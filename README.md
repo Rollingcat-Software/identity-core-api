@@ -8,9 +8,13 @@
 
 ## Overview
 
-**Identity Core API** is the central authentication and identity management microservice of the **FIVUCSAS** (Face and Identity Verification Using Cloud-based SaaS) platform. Built with Spring Boot following Hexagonal Architecture principles, this service acts as the system's brain, managing user authentication, authorization, multi-tenancy, and security policies for both physical and digital access control.
+**Identity Core API** is the central authentication and identity management microservice of the **FIVUCSAS** (Face and
+Identity Verification Using Cloud-based SaaS) platform. Built with Spring Boot following Hexagonal Architecture
+principles, this service acts as the system's brain, managing user authentication, authorization, multi-tenancy, and
+security policies for both physical and digital access control.
 
-This microservice is part of a larger biometric authentication ecosystem developed as an Engineering Project at Marmara University's Computer Engineering Department.
+This microservice is part of a larger biometric authentication ecosystem developed as an Engineering Project at Marmara
+University's Computer Engineering Department.
 
 ## Table of Contents
 
@@ -36,6 +40,7 @@ This microservice is part of a larger biometric authentication ecosystem develop
 ## Features
 
 ### Core Functionality
+
 - **Multi-Tenant Architecture**: Complete tenant isolation with row-level security in PostgreSQL
 - **User Management**: Comprehensive CRUD operations for users with role-based access control
 - **Authentication & Authorization**: JWT-based stateless authentication with refresh token support
@@ -46,6 +51,7 @@ This microservice is part of a larger biometric authentication ecosystem develop
 - **API Gateway Integration**: RESTful API designed for microservices communication
 
 ### Advanced Features
+
 - **Biometric Integration**: Seamless integration with Biometric Processor API
 - **Event-Driven Architecture**: Redis-based message queue for asynchronous operations
 - **Physical & Digital Access**: Unified identity for both door access and system login
@@ -57,7 +63,8 @@ This microservice is part of a larger biometric authentication ecosystem develop
 
 ## Architecture
 
-This service follows **Hexagonal Architecture** (Ports and Adapters) principles, ensuring clean separation of concerns and testability.
+This service follows **Hexagonal Architecture** (Ports and Adapters) principles, ensuring clean separation of concerns
+and testability.
 
 ```
 identity-core-api/
@@ -155,6 +162,7 @@ identity-core-api/
 ## Technology Stack
 
 ### Core Technologies
+
 - **Java 21**: Latest LTS version with modern language features
 - **Spring Boot 3.2+**: Enterprise-grade framework
 - **Spring Security 6**: Authentication and authorization
@@ -165,6 +173,7 @@ identity-core-api/
 - **Gradle 8**: Build automation tool
 
 ### Libraries & Frameworks
+
 - **Hibernate**: ORM implementation
 - **Flyway**: Database migration management
 - **Lombok**: Boilerplate code reduction
@@ -176,6 +185,7 @@ identity-core-api/
 - **SLF4J + Logback**: Logging framework
 
 ### Development & Testing
+
 - **JUnit 5**: Unit testing
 - **Mockito**: Mocking framework
 - **TestContainers**: Integration testing with Docker
@@ -184,6 +194,7 @@ identity-core-api/
 - **SonarQube**: Code quality analysis
 
 ### DevOps & Deployment
+
 - **Docker**: Containerization
 - **Docker Compose**: Multi-container orchestration
 - **GitHub Actions**: CI/CD pipeline
@@ -420,56 +431,56 @@ http://localhost:8080/api/v1
 
 ### Authentication Endpoints
 
-| Method | Endpoint | Description | Auth Required |
-|--------|----------|-------------|---------------|
-| POST | `/auth/register` | Register a new user | No |
-| POST | `/auth/login` | Authenticate and receive JWT tokens | No |
-| POST | `/auth/logout` | Invalidate refresh token | Yes |
-| POST | `/auth/refresh` | Refresh access token | Yes (Refresh Token) |
-| POST | `/auth/forgot-password` | Request password reset | No |
-| POST | `/auth/reset-password` | Reset password with token | No |
-| POST | `/auth/verify-email` | Verify email address | No |
-| POST | `/auth/verify-biometric` | Verify biometric authentication | No |
+| Method | Endpoint                 | Description                         | Auth Required       |
+|--------|--------------------------|-------------------------------------|---------------------|
+| POST   | `/auth/register`         | Register a new user                 | No                  |
+| POST   | `/auth/login`            | Authenticate and receive JWT tokens | No                  |
+| POST   | `/auth/logout`           | Invalidate refresh token            | Yes                 |
+| POST   | `/auth/refresh`          | Refresh access token                | Yes (Refresh Token) |
+| POST   | `/auth/forgot-password`  | Request password reset              | No                  |
+| POST   | `/auth/reset-password`   | Reset password with token           | No                  |
+| POST   | `/auth/verify-email`     | Verify email address                | No                  |
+| POST   | `/auth/verify-biometric` | Verify biometric authentication     | No                  |
 
 ### User Management Endpoints
 
-| Method | Endpoint | Description | Auth Required | Role |
-|--------|----------|-------------|---------------|------|
-| GET | `/users` | List all users (paginated) | Yes | ADMIN |
-| GET | `/users/{id}` | Get user by ID | Yes | ADMIN/SELF |
-| POST | `/users` | Create new user | Yes | ADMIN |
-| PUT | `/users/{id}` | Update user | Yes | ADMIN/SELF |
-| DELETE | `/users/{id}` | Delete user | Yes | ADMIN |
-| GET | `/users/me` | Get current user profile | Yes | USER |
-| PUT | `/users/me` | Update current user | Yes | USER |
-| GET | `/users/{id}/biometrics` | Get user biometric info | Yes | ADMIN/SELF |
-| POST | `/users/{id}/biometrics` | Enroll biometric data | Yes | ADMIN/SELF |
-| DELETE | `/users/{id}/biometrics/{biometricId}` | Delete biometric | Yes | ADMIN/SELF |
+| Method | Endpoint                               | Description                | Auth Required | Role       |
+|--------|----------------------------------------|----------------------------|---------------|------------|
+| GET    | `/users`                               | List all users (paginated) | Yes           | ADMIN      |
+| GET    | `/users/{id}`                          | Get user by ID             | Yes           | ADMIN/SELF |
+| POST   | `/users`                               | Create new user            | Yes           | ADMIN      |
+| PUT    | `/users/{id}`                          | Update user                | Yes           | ADMIN/SELF |
+| DELETE | `/users/{id}`                          | Delete user                | Yes           | ADMIN      |
+| GET    | `/users/me`                            | Get current user profile   | Yes           | USER       |
+| PUT    | `/users/me`                            | Update current user        | Yes           | USER       |
+| GET    | `/users/{id}/biometrics`               | Get user biometric info    | Yes           | ADMIN/SELF |
+| POST   | `/users/{id}/biometrics`               | Enroll biometric data      | Yes           | ADMIN/SELF |
+| DELETE | `/users/{id}/biometrics/{biometricId}` | Delete biometric           | Yes           | ADMIN/SELF |
 
 ### Tenant Management Endpoints
 
-| Method | Endpoint | Description | Auth Required | Role |
-|--------|----------|-------------|---------------|------|
-| GET | `/tenants` | List all tenants | Yes | SUPER_ADMIN |
-| GET | `/tenants/{id}` | Get tenant by ID | Yes | TENANT_ADMIN |
-| POST | `/tenants` | Create new tenant | Yes | SUPER_ADMIN |
-| PUT | `/tenants/{id}` | Update tenant | Yes | TENANT_ADMIN |
-| DELETE | `/tenants/{id}` | Delete tenant | Yes | SUPER_ADMIN |
-| GET | `/tenants/{id}/users` | Get tenant users | Yes | TENANT_ADMIN |
-| POST | `/tenants/{id}/config` | Update tenant configuration | Yes | TENANT_ADMIN |
+| Method | Endpoint               | Description                 | Auth Required | Role         |
+|--------|------------------------|-----------------------------|---------------|--------------|
+| GET    | `/tenants`             | List all tenants            | Yes           | SUPER_ADMIN  |
+| GET    | `/tenants/{id}`        | Get tenant by ID            | Yes           | TENANT_ADMIN |
+| POST   | `/tenants`             | Create new tenant           | Yes           | SUPER_ADMIN  |
+| PUT    | `/tenants/{id}`        | Update tenant               | Yes           | TENANT_ADMIN |
+| DELETE | `/tenants/{id}`        | Delete tenant               | Yes           | SUPER_ADMIN  |
+| GET    | `/tenants/{id}/users`  | Get tenant users            | Yes           | TENANT_ADMIN |
+| POST   | `/tenants/{id}/config` | Update tenant configuration | Yes           | TENANT_ADMIN |
 
 ### Role & Permission Endpoints
 
-| Method | Endpoint | Description | Auth Required | Role |
-|--------|----------|-------------|---------------|------|
-| GET | `/roles` | List all roles | Yes | ADMIN |
-| GET | `/roles/{id}` | Get role by ID | Yes | ADMIN |
-| POST | `/roles` | Create new role | Yes | ADMIN |
-| PUT | `/roles/{id}` | Update role | Yes | ADMIN |
-| DELETE | `/roles/{id}` | Delete role | Yes | ADMIN |
-| GET | `/roles/{id}/permissions` | Get role permissions | Yes | ADMIN |
-| POST | `/roles/{id}/permissions` | Assign permissions | Yes | ADMIN |
-| DELETE | `/roles/{id}/permissions/{permissionId}` | Remove permission | Yes | ADMIN |
+| Method | Endpoint                                 | Description          | Auth Required | Role  |
+|--------|------------------------------------------|----------------------|---------------|-------|
+| GET    | `/roles`                                 | List all roles       | Yes           | ADMIN |
+| GET    | `/roles/{id}`                            | Get role by ID       | Yes           | ADMIN |
+| POST   | `/roles`                                 | Create new role      | Yes           | ADMIN |
+| PUT    | `/roles/{id}`                            | Update role          | Yes           | ADMIN |
+| DELETE | `/roles/{id}`                            | Delete role          | Yes           | ADMIN |
+| GET    | `/roles/{id}/permissions`                | Get role permissions | Yes           | ADMIN |
+| POST   | `/roles/{id}/permissions`                | Assign permissions   | Yes           | ADMIN |
+| DELETE | `/roles/{id}/permissions/{permissionId}` | Remove permission    | Yes           | ADMIN |
 
 ### Example Requests
 
@@ -501,6 +512,7 @@ curl -X POST http://localhost:8080/api/v1/auth/login \
 ```
 
 Response:
+
 ```json
 {
   "accessToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
@@ -525,13 +537,15 @@ curl -X GET http://localhost:8080/api/v1/users/me \
   -H "X-Tenant-ID: tenant-123"
 ```
 
-For complete API documentation, visit the Swagger UI at `http://localhost:8080/swagger-ui.html` when the application is running.
+For complete API documentation, visit the Swagger UI at `http://localhost:8080/swagger-ui.html` when the application is
+running.
 
 ## Database Schema
 
 ### Core Tables
 
 #### users
+
 ```sql
 CREATE TABLE users (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -554,6 +568,7 @@ CREATE INDEX idx_users_email ON users(email);
 ```
 
 #### tenants
+
 ```sql
 CREATE TABLE tenants (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -568,6 +583,7 @@ CREATE TABLE tenants (
 ```
 
 #### roles
+
 ```sql
 CREATE TABLE roles (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -581,6 +597,7 @@ CREATE TABLE roles (
 ```
 
 #### user_roles
+
 ```sql
 CREATE TABLE user_roles (
     user_id UUID REFERENCES users(id) ON DELETE CASCADE,
@@ -591,6 +608,7 @@ CREATE TABLE user_roles (
 ```
 
 #### biometric_data
+
 ```sql
 CREATE TABLE biometric_data (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -646,12 +664,14 @@ CREATE INDEX idx_biometric_embedding ON biometric_data USING ivfflat (embedding 
 ### Security Features
 
 #### Password Security
+
 - Passwords hashed with **BCrypt** (work factor 12)
 - Minimum password requirements enforced
 - Password history to prevent reuse
 - Account lockout after failed attempts
 
 #### Token Security
+
 - JWT tokens signed with HS512 algorithm
 - Short-lived access tokens (1 hour)
 - Refresh tokens with longer expiration (7 days)
@@ -659,12 +679,14 @@ CREATE INDEX idx_biometric_embedding ON biometric_data USING ivfflat (embedding 
 - Refresh token rotation
 
 #### Data Encryption
+
 - Sensitive data encrypted at rest with AES-256
 - TLS 1.3 for data in transit
 - Biometric vectors stored encrypted
 - Database connection encryption
 
 #### Security Headers
+
 ```yaml
 Security-Headers:
   X-Content-Type-Options: nosniff
@@ -675,6 +697,7 @@ Security-Headers:
 ```
 
 #### Rate Limiting
+
 - Login attempts: 5 per 15 minutes
 - API calls: 100 per minute per user
 - Biometric verification: 10 per minute
@@ -684,6 +707,7 @@ Security-Headers:
 ### Tenant Isolation Strategies
 
 #### Row-Level Security (RLS)
+
 - All queries automatically filtered by tenant_id
 - Implemented at application level with Hibernate filters
 - Most efficient for shared database schema
@@ -697,6 +721,7 @@ public class User {
 ```
 
 #### Schema-Based Isolation
+
 - Each tenant has a dedicated schema
 - Complete data isolation
 - Higher resource usage but maximum security
@@ -704,6 +729,7 @@ public class User {
 ### Tenant Context
 
 Tenant is identified via:
+
 1. Custom HTTP header: `X-Tenant-ID`
 2. Subdomain: `tenant-name.fivucsas.com`
 3. JWT token claim: `tenantId`
@@ -749,6 +775,7 @@ src/test/
 ```
 
 ### Test Coverage Goals
+
 - Unit tests: > 80%
 - Integration tests: > 70%
 - Overall coverage: > 75%
@@ -771,11 +798,13 @@ docker-compose logs -f identity-core-api
 ### Environment-Specific Deployment
 
 #### Development
+
 ```bash
 docker-compose -f docker/docker-compose.dev.yml up
 ```
 
 #### Production
+
 ```bash
 docker-compose -f docker/docker-compose.prod.yml up -d
 ```
@@ -888,10 +917,10 @@ We welcome contributions from the team! Please follow these guidelines:
    ```
 
 2. **Make your changes**
-   - Follow SOLID principles
-   - Adhere to Hexagonal Architecture
-   - Write unit tests
-   - Update documentation
+    - Follow SOLID principles
+    - Adhere to Hexagonal Architecture
+    - Write unit tests
+    - Update documentation
 
 3. **Commit your changes**
    ```bash
@@ -905,9 +934,9 @@ We welcome contributions from the team! Please follow these guidelines:
    ```
 
 5. **Create Pull Request**
-   - Describe changes clearly
-   - Reference related issues
-   - Ensure CI passes
+    - Describe changes clearly
+    - Reference related issues
+    - Ensure CI passes
 
 ### Code Standards
 
@@ -931,6 +960,7 @@ Types: `feat`, `fix`, `docs`, `style`, `refactor`, `test`, `chore`
 ## Roadmap
 
 ### Phase 1: MVP (Current)
+
 - [x] User authentication with JWT
 - [x] Multi-tenant architecture
 - [x] Role-based access control
@@ -938,6 +968,7 @@ Types: `feat`, `fix`, `docs`, `style`, `refactor`, `test`, `chore`
 - [ ] Basic API documentation
 
 ### Phase 2: Enhanced Features
+
 - [ ] Social authentication (Google, Apple)
 - [ ] Passwordless authentication
 - [ ] Advanced audit logging
@@ -945,6 +976,7 @@ Types: `feat`, `fix`, `docs`, `style`, `refactor`, `test`, `chore`
 - [ ] Comprehensive admin panel
 
 ### Phase 3: Advanced Features
+
 - [ ] Risk-based adaptive authentication
 - [ ] Behavioral biometrics
 - [ ] API key management for developers
@@ -952,6 +984,7 @@ Types: `feat`, `fix`, `docs`, `style`, `refactor`, `test`, `chore`
 - [ ] Advanced analytics dashboard
 
 ### Phase 4: Production Ready
+
 - [ ] Kubernetes deployment
 - [ ] High availability setup
 - [ ] Performance optimization
@@ -963,6 +996,7 @@ Types: `feat`, `fix`, `docs`, `style`, `refactor`, `test`, `chore`
 ### Common Issues
 
 #### Database Connection Failed
+
 ```bash
 # Check PostgreSQL is running
 docker-compose ps postgres
@@ -972,6 +1006,7 @@ psql -h localhost -U postgres -d identity_core_db
 ```
 
 #### Redis Connection Failed
+
 ```bash
 # Check Redis is running
 docker-compose ps redis
@@ -981,6 +1016,7 @@ redis-cli ping
 ```
 
 #### Port Already in Use
+
 ```bash
 # Find process using port 8080
 lsof -i :8080
@@ -991,7 +1027,8 @@ kill -9 <PID>
 
 ## License
 
-This project is part of the **FIVUCSAS** platform developed as an Engineering Project at Marmara University, Faculty of Engineering, Computer Engineering Department.
+This project is part of the **FIVUCSAS** platform developed as an Engineering Project at Marmara University, Faculty of
+Engineering, Computer Engineering Department.
 
 Copyright © 2025 FIVUCSAS Team. All rights reserved.
 
