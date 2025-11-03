@@ -16,6 +16,7 @@ import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.reactive.function.BodyInserters;
 import org.springframework.web.reactive.function.client.WebClient;
 
+import java.time.Instant;
 import java.util.Map;
 import java.util.UUID;
 
@@ -60,6 +61,7 @@ public class BiometricService {
 
         // Update user
         user.setBiometricEnrolled(true);
+        user.setEnrolledAt(Instant.now());
         userRepository.save(user);
 
         log.info("Face enrolled successfully for user: {}", userId);
@@ -90,6 +92,12 @@ public class BiometricService {
         boolean verified = (Boolean) response.get("verified");
         double confidence = ((Number) response.get("confidence")).doubleValue();
         String message = (String) response.get("message");
+
+        // Update verification count if successful
+        if (verified) {
+            user.incrementVerificationCount();
+            userRepository.save(user);
+        }
 
         log.info("Face verification result for user {}: verified={}, confidence={}",
                 userId, verified, confidence);

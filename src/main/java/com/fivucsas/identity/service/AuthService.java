@@ -5,6 +5,7 @@ import com.fivucsas.identity.dto.LoginRequest;
 import com.fivucsas.identity.dto.RegisterRequest;
 import com.fivucsas.identity.dto.UserDto;
 import com.fivucsas.identity.entity.User;
+import com.fivucsas.identity.entity.UserStatus;
 import com.fivucsas.identity.repository.UserRepository;
 import com.fivucsas.identity.security.JwtService;
 import lombok.RequiredArgsConstructor;
@@ -35,14 +36,22 @@ public class AuthService {
                 .passwordHash(passwordEncoder.encode(request.getPassword()))
                 .firstName(request.getFirstName())
                 .lastName(request.getLastName())
+                .status(UserStatus.ACTIVE)
                 .isBiometricEnrolled(false)
+                .verificationCount(0)
                 .build();
 
-        user = userRepository.save(user);
-        log.info("User registered successfully: {}", user.getId());
+        User savedUser = userRepository.save(user);
+        
+        if (savedUser == null) {
+            log.error("Failed to save user - repository returned null");
+            throw new RuntimeException("Failed to create user");
+        }
+        
+        log.info("User registered successfully: {}", savedUser.getId());
 
-        String token = jwtService.generateToken(user.getEmail());
-        UserDto userDto = mapToDto(user);
+        String token = jwtService.generateToken(savedUser.getEmail());
+        UserDto userDto = mapToDto(savedUser);
 
         return AuthResponse.of(token, userDto);
     }
@@ -72,13 +81,25 @@ public class AuthService {
     }
 
     private UserDto mapToDto(User user) {
+        if (user == null) {
+            log.error("mapToDto called with null user");
+            throw new RuntimeException("Cannot map null user to DTO");
+        }
+        
         return UserDto.builder()
-                .id(user.getId())
+                .id(user.getId() != null ? user.getId().toString() : null)
+                .name(user.getFullName())
                 .email(user.getEmail())
-                .firstName(user.getFirstName())
-                .lastName(user.getLastName())
+                .idNumber(user.getIdNumber())
+                .phoneNumber(user.getPhoneNumber())
+                .address(user.getAddress())
+                .status(user.getStatus())
                 .isBiometricEnrolled(user.isBiometricEnrolled())
+                .enrolledAt(user.getEnrolledAt())
+                .lastVerifiedAt(user.getLastVerifiedAt())
+                .verificationCount(user.getVerificationCount())
                 .createdAt(user.getCreatedAt())
+                .updatedAt(user.getUpdatedAt())
                 .build();
     }
 }
