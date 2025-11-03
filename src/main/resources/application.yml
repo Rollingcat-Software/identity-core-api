@@ -36,7 +36,7 @@ spring:
 
 # JWT Configuration
 jwt:
-  secret: fivucsas-mvp-secret-key-change-in-production-min-256-bits
+  secret: Zml2dWNzYXMtbXZwLXNlY3JldC1rZXktY2hhbmdlLWluLXByb2R1Y3Rpb24tbWluLTI1Ni1iaXRzLWJhc2U2NAo=
   expiration: 86400000  # 24 hours in milliseconds
   refresh-expiration: 604800000  # 7 days
 
