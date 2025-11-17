@@ -8,8 +8,16 @@ import org.springframework.stereotype.Repository;
 import java.util.Optional;
 import java.util.UUID;
 
+/**
+ * JPA Repository for BiometricData entity.
+ *
+ * Implements domain repository contract + JPA features.
+ * Following Dependency Inversion Principle.
+ */
 @Repository
-public interface BiometricDataRepository extends JpaRepository<BiometricData, UUID> {
+public interface BiometricDataRepository extends
+        JpaRepository<BiometricData, UUID>,
+        com.fivucsas.identity.domain.repository.BiometricDataRepository {
 
     Optional<BiometricData> findByUser(User user);
 
