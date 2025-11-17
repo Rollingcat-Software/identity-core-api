@@ -1,48 +1,62 @@
 package com.fivucsas.identity.entity;
 
+import com.fivucsas.identity.domain.model.user.*;
 import jakarta.persistence.*;
-import lombok.AllArgsConstructor;
-import lombok.Builder;
-import lombok.Data;
-import lombok.NoArgsConstructor;
+import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
+import org.springframework.security.crypto.password.PasswordEncoder;
 
 import java.time.Instant;
 import java.util.UUID;
 
+/**
+ * User aggregate root entity.
+ *
+ * Refactored to use value objects and business methods, eliminating:
+ * - Primitive Obsession anti-pattern
+ * - Anemic Domain Model anti-pattern
+ *
+ * Following principles:
+ * - Rich Domain Model: Business logic in entity
+ * - Encapsulation: No public setters for critical fields
+ * - Immutability: Value objects ensure valid state
+ * - Single Responsibility: User manages its own state
+ */
 @Entity
 @Table(name = "users")
-@Data
+@Getter
+@NoArgsConstructor(access = AccessLevel.PROTECTED) // For JPA
+@AllArgsConstructor(access = AccessLevel.PRIVATE) // For Builder
 @Builder
-@NoArgsConstructor
-@AllArgsConstructor
 public class User {
 
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
-    private UUID id;
+    private UUID id;  // Keep as UUID for now, can refactor to UserId later
 
     @Column(unique = true, nullable = false, length = 255)
-    private String email;
+    private String email;  // Will be converted to Email via converter
 
-    @Column(nullable = false)
-    private String passwordHash;
+    @Column(nullable = false, name = "password_hash")
+    private String passwordHash;  // Will be converted to HashedPassword via converter
 
     @Column(nullable = false, length = 100)
+    @Setter  // Allow updating
     private String firstName;
 
     @Column(nullable = false, length = 100)
+    @Setter  // Allow updating
     private String lastName;
 
     @Column(unique = true, length = 11)
-    private String idNumber;
+    private String idNumber;  // Will be converted to IdNumber via converter
 
     @Column(length = 20)
-    private String phoneNumber;
+    private String phoneNumber;  // Will be converted to PhoneNumber via converter
 
     @Column(length = 500)
-    private String address;
+    private String address;  // Will be converted to Address via converter
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
@@ -71,15 +85,240 @@ public class User {
     @Column(nullable = false)
     private Instant updatedAt;
 
-    public String getFullName() {
-        if (firstName == null || lastName == null) {
-            return "";
-        }
-        return firstName + " " + lastName;
+    // ========== Value Object Getters (Type-Safe) ==========
+
+    /**
+     * Returns email as value object.
+     * Thread-safe and validated.
+     */
+    public Email getEmailAsValueObject() {
+        return email != null ? Email.of(email) : null;
     }
 
+    /**
+     * Returns hashed password as value object.
+     * Prevents accidental plain text exposure.
+     */
+    public HashedPassword getPasswordAsValueObject() {
+        return passwordHash != null ? HashedPassword.of(passwordHash) : null;
+    }
+
+    /**
+     * Returns phone number as value object (nullable).
+     */
+    public PhoneNumber getPhoneNumberAsValueObject() {
+        return phoneNumber != null ? PhoneNumber.of(phoneNumber) : null;
+    }
+
+    /**
+     * Returns address as value object (nullable).
+     */
+    public Address getAddressAsValueObject() {
+        return address != null ? Address.of(address) : null;
+    }
+
+    /**
+     * Returns ID number as value object (nullable).
+     */
+    public IdNumber getIdNumberAsValueObject() {
+        return idNumber != null ? IdNumber.of(idNumber) : null;
+    }
+
+    /**
+     * Returns full name as value object.
+     */
+    public FullName getFullNameAsValueObject() {
+        if (firstName == null || lastName == null) {
+            return null;
+        }
+        return FullName.of(firstName, lastName);
+    }
+
+    // ========== Business Methods ==========
+
+    /**
+     * Returns full name as string.
+     * Delegates to value object for formatting.
+     */
+    public String getFullName() {
+        FullName fullName = getFullNameAsValueObject();
+        return fullName != null ? fullName.getFullName() : "";
+    }
+
+    /**
+     * Changes user's email address.
+     * Validates new email through value object.
+     *
+     * @param newEmail the new email address
+     * @throws IllegalArgumentException if email is invalid
+     */
+    public void changeEmail(Email newEmail) {
+        if (newEmail == null) {
+            throw new IllegalArgumentException("Email cannot be null");
+        }
+        this.email = newEmail.getValue();
+    }
+
+    /**
+     * Updates user's password.
+     * Ensures password is properly hashed.
+     *
+     * @param plainPassword the plain text password
+     * @param passwordEncoder the password encoder
+     * @throws IllegalArgumentException if password is invalid
+     */
+    public void updatePassword(String plainPassword, PasswordEncoder passwordEncoder) {
+        if (plainPassword == null || plainPassword.trim().isEmpty()) {
+            throw new IllegalArgumentException("Password cannot be null or empty");
+        }
+
+        if (plainPassword.length() < 8) {
+            throw new IllegalArgumentException("Password must be at least 8 characters");
+        }
+
+        String hashed = passwordEncoder.encode(plainPassword);
+        HashedPassword hashedPassword = HashedPassword.of(hashed);
+        this.passwordHash = hashedPassword.getValue();
+    }
+
+    /**
+     * Checks if provided plain password matches stored hash.
+     *
+     * @param plainPassword the plain text password to check
+     * @param passwordEncoder the password encoder
+     * @return true if password matches
+     */
+    public boolean checkPassword(String plainPassword, PasswordEncoder passwordEncoder) {
+        if (plainPassword == null || this.passwordHash == null) {
+            return false;
+        }
+        return passwordEncoder.matches(plainPassword, this.passwordHash);
+    }
+
+    /**
+     * Updates user's phone number.
+     * Validates through value object.
+     *
+     * @param phoneNumber the new phone number (can be null)
+     */
+    public void updatePhoneNumber(PhoneNumber phoneNumber) {
+        this.phoneNumber = phoneNumber != null ? phoneNumber.getValue() : null;
+    }
+
+    /**
+     * Updates user's address.
+     *
+     * @param address the new address (can be null)
+     */
+    public void updateAddress(Address address) {
+        this.address = address != null ? address.getValue() : null;
+    }
+
+    /**
+     * Updates user's ID number.
+     * Validates through value object.
+     *
+     * @param idNumber the new ID number (can be null)
+     */
+    public void updateIdNumber(IdNumber idNumber) {
+        this.idNumber = idNumber != null ? idNumber.getValue() : null;
+    }
+
+    /**
+     * Updates user's profile information.
+     *
+     * @param firstName new first name
+     * @param lastName new last name
+     * @param phoneNumber new phone number (nullable)
+     * @param address new address (nullable)
+     */
+    public void updateProfile(String firstName, String lastName,
+                             PhoneNumber phoneNumber, Address address) {
+        // Validate through FullName value object
+        FullName fullName = FullName.of(firstName, lastName);
+
+        this.firstName = fullName.getFirstName();
+        this.lastName = fullName.getLastName();
+        this.phoneNumber = phoneNumber != null ? phoneNumber.getValue() : null;
+        this.address = address != null ? address.getValue() : null;
+    }
+
+    /**
+     * Enrolls user for biometric authentication.
+     * Marks user as enrolled and records timestamp.
+     */
+    public void enrollBiometric() {
+        this.isBiometricEnrolled = true;
+        this.enrolledAt = Instant.now();
+    }
+
+    /**
+     * Unenrolls user from biometric authentication.
+     * Removes biometric enrollment status.
+     */
+    public void unenrollBiometric() {
+        this.isBiometricEnrolled = false;
+        this.enrolledAt = null;
+        this.lastVerifiedAt = null;
+        this.verificationCount = 0;
+    }
+
+    /**
+     * Records a successful biometric verification.
+     * Increments counter and updates timestamp.
+     */
     public void incrementVerificationCount() {
         this.verificationCount++;
         this.lastVerifiedAt = Instant.now();
+    }
+
+    /**
+     * Activates the user account.
+     */
+    public void activate() {
+        this.status = UserStatus.ACTIVE;
+    }
+
+    /**
+     * Deactivates the user account.
+     */
+    public void deactivate() {
+        this.status = UserStatus.INACTIVE;
+    }
+
+    /**
+     * Suspends the user account.
+     * Used for security or compliance reasons.
+     */
+    public void suspend() {
+        this.status = UserStatus.SUSPENDED;
+    }
+
+    /**
+     * Checks if user is currently active.
+     */
+    public boolean isActive() {
+        return this.status == UserStatus.ACTIVE;
+    }
+
+    /**
+     * Checks if user account is suspended.
+     */
+    public boolean isSuspended() {
+        return this.status == UserStatus.SUSPENDED;
+    }
+
+    /**
+     * Checks if user has enrolled biometric data.
+     */
+    public boolean hasBiometricEnrolled() {
+        return this.isBiometricEnrolled;
+    }
+
+    /**
+     * Checks if user has the given email.
+     */
+    public boolean hasEmail(Email email) {
+        return this.email != null && this.email.equalsIgnoreCase(email.getValue());
     }
 }
