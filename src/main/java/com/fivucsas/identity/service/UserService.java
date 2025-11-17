@@ -1,11 +1,12 @@
 package com.fivucsas.identity.service;
 
+import com.fivucsas.identity.domain.exception.DuplicateEmailException;
+import com.fivucsas.identity.domain.exception.UserNotFoundException;
 import com.fivucsas.identity.dto.CreateUserRequest;
 import com.fivucsas.identity.dto.UpdateUserRequest;
 import com.fivucsas.identity.dto.UserDto;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.entity.UserStatus;
-import com.fivucsas.identity.exception.ResourceNotFoundException;
 import com.fivucsas.identity.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -38,7 +39,7 @@ public class UserService {
         log.info("Fetching user by id: {}", id);
         UUID uuid = UUID.fromString(id);
         User user = userRepository.findById(uuid)
-                .orElseThrow(() -> new ResourceNotFoundException("User not found with id: " + id));
+                .orElseThrow(() -> new UserNotFoundException(id));
         return mapToDto(user);
     }
 
@@ -47,7 +48,7 @@ public class UserService {
         log.info("Creating new user: {}", request.getEmail());
 
         if (userRepository.existsByEmail(request.getEmail())) {
-            throw new IllegalArgumentException("Email already exists: " + request.getEmail());
+            throw new DuplicateEmailException(request.getEmail());
         }
 
         User user = User.builder()
@@ -75,7 +76,7 @@ public class UserService {
         UUID uuid = UUID.fromString(id);
         
         User user = userRepository.findById(uuid)
-                .orElseThrow(() -> new ResourceNotFoundException("User not found with id: " + id));
+                .orElseThrow(() -> new UserNotFoundException(id));
 
         if (request.getFirstName() != null) {
             user.setFirstName(request.getFirstName());
@@ -114,7 +115,7 @@ public class UserService {
         UUID uuid = UUID.fromString(id);
         
         User user = userRepository.findById(uuid)
-                .orElseThrow(() -> new ResourceNotFoundException("User not found with id: " + id));
+                .orElseThrow(() -> new UserNotFoundException(id));
 
         userRepository.delete(user);
         log.info("User deleted successfully: {}", id);
