@@ -1,5 +1,9 @@
 package com.fivucsas.identity.service;
 
+import com.fivucsas.identity.domain.exception.BiometricEnrollmentException;
+import com.fivucsas.identity.domain.exception.BiometricNotEnrolledException;
+import com.fivucsas.identity.domain.exception.BiometricVerificationException;
+import com.fivucsas.identity.domain.exception.UserNotFoundException;
 import com.fivucsas.identity.dto.BiometricVerificationResponse;
 import com.fivucsas.identity.entity.BiometricData;
 import com.fivucsas.identity.entity.User;
@@ -37,13 +41,13 @@ public class BiometricService {
         log.info("Enrolling face for user: {}", userId);
 
         User user = userRepository.findById(userId)
-                .orElseThrow(() -> new RuntimeException("User not found"));
+                .orElseThrow(() -> new UserNotFoundException(userId.toString()));
 
         // Call FastAPI to extract embedding
         Map<String, Object> response = callFastApiEnroll(image);
 
         if (!(Boolean) response.get("success")) {
-            throw new RuntimeException("Face enrollment failed: " + response.get("message"));
+            throw new BiometricEnrollmentException("Face enrollment failed: " + response.get("message"));
         }
 
         String embedding = (String) response.get("embedding");
@@ -77,14 +81,14 @@ public class BiometricService {
         log.info("Verifying face for user: {}", userId);
 
         User user = userRepository.findById(userId)
-                .orElseThrow(() -> new RuntimeException("User not found"));
+                .orElseThrow(() -> new UserNotFoundException(userId.toString()));
 
         if (!user.isBiometricEnrolled()) {
-            throw new RuntimeException("User has not enrolled biometric data");
+            throw new BiometricNotEnrolledException(userId.toString());
         }
 
         BiometricData biometricData = biometricDataRepository.findByUser(user)
-                .orElseThrow(() -> new RuntimeException("Biometric data not found"));
+                .orElseThrow(() -> new BiometricNotEnrolledException(userId.toString()));
 
         // Call FastAPI to verify
         Map<String, Object> response = callFastApiVerify(image, biometricData.getEmbedding());
@@ -126,7 +130,7 @@ public class BiometricService {
 
         } catch (Exception e) {
             log.error("Error calling FastAPI enroll endpoint", e);
-            throw new RuntimeException("Failed to communicate with biometric service: " + e.getMessage());
+            throw new BiometricEnrollmentException("Failed to communicate with biometric service: " + e.getMessage(), e);
         }
     }
 
@@ -148,7 +152,7 @@ public class BiometricService {
 
         } catch (Exception e) {
             log.error("Error calling FastAPI verify endpoint", e);
-            throw new RuntimeException("Failed to communicate with biometric service: " + e.getMessage());
+            throw new BiometricVerificationException("Failed to communicate with biometric service: " + e.getMessage(), e);
         }
     }
 }
