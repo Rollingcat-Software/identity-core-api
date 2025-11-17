@@ -12,8 +12,16 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
+/**
+ * JPA Repository for RefreshToken entity.
+ *
+ * Implements domain repository contract + JPA features.
+ * Following Dependency Inversion Principle.
+ */
 @Repository
-public interface RefreshTokenRepository extends JpaRepository<RefreshToken, UUID> {
+public interface RefreshTokenRepository extends
+        JpaRepository<RefreshToken, UUID>,
+        com.fivucsas.identity.domain.repository.RefreshTokenRepository {
 
     Optional<RefreshToken> findByToken(String token);
 

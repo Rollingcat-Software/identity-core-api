@@ -1,5 +1,8 @@
 package com.fivucsas.identity.service;
 
+import com.fivucsas.identity.domain.exception.DuplicateEmailException;
+import com.fivucsas.identity.domain.exception.InvalidCredentialsException;
+import com.fivucsas.identity.domain.exception.UserNotFoundException;
 import com.fivucsas.identity.dto.AuthResponse;
 import com.fivucsas.identity.dto.LoginRequest;
 import com.fivucsas.identity.dto.RegisterRequest;
@@ -30,7 +33,7 @@ public class AuthService {
         log.info("Registering new user: {}", request.getEmail());
 
         if (userRepository.existsByEmail(request.getEmail())) {
-            throw new RuntimeException("Email already exists: " + request.getEmail());
+            throw new DuplicateEmailException(request.getEmail());
         }
 
         User user = User.builder()
@@ -64,11 +67,11 @@ public class AuthService {
         log.info("Login attempt for user: {}", request.getEmail());
 
         User user = userRepository.findByEmail(request.getEmail())
-                .orElseThrow(() -> new RuntimeException("Invalid credentials"));
+                .orElseThrow(() -> new InvalidCredentialsException());
 
         if (!passwordEncoder.matches(request.getPassword(), user.getPasswordHash())) {
             log.warn("Invalid password for user: {}", request.getEmail());
-            throw new RuntimeException("Invalid credentials");
+            throw new InvalidCredentialsException();
         }
 
         log.info("User logged in successfully: {}", user.getId());
@@ -125,7 +128,7 @@ public class AuthService {
 
     public User getUserByEmail(String email) {
         return userRepository.findByEmail(email)
-                .orElseThrow(() -> new RuntimeException("User not found: " + email));
+                .orElseThrow(() -> new UserNotFoundException(email));
     }
 
     public UserDto mapToDto(User user) {

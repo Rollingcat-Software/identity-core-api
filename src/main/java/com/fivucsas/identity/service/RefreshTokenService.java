@@ -1,5 +1,8 @@
 package com.fivucsas.identity.service;
 
+import com.fivucsas.identity.domain.exception.TokenExpiredException;
+import com.fivucsas.identity.domain.exception.TokenRevokedException;
+import com.fivucsas.identity.domain.exception.UserNotFoundException;
 import com.fivucsas.identity.entity.RefreshToken;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.repository.RefreshTokenRepository;
@@ -44,11 +47,11 @@ public class RefreshTokenService {
     public RefreshToken verifyExpiration(RefreshToken token) {
         if (token.isExpired()) {
             refreshTokenRepository.delete(token);
-            throw new RuntimeException("Refresh token expired. Please login again.");
+            throw new TokenExpiredException("Refresh");
         }
 
         if (token.isRevoked()) {
-            throw new RuntimeException("Refresh token has been revoked. Please login again.");
+            throw new TokenRevokedException();
         }
 
         return token;
@@ -57,7 +60,7 @@ public class RefreshTokenService {
     @Transactional(readOnly = true)
     public RefreshToken findByToken(String token) {
         return refreshTokenRepository.findByToken(token)
-                .orElseThrow(() -> new RuntimeException("Refresh token not found"));
+                .orElseThrow(() -> new TokenRevokedException("Refresh token not found or has been revoked"));
     }
 
     @Transactional
