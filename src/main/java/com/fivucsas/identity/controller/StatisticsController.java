@@ -1,7 +1,8 @@
 package com.fivucsas.identity.controller;
 
+import com.fivucsas.identity.application.dto.response.StatisticsResponse;
+import com.fivucsas.identity.application.port.input.GetStatisticsUseCase;
 import com.fivucsas.identity.dto.StatisticsDto;
-import com.fivucsas.identity.service.StatisticsService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
@@ -11,6 +12,11 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+/**
+ * REST controller for statistics endpoints.
+ *
+ * Refactored to use Hexagonal Architecture input ports (use cases).
+ */
 @RestController
 @RequestMapping("/api/v1/statistics")
 @RequiredArgsConstructor
@@ -18,13 +24,26 @@ import org.springframework.web.bind.annotation.RestController;
 @Tag(name = "Statistics", description = "System statistics")
 public class StatisticsController {
 
-    private final StatisticsService statisticsService;
+    private final GetStatisticsUseCase getStatisticsUseCase;
 
     @GetMapping
     @Operation(summary = "Get system statistics")
     public ResponseEntity<StatisticsDto> getStatistics() {
         log.info("GET /api/v1/statistics - Get system statistics");
-        StatisticsDto statistics = statisticsService.getStatistics();
-        return ResponseEntity.ok(statistics);
+
+        StatisticsResponse response = getStatisticsUseCase.execute();
+
+        return ResponseEntity.ok(mapToStatisticsDto(response));
+    }
+
+    private StatisticsDto mapToStatisticsDto(StatisticsResponse response) {
+        return StatisticsDto.builder()
+            .totalUsers(response.getTotalUsers())
+            .activeUsers(response.getActiveUsers())
+            .inactiveUsers(response.getInactiveUsers())
+            .suspendedUsers(response.getSuspendedUsers())
+            .biometricEnrolledUsers(response.getBiometricEnrolledUsers())
+            .totalVerifications(response.getTotalVerifications())
+            .build();
     }
 }

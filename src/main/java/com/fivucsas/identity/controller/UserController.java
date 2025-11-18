@@ -1,9 +1,15 @@
 package com.fivucsas.identity.controller;
 
+import com.fivucsas.identity.application.dto.command.CreateUserCommand;
+import com.fivucsas.identity.application.dto.command.UpdateUserCommand;
+import com.fivucsas.identity.application.dto.query.GetAllUsersQuery;
+import com.fivucsas.identity.application.dto.query.GetUserByIdQuery;
+import com.fivucsas.identity.application.dto.query.SearchUsersQuery;
+import com.fivucsas.identity.application.dto.response.UserResponse;
+import com.fivucsas.identity.application.port.input.ManageUserUseCase;
 import com.fivucsas.identity.dto.CreateUserRequest;
 import com.fivucsas.identity.dto.UpdateUserRequest;
 import com.fivucsas.identity.dto.UserDto;
-import com.fivucsas.identity.service.UserService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -14,7 +20,13 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.stream.Collectors;
 
+/**
+ * REST controller for user management endpoints.
+ *
+ * Refactored to use Hexagonal Architecture input ports (use cases).
+ */
 @RestController
 @RequestMapping("/api/v1/users")
 @RequiredArgsConstructor
@@ -22,13 +34,19 @@ import java.util.List;
 @Tag(name = "User Management", description = "User CRUD operations")
 public class UserController {
 
-    private final UserService userService;
+    private final ManageUserUseCase manageUserUseCase;
 
     @GetMapping
     @Operation(summary = "Get all users")
     public ResponseEntity<List<UserDto>> getAllUsers() {
         log.info("GET /api/v1/users - Get all users");
-        List<UserDto> users = userService.getAllUsers();
+
+        List<UserResponse> responses = manageUserUseCase.getAllUsers(new GetAllUsersQuery());
+
+        List<UserDto> users = responses.stream()
+            .map(this::mapToUserDto)
+            .collect(Collectors.toList());
+
         return ResponseEntity.ok(users);
     }
 
@@ -36,16 +54,34 @@ public class UserController {
     @Operation(summary = "Get user by ID")
     public ResponseEntity<UserDto> getUserById(@PathVariable String id) {
         log.info("GET /api/v1/users/{} - Get user by ID", id);
-        UserDto user = userService.getUserById(id);
-        return ResponseEntity.ok(user);
+
+        GetUserByIdQuery query = GetUserByIdQuery.builder()
+            .userId(id)
+            .build();
+
+        UserResponse response = manageUserUseCase.getUserById(query);
+
+        return ResponseEntity.ok(mapToUserDto(response));
     }
 
     @PostMapping
     @Operation(summary = "Create new user")
     public ResponseEntity<UserDto> createUser(@Valid @RequestBody CreateUserRequest request) {
         log.info("POST /api/v1/users - Create user: {}", request.getEmail());
-        UserDto user = userService.createUser(request);
-        return ResponseEntity.status(HttpStatus.CREATED).body(user);
+
+        CreateUserCommand command = CreateUserCommand.builder()
+            .email(request.getEmail())
+            .password(request.getPassword())
+            .firstName(request.getFirstName())
+            .lastName(request.getLastName())
+            .phoneNumber(request.getPhoneNumber())
+            .address(request.getAddress())
+            .idNumber(request.getIdNumber())
+            .build();
+
+        UserResponse response = manageUserUseCase.createUser(command);
+
+        return ResponseEntity.status(HttpStatus.CREATED).body(mapToUserDto(response));
     }
 
     @PutMapping("/{id}")
@@ -54,15 +90,27 @@ public class UserController {
             @PathVariable String id,
             @Valid @RequestBody UpdateUserRequest request) {
         log.info("PUT /api/v1/users/{} - Update user", id);
-        UserDto user = userService.updateUser(id, request);
-        return ResponseEntity.ok(user);
+
+        UpdateUserCommand command = UpdateUserCommand.builder()
+            .userId(id)
+            .firstName(request.getFirstName())
+            .lastName(request.getLastName())
+            .phoneNumber(request.getPhoneNumber())
+            .address(request.getAddress())
+            .build();
+
+        UserResponse response = manageUserUseCase.updateUser(command);
+
+        return ResponseEntity.ok(mapToUserDto(response));
     }
 
     @DeleteMapping("/{id}")
     @Operation(summary = "Delete user")
     public ResponseEntity<Void> deleteUser(@PathVariable String id) {
         log.info("DELETE /api/v1/users/{} - Delete user", id);
-        userService.deleteUser(id);
+
+        manageUserUseCase.deleteUser(id);
+
         return ResponseEntity.noContent().build();
     }
 
@@ -70,7 +118,36 @@ public class UserController {
     @Operation(summary = "Search users")
     public ResponseEntity<List<UserDto>> searchUsers(@RequestParam String query) {
         log.info("GET /api/v1/users/search?query={} - Search users", query);
-        List<UserDto> users = userService.searchUsers(query);
+
+        SearchUsersQuery searchQuery = SearchUsersQuery.builder()
+            .searchQuery(query)
+            .build();
+
+        List<UserResponse> responses = manageUserUseCase.searchUsers(searchQuery);
+
+        List<UserDto> users = responses.stream()
+            .map(this::mapToUserDto)
+            .collect(Collectors.toList());
+
         return ResponseEntity.ok(users);
+    }
+
+    private UserDto mapToUserDto(UserResponse response) {
+        return UserDto.builder()
+            .id(response.getId())
+            .email(response.getEmail())
+            .firstName(response.getFirstName())
+            .lastName(response.getLastName())
+            .phoneNumber(response.getPhoneNumber())
+            .address(response.getAddress())
+            .idNumber(response.getIdNumber())
+            .status(response.getStatus())
+            .isBiometricEnrolled(response.isBiometricEnrolled())
+            .enrolledAt(response.getEnrolledAt())
+            .lastVerifiedAt(response.getLastVerifiedAt())
+            .verificationCount(response.getVerificationCount())
+            .createdAt(response.getCreatedAt())
+            .updatedAt(response.getUpdatedAt())
+            .build();
     }
 }
