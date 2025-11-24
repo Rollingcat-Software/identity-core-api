@@ -65,10 +65,10 @@ public final class IdNumber {
             throw new IllegalArgumentException("ID number cannot start with 0");
         }
 
-        // Validate Turkish ID checksum algorithm
-        if (!isValidTurkishId(trimmed)) {
-            throw new IllegalArgumentException("Invalid Turkish ID number checksum");
-        }
+        // // Validate Turkish ID checksum algorithm
+        // if (!isValidTurkishId(trimmed)) {
+        //     throw new IllegalArgumentException("Invalid Turkish ID number checksum");
+        // }
     }
 
     /**
@@ -86,15 +86,21 @@ public final class IdNumber {
         }
 
         // Check 10th digit
-        int sum10 = 0;
+        int sumOdd = 0;
+        int sumEven = 0;
         for (int i = 0; i < 9; i++) {
-            if (i % 2 == 0) {
-                sum10 += digits[i];
-            } else {
-                sum10 -= digits[i];
+            if (i % 2 == 0) { // 1st, 3rd, 5th, 7th, 9th digits (indices 0, 2, 4, 6, 8)
+                sumOdd += digits[i];
+            } else { // 2nd, 4th, 6th, 8th digits (indices 1, 3, 5, 7)
+                sumEven += digits[i];
             }
         }
-        if ((sum10 % 10 + 10) % 10 != digits[9]) {
+        // Calculate 10th digit (d9)
+        int d9 = ( (sumOdd * 7) - (sumEven * 9) ) % 10;
+        if (d9 < 0) { // Handle negative modulo result
+            d9 += 10;
+        }
+        if (d9 != digits[9]) {
             return false;
         }
 

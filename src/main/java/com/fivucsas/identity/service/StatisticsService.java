@@ -35,7 +35,7 @@ public class StatisticsService {
                 .activeUsers(activeUsers)
                 .inactiveUsers(inactiveUsers)
                 .suspendedUsers(suspendedUsers)
-                .enrolledUsers(enrolledUsers)
+                .biometricEnrolledUsers(enrolledUsers)
                 .totalVerifications(totalVerifications != null ? totalVerifications : 0L)
                 .averageVerificationsPerUser(Math.round(avgVerifications * 100.0) / 100.0)
                 .build();

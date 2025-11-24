@@ -10,7 +10,7 @@ import com.fivucsas.identity.dto.UserDto;
 import com.fivucsas.identity.entity.RefreshToken;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.entity.UserStatus;
-import com.fivucsas.identity.repository.UserRepository;
+import com.fivucsas.identity.domain.repository.UserRepository;
 import com.fivucsas.identity.security.JwtService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -23,7 +23,7 @@ import org.springframework.transaction.annotation.Transactional;
 @Slf4j
 public class AuthService {
 
-    private final UserRepository userRepository;
+    private final com.fivucsas.identity.domain.repository.UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
     private final RefreshTokenService refreshTokenService;
@@ -55,7 +55,7 @@ public class AuthService {
 
         log.info("User registered successfully: {}", savedUser.getId());
 
-        String accessToken = jwtService.generateToken(savedUser.getEmail());
+        String accessToken = jwtService.generateAccessToken(savedUser.getEmail());
         String refreshToken = refreshTokenService.createRefreshToken(savedUser, ipAddress, userAgent).getToken();
         UserDto userDto = mapToDto(savedUser);
 
@@ -76,7 +76,7 @@ public class AuthService {
 
         log.info("User logged in successfully: {}", user.getId());
 
-        String accessToken = jwtService.generateToken(user.getEmail());
+        String accessToken = jwtService.generateAccessToken(user.getEmail());
         String refreshToken = refreshTokenService.createRefreshToken(user, ipAddress, userAgent).getToken();
         UserDto userDto = mapToDto(user);
 
@@ -95,7 +95,7 @@ public class AuthService {
         // Rotate refresh token for security
         RefreshToken newRefreshToken = refreshTokenService.rotateRefreshToken(refreshToken, ipAddress, userAgent);
 
-        String accessToken = jwtService.generateToken(user.getEmail());
+        String accessToken = jwtService.generateAccessToken(user.getEmail());
         UserDto userDto = mapToDto(user);
 
         log.info("Token refreshed successfully for user: {}", user.getEmail());

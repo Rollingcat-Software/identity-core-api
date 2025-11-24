@@ -19,6 +19,8 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.time.Instant;
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.Optional;
 import java.util.UUID;
@@ -70,15 +72,15 @@ class AuthenticateUserServiceTest {
             .status(UserStatus.ACTIVE)
             .isBiometricEnrolled(false)
             .verificationCount(0)
-            .createdAt(LocalDateTime.now())
-            .updatedAt(LocalDateTime.now())
+            .createdAt(Instant.now())
+            .updatedAt(Instant.now())
             .build();
 
         refreshToken = RefreshToken.builder()
             .id(UUID.randomUUID())
             .token("refresh-token-value")
             .user(existingUser)
-            .expiryDate(LocalDateTime.now().plusDays(7))
+            .expiryDate(Instant.now().plus(Duration.ofDays(7)))
             .build();
     }
 
@@ -130,10 +132,8 @@ class AuthenticateUserServiceTest {
                 .status(UserStatus.ACTIVE)
                 .isBiometricEnrolled(true)
                 .verificationCount(5)
-                .enrolledAt(LocalDateTime.now().minusDays(10))
-                .lastVerifiedAt(LocalDateTime.now().minusDays(1))
-                .createdAt(LocalDateTime.now().minusDays(30))
-                .updatedAt(LocalDateTime.now())
+                                  .enrolledAt(Instant.now().minus(Duration.ofDays(10)))                  .lastVerifiedAt(Instant.now().minus(Duration.ofDays(1)))
+                                  .createdAt(Instant.now().minus(Duration.ofDays(30)))                .updatedAt(Instant.now())
                 .build();
 
             when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(userWithFullDetails));
@@ -258,8 +258,8 @@ class AuthenticateUserServiceTest {
                 .firstName("John")
                 .lastName("Doe")
                 .status(UserStatus.INACTIVE)
-                .createdAt(LocalDateTime.now())
-                .updatedAt(LocalDateTime.now())
+                .createdAt(Instant.now())
+                .updatedAt(Instant.now())
                 .build();
 
             when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(inactiveUser));

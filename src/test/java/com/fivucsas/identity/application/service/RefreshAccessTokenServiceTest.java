@@ -16,6 +16,8 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.time.Instant;
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.UUID;
 
@@ -60,22 +62,22 @@ class RefreshAccessTokenServiceTest {
             .status(UserStatus.ACTIVE)
             .isBiometricEnrolled(false)
             .verificationCount(0)
-            .createdAt(LocalDateTime.now())
-            .updatedAt(LocalDateTime.now())
+            .createdAt(Instant.now())
+            .updatedAt(Instant.now())
             .build();
 
         existingToken = RefreshToken.builder()
             .id(UUID.randomUUID())
             .token("existing-refresh-token")
             .user(user)
-            .expiryDate(LocalDateTime.now().plusDays(7))
+            .expiryDate(Instant.now().plus(Duration.ofDays(7)))
             .build();
 
         newToken = RefreshToken.builder()
             .id(UUID.randomUUID())
             .token("new-refresh-token")
             .user(user)
-            .expiryDate(LocalDateTime.now().plusDays(7))
+            .expiryDate(Instant.now().plus(Duration.ofDays(7)))
             .build();
     }
 
@@ -124,15 +126,15 @@ class RefreshAccessTokenServiceTest {
                 .status(UserStatus.ACTIVE)
                 .isBiometricEnrolled(true)
                 .verificationCount(10)
-                .createdAt(LocalDateTime.now())
-                .updatedAt(LocalDateTime.now())
+                .createdAt(Instant.now())
+                .updatedAt(Instant.now())
                 .build();
 
             RefreshToken tokenWithUser = RefreshToken.builder()
                 .id(UUID.randomUUID())
                 .token("existing-refresh-token")
                 .user(userWithDetails)
-                .expiryDate(LocalDateTime.now().plusDays(7))
+                .expiryDate(Instant.now().plus(Duration.ofDays(7)))
                 .build();
 
             when(refreshTokenService.findByToken("existing-refresh-token")).thenReturn(tokenWithUser);

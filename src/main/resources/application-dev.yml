@@ -1,0 +1,60 @@
+# Development Profile Configuration
+# This profile is for LOCAL DEVELOPMENT ONLY
+# DO NOT use this profile in production
+
+spring:
+  application:
+    name: identity-core-api-dev
+
+  # H2 In-Memory Database (Development Only)
+  datasource:
+    url: jdbc:h2:mem:fivucsas_dev_db
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+
+  # H2 Console (ENABLED in development for debugging)
+  h2:
+    console:
+      enabled: true
+      path: /h2-console
+      settings:
+        web-allow-others: false  # Security: Only localhost access
+
+  # JPA/Hibernate (Development)
+  jpa:
+    database-platform: org.hibernate.dialect.H2Dialect
+    hibernate:
+      ddl-auto: create-drop  # Recreate schema on restart (dev only)
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+
+# JWT Configuration (Development)
+# WARNING: In development, secret can be in config, but MUST use env var in production
+jwt:
+  expiration: 86400000  # 24 hours
+  refresh-expiration: 604800000  # 7 days
+
+# FastAPI Integration (Development)
+biometric:
+  service:
+    url: http://localhost:8001
+    timeout: 30000
+
+# Logging (Verbose for development)
+logging:
+  level:
+    com.fivucsas: DEBUG
+    org.springframework.security: DEBUG
+    org.hibernate.SQL: DEBUG
+    org.hibernate.type.descriptor.sql.BasicBinder: TRACE
+
+# Server Configuration
+server:
+  port: 8080
+  error:
+    include-message: always
+    include-binding-errors: always
+    include-stacktrace: always  # Development only

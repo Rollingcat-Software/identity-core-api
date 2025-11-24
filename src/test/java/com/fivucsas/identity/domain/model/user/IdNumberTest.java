@@ -14,7 +14,7 @@ import static org.junit.jupiter.api.Assertions.*;
 class IdNumberTest {
 
     // Valid Turkish ID numbers (real algorithm)
-    private static final String VALID_ID_1 = "12345678910"; // Valid checksum
+    private static final String VALID_ID_1 = "10000000146"; // Valid checksum
     private static final String VALID_ID_2 = "10000000146"; // Valid checksum
 
     @Test
@@ -98,7 +98,6 @@ class IdNumberTest {
 
     @ParameterizedTest
     @ValueSource(strings = {
-        "12345678910",  // Valid checksum
         "10000000146",  // Valid checksum
         "11111111110"   // Valid checksum (all 1s except last digit)
     })

@@ -17,14 +17,6 @@ import java.util.UUID;
 public interface BiometricDataRepository {
 
     /**
-     * Saves biometric data.
-     *
-     * @param biometricData the data to save
-     * @return the saved data
-     */
-    BiometricData save(BiometricData biometricData);
-
-    /**
      * Finds biometric data by user.
      *
      * @param user the user
@@ -46,11 +38,4 @@ public interface BiometricDataRepository {
      * @param user the user
      */
     void deleteByUser(User user);
-
-    /**
-     * Deletes specific biometric data.
-     *
-     * @param biometricData the data to delete
-     */
-    void delete(BiometricData biometricData);
 }

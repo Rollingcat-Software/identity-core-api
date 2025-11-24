@@ -43,6 +43,12 @@ dependencies {
     // Springdoc OpenAPI (Swagger)
     implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:2.2.0'
 
+    // Rate Limiting (Bucket4j)
+    implementation 'com.bucket4j:bucket4j-core:8.7.0'
+
+    // PostgreSQL (for production)
+    runtimeOnly 'org.postgresql:postgresql'
+
     // Testing
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
     testImplementation 'org.springframework.security:spring-security-test'

@@ -21,6 +21,8 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.time.Instant;
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.UUID;
 
@@ -73,15 +75,15 @@ class RegisterUserServiceTest {
             .status(UserStatus.ACTIVE)
             .isBiometricEnrolled(false)
             .verificationCount(0)
-            .createdAt(LocalDateTime.now())
-            .updatedAt(LocalDateTime.now())
+            .createdAt(Instant.now())
+            .updatedAt(Instant.now())
             .build();
 
         refreshToken = RefreshToken.builder()
             .id(UUID.randomUUID())
             .token("refresh-token-value")
             .user(savedUser)
-            .expiryDate(LocalDateTime.now().plusDays(7))
+            .expiryDate(Instant.now().plus(Duration.ofDays(7)))
             .build();
     }
 
@@ -282,8 +284,8 @@ class RegisterUserServiceTest {
                 .status(UserStatus.ACTIVE)
                 .isBiometricEnrolled(false)
                 .verificationCount(0)
-                .createdAt(LocalDateTime.now())
-                .updatedAt(LocalDateTime.now())
+                .createdAt(Instant.now())
+                .updatedAt(Instant.now())
                 .build();
 
             when(userRepository.existsByEmail("test@example.com")).thenReturn(false);
