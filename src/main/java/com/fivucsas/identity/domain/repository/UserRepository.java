@@ -21,22 +21,6 @@ import java.util.UUID;
 public interface UserRepository {
 
     /**
-     * Saves a user (create or update).
-     *
-     * @param user the user to save
-     * @return the saved user
-     */
-    User save(User user);
-
-    /**
-     * Finds a user by their unique identifier.
-     *
-     * @param id the user ID
-     * @return Optional containing the user if found
-     */
-    Optional<User> findById(UUID id);
-
-    /**
      * Finds a user by their email address.
      *
      * @param email the email to search for
@@ -85,31 +69,42 @@ public interface UserRepository {
     List<User> searchUsers(String query);
 
     /**
-     * Finds all users.
-     *
-     * @return list of all users
-     */
-    List<User> findAll();
-
-    /**
-     * Deletes a user.
-     *
-     * @param user the user to delete
-     */
-    void delete(User user);
-
-    /**
-     * Counts total number of users.
-     *
-     * @return total user count
-     */
-    long count();
-
-    /**
      * Sums the verification count across all users.
      * Used for statistics.
      *
      * @return total verification count
      */
     Long sumVerificationCount();
+
+    /**
+     * Saves a user.
+     * @param user the user to save
+     * @return the saved user
+     */
+    User save(User user);
+
+    /**
+     * Finds a user by ID.
+     * @param id the ID of the user
+     * @return Optional containing the user if found
+     */
+    Optional<User> findById(UUID id);
+
+    /**
+     * Finds all users.
+     * @return list of all users
+     */
+    List<User> findAll();
+
+    /**
+     * Counts all users.
+     * @return total count of users
+     */
+    long count();
+
+    /**
+     * Deletes a user.
+     * @param user the user to delete
+     */
+    void delete(User user);
 }

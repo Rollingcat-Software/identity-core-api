@@ -19,14 +19,6 @@ import java.util.UUID;
 public interface RefreshTokenRepository {
 
     /**
-     * Saves a refresh token.
-     *
-     * @param token the token to save
-     * @return the saved token
-     */
-    RefreshToken save(RefreshToken token);
-
-    /**
      * Finds a refresh token by its token string.
      *
      * @param token the token string
@@ -76,11 +68,4 @@ public interface RefreshTokenRepository {
      * @return true if active token exists
      */
     boolean existsByTokenAndIsRevokedFalse(String token);
-
-    /**
-     * Deletes a refresh token.
-     *
-     * @param token the token to delete
-     */
-    void delete(RefreshToken token);
 }

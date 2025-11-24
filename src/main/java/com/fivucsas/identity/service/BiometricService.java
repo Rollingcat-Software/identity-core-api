@@ -8,7 +8,7 @@ import com.fivucsas.identity.dto.BiometricVerificationResponse;
 import com.fivucsas.identity.entity.BiometricData;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.repository.BiometricDataRepository;
-import com.fivucsas.identity.repository.UserRepository;
+import com.fivucsas.identity.domain.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -30,7 +30,7 @@ import java.util.UUID;
 public class BiometricService {
 
     private final BiometricDataRepository biometricDataRepository;
-    private final UserRepository userRepository;
+    private final com.fivucsas.identity.domain.repository.UserRepository userRepository;
     private final WebClient.Builder webClientBuilder;
 
     @Value("${biometric.service.url}")

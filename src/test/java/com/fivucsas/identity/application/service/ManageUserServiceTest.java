@@ -22,6 +22,7 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.Collections;
@@ -65,8 +66,8 @@ class ManageUserServiceTest {
             .status(UserStatus.ACTIVE)
             .isBiometricEnrolled(false)
             .verificationCount(0)
-            .createdAt(LocalDateTime.now())
-            .updatedAt(LocalDateTime.now())
+            .createdAt(Instant.now())
+            .updatedAt(Instant.now())
             .build();
     }
 
@@ -100,8 +101,8 @@ class ManageUserServiceTest {
                 .status(UserStatus.ACTIVE)
                 .isBiometricEnrolled(false)
                 .verificationCount(0)
-                .createdAt(LocalDateTime.now())
-                .updatedAt(LocalDateTime.now())
+                .createdAt(Instant.now())
+                .updatedAt(Instant.now())
                 .build();
 
             when(userRepository.existsByEmail("newuser@example.com")).thenReturn(false);
@@ -246,8 +247,8 @@ class ManageUserServiceTest {
                 .status(UserStatus.ACTIVE)
                 .isBiometricEnrolled(false)
                 .verificationCount(0)
-                .createdAt(LocalDateTime.now())
-                .updatedAt(LocalDateTime.now())
+                .createdAt(Instant.now())
+                .updatedAt(Instant.now())
                 .build();
 
             when(userRepository.findAll()).thenReturn(Arrays.asList(existingUser, user2));

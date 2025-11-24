@@ -12,6 +12,7 @@ import com.fivucsas.identity.dto.AuthResponse;
 import com.fivucsas.identity.dto.LoginRequest;
 import com.fivucsas.identity.dto.RefreshTokenRequest;
 import com.fivucsas.identity.dto.RegisterRequest;
+import com.fivucsas.identity.entity.UserStatus;
 import com.fivucsas.identity.dto.UserDto;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
@@ -159,7 +160,7 @@ public class AuthController {
             .phoneNumber(response.getPhoneNumber())
             .address(response.getAddress())
             .idNumber(response.getIdNumber())
-            .status(response.getStatus())
+            .status(UserStatus.valueOf(response.getStatus()))
             .isBiometricEnrolled(response.isBiometricEnrolled())
             .enrolledAt(response.getEnrolledAt())
             .lastVerifiedAt(response.getLastVerifiedAt())

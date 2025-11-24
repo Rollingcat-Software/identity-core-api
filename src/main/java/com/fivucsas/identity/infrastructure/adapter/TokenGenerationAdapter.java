@@ -23,7 +23,7 @@ public class TokenGenerationAdapter implements TokenGenerationPort {
 
     @Override
     public String generateAccessToken(String email) {
-        return jwtService.generateToken(email);
+        return jwtService.generateAccessToken(email);
     }
 
     @Override

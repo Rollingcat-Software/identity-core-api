@@ -1,0 +1,101 @@
+# Production Profile Configuration
+# SECURITY: This profile enforces production security standards
+
+spring:
+  application:
+    name: identity-core-api
+
+  # PostgreSQL Database (Production)
+  # IMPORTANT: Configure these via environment variables
+  datasource:
+    url: ${DATABASE_URL}
+    driver-class-name: org.postgresql.Driver
+    username: ${DATABASE_USERNAME}
+    password: ${DATABASE_PASSWORD}
+    hikari:
+      maximum-pool-size: 20
+      minimum-idle: 5
+      connection-timeout: 30000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+
+  # H2 Console (DISABLED in production for security)
+  h2:
+    console:
+      enabled: false
+
+  # JPA/Hibernate (Production)
+  jpa:
+    database-platform: org.hibernate.dialect.PostgreSQLDialect
+    hibernate:
+      ddl-auto: validate  # Never auto-create schema in production
+    show-sql: false  # Don't log SQL in production
+    properties:
+      hibernate:
+        format_sql: false
+        jdbc:
+          batch_size: 20
+        order_inserts: true
+        order_updates: true
+
+# JWT Configuration (Production)
+# CRITICAL: JWT secret MUST come from environment variable (see JwtSecretProvider)
+jwt:
+  expiration: ${JWT_EXPIRATION:3600000}  # Default 1 hour, override via env var
+  refresh-expiration: ${JWT_REFRESH_EXPIRATION:86400000}  # Default 24 hours
+
+# FastAPI Integration (Production)
+# IMPORTANT: Configure via environment variables
+biometric:
+  service:
+    url: ${BIOMETRIC_SERVICE_URL}
+    timeout: ${BIOMETRIC_SERVICE_TIMEOUT:30000}
+
+# Logging (Production)
+# Only log warnings and errors, no sensitive data
+logging:
+  level:
+    com.fivucsas: INFO
+    org.springframework.security: WARN
+    org.hibernate: WARN
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} - %msg%n"
+  file:
+    name: /var/log/fivucsas/identity-core-api.log
+    max-size: 10MB
+    max-history: 30
+
+# Server Configuration (Production)
+server:
+  port: ${PORT:8080}
+  error:
+    include-message: never  # Security: Don't expose internal errors
+    include-binding-errors: never
+    include-stacktrace: never
+  compression:
+    enabled: true
+  http2:
+    enabled: true
+  shutdown: graceful
+
+# Spring Boot Actuator (Production)
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: never  # Don't expose internal details
+  metrics:
+    export:
+      prometheus:
+        enabled: true
+
+# Security Headers (Production)
+security:
+  headers:
+    content-security-policy: "default-src 'self'"
+    x-frame-options: DENY
+    x-content-type-options: nosniff
+    strict-transport-security: max-age=31536000; includeSubDomains

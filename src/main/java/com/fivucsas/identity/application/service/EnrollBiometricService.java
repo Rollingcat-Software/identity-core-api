@@ -26,7 +26,7 @@ import java.util.UUID;
 @Slf4j
 public class EnrollBiometricService implements EnrollBiometricUseCase {
 
-    private final UserRepository userRepository;
+    private final com.fivucsas.identity.domain.repository.UserRepository userRepository;
     private final BiometricServicePort biometricService;
 
     @Override

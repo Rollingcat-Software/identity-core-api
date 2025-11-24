@@ -1,10 +1,13 @@
 package com.fivucsas.identity.security;
 
+import com.fivucsas.identity.application.port.output.TokenGenerationPort;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.io.Decoders;
 import io.jsonwebtoken.security.Keys;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Primary;
 import org.springframework.stereotype.Service;
 
 import javax.crypto.SecretKey;
@@ -14,13 +17,18 @@ import java.util.Map;
 import java.util.function.Function;
 
 @Service
-public class JwtService {
+@Slf4j
+@Primary
+public class JwtService implements TokenGenerationPort {
 
-    @Value("${jwt.secret}")
-    private String secret;
+    private final JwtSecretProvider jwtSecretProvider;
 
     @Value("${jwt.expiration}")
     private long jwtExpiration;
+
+    public JwtService(JwtSecretProvider jwtSecretProvider) {
+        this.jwtSecretProvider = jwtSecretProvider;
+    }
 
     public String extractEmail(String token) {
         return extractClaim(token, Claims::getSubject);
@@ -31,8 +39,9 @@ public class JwtService {
         return claimsResolver.apply(claims);
     }
 
-    public String generateToken(String email) {
-        return generateToken(new HashMap<>(), email);
+    @Override
+    public String generateAccessToken(String email) {
+        return buildToken(new HashMap<>(), email, jwtExpiration);
     }
 
     public String generateToken(Map<String, Object> extraClaims, String email) {
@@ -44,7 +53,7 @@ public class JwtService {
             String email,
             long expiration
     ) {
-        return Jwts
+        String token = Jwts
                 .builder()
                 .claims(extraClaims)
                 .subject(email)
@@ -52,6 +61,9 @@ public class JwtService {
                 .expiration(new Date(System.currentTimeMillis() + expiration))
                 .signWith(getSignInKey())
                 .compact();
+        // SECURITY: Never log the actual token - it's a bearer credential
+        log.debug("Generated JWT token for user: {}", email);
+        return token;
     }
 
     public boolean isTokenValid(String token, String email) {
@@ -77,7 +89,7 @@ public class JwtService {
     }
 
     private SecretKey getSignInKey() {
-        byte[] keyBytes = Decoders.BASE64.decode(secret);
+        byte[] keyBytes = Decoders.BASE64.decode(jwtSecretProvider.getSecret());
         return Keys.hmacShaKeyFor(keyBytes);
     }
 }

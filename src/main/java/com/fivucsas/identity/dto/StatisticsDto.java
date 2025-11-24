@@ -15,7 +15,7 @@ public class StatisticsDto {
     private Long activeUsers;
     private Long inactiveUsers;
     private Long suspendedUsers;
-    private Long enrolledUsers;
+    private Long biometricEnrolledUsers;
     private Long totalVerifications;
     private Double averageVerificationsPerUser;
 }

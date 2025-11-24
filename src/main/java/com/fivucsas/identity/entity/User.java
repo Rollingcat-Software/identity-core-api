@@ -50,6 +50,7 @@ public class User {
     private Tenant tenant;
 
     @Column(unique = true, nullable = false, length = 255)
+    @Setter  // Allow updating
     private String email;  // Will be converted to Email via converter
 
     @Column(nullable = false, name = "password_hash")
@@ -64,24 +65,30 @@ public class User {
     private String lastName;
 
     @Column(unique = true, length = 11)
+    @Setter  // Allow updating
     private String idNumber;  // Will be converted to IdNumber via converter
 
     @Column(length = 20)
+    @Setter  // Allow updating
     private String phoneNumber;  // Will be converted to PhoneNumber via converter
 
     @Column(length = 500)
+    @Setter  // Allow updating
     private String address;  // Will be converted to Address via converter
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     @Builder.Default
+    @Setter  // Allow updating
     private UserStatus status = UserStatus.ACTIVE;
 
     @Column(name = "is_biometric_enrolled")
     @Builder.Default
+    @Setter  // Allow updating
     private boolean isBiometricEnrolled = false;
 
     @Column(name = "enrolled_at")
+    @Setter  // Allow updating
     private Instant enrolledAt;
 
     @Column(name = "last_verified_at")

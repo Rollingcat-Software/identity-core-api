@@ -33,7 +33,7 @@ import java.util.stream.Collectors;
 @Slf4j
 public class ManageUserService implements ManageUserUseCase {
 
-    private final UserRepository userRepository;
+    private final com.fivucsas.identity.domain.repository.UserRepository userRepository;
     private final PasswordEncoderPort passwordEncoder;
 
     @Override

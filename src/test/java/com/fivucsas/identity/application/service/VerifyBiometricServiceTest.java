@@ -21,6 +21,8 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.time.LocalDateTime;
 import java.util.Map;
+import java.time.Instant;
+import java.time.Duration;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -62,9 +64,9 @@ class VerifyBiometricServiceTest {
             .status(UserStatus.ACTIVE)
             .isBiometricEnrolled(true)
             .verificationCount(0)
-            .enrolledAt(LocalDateTime.now().minusDays(10))
-            .createdAt(LocalDateTime.now())
-            .updatedAt(LocalDateTime.now())
+            .enrolledAt(Instant.now().minus(Duration.ofDays(10)))
+            .createdAt(Instant.now())
+            .updatedAt(Instant.now())
             .build();
 
         validCommand = VerifyBiometricCommand.builder()
@@ -197,8 +199,8 @@ class VerifyBiometricServiceTest {
                 .status(UserStatus.ACTIVE)
                 .isBiometricEnrolled(false)
                 .verificationCount(0)
-                .createdAt(LocalDateTime.now())
-                .updatedAt(LocalDateTime.now())
+                .createdAt(Instant.now())
+                .updatedAt(Instant.now())
                 .build();
 
             when(userRepository.findById(userId)).thenReturn(Optional.of(notEnrolledUser));
@@ -270,7 +272,9 @@ class VerifyBiometricServiceTest {
         @DisplayName("Should handle multiple verifications")
         void shouldHandleMultipleVerifications() {
             // Given
-            enrolledUser.setVerificationCount(10);
+            for (int i = 0; i < 10; i++) {
+                enrolledUser.incrementVerificationCount();
+            }
             when(userRepository.findById(userId)).thenReturn(Optional.of(enrolledUser));
             when(biometricService.verifyFace(eq(userId), eq(faceImage)))
                 .thenReturn(Map.of("success", true, "confidence", 0.98));

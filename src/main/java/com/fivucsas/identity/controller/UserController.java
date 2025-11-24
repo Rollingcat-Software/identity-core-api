@@ -9,6 +9,7 @@ import com.fivucsas.identity.application.dto.response.UserResponse;
 import com.fivucsas.identity.application.port.input.ManageUserUseCase;
 import com.fivucsas.identity.dto.CreateUserRequest;
 import com.fivucsas.identity.dto.UpdateUserRequest;
+import com.fivucsas.identity.entity.UserStatus;
 import com.fivucsas.identity.dto.UserDto;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -141,7 +142,7 @@ public class UserController {
             .phoneNumber(response.getPhoneNumber())
             .address(response.getAddress())
             .idNumber(response.getIdNumber())
-            .status(response.getStatus())
+            .status(UserStatus.valueOf(response.getStatus()))
             .isBiometricEnrolled(response.isBiometricEnrolled())
             .enrolledAt(response.getEnrolledAt())
             .lastVerifiedAt(response.getLastVerifiedAt())

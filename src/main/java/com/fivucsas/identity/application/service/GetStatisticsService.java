@@ -19,7 +19,7 @@ import org.springframework.transaction.annotation.Transactional;
 @Slf4j
 public class GetStatisticsService implements GetStatisticsUseCase {
 
-    private final UserRepository userRepository;
+    private final com.fivucsas.identity.domain.repository.UserRepository userRepository;
 
     @Override
     @Transactional(readOnly = true)

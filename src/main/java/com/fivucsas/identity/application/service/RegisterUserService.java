@@ -37,7 +37,7 @@ import org.springframework.transaction.annotation.Transactional;
 @Slf4j
 public class RegisterUserService implements RegisterUserUseCase {
 
-    private final UserRepository userRepository;
+    private final com.fivucsas.identity.domain.repository.UserRepository userRepository;
     private final PasswordEncoderPort passwordEncoder;
     private final TokenGenerationPort tokenGenerator;
     private final RefreshTokenService refreshTokenService;  // TODO: Convert to port
