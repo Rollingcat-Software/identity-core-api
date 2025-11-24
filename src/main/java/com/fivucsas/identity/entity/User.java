@@ -1,13 +1,19 @@
 package com.fivucsas.identity.entity;
 
+import com.fivucsas.identity.domain.model.tenant.TenantId;
 import com.fivucsas.identity.domain.model.user.*;
 import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.Filter;
+import org.hibernate.annotations.FilterDef;
+import org.hibernate.annotations.ParamDef;
 import org.hibernate.annotations.UpdateTimestamp;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
 import java.time.Instant;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -24,7 +30,11 @@ import java.util.UUID;
  * - Single Responsibility: User manages its own state
  */
 @Entity
-@Table(name = "users")
+@Table(name = "users", indexes = {
+    @Index(name = "idx_users_tenant_id", columnList = "tenant_id")
+})
+@FilterDef(name = "tenantFilter", parameters = @ParamDef(name = "tenantId", type = UUID.class))
+@Filter(name = "tenantFilter", condition = "tenant_id = :tenantId")
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED) // For JPA
 @AllArgsConstructor(access = AccessLevel.PRIVATE) // For Builder
@@ -34,6 +44,10 @@ public class User {
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;  // Keep as UUID for now, can refactor to UserId later
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "tenant_id", nullable = false)
+    private Tenant tenant;
 
     @Column(unique = true, nullable = false, length = 255)
     private String email;  // Will be converted to Email via converter
@@ -85,6 +99,15 @@ public class User {
     @Column(nullable = false)
     private Instant updatedAt;
 
+    @ManyToMany(fetch = FetchType.EAGER)
+    @JoinTable(
+        name = "user_roles",
+        joinColumns = @JoinColumn(name = "user_id"),
+        inverseJoinColumns = @JoinColumn(name = "role_id")
+    )
+    @Builder.Default
+    private Set<Role> roles = new HashSet<>();
+
     // ========== Value Object Getters (Type-Safe) ==========
 
     /**
@@ -132,6 +155,13 @@ public class User {
             return null;
         }
         return FullName.of(firstName, lastName);
+    }
+
+    /**
+     * Returns tenant ID as value object.
+     */
+    public TenantId getTenantId() {
+        return tenant != null ? TenantId.of(tenant.getId()) : null;
     }
 
     // ========== Business Methods ==========
@@ -320,5 +350,69 @@ public class User {
      */
     public boolean hasEmail(Email email) {
         return this.email != null && this.email.equalsIgnoreCase(email.getValue());
+    }
+
+    // ========== Role Management Methods ==========
+
+    /**
+     * Adds a role to this user.
+     */
+    public void addRole(Role role) {
+        if (role != null) {
+            roles.add(role);
+        }
+    }
+
+    /**
+     * Removes a role from this user.
+     */
+    public void removeRole(Role role) {
+        roles.remove(role);
+    }
+
+    /**
+     * Checks if user has a specific role by name.
+     */
+    public boolean hasRole(String roleName) {
+        return roles.stream()
+            .anyMatch(r -> r.getName().equalsIgnoreCase(roleName));
+    }
+
+    /**
+     * Checks if user has a specific permission.
+     */
+    public boolean hasPermission(String permission) {
+        return roles.stream()
+            .anyMatch(r -> r.hasPermission(permission));
+    }
+
+    /**
+     * Checks if user has permission for resource and action.
+     */
+    public boolean hasPermission(String resource, String action) {
+        return roles.stream()
+            .anyMatch(r -> r.hasPermission(resource, action));
+    }
+
+    /**
+     * Gets all permission strings for this user.
+     */
+    public Set<String> getAllPermissions() {
+        Set<String> allPermissions = new HashSet<>();
+        for (Role role : roles) {
+            allPermissions.addAll(role.getPermissionStrings());
+        }
+        return allPermissions;
+    }
+
+    /**
+     * Gets all role names for this user.
+     */
+    public Set<String> getRoleNames() {
+        Set<String> roleNames = new HashSet<>();
+        for (Role role : roles) {
+            roleNames.add(role.getName());
+        }
+        return roleNames;
     }
 }
