@@ -75,8 +75,11 @@ public class SecurityConfig {
                         .requestMatchers("/api/v1/biometric/**").authenticated()
 
                         // Statistics endpoints - require authentication
-                        // TODO: Restrict to ADMIN role when RBAC is implemented
                         .requestMatchers("/api/v1/statistics/**").authenticated()
+
+                        // Tenant management endpoints - require authentication
+                        // Actual authorization handled via @PreAuthorize
+                        .requestMatchers("/api/v1/tenants/**").authenticated()
 
                         // All other requests require authentication
                         .anyRequest().authenticated()
