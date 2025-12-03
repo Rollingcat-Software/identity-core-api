@@ -540,4 +540,136 @@ The foundation is solid for completing Phase 3 (Multi-Tenancy & RBAC) and Phase 
 
 ---
 
-*Report generated for presentation on December 3, 2025*
+## DEEP INVESTIGATION FINDINGS (Verified via Code Analysis)
+
+### Use Case Services - ALL FULLY IMPLEMENTED
+
+Deep code review confirms **all 9 services contain complete business logic** (not stubs):
+
+| Service | Lines | Validation | Error Handling | Output Ports Used |
+|---------|-------|------------|----------------|-------------------|
+| RegisterUserService | 110 | Value objects, email uniqueness | DuplicateEmailException | PasswordEncoder, TokenGenerator |
+| AuthenticateUserService | 78 | User exists, password match | InvalidCredentialsException | PasswordEncoder, TokenGenerator |
+| RefreshAccessTokenService | 72 | Token expiry, rotation | Delegated to RefreshTokenService | TokenGenerator |
+| ManageUserService | 175 | Value objects, null checks | DuplicateEmail, UserNotFound | PasswordEncoder |
+| EnrollBiometricService | 62 | User exists, service response | UserNotFound, BiometricEnrollment | BiometricService |
+| VerifyBiometricService | 72 | User exists, enrolled, service response | 3 custom exceptions | BiometricService |
+| GetCurrentUserService | 57 | User exists | UserNotFoundException | None (read-only) |
+| LogoutUserService | 35 | Idempotent handling | Catches all, logs warning | None |
+| GetStatisticsService | 50 | Null safety for aggregation | None needed | None (read-only) |
+
+---
+
+### Output Port Adapter Usage - CRITICAL FINDINGS
+
+| Adapter | Status | Used By | Notes |
+|---------|--------|---------|-------|
+| BiometricServiceAdapter | **ACTIVE** | EnrollBiometricService, VerifyBiometricService | Full HTTP integration with FastAPI |
+| TokenGenerationAdapter | **ACTIVE** | RegisterUserService, AuthenticateUserService, RefreshAccessTokenService | JWT generation |
+| PasswordEncoderAdapter | **ACTIVE** | RegisterUserService, AuthenticateUserService, ManageUserService | BCrypt encoding |
+| AuditLogAdapter | **ORPHANED** | **NONE** | Created but never injected into any service |
+| EventPublisherAdapter | **ORPHANED** | **NONE** | Created but never injected into any service |
+
+**FINDING:** AuditLogAdapter and EventPublisherAdapter are architectural placeholders - the ports and adapters exist but are NOT wired into any use case services. This explains why audit logging only goes to console.
+
+---
+
+### Legacy Code - TECHNICAL DEBT
+
+**CRITICAL:** Old legacy services still exist in codebase (not cleaned up after refactoring):
+
+| Legacy Service | Location | Status | Notes |
+|---------------|----------|--------|-------|
+| AuthService.java | `/service/AuthService.java` | **DEAD CODE** | 156 lines, still uses RuntimeException |
+| UserService.java | `/service/UserService.java` | **DEAD CODE** | Not imported anywhere |
+| StatisticsService.java | `/service/StatisticsService.java` | **DEAD CODE** | Not imported anywhere |
+| BiometricService.java | `/service/BiometricService.java` | **DEAD CODE** | Not imported anywhere |
+| RefreshTokenService.java | `/service/RefreshTokenService.java` | **STILL USED** | Used by new hexagonal services |
+
+**RECOMMENDATION:** Delete dead code files (AuthService, UserService, StatisticsService, BiometricService) to clean up codebase.
+
+---
+
+### Security Implementation - VERIFIED COMPLETE
+
+| Component | Status | Verification |
+|-----------|--------|--------------|
+| JwtAuthenticationFilter | **COMPLETE** | Properly extracts Bearer token, validates, sets SecurityContext |
+| JwtService | **COMPLETE** | Uses HMAC-SHA, configurable expiration, proper claims handling |
+| GlobalExceptionHandler | **COMPLETE** | Handles all 10 domain exceptions + validation + generic fallback |
+| SecurityConfig | **COMPLETE** | Proper endpoint security, JWT filter chain, configurable CORS |
+| Password Encoding | **COMPLETE** | BCrypt via PasswordEncoderAdapter |
+
+---
+
+### Repository Implementation - VERIFIED COMPLETE
+
+**Domain Repository Interface (`domain/repository/UserRepository.java`):**
+- 12 methods defined for all user operations
+- Proper abstraction (no JPA leakage)
+
+**JPA Implementation (`repository/UserRepository.java`):**
+- Extends both JpaRepository AND domain interface
+- Custom JPQL queries for search and aggregation
+- Proper null handling with COALESCE
+
+---
+
+### Biometric Integration - VERIFIED COMPLETE
+
+| Aspect | Status | Details |
+|--------|--------|---------|
+| BiometricServicePort | COMPLETE | 2 methods: enrollFace, verifyFace |
+| BiometricServiceAdapter | COMPLETE | Full WebClient integration with FastAPI |
+| Error Handling | COMPLETE | Returns failure Map if service unavailable |
+| Multipart Upload | COMPLETE | Proper file handling with ContentType |
+
+---
+
+### TODO Items Found in Code
+
+| File | Line | TODO |
+|------|------|------|
+| RegisterUserService.java | 43 | `TODO: Convert RefreshTokenService to port` |
+| SecurityConfig.java | 72 | `TODO: Add role-based authorization when RBAC is implemented` |
+| SecurityConfig.java | 79 | `TODO: Restrict to ADMIN role when RBAC is implemented` |
+| AuditLogAdapter.java | 13 | `NOTE: Placeholder implementation for Phase 4` |
+| EventPublisherAdapter.java | 14 | `NOTE: Placeholder implementation for Phase 4` |
+
+---
+
+### Key Metrics Summary
+
+| Metric | Count |
+|--------|-------|
+| Total Source Files (main) | ~50 |
+| Use Case Services | 9 (all complete) |
+| Domain Exceptions | 10 |
+| Value Objects | 7 |
+| Output Ports | 5 (3 active, 2 orphaned) |
+| Unit Test Files | 25 |
+| Database Migrations | 6 |
+| Legacy Dead Code Files | 4 (should be deleted) |
+
+---
+
+## Risk Assessment
+
+### Low Risk
+- All core authentication flows working
+- Proper security configuration
+- Complete use case implementations
+
+### Medium Risk
+- Orphaned adapters (AuditLog, EventPublisher) may cause confusion
+- Legacy dead code should be removed
+- RefreshTokenService not abstracted as port
+
+### High Risk
+- No RBAC enforcement (anyone authenticated can access all endpoints)
+- No multi-tenancy isolation (data not scoped by tenant)
+- No rate limiting (vulnerable to brute force)
+
+---
+
+*Report updated with deep investigation findings on December 3, 2025*
