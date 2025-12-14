@@ -28,14 +28,12 @@ CREATE TABLE IF NOT EXISTS biometric_data
 
     -- Biometric information
     biometric_type biometric_type NOT NULL DEFAULT 'FACE',
-    embedding vector
-(
-    2622
-), -- pgvector for face embeddings (VGG-Face: 2622 dimensions)
+    embedding vector, -- pgvector for face embeddings (flexible dimension: VGG-Face=2622, Facenet512=512)
     embedding_model VARCHAR
 (
     50
 ) DEFAULT 'VGG-Face',
+    embedding_dimension INTEGER DEFAULT 2622 CHECK (embedding_dimension > 0),
 
     -- Quality metrics
     quality_score FLOAT CHECK
@@ -101,6 +99,8 @@ CREATE TABLE IF NOT EXISTS biometric_data
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
     deleted_at TIMESTAMP,
+
+    -- Constraints
     CONSTRAINT fk_user_tenant CHECK
 (
     EXISTS
@@ -121,7 +121,8 @@ CREATE TABLE IF NOT EXISTS biometric_data
     tenant_id =
     tenant_id
 )
-    )
+    ),
+    CONSTRAINT uq_biometric_user_tenant_type UNIQUE (user_id, tenant_id, biometric_type) WHERE deleted_at IS NULL
     );
 
 -- Liveness Detection Attempts Table
@@ -284,7 +285,9 @@ CREATE INDEX idx_verification_success ON biometric_verification_logs (success);
 COMMENT
 ON TABLE biometric_data IS 'Encrypted biometric embeddings for users';
 COMMENT
-ON COLUMN biometric_data.embedding IS 'pgvector embedding (2622 dimensions for VGG-Face)';
+ON COLUMN biometric_data.embedding IS 'pgvector embedding (flexible dimensions: VGG-Face=2622, Facenet512=512)';
+COMMENT
+ON COLUMN biometric_data.embedding_dimension IS 'Dimension of the embedding vector (varies by model)';
 COMMENT
 ON COLUMN biometric_data.liveness_verified IS 'Whether liveness was checked during enrollment';
 COMMENT

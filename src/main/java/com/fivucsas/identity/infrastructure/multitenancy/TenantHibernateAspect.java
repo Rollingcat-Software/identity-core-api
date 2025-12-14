@@ -38,7 +38,7 @@ public class TenantHibernateAspect {
         if (tenantId != null) {
             Session session = entityManager.unwrap(Session.class);
 
-            if (!session.getEnabledFilter("tenantFilter") != null) {
+            if (session.getEnabledFilter("tenantFilter") == null) {
                 session.enableFilter("tenantFilter")
                        .setParameter("tenantId", tenantId);
                 log.trace("Tenant filter enabled for tenant: {}", tenantId);

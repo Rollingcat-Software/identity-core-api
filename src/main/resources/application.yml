@@ -18,6 +18,15 @@ spring:
   application:
     name: identity-core-api
 
+# Redis Configuration
+redis:
+  host: ${REDIS_HOST:localhost}
+  port: ${REDIS_PORT:6379}
+  password: ${REDIS_PASSWORD:}
+  database: ${REDIS_DB:0}
+  event-bus:
+    enabled: ${REDIS_EVENT_BUS_ENABLED:true}
+
 # JWT Configuration
 # CRITICAL SECURITY: Secret must come from JWT_SECRET environment variable (enforced by JwtSecretProvider)
 jwt:
@@ -44,3 +53,25 @@ server:
   error:
     include-message: ${ERROR_INCLUDE_MESSAGE:never}
     include-binding-errors: ${ERROR_INCLUDE_BINDING:never}
+
+# Management and Monitoring (Actuator + Prometheus)
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+      base-path: /actuator
+  endpoint:
+    health:
+      show-details: ${ACTUATOR_HEALTH_DETAILS:when-authorized}
+    prometheus:
+      enabled: true
+    metrics:
+      enabled: true
+  metrics:
+    export:
+      prometheus:
+        enabled: true
+    tags:
+      application: ${spring.application.name}
+      environment: ${SPRING_PROFILES_ACTIVE:dev}
