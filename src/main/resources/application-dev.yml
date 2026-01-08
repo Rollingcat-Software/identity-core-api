@@ -23,6 +23,10 @@ spring:
         web-allow-others: false  # Security: Only localhost access
         trace: false  # Security: Disable SQL tracing
 
+  # Disable Flyway for H2 development (use Hibernate ddl-auto instead)
+  flyway:
+    enabled: false
+
   # JPA/Hibernate (Development)
   jpa:
     database-platform: org.hibernate.dialect.H2Dialect
@@ -32,10 +36,17 @@ spring:
     properties:
       hibernate:
         format_sql: true
+    defer-datasource-initialization: true
+
+  # SQL Initialization - run data.sql after schema creation
+  sql:
+    init:
+      mode: always
 
 # JWT Configuration (Development)
 # WARNING: In development, secret can be in config, but MUST use env var in production
 jwt:
+  secret: ZGV2ZWxvcG1lbnRzZWNyZXRrZXlmb3Jsb2NhbHRlc3Rpbmdvbmx5bm90Zm9ycHJvZA==
   expiration: 86400000  # 24 hours
   refresh-expiration: 604800000  # 7 days
 
