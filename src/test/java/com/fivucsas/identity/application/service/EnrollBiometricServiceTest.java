@@ -35,6 +35,9 @@ import static org.mockito.Mockito.*;
 @DisplayName("EnrollBiometricService Tests")
 class EnrollBiometricServiceTest {
 
+    // Valid BCrypt hash for testing
+    private static final String VALID_BCRYPT_HASH = "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy";
+
     @Mock
     private UserRepository userRepository;
 
@@ -57,7 +60,7 @@ class EnrollBiometricServiceTest {
         existingUser = User.builder()
             .id(userId)
             .email("test@example.com")
-            .passwordHash("hashedPassword123")
+            .passwordHash(VALID_BCRYPT_HASH)
             .firstName("John")
             .lastName("Doe")
             .status(UserStatus.ACTIVE)
@@ -223,7 +226,7 @@ class EnrollBiometricServiceTest {
             User enrolledUser = User.builder()
                 .id(userId)
                 .email("test@example.com")
-                .passwordHash("hashedPassword123")
+                .passwordHash(VALID_BCRYPT_HASH)
                 .firstName("John")
                 .lastName("Doe")
                 .status(UserStatus.ACTIVE)

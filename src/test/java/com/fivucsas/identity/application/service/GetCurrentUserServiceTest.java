@@ -29,6 +29,9 @@ import static org.mockito.Mockito.*;
 @DisplayName("GetCurrentUserService Tests")
 class GetCurrentUserServiceTest {
 
+    // Valid BCrypt hash for testing
+    private static final String VALID_BCRYPT_HASH = "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy";
+
     @Mock
     private UserRepository userRepository;
 
@@ -43,7 +46,7 @@ class GetCurrentUserServiceTest {
         existingUser = User.builder()
             .id(UUID.randomUUID())
             .email("test@example.com")
-            .passwordHash("hashedPassword123")
+            .passwordHash(VALID_BCRYPT_HASH)
             .firstName("John")
             .lastName("Doe")
             .phoneNumber("+1234567890")
@@ -157,7 +160,7 @@ class GetCurrentUserServiceTest {
             User userWithNulls = User.builder()
                 .id(UUID.randomUUID())
                 .email("test@example.com")
-                .passwordHash("hashedPassword123")
+                .passwordHash(VALID_BCRYPT_HASH)
                 .firstName("John")
                 .lastName("Doe")
                 .phoneNumber(null)
@@ -193,7 +196,7 @@ class GetCurrentUserServiceTest {
             User suspendedUser = User.builder()
                 .id(UUID.randomUUID())
                 .email("test@example.com")
-                .passwordHash("hashedPassword123")
+                .passwordHash(VALID_BCRYPT_HASH)
                 .firstName("John")
                 .lastName("Doe")
                 .status(UserStatus.SUSPENDED)

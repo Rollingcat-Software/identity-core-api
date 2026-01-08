@@ -36,6 +36,9 @@ import static org.mockito.Mockito.*;
 @DisplayName("RegisterUserService Tests")
 class RegisterUserServiceTest {
 
+    // Valid BCrypt hash for testing (represents "Password123!")
+    private static final String VALID_BCRYPT_HASH = "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy";
+
     @Mock
     private UserRepository userRepository;
 
@@ -69,7 +72,7 @@ class RegisterUserServiceTest {
         savedUser = User.builder()
             .id(UUID.randomUUID())
             .email("test@example.com")
-            .passwordHash("hashedPassword123")
+            .passwordHash(VALID_BCRYPT_HASH)
             .firstName("John")
             .lastName("Doe")
             .status(UserStatus.ACTIVE)
@@ -96,7 +99,7 @@ class RegisterUserServiceTest {
         void shouldRegisterUserSuccessfully() {
             // Given
             when(userRepository.existsByEmail("test@example.com")).thenReturn(false);
-            when(passwordEncoder.encode("Password123!")).thenReturn("hashedPassword123");
+            when(passwordEncoder.encode("Password123!")).thenReturn(VALID_BCRYPT_HASH);
             when(userRepository.save(any(User.class))).thenReturn(savedUser);
             when(tokenGenerator.generateAccessToken("test@example.com")).thenReturn("access-token");
             when(refreshTokenService.createRefreshToken(eq(savedUser), eq("192.168.1.1"), eq("Mozilla/5.0")))
@@ -127,7 +130,7 @@ class RegisterUserServiceTest {
         void shouldCreateUserWithCorrectAttributes() {
             // Given
             when(userRepository.existsByEmail("test@example.com")).thenReturn(false);
-            when(passwordEncoder.encode("Password123!")).thenReturn("hashedPassword123");
+            when(passwordEncoder.encode("Password123!")).thenReturn(VALID_BCRYPT_HASH);
             when(userRepository.save(any(User.class))).thenReturn(savedUser);
             when(tokenGenerator.generateAccessToken("test@example.com")).thenReturn("access-token");
             when(refreshTokenService.createRefreshToken(any(), any(), any())).thenReturn(refreshToken);
@@ -142,7 +145,7 @@ class RegisterUserServiceTest {
             User capturedUser = userCaptor.getValue();
 
             assertThat(capturedUser.getEmail()).isEqualTo("test@example.com");
-            assertThat(capturedUser.getPasswordHash()).isEqualTo("hashedPassword123");
+            assertThat(capturedUser.getPasswordHash()).isEqualTo(VALID_BCRYPT_HASH);
             assertThat(capturedUser.getFirstName()).isEqualTo("John");
             assertThat(capturedUser.getLastName()).isEqualTo("Doe");
             assertThat(capturedUser.getStatus()).isEqualTo(UserStatus.ACTIVE);
@@ -250,7 +253,7 @@ class RegisterUserServiceTest {
                 .build();
 
             when(userRepository.existsByEmail("test@example.com")).thenReturn(false);
-            when(passwordEncoder.encode("Password123!")).thenReturn("hashedPassword123");
+            when(passwordEncoder.encode("Password123!")).thenReturn(VALID_BCRYPT_HASH);
             when(userRepository.save(any(User.class))).thenReturn(savedUser);
             when(tokenGenerator.generateAccessToken("test@example.com")).thenReturn("access-token");
             when(refreshTokenService.createRefreshToken(eq(savedUser), isNull(), isNull()))
@@ -278,7 +281,7 @@ class RegisterUserServiceTest {
             User userWithSpecialName = User.builder()
                 .id(UUID.randomUUID())
                 .email("test@example.com")
-                .passwordHash("hashedPassword123")
+                .passwordHash(VALID_BCRYPT_HASH)
                 .firstName("José-María")
                 .lastName("O'Connor")
                 .status(UserStatus.ACTIVE)
@@ -289,7 +292,7 @@ class RegisterUserServiceTest {
                 .build();
 
             when(userRepository.existsByEmail("test@example.com")).thenReturn(false);
-            when(passwordEncoder.encode("Password123!")).thenReturn("hashedPassword123");
+            when(passwordEncoder.encode("Password123!")).thenReturn(VALID_BCRYPT_HASH);
             when(userRepository.save(any(User.class))).thenReturn(userWithSpecialName);
             when(tokenGenerator.generateAccessToken("test@example.com")).thenReturn("access-token");
             when(refreshTokenService.createRefreshToken(any(), any(), any())).thenReturn(refreshToken);

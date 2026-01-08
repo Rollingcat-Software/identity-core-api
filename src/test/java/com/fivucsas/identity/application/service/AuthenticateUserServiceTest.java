@@ -35,6 +35,9 @@ import static org.mockito.Mockito.*;
 @DisplayName("AuthenticateUserService Tests")
 class AuthenticateUserServiceTest {
 
+    // Valid BCrypt hash for testing
+    private static final String VALID_BCRYPT_HASH = "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy";
+
     @Mock
     private UserRepository userRepository;
 
@@ -66,7 +69,7 @@ class AuthenticateUserServiceTest {
         existingUser = User.builder()
             .id(UUID.randomUUID())
             .email("test@example.com")
-            .passwordHash("hashedPassword123")
+            .passwordHash(VALID_BCRYPT_HASH)
             .firstName("John")
             .lastName("Doe")
             .status(UserStatus.ACTIVE)
@@ -93,7 +96,7 @@ class AuthenticateUserServiceTest {
         void shouldAuthenticateUserSuccessfully() {
             // Given
             when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(existingUser));
-            when(passwordEncoder.matches("Password123!", "hashedPassword123")).thenReturn(true);
+            when(passwordEncoder.matches("Password123!", VALID_BCRYPT_HASH)).thenReturn(true);
             when(tokenGenerator.generateAccessToken("test@example.com")).thenReturn("access-token");
             when(refreshTokenService.createRefreshToken(eq(existingUser), eq("192.168.1.1"), eq("Mozilla/5.0")))
                 .thenReturn(refreshToken);
@@ -111,7 +114,7 @@ class AuthenticateUserServiceTest {
             assertThat(response.getUser().getLastName()).isEqualTo("Doe");
 
             verify(userRepository).findByEmail("test@example.com");
-            verify(passwordEncoder).matches("Password123!", "hashedPassword123");
+            verify(passwordEncoder).matches("Password123!", VALID_BCRYPT_HASH);
             verify(tokenGenerator).generateAccessToken("test@example.com");
             verify(refreshTokenService).createRefreshToken(existingUser, "192.168.1.1", "Mozilla/5.0");
         }
@@ -123,7 +126,7 @@ class AuthenticateUserServiceTest {
             User userWithFullDetails = User.builder()
                 .id(UUID.randomUUID())
                 .email("test@example.com")
-                .passwordHash("hashedPassword123")
+                .passwordHash(VALID_BCRYPT_HASH)
                 .firstName("John")
                 .lastName("Doe")
                 .phoneNumber("+1234567890")
@@ -137,7 +140,7 @@ class AuthenticateUserServiceTest {
                 .build();
 
             when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(userWithFullDetails));
-            when(passwordEncoder.matches("Password123!", "hashedPassword123")).thenReturn(true);
+            when(passwordEncoder.matches("Password123!", VALID_BCRYPT_HASH)).thenReturn(true);
             when(tokenGenerator.generateAccessToken("test@example.com")).thenReturn("access-token");
             when(refreshTokenService.createRefreshToken(any(), any(), any())).thenReturn(refreshToken);
 
@@ -176,14 +179,14 @@ class AuthenticateUserServiceTest {
         void shouldThrowInvalidCredentialsExceptionWhenPasswordDoesNotMatch() {
             // Given
             when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(existingUser));
-            when(passwordEncoder.matches("Password123!", "hashedPassword123")).thenReturn(false);
+            when(passwordEncoder.matches("Password123!", VALID_BCRYPT_HASH)).thenReturn(false);
 
             // When/Then
             assertThatThrownBy(() -> authenticateUserService.execute(validCommand))
                 .isInstanceOf(InvalidCredentialsException.class);
 
             verify(userRepository).findByEmail("test@example.com");
-            verify(passwordEncoder).matches("Password123!", "hashedPassword123");
+            verify(passwordEncoder).matches("Password123!", VALID_BCRYPT_HASH);
             verify(tokenGenerator, never()).generateAccessToken(any());
             verify(refreshTokenService, never()).createRefreshToken(any(), any(), any());
         }
@@ -205,7 +208,7 @@ class AuthenticateUserServiceTest {
 
             // Given - Wrong password
             when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(existingUser));
-            when(passwordEncoder.matches("wrongPassword", "hashedPassword123")).thenReturn(false);
+            when(passwordEncoder.matches("wrongPassword", VALID_BCRYPT_HASH)).thenReturn(false);
 
             AuthenticateUserCommand wrongPasswordCommand = AuthenticateUserCommand.builder()
                 .email("test@example.com")
@@ -234,7 +237,7 @@ class AuthenticateUserServiceTest {
                 .build();
 
             when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(existingUser));
-            when(passwordEncoder.matches("Password123!", "hashedPassword123")).thenReturn(true);
+            when(passwordEncoder.matches("Password123!", VALID_BCRYPT_HASH)).thenReturn(true);
             when(tokenGenerator.generateAccessToken("test@example.com")).thenReturn("access-token");
             when(refreshTokenService.createRefreshToken(eq(existingUser), isNull(), isNull()))
                 .thenReturn(refreshToken);
@@ -254,7 +257,7 @@ class AuthenticateUserServiceTest {
             User inactiveUser = User.builder()
                 .id(UUID.randomUUID())
                 .email("test@example.com")
-                .passwordHash("hashedPassword123")
+                .passwordHash(VALID_BCRYPT_HASH)
                 .firstName("John")
                 .lastName("Doe")
                 .status(UserStatus.INACTIVE)
@@ -263,7 +266,7 @@ class AuthenticateUserServiceTest {
                 .build();
 
             when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(inactiveUser));
-            when(passwordEncoder.matches("Password123!", "hashedPassword123")).thenReturn(true);
+            when(passwordEncoder.matches("Password123!", VALID_BCRYPT_HASH)).thenReturn(true);
             when(tokenGenerator.generateAccessToken("test@example.com")).thenReturn("access-token");
             when(refreshTokenService.createRefreshToken(any(), any(), any())).thenReturn(refreshToken);
 

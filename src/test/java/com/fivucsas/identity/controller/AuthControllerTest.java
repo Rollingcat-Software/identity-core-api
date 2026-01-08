@@ -27,6 +27,9 @@ import static org.springframework.security.test.web.servlet.request.SecurityMock
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.test.context.ActiveProfiles;
+
 /**
  * Unit tests for AuthController.
  *
@@ -39,6 +42,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * Uses MockMvc for controller testing and Mockito for mocking services.
  */
 @WebMvcTest(AuthController.class)
+@ActiveProfiles("test")
+@AutoConfigureMockMvc(addFilters = false) // Disable security filters for unit tests
 @DisplayName("Auth Controller Tests")
 class AuthControllerTest {
 

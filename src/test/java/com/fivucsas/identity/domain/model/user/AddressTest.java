@@ -168,7 +168,7 @@ class AddressTest {
         // Then
         assertEquals(50, shortForm.length());
         assertTrue(shortForm.endsWith("..."));
-        assertEquals("123 Very Long Street Name, Springfield, Ill...", shortForm);
+        assertEquals("123 Very Long Street Name, Springfield, Illinoi...", shortForm);
     }
 
     @Test

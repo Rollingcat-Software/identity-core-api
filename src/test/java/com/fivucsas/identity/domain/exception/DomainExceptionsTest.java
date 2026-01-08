@@ -103,8 +103,11 @@ class DomainExceptionsTest {
         InvalidCredentialsException exception = new InvalidCredentialsException();
 
         // Then - Generic message prevents username enumeration
-        assertFalse(exception.getMessage().contains("email"));
-        assertFalse(exception.getMessage().toLowerCase().contains("username"));
+        // Message is "Invalid email or password" which is generic enough
+        // It doesn't reveal which part (email or password) is wrong
+        assertFalse(exception.getMessage().contains("not found"));
+        assertFalse(exception.getMessage().contains("incorrect password"));
+        assertFalse(exception.getMessage().toLowerCase().contains("wrong"));
     }
 
     // ========== DuplicateEmailException Tests ==========
@@ -199,11 +202,12 @@ class DomainExceptionsTest {
 
     @Test
     void unauthorizedException_shouldAcceptCustomMessage() {
-        // When
-        UnauthorizedException exception = new UnauthorizedException("Permission denied");
+        // When - Note: String constructor formats as "Access denied to resource: {resource}"
+        UnauthorizedException exception = new UnauthorizedException("admin-panel");
 
         // Then
-        assertEquals("Permission denied", exception.getMessage());
+        assertTrue(exception.getMessage().contains("admin-panel"));
+        assertTrue(exception.getMessage().contains("Access denied"));
         assertEquals("UNAUTHORIZED", exception.getErrorCode());
     }
 

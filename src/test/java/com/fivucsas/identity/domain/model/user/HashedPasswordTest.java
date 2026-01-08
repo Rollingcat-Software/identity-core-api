@@ -129,9 +129,9 @@ class HashedPasswordTest {
 
     @Test
     void shouldNotBeEqualWhenHashesDifferent() {
-        // Given
+        // Given - Two different valid BCrypt hashes (both 60 chars)
         String hash1 = "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy";
-        String hash2 = "$2a$10$abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ12";
+        String hash2 = "$2a$10$EIxOcvB6pkdC3e7E0JxJnOJZJQWM6HWVq.LNQu4Wm.vU6JHWxbX7C"; // Different valid hash
 
         HashedPassword password1 = HashedPassword.of(hash1);
         HashedPassword password2 = HashedPassword.of(hash2);
