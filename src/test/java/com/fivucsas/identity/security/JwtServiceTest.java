@@ -189,10 +189,11 @@ class JwtServiceTest {
     }
 
     @Test
-    @DisplayName("Token format - different tokens should be different")
-    void testTokenFormat_DifferentTokens() {
-        // Act
+    @DisplayName("Token format - tokens generated at different times should be different")
+    void testTokenFormat_DifferentTokens() throws InterruptedException {
+        // Act - Add delay to ensure different timestamp (JWT uses second precision)
         String token1 = jwtService.generateAccessToken(TEST_EMAIL);
+        Thread.sleep(1100); // Wait > 1 second to ensure different timestamp
         String token2 = jwtService.generateAccessToken(TEST_EMAIL);
 
         // Assert - Tokens should be different due to different issue times

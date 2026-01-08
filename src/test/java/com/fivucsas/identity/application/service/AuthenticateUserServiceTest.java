@@ -131,7 +131,7 @@ class AuthenticateUserServiceTest {
                 .lastName("Doe")
                 .phoneNumber("+1234567890")
                 .address("123 Main St")
-                .idNumber("A12345678")
+                .idNumber("12345678901")
                 .status(UserStatus.ACTIVE)
                 .isBiometricEnrolled(true)
                 .verificationCount(5)

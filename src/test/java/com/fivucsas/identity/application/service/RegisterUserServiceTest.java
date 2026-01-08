@@ -6,8 +6,11 @@ import com.fivucsas.identity.application.port.output.PasswordEncoderPort;
 import com.fivucsas.identity.application.port.output.TokenGenerationPort;
 import com.fivucsas.identity.domain.exception.DuplicateEmailException;
 import com.fivucsas.identity.domain.exception.InvalidEmailException;
+import com.fivucsas.identity.domain.repository.TenantRepository;
 import com.fivucsas.identity.domain.repository.UserRepository;
 import com.fivucsas.identity.entity.RefreshToken;
+import com.fivucsas.identity.entity.Tenant;
+import com.fivucsas.identity.entity.TenantStatus;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.entity.UserStatus;
 import com.fivucsas.identity.service.RefreshTokenService;
@@ -24,6 +27,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.time.Instant;
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -31,6 +35,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
+import static org.mockito.Mockito.lenient;
 
 @ExtendWith(MockitoExtension.class)
 @DisplayName("RegisterUserService Tests")
@@ -41,6 +46,9 @@ class RegisterUserServiceTest {
 
     @Mock
     private UserRepository userRepository;
+
+    @Mock
+    private TenantRepository tenantRepository;
 
     @Mock
     private PasswordEncoderPort passwordEncoder;
@@ -57,9 +65,18 @@ class RegisterUserServiceTest {
     private RegisterUserCommand validCommand;
     private User savedUser;
     private RefreshToken refreshToken;
+    private Tenant testTenant;
 
     @BeforeEach
     void setUp() {
+        testTenant = Tenant.builder()
+            .id(UUID.randomUUID())
+            .name("Test Tenant")
+            .slug("test-tenant")
+            .contactEmail("admin@test.com")
+            .status(TenantStatus.ACTIVE)
+            .build();
+
         validCommand = RegisterUserCommand.builder()
             .email("test@example.com")
             .password("Password123!")
@@ -75,6 +92,7 @@ class RegisterUserServiceTest {
             .passwordHash(VALID_BCRYPT_HASH)
             .firstName("John")
             .lastName("Doe")
+            .tenant(testTenant)
             .status(UserStatus.ACTIVE)
             .isBiometricEnrolled(false)
             .verificationCount(0)
@@ -88,6 +106,9 @@ class RegisterUserServiceTest {
             .user(savedUser)
             .expiryDate(Instant.now().plus(Duration.ofDays(7)))
             .build();
+
+        // Configure tenant repository mock to return test tenant
+        lenient().when(tenantRepository.findBySlug("test-tenant")).thenReturn(Optional.of(testTenant));
     }
 
     @Nested
@@ -175,8 +196,8 @@ class RegisterUserServiceTest {
         }
 
         @Test
-        @DisplayName("Should throw InvalidEmailException for invalid email format")
-        void shouldThrowInvalidEmailExceptionForInvalidEmail() {
+        @DisplayName("Should throw IllegalArgumentException for invalid email format")
+        void shouldThrowIllegalArgumentExceptionForInvalidEmail() {
             // Given
             RegisterUserCommand invalidEmailCommand = RegisterUserCommand.builder()
                 .email("invalid-email")
@@ -189,7 +210,8 @@ class RegisterUserServiceTest {
 
             // When/Then
             assertThatThrownBy(() -> registerUserService.execute(invalidEmailCommand))
-                .isInstanceOf(InvalidEmailException.class);
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Invalid email format");
 
             verify(userRepository, never()).save(any());
         }

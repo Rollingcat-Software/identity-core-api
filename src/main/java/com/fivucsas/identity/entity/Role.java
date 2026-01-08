@@ -4,8 +4,6 @@ import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.Filter;
-import org.hibernate.annotations.FilterDef;
-import org.hibernate.annotations.ParamDef;
 import org.hibernate.annotations.UpdateTimestamp;
 
 import java.time.Instant;
@@ -24,7 +22,6 @@ import java.util.stream.Collectors;
 @Table(name = "roles", indexes = {
     @Index(name = "idx_roles_tenant_id", columnList = "tenant_id")
 })
-@FilterDef(name = "tenantFilter", parameters = @ParamDef(name = "tenantId", type = UUID.class))
 @Filter(name = "tenantFilter", condition = "tenant_id = :tenantId")
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)

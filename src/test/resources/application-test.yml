@@ -2,6 +2,10 @@ spring:
   application:
     name: fivucsas-identity-core-api-test
 
+  # Disable Flyway for tests - use Hibernate ddl-auto instead
+  flyway:
+    enabled: false
+
   # H2 In-Memory Database for Testing
   datasource:
     url: jdbc:h2:mem:testdb;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH
@@ -19,6 +23,12 @@ spring:
       hibernate:
         format_sql: true
         use_sql_comments: true
+    defer-datasource-initialization: true
+
+  # SQL Initialization - run data.sql after schema creation
+  sql:
+    init:
+      mode: always
 
   # H2 Console (disabled in test)
   h2:
@@ -32,8 +42,9 @@ spring:
       password: test
 
 # JWT Configuration for Testing
+# Base64-encoded secret (represents 256-bit key for HMAC-SHA256)
 jwt:
-  secret: test-secret-key-for-jwt-token-generation-in-integration-tests-minimum-256-bits
+  secret: dGhpc2lzYXRlc3RzZWNyZXRrZXl0aGF0aXNsb25nZW5vdWdoZm9ydGVzdGluZw==
   expiration: 3600000  # 1 hour in milliseconds
   refresh-expiration: 86400000  # 24 hours in milliseconds
 

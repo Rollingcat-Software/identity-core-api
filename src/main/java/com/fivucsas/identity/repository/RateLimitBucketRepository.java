@@ -154,58 +154,63 @@ public interface RateLimitBucketRepository extends JpaRepository<RateLimitBucket
      * Resets a rate limit bucket to full capacity.
      *
      * @param limitKey the unique bucket key
+     * @param now current timestamp
      * @return number of updated records
      */
     @Modifying
     @Query("UPDATE RateLimitBucket rlb SET rlb.bucketTokens = rlb.maxTokens, " +
-           "rlb.lastRefillAt = CURRENT_TIMESTAMP, rlb.requestCount = 0, " +
+           "rlb.lastRefillAt = :now, rlb.requestCount = 0, " +
            "rlb.blockedCount = 0 WHERE rlb.limitKey = :limitKey")
-    int resetBucket(@Param("limitKey") String limitKey);
+    int resetBucket(@Param("limitKey") String limitKey, @Param("now") Instant now);
 
     /**
      * Resets all rate limit buckets of a specific type.
      *
      * @param limitType the type (IP, USER, ENDPOINT, TENANT, GLOBAL)
+     * @param now current timestamp
      * @return number of updated records
      */
     @Modifying
     @Query("UPDATE RateLimitBucket rlb SET rlb.bucketTokens = rlb.maxTokens, " +
-           "rlb.lastRefillAt = CURRENT_TIMESTAMP, rlb.requestCount = 0, " +
+           "rlb.lastRefillAt = :now, rlb.requestCount = 0, " +
            "rlb.blockedCount = 0 WHERE rlb.limitType = :limitType")
-    int resetBucketsByType(@Param("limitType") String limitType);
+    int resetBucketsByType(@Param("limitType") String limitType, @Param("now") Instant now);
 
     /**
      * Updates last seen timestamp for a bucket.
      *
      * @param limitKey the unique bucket key
+     * @param now current timestamp
      * @return number of updated records
      */
     @Modifying
-    @Query("UPDATE RateLimitBucket rlb SET rlb.lastSeenAt = CURRENT_TIMESTAMP " +
+    @Query("UPDATE RateLimitBucket rlb SET rlb.lastSeenAt = :now " +
            "WHERE rlb.limitKey = :limitKey")
-    int updateLastSeenAt(@Param("limitKey") String limitKey);
+    int updateLastSeenAt(@Param("limitKey") String limitKey, @Param("now") Instant now);
 
     /**
      * Increments request count for a bucket.
      *
      * @param limitKey the unique bucket key
+     * @param now current timestamp
      * @return number of updated records
      */
     @Modifying
     @Query("UPDATE RateLimitBucket rlb SET rlb.requestCount = rlb.requestCount + 1, " +
-           "rlb.lastSeenAt = CURRENT_TIMESTAMP WHERE rlb.limitKey = :limitKey")
-    int incrementRequestCount(@Param("limitKey") String limitKey);
+           "rlb.lastSeenAt = :now WHERE rlb.limitKey = :limitKey")
+    int incrementRequestCount(@Param("limitKey") String limitKey, @Param("now") Instant now);
 
     /**
      * Increments blocked count for a bucket.
      *
      * @param limitKey the unique bucket key
+     * @param now current timestamp
      * @return number of updated records
      */
     @Modifying
     @Query("UPDATE RateLimitBucket rlb SET rlb.blockedCount = rlb.blockedCount + 1, " +
-           "rlb.lastSeenAt = CURRENT_TIMESTAMP WHERE rlb.limitKey = :limitKey")
-    int incrementBlockedCount(@Param("limitKey") String limitKey);
+           "rlb.lastSeenAt = :now WHERE rlb.limitKey = :limitKey")
+    int incrementBlockedCount(@Param("limitKey") String limitKey, @Param("now") Instant now);
 
     /**
      * Finds all rate limit buckets for monitoring.

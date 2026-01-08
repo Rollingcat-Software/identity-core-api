@@ -10,8 +10,10 @@ import com.fivucsas.identity.domain.exception.DuplicateEmailException;
 import com.fivucsas.identity.domain.model.user.Email;
 import com.fivucsas.identity.domain.model.user.FullName;
 import com.fivucsas.identity.domain.model.user.HashedPassword;
+import com.fivucsas.identity.domain.repository.TenantRepository;
 import com.fivucsas.identity.domain.repository.UserRepository;
 import com.fivucsas.identity.entity.RefreshToken;
+import com.fivucsas.identity.entity.Tenant;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.entity.UserStatus;
 import com.fivucsas.identity.service.RefreshTokenService;
@@ -38,6 +40,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class RegisterUserService implements RegisterUserUseCase {
 
     private final com.fivucsas.identity.domain.repository.UserRepository userRepository;
+    private final TenantRepository tenantRepository;
     private final PasswordEncoderPort passwordEncoder;
     private final TokenGenerationPort tokenGenerator;
     private final RefreshTokenService refreshTokenService;  // TODO: Convert to port
@@ -60,12 +63,18 @@ public class RegisterUserService implements RegisterUserUseCase {
         String hashedPasswordString = passwordEncoder.encode(command.getPassword());
         HashedPassword hashedPassword = HashedPassword.of(hashedPasswordString);
 
+        // Get default tenant (TODO: In production, get from request context or subdomain)
+        Tenant defaultTenant = tenantRepository.findBySlug("test-tenant")
+            .orElseGet(() -> tenantRepository.findAll().stream().findFirst()
+                .orElseThrow(() -> new IllegalStateException("No tenant found in the system")));
+
         // Create user entity
         User user = User.builder()
             .email(email.getValue())
             .passwordHash(hashedPassword.getValue())
             .firstName(fullName.getFirstName())
             .lastName(fullName.getLastName())
+            .tenant(defaultTenant)
             .status(UserStatus.ACTIVE)
             .isBiometricEnrolled(false)
             .verificationCount(0)

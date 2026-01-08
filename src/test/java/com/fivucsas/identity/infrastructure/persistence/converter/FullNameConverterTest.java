@@ -174,15 +174,14 @@ class FullNameConverterTest {
 
     @Test
     void shouldHandleDatabaseValueWithMultiplePipes() {
-        // Given - Multiple pipe separators (split with limit 2 takes first 2 parts)
+        // Given - Multiple pipe separators result in invalid lastName containing pipe
         String dbValue = "John|Middle|Doe";
 
-        // When
-        FullName fullName = converter.convertToEntityAttribute(dbValue);
-
-        // Then - Should use first part as firstName, rest as lastName
-        assertNotNull(fullName);
-        assertEquals("John", fullName.getFirstName());
-        assertEquals("Middle|Doe", fullName.getLastName());
+        // When/Then - Should throw exception because pipe is not valid in names
+        IllegalArgumentException exception = assertThrows(
+            IllegalArgumentException.class,
+            () -> converter.convertToEntityAttribute(dbValue)
+        );
+        assertTrue(exception.getMessage().contains("invalid characters"));
     }
 }
