@@ -4,7 +4,7 @@ import com.fivucsas.identity.application.dto.query.GetUserByEmailQuery;
 import com.fivucsas.identity.application.dto.response.UserResponse;
 import com.fivucsas.identity.application.port.input.GetCurrentUserUseCase;
 import com.fivucsas.identity.domain.exception.UserNotFoundException;
-import com.fivucsas.identity.repository.UserRepository;
+import com.fivucsas.identity.domain.repository.UserRepository;
 import com.fivucsas.identity.entity.User;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;

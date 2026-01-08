@@ -65,7 +65,7 @@ class ManageUserServiceTest {
             .lastName("Doe")
             .phoneNumber("+1234567890")
             .address("123 Main St")
-            .idNumber("A12345678")
+            .idNumber("12345678901")
             .status(UserStatus.ACTIVE)
             .isBiometricEnrolled(false)
             .verificationCount(0)
@@ -89,18 +89,18 @@ class ManageUserServiceTest {
                 .lastName("Smith")
                 .phoneNumber("+0987654321")
                 .address("456 Oak Ave")
-                .idNumber("B98765432")
+                .idNumber("98765432109")
                 .build();
 
             User savedUser = User.builder()
                 .id(UUID.randomUUID())
                 .email("newuser@example.com")
-                .passwordHash("hashedPassword")
+                .passwordHash(VALID_BCRYPT_HASH)
                 .firstName("Jane")
                 .lastName("Smith")
                 .phoneNumber("+0987654321")
                 .address("456 Oak Ave")
-                .idNumber("B98765432")
+                .idNumber("98765432109")
                 .status(UserStatus.ACTIVE)
                 .isBiometricEnrolled(false)
                 .verificationCount(0)
@@ -109,7 +109,7 @@ class ManageUserServiceTest {
                 .build();
 
             when(userRepository.existsByEmail("newuser@example.com")).thenReturn(false);
-            when(passwordEncoder.encode("Password123!")).thenReturn("hashedPassword");
+            when(passwordEncoder.encode("Password123!")).thenReturn(VALID_BCRYPT_HASH);
             when(userRepository.save(any(User.class))).thenReturn(savedUser);
 
             // When
@@ -159,8 +159,23 @@ class ManageUserServiceTest {
                 .build();
 
             when(userRepository.existsByEmail("newuser@example.com")).thenReturn(false);
-            when(passwordEncoder.encode("Password123!")).thenReturn("hashedPassword");
-            when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+            when(passwordEncoder.encode("Password123!")).thenReturn(VALID_BCRYPT_HASH);
+            when(userRepository.save(any(User.class))).thenAnswer(invocation -> {
+                User user = invocation.getArgument(0);
+                // Simulate database assigning an ID
+                return User.builder()
+                    .id(UUID.randomUUID())
+                    .email(user.getEmail())
+                    .passwordHash(user.getPasswordHash())
+                    .firstName(user.getFirstName())
+                    .lastName(user.getLastName())
+                    .status(user.getStatus())
+                    .isBiometricEnrolled(user.isBiometricEnrolled())
+                    .verificationCount(user.getVerificationCount())
+                    .createdAt(Instant.now())
+                    .updatedAt(Instant.now())
+                    .build();
+            });
 
             ArgumentCaptor<User> userCaptor = ArgumentCaptor.forClass(User.class);
 
@@ -244,7 +259,7 @@ class ManageUserServiceTest {
             User user2 = User.builder()
                 .id(UUID.randomUUID())
                 .email("user2@example.com")
-                .passwordHash("hash")
+                .passwordHash(VALID_BCRYPT_HASH)
                 .firstName("Jane")
                 .lastName("Smith")
                 .status(UserStatus.ACTIVE)

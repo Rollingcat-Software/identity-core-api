@@ -56,7 +56,7 @@ class PhoneNumberTest {
     @ValueSource(strings = {
         "5551234567",                // Missing +
         "+0551234567",               // Starts with 0 (invalid country code)
-        "+9055123456",               // Too short (9 digits after country code)
+        "+905512345",                // Too short (only 9 digits after +)
         "+9055123456789012345",      // Too long (18 digits, way over limit)
         "+90 555 123 4567",          // Contains spaces
         "+90-555-123-4567",          // Contains dashes

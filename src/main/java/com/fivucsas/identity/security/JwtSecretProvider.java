@@ -1,6 +1,7 @@
 package com.fivucsas.identity.security;
 
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import jakarta.annotation.PostConstruct;
@@ -9,7 +10,8 @@ import jakarta.annotation.PostConstruct;
  * Secure JWT secret provider that validates and manages JWT signing keys.
  *
  * Security Requirements:
- * - JWT secret MUST be provided via JWT_SECRET environment variable
+ * - JWT secret MUST be provided via JWT_SECRET environment variable (production)
+ * - Fallback to jwt.secret property for testing environments
  * - Minimum 256 bits (32 characters) for HMAC-SHA256
  * - Never log or expose the actual secret value
  * - Fail fast on startup if secret is invalid
@@ -28,6 +30,9 @@ public class JwtSecretProvider {
     private static final int MINIMUM_SECRET_LENGTH = 32;
     private static final String ENV_VAR_NAME = "JWT_SECRET";
 
+    @Value("${jwt.secret:}")
+    private String configSecret;
+
     private String secret;
 
     /**
@@ -40,17 +45,26 @@ public class JwtSecretProvider {
     public void initialize() {
         log.info("Initializing JWT secret provider...");
 
+        // First try environment variable (preferred for production)
         secret = System.getenv(ENV_VAR_NAME);
 
+        // Fallback to Spring property (for tests and local development)
         if (secret == null || secret.trim().isEmpty()) {
-            String errorMessage = String.format(
-                "CRITICAL SECURITY ERROR: %s environment variable is not set. " +
-                "Application cannot start without a valid JWT secret. " +
-                "Please set %s environment variable with a base64-encoded secret of minimum %d characters.",
-                ENV_VAR_NAME, ENV_VAR_NAME, MINIMUM_SECRET_LENGTH
-            );
-            log.error(errorMessage);
-            throw new IllegalStateException(errorMessage);
+            if (configSecret != null && !configSecret.trim().isEmpty()) {
+                secret = configSecret;
+                log.info("SECURITY: JWT secret loaded from application property (suitable for test/dev only)");
+            } else {
+                String errorMessage = String.format(
+                    "CRITICAL SECURITY ERROR: %s environment variable is not set. " +
+                    "Application cannot start without a valid JWT secret. " +
+                    "Please set %s environment variable with a base64-encoded secret of minimum %d characters.",
+                    ENV_VAR_NAME, ENV_VAR_NAME, MINIMUM_SECRET_LENGTH
+                );
+                log.error(errorMessage);
+                throw new IllegalStateException(errorMessage);
+            }
+        } else {
+            log.info("SECURITY: JWT secret loaded from environment variable");
         }
 
         if (secret.length() < MINIMUM_SECRET_LENGTH) {
@@ -66,7 +80,6 @@ public class JwtSecretProvider {
 
         // Log success WITHOUT exposing the actual secret
         log.info("JWT secret provider initialized successfully. Secret length: {} characters", secret.length());
-        log.info("SECURITY: JWT secret loaded from environment variable (not from config file)");
     }
 
     /**
