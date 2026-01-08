@@ -12,6 +12,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -34,6 +35,7 @@ public class BiometricController {
 
     @PostMapping(value = "/enroll/{userId}", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @Operation(summary = "Enroll user's face biometric data")
+    @PreAuthorize("hasAuthority('biometric:enroll') or @userSecurityService.isCurrentUser(#userId)")
     public ResponseEntity<BiometricVerificationResponse> enrollFace(
             @PathVariable UUID userId,
             @RequestParam("image") MultipartFile image) {
@@ -52,6 +54,7 @@ public class BiometricController {
 
     @PostMapping(value = "/verify/{userId}", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @Operation(summary = "Verify user's face against enrolled biometric data")
+    @PreAuthorize("hasAuthority('biometric:verify') or @userSecurityService.isCurrentUser(#userId)")
     public ResponseEntity<BiometricVerificationResponse> verifyFace(
             @PathVariable UUID userId,
             @RequestParam("image") MultipartFile image) {

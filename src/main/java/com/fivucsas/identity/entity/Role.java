@@ -12,6 +12,7 @@ import java.time.Instant;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 /**
  * Role entity representing a collection of permissions.
@@ -43,13 +44,18 @@ public class Role {
     private String name;
 
     @Column(length = 500)
+    @Setter
     private String description;
 
     @Column(name = "is_system_role")
     @Builder.Default
     private boolean isSystemRole = false;
 
-    @ManyToMany(fetch = FetchType.EAGER)
+    @Column(name = "is_active", nullable = false)
+    @Builder.Default
+    private boolean active = true;
+
+    @ManyToMany(fetch = FetchType.LAZY)
     @JoinTable(
         name = "role_permissions",
         joinColumns = @JoinColumn(name = "role_id"),
@@ -66,6 +72,9 @@ public class Role {
     @Column(nullable = false)
     private Instant updatedAt;
 
+    @Column(name = "deleted_at")
+    private Instant deletedAt;
+
     // ========== Business Methods ==========
 
     /**
@@ -81,7 +90,9 @@ public class Role {
      * Removes a permission from this role.
      */
     public void removePermission(Permission permission) {
-        permissions.remove(permission);
+        if (permission != null) {
+            permissions.remove(permission);
+        }
     }
 
     /**
@@ -89,14 +100,15 @@ public class Role {
      */
     public boolean hasPermission(String permissionName) {
         return permissions.stream()
-            .anyMatch(p -> p.getName().equals(permissionName));
+            .anyMatch(p -> p.getName().equals(permissionName) ||
+                          p.getAuthorityName().equals(permissionName));
     }
 
     /**
      * Checks if role has permission for resource and action.
      */
     public boolean hasPermission(String resource, String action) {
-        String permissionString = resource.toUpperCase() + ":" + action.toUpperCase();
+        String permissionString = resource + ":" + action;
         return hasPermission(permissionString);
     }
 
@@ -106,9 +118,32 @@ public class Role {
     public Set<String> getPermissionStrings() {
         Set<String> permStrings = new HashSet<>();
         for (Permission p : permissions) {
-            permStrings.add(p.getPermissionString());
+            permStrings.add(p.getAuthorityName());
         }
         return permStrings;
+    }
+
+    /**
+     * Returns only permission authority names.
+     * Alias for getPermissionStrings() for compatibility.
+     */
+    public Set<String> getPermissionAuthorities() {
+        return permissions.stream()
+                .map(Permission::getAuthorityName)
+                .collect(Collectors.toSet());
+    }
+
+    /**
+     * Returns all authority names for this role.
+     * Includes both role name (ROLE_X) and permission names (resource:action).
+     */
+    public Set<String> getAuthorities() {
+        Set<String> authorities = new HashSet<>();
+        // Add role as authority
+        authorities.add("ROLE_" + this.name);
+        // Add all permissions
+        authorities.addAll(getPermissionAuthorities());
+        return authorities;
     }
 
     /**
@@ -120,5 +155,75 @@ public class Role {
         }
         this.name = name;
         this.description = description;
+    }
+
+    /**
+     * Updates the role name.
+     */
+    public void updateName(String name) {
+        if (name != null && !name.trim().isEmpty()) {
+            this.name = name.trim();
+        }
+    }
+
+    /**
+     * Deactivates the role.
+     * Deactivated roles are not loaded for users.
+     */
+    public void deactivate() {
+        this.active = false;
+    }
+
+    /**
+     * Activates the role.
+     */
+    public void activate() {
+        this.active = true;
+    }
+
+    /**
+     * Soft deletes the role.
+     * Soft-deleted roles are not visible in queries.
+     */
+    public void softDelete() {
+        this.deletedAt = Instant.now();
+        this.active = false;
+    }
+
+    /**
+     * Checks if role is soft-deleted.
+     */
+    public boolean isDeleted() {
+        return this.deletedAt != null;
+    }
+
+    /**
+     * Checks if role is a system role.
+     */
+    public boolean isSystemRole() {
+        return this.isSystemRole;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (!(o instanceof Role)) return false;
+        Role role = (Role) o;
+        return id != null && id.equals(role.id);
+    }
+
+    @Override
+    public int hashCode() {
+        return getClass().hashCode();
+    }
+
+    @Override
+    public String toString() {
+        return "Role{" +
+                "id=" + id +
+                ", name='" + name + '\'' +
+                ", isSystemRole=" + isSystemRole +
+                ", active=" + active +
+                '}';
     }
 }

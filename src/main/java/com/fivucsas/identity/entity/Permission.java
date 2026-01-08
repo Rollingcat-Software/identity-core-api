@@ -53,4 +53,36 @@ public class Permission {
     public String getPermissionString() {
         return resource + ":" + action;
     }
+
+    /**
+     * Returns the authority name in Spring Security format.
+     * Format: "resource:action" (e.g., "user:read")
+     * Alias for getPermissionString() for Spring Security compatibility.
+     */
+    public String getAuthorityName() {
+        return resource.toLowerCase() + ":" + action.toLowerCase();
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (!(o instanceof Permission)) return false;
+        Permission that = (Permission) o;
+        return id != null && id.equals(that.id);
+    }
+
+    @Override
+    public int hashCode() {
+        return getClass().hashCode();
+    }
+
+    @Override
+    public String toString() {
+        return "Permission{" +
+                "id=" + id +
+                ", name='" + name + '\'' +
+                ", resource='" + resource + '\'' +
+                ", action='" + action + '\'' +
+                '}';
+    }
 }

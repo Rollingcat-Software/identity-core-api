@@ -15,6 +15,7 @@ import java.time.Instant;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 /**
  * User aggregate root entity.
@@ -106,14 +107,11 @@ public class User {
     @Column(nullable = false)
     private Instant updatedAt;
 
-    @ManyToMany(fetch = FetchType.EAGER)
-    @JoinTable(
-        name = "user_roles",
-        joinColumns = @JoinColumn(name = "user_id"),
-        inverseJoinColumns = @JoinColumn(name = "role_id")
-    )
+    // ========== RBAC Relationships ==========
+
+    @OneToMany(mappedBy = "user", fetch = FetchType.LAZY, cascade = CascadeType.ALL, orphanRemoval = true)
     @Builder.Default
-    private Set<Role> roles = new HashSet<>();
+    private Set<UserRole> userRoles = new HashSet<>();
 
     // ========== Value Object Getters (Type-Safe) ==========
 
@@ -359,67 +357,95 @@ public class User {
         return this.email != null && this.email.equalsIgnoreCase(email.getValue());
     }
 
-    // ========== Role Management Methods ==========
+    // ========== RBAC Methods ==========
 
     /**
-     * Adds a role to this user.
+     * Returns all active (non-expired) roles for this user.
      */
-    public void addRole(Role role) {
-        if (role != null) {
-            roles.add(role);
+    public Set<Role> getActiveRoles() {
+        return userRoles.stream()
+                .filter(UserRole::isValid)
+                .map(UserRole::getRole)
+                .collect(Collectors.toSet());
+    }
+
+    /**
+     * Returns all authorities (roles and permissions) for this user.
+     * Format: "ROLE_X" for roles, "resource:action" for permissions.
+     */
+    public Set<String> getAllAuthorities() {
+        Set<String> authorities = new HashSet<>();
+        for (UserRole userRole : userRoles) {
+            if (userRole.isValid()) {
+                Role role = userRole.getRole();
+                // Add role as authority (ROLE_ADMIN, ROLE_USER, etc.)
+                authorities.add("ROLE_" + role.getName());
+                // Add all permissions from the role
+                authorities.addAll(role.getPermissionAuthorities());
+            }
         }
-    }
-
-    /**
-     * Removes a role from this user.
-     */
-    public void removeRole(Role role) {
-        roles.remove(role);
-    }
-
-    /**
-     * Checks if user has a specific role by name.
-     */
-    public boolean hasRole(String roleName) {
-        return roles.stream()
-            .anyMatch(r -> r.getName().equalsIgnoreCase(roleName));
+        return authorities;
     }
 
     /**
      * Checks if user has a specific permission.
+     * @param permission the permission name (e.g., "user:read")
      */
     public boolean hasPermission(String permission) {
-        return roles.stream()
-            .anyMatch(r -> r.hasPermission(permission));
+        return getAllAuthorities().contains(permission);
     }
 
     /**
-     * Checks if user has permission for resource and action.
+     * Checks if user has a specific role.
+     * @param roleName the role name (without "ROLE_" prefix)
      */
-    public boolean hasPermission(String resource, String action) {
-        return roles.stream()
-            .anyMatch(r -> r.hasPermission(resource, action));
+    public boolean hasRole(String roleName) {
+        return getActiveRoles().stream()
+                .anyMatch(r -> r.getName().equalsIgnoreCase(roleName));
+    }
+
+    /**
+     * Checks if user has any of the specified roles.
+     */
+    public boolean hasAnyRole(String... roleNames) {
+        Set<String> userRoleNames = getActiveRoles().stream()
+                .map(Role::getName)
+                .map(String::toUpperCase)
+                .collect(Collectors.toSet());
+        for (String roleName : roleNames) {
+            if (userRoleNames.contains(roleName.toUpperCase())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Checks if user is an administrator (has SUPER_ADMIN or TENANT_ADMIN role).
+     */
+    public boolean isAdmin() {
+        return hasAnyRole("SUPER_ADMIN", "TENANT_ADMIN");
     }
 
     /**
      * Gets all permission strings for this user.
+     * Compatibility method for existing code.
      */
     public Set<String> getAllPermissions() {
         Set<String> allPermissions = new HashSet<>();
-        for (Role role : roles) {
-            allPermissions.addAll(role.getPermissionStrings());
+        for (Role role : getActiveRoles()) {
+            allPermissions.addAll(role.getPermissionAuthorities());
         }
         return allPermissions;
     }
 
     /**
      * Gets all role names for this user.
+     * Compatibility method for existing code.
      */
     public Set<String> getRoleNames() {
-        Set<String> roleNames = new HashSet<>();
-        for (Role role : roles) {
-            roleNames.add(role.getName());
-        }
-        return roleNames;
+        return getActiveRoles().stream()
+                .map(Role::getName)
+                .collect(Collectors.toSet());
     }
 }
