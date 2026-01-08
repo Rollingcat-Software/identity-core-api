@@ -13,13 +13,15 @@ spring:
     username: sa
     password:
 
-  # H2 Console (ENABLED in development for debugging)
+  # H2 Console (Development only - requires authentication)
+  # SECURITY: Disabled by default, enable via H2_CONSOLE_ENABLED=true env var
   h2:
     console:
-      enabled: true
+      enabled: ${H2_CONSOLE_ENABLED:false}
       path: /h2-console
       settings:
         web-allow-others: false  # Security: Only localhost access
+        trace: false  # Security: Disable SQL tracing
 
   # JPA/Hibernate (Development)
   jpa:
@@ -38,10 +40,11 @@ jwt:
   refresh-expiration: 604800000  # 7 days
 
 # Redis Configuration (Development)
+# SECURITY: Password must be set via REDIS_PASSWORD environment variable
 redis:
   host: localhost
   port: 6379
-  password: ***REMOVED***
+  password: ${REDIS_PASSWORD:}
   database: 0
   event-bus:
     enabled: true
