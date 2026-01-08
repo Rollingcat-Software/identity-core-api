@@ -39,6 +39,9 @@ import static org.mockito.Mockito.*;
 @DisplayName("ManageUserService Tests")
 class ManageUserServiceTest {
 
+    // Valid BCrypt hash for testing
+    private static final String VALID_BCRYPT_HASH = "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy";
+
     @Mock
     private UserRepository userRepository;
 
@@ -57,7 +60,7 @@ class ManageUserServiceTest {
         existingUser = User.builder()
             .id(userId)
             .email("test@example.com")
-            .passwordHash("hashedPassword123")
+            .passwordHash(VALID_BCRYPT_HASH)
             .firstName("John")
             .lastName("Doe")
             .phoneNumber("+1234567890")

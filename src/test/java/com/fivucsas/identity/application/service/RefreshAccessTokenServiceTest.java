@@ -31,6 +31,9 @@ import static org.mockito.Mockito.*;
 @DisplayName("RefreshAccessTokenService Tests")
 class RefreshAccessTokenServiceTest {
 
+    // Valid BCrypt hash for testing
+    private static final String VALID_BCRYPT_HASH = "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy";
+
     @Mock
     private RefreshTokenService refreshTokenService;
 
@@ -56,7 +59,7 @@ class RefreshAccessTokenServiceTest {
         user = User.builder()
             .id(UUID.randomUUID())
             .email("test@example.com")
-            .passwordHash("hashedPassword123")
+            .passwordHash(VALID_BCRYPT_HASH)
             .firstName("John")
             .lastName("Doe")
             .status(UserStatus.ACTIVE)
@@ -90,7 +93,7 @@ class RefreshAccessTokenServiceTest {
         void shouldRefreshTokenSuccessfully() {
             // Given
             when(refreshTokenService.findByToken("existing-refresh-token")).thenReturn(existingToken);
-            doNothing().when(refreshTokenService).verifyExpiration(existingToken);
+            when(refreshTokenService.verifyExpiration(existingToken)).thenReturn(existingToken);
             when(refreshTokenService.rotateRefreshToken(eq(existingToken), eq("192.168.1.1"), eq("Mozilla/5.0")))
                 .thenReturn(newToken);
             when(tokenGenerator.generateAccessToken("test@example.com")).thenReturn("new-access-token");
@@ -118,7 +121,7 @@ class RefreshAccessTokenServiceTest {
             User userWithDetails = User.builder()
                 .id(UUID.randomUUID())
                 .email("test@example.com")
-                .passwordHash("hashedPassword123")
+                .passwordHash(VALID_BCRYPT_HASH)
                 .firstName("John")
                 .lastName("Doe")
                 .phoneNumber("+1234567890")
@@ -138,7 +141,7 @@ class RefreshAccessTokenServiceTest {
                 .build();
 
             when(refreshTokenService.findByToken("existing-refresh-token")).thenReturn(tokenWithUser);
-            doNothing().when(refreshTokenService).verifyExpiration(tokenWithUser);
+            when(refreshTokenService.verifyExpiration(tokenWithUser)).thenReturn(tokenWithUser);
             when(refreshTokenService.rotateRefreshToken(any(), any(), any())).thenReturn(newToken);
             when(tokenGenerator.generateAccessToken("test@example.com")).thenReturn("new-access-token");
 
@@ -208,7 +211,7 @@ class RefreshAccessTokenServiceTest {
                 .build();
 
             when(refreshTokenService.findByToken("existing-refresh-token")).thenReturn(existingToken);
-            doNothing().when(refreshTokenService).verifyExpiration(existingToken);
+            when(refreshTokenService.verifyExpiration(existingToken)).thenReturn(existingToken);
             when(refreshTokenService.rotateRefreshToken(eq(existingToken), isNull(), isNull()))
                 .thenReturn(newToken);
             when(tokenGenerator.generateAccessToken("test@example.com")).thenReturn("new-access-token");
