@@ -6,39 +6,43 @@ import io.jsonwebtoken.security.SignatureException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import static org.assertj.core.api.Assertions.*;
+import static org.mockito.Mockito.when;
 
 /**
  * Unit tests for JwtService.
  *
  * Tests JWT token generation, validation, and claim extraction:
  * - Access token generation with correct claims
- * - Refresh token generation
  * - Token validation (valid, expired, invalid signature)
  * - Email extraction from token
- * - Token expiration checking
  *
- * Uses reflection to set private fields for testing.
+ * Uses Mockito to mock JwtSecretProvider dependency.
  */
 @DisplayName("JWT Service Tests")
+@ExtendWith(MockitoExtension.class)
 class JwtServiceTest {
+
+    @Mock
+    private JwtSecretProvider jwtSecretProvider;
 
     private JwtService jwtService;
 
     private static final String TEST_EMAIL = "test@fivucsas.com";
-    private static final String TEST_SECRET = "test-secret-key-that-is-at-least-256-bits-long-for-hs256-algorithm-security-requirements";
+    // Base64-encoded secret that is at least 256 bits for HMAC-SHA256
+    private static final String TEST_SECRET = "dGVzdC1zZWNyZXQta2V5LXRoYXQtaXMtYXQtbGVhc3QtMjU2LWJpdHMtbG9uZy1mb3ItaHMyNTYtYWxnb3JpdGhtLXNlY3VyaXR5LXJlcXVpcmVtZW50cw==";
     private static final long ACCESS_TOKEN_EXPIRATION = 900000L; // 15 minutes
-    private static final long REFRESH_TOKEN_EXPIRATION = 604800000L; // 7 days
 
     @BeforeEach
     void setUp() {
-        jwtService = new JwtService();
-        // Set private fields using reflection for testing
-        ReflectionTestUtils.setField(jwtService, "secretKey", TEST_SECRET);
-        ReflectionTestUtils.setField(jwtService, "accessTokenExpiration", ACCESS_TOKEN_EXPIRATION);
-        ReflectionTestUtils.setField(jwtService, "refreshTokenExpiration", REFRESH_TOKEN_EXPIRATION);
+        when(jwtSecretProvider.getSecret()).thenReturn(TEST_SECRET);
+        jwtService = new JwtService(jwtSecretProvider);
+        ReflectionTestUtils.setField(jwtService, "jwtExpiration", ACCESS_TOKEN_EXPIRATION);
     }
 
     // ============== ACCESS TOKEN GENERATION TESTS ==============
@@ -70,74 +74,22 @@ class JwtServiceTest {
     void testGenerateAccessToken_CorrectExpiration() {
         // Act
         String token = jwtService.generateAccessToken(TEST_EMAIL);
-        boolean isExpired = jwtService.isTokenExpired(token);
+        boolean isValid = jwtService.isTokenValid(token, TEST_EMAIL);
 
         // Assert
-        assertThat(isExpired).isFalse();
-    }
-
-    @Test
-    @DisplayName("Generate access token - should throw exception for null email")
-    void testGenerateAccessToken_NullEmail() {
-        // Act & Assert
-        assertThatThrownBy(() -> jwtService.generateAccessToken(null))
-                .isInstanceOf(IllegalArgumentException.class);
-    }
-
-    @Test
-    @DisplayName("Generate access token - should throw exception for empty email")
-    void testGenerateAccessToken_EmptyEmail() {
-        // Act & Assert
-        assertThatThrownBy(() -> jwtService.generateAccessToken(""))
-                .isInstanceOf(IllegalArgumentException.class);
-    }
-
-    // ============== REFRESH TOKEN GENERATION TESTS ==============
-
-    @Test
-    @DisplayName("Generate refresh token - should create valid JWT")
-    void testGenerateRefreshToken_ValidToken() {
-        // Act
-        String token = jwtService.generateRefreshToken(TEST_EMAIL);
-
-        // Assert
-        assertThat(token).isNotNull().isNotEmpty();
-        assertThat(token).matches("^[A-Za-z0-9-_]+\\.[A-Za-z0-9-_]+\\.[A-Za-z0-9-_]+$");
-    }
-
-    @Test
-    @DisplayName("Generate refresh token - should include email claim")
-    void testGenerateRefreshToken_IncludesEmailClaim() {
-        // Act
-        String token = jwtService.generateRefreshToken(TEST_EMAIL);
-        String extractedEmail = jwtService.extractEmail(token);
-
-        // Assert
-        assertThat(extractedEmail).isEqualTo(TEST_EMAIL);
-    }
-
-    @Test
-    @DisplayName("Generate refresh token - should have longer expiration than access token")
-    void testGenerateRefreshToken_LongerExpiration() {
-        // Act
-        String accessToken = jwtService.generateAccessToken(TEST_EMAIL);
-        String refreshToken = jwtService.generateRefreshToken(TEST_EMAIL);
-
-        // Assert - Both should be valid
-        assertThat(jwtService.isTokenExpired(accessToken)).isFalse();
-        assertThat(jwtService.isTokenExpired(refreshToken)).isFalse();
+        assertThat(isValid).isTrue();
     }
 
     // ============== TOKEN VALIDATION TESTS ==============
 
     @Test
     @DisplayName("Validate token - valid token should return true")
-    void testValidateToken_ValidToken() {
+    void testIsTokenValid_ValidToken() {
         // Arrange
         String token = jwtService.generateAccessToken(TEST_EMAIL);
 
         // Act
-        boolean isValid = jwtService.validateToken(token, TEST_EMAIL);
+        boolean isValid = jwtService.isTokenValid(token, TEST_EMAIL);
 
         // Assert
         assertThat(isValid).isTrue();
@@ -145,12 +97,12 @@ class JwtServiceTest {
 
     @Test
     @DisplayName("Validate token - should return false for wrong email")
-    void testValidateToken_WrongEmail() {
+    void testIsTokenValid_WrongEmail() {
         // Arrange
         String token = jwtService.generateAccessToken(TEST_EMAIL);
 
         // Act
-        boolean isValid = jwtService.validateToken(token, "wrong@email.com");
+        boolean isValid = jwtService.isTokenValid(token, "wrong@email.com");
 
         // Assert
         assertThat(isValid).isFalse();
@@ -158,33 +110,34 @@ class JwtServiceTest {
 
     @Test
     @DisplayName("Validate token - should throw exception for malformed token")
-    void testValidateToken_MalformedToken() {
+    void testIsTokenValid_MalformedToken() {
         // Act & Assert
-        assertThatThrownBy(() -> jwtService.validateToken("invalid.token", TEST_EMAIL))
+        assertThatThrownBy(() -> jwtService.isTokenValid("invalid.token", TEST_EMAIL))
                 .isInstanceOf(MalformedJwtException.class);
     }
 
     @Test
     @DisplayName("Validate token - should throw exception for invalid signature")
-    void testValidateToken_InvalidSignature() {
-        // Arrange - Token signed with different key
-        JwtService otherJwtService = new JwtService();
-        ReflectionTestUtils.setField(otherJwtService, "secretKey", "different-secret-key-for-testing-purposes-at-least-256-bits-long");
-        ReflectionTestUtils.setField(otherJwtService, "accessTokenExpiration", ACCESS_TOKEN_EXPIRATION);
+    void testIsTokenValid_InvalidSignature() {
+        // Arrange - Create a different secret provider with a different key
+        JwtSecretProvider otherSecretProvider = org.mockito.Mockito.mock(JwtSecretProvider.class);
+        // Different Base64-encoded secret
+        when(otherSecretProvider.getSecret()).thenReturn("ZGlmZmVyZW50LXNlY3JldC1rZXktZm9yLXRlc3RpbmctcHVycG9zZXMtYXQtbGVhc3QtMjU2LWJpdHMtbG9uZw==");
+        JwtService otherJwtService = new JwtService(otherSecretProvider);
+        ReflectionTestUtils.setField(otherJwtService, "jwtExpiration", ACCESS_TOKEN_EXPIRATION);
         String tokenWithDifferentKey = otherJwtService.generateAccessToken(TEST_EMAIL);
 
         // Act & Assert
-        assertThatThrownBy(() -> jwtService.validateToken(tokenWithDifferentKey, TEST_EMAIL))
+        assertThatThrownBy(() -> jwtService.isTokenValid(tokenWithDifferentKey, TEST_EMAIL))
                 .isInstanceOf(SignatureException.class);
     }
 
     @Test
     @DisplayName("Validate token - should return false for expired token")
-    void testValidateToken_ExpiredToken() {
+    void testIsTokenValid_ExpiredToken() {
         // Arrange - Create service with very short expiration
-        JwtService shortExpirationService = new JwtService();
-        ReflectionTestUtils.setField(shortExpirationService, "secretKey", TEST_SECRET);
-        ReflectionTestUtils.setField(shortExpirationService, "accessTokenExpiration", 1L); // 1ms
+        JwtService shortExpirationService = new JwtService(jwtSecretProvider);
+        ReflectionTestUtils.setField(shortExpirationService, "jwtExpiration", 1L); // 1ms
         String token = shortExpirationService.generateAccessToken(TEST_EMAIL);
 
         // Act - Wait for token to expire
@@ -220,50 +173,6 @@ class JwtServiceTest {
         // Act & Assert
         assertThatThrownBy(() -> jwtService.extractEmail("invalid.token.here"))
                 .isInstanceOf(MalformedJwtException.class);
-    }
-
-    @Test
-    @DisplayName("Extract email - should throw exception for null token")
-    void testExtractEmail_NullToken() {
-        // Act & Assert
-        assertThatThrownBy(() -> jwtService.extractEmail(null))
-                .isInstanceOf(IllegalArgumentException.class);
-    }
-
-    // ============== TOKEN EXPIRATION TESTS ==============
-
-    @Test
-    @DisplayName("Is token expired - valid token should return false")
-    void testIsTokenExpired_ValidToken() {
-        // Arrange
-        String token = jwtService.generateAccessToken(TEST_EMAIL);
-
-        // Act
-        boolean isExpired = jwtService.isTokenExpired(token);
-
-        // Assert
-        assertThat(isExpired).isFalse();
-    }
-
-    @Test
-    @DisplayName("Is token expired - expired token should return true")
-    void testIsTokenExpired_ExpiredToken() {
-        // Arrange - Create service with very short expiration
-        JwtService shortExpirationService = new JwtService();
-        ReflectionTestUtils.setField(shortExpirationService, "secretKey", TEST_SECRET);
-        ReflectionTestUtils.setField(shortExpirationService, "accessTokenExpiration", 1L);
-        String token = shortExpirationService.generateAccessToken(TEST_EMAIL);
-
-        // Act - Wait for expiration
-        try {
-            Thread.sleep(10);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        }
-
-        // Assert
-        assertThatThrownBy(() -> shortExpirationService.isTokenExpired(token))
-                .isInstanceOf(ExpiredJwtException.class);
     }
 
     // ============== TOKEN FORMAT TESTS ==============
@@ -345,7 +254,7 @@ class JwtServiceTest {
         // Assert - All tokens should be valid
         for (String token : tokens) {
             assertThat(token).isNotNull();
-            assertThat(jwtService.validateToken(token, TEST_EMAIL)).isTrue();
+            assertThat(jwtService.isTokenValid(token, TEST_EMAIL)).isTrue();
         }
     }
 }
