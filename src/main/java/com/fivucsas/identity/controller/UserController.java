@@ -17,6 +17,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -38,6 +39,7 @@ public class UserController {
 
     @GetMapping
     @Operation(summary = "Get all users")
+    @PreAuthorize("hasAuthority('user:read')")
     public ResponseEntity<List<UserDto>> getAllUsers() {
         log.info("GET /api/v1/users - Get all users");
 
@@ -52,6 +54,7 @@ public class UserController {
 
     @GetMapping("/{id}")
     @Operation(summary = "Get user by ID")
+    @PreAuthorize("hasAuthority('user:read') or @userSecurityService.isCurrentUser(#id)")
     public ResponseEntity<UserDto> getUserById(@PathVariable String id) {
         log.info("GET /api/v1/users/{} - Get user by ID", id);
 
@@ -66,6 +69,7 @@ public class UserController {
 
     @PostMapping
     @Operation(summary = "Create new user")
+    @PreAuthorize("hasAuthority('user:create')")
     public ResponseEntity<UserDto> createUser(@Valid @RequestBody CreateUserRequest request) {
         log.info("POST /api/v1/users - Create user: {}", request.getEmail());
 
@@ -86,6 +90,7 @@ public class UserController {
 
     @PutMapping("/{id}")
     @Operation(summary = "Update user")
+    @PreAuthorize("hasAuthority('user:update') or @userSecurityService.isCurrentUser(#id)")
     public ResponseEntity<UserDto> updateUser(
             @PathVariable String id,
             @Valid @RequestBody UpdateUserRequest request) {
@@ -106,6 +111,7 @@ public class UserController {
 
     @DeleteMapping("/{id}")
     @Operation(summary = "Delete user")
+    @PreAuthorize("hasAuthority('user:delete')")
     public ResponseEntity<Void> deleteUser(@PathVariable String id) {
         log.info("DELETE /api/v1/users/{} - Delete user", id);
 
@@ -116,6 +122,7 @@ public class UserController {
 
     @GetMapping("/search")
     @Operation(summary = "Search users")
+    @PreAuthorize("hasAuthority('user:read')")
     public ResponseEntity<List<UserDto>> searchUsers(@RequestParam String query) {
         log.info("GET /api/v1/users/search?query={} - Search users", query);
 

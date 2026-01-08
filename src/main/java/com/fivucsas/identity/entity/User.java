@@ -8,7 +8,10 @@ import org.hibernate.annotations.UpdateTimestamp;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
 import java.time.Instant;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 /**
  * User aggregate root entity.
@@ -84,6 +87,12 @@ public class User {
     @UpdateTimestamp
     @Column(nullable = false)
     private Instant updatedAt;
+
+    // ========== RBAC Relationships ==========
+
+    @OneToMany(mappedBy = "user", fetch = FetchType.LAZY, cascade = CascadeType.ALL, orphanRemoval = true)
+    @Builder.Default
+    private Set<UserRole> userRoles = new HashSet<>();
 
     // ========== Value Object Getters (Type-Safe) ==========
 
@@ -320,5 +329,75 @@ public class User {
      */
     public boolean hasEmail(Email email) {
         return this.email != null && this.email.equalsIgnoreCase(email.getValue());
+    }
+
+    // ========== RBAC Methods ==========
+
+    /**
+     * Returns all active (non-expired) roles for this user.
+     */
+    public Set<Role> getActiveRoles() {
+        return userRoles.stream()
+                .filter(UserRole::isValid)
+                .map(UserRole::getRole)
+                .collect(Collectors.toSet());
+    }
+
+    /**
+     * Returns all authorities (roles and permissions) for this user.
+     * Format: "ROLE_X" for roles, "resource:action" for permissions.
+     */
+    public Set<String> getAllAuthorities() {
+        Set<String> authorities = new HashSet<>();
+        for (UserRole userRole : userRoles) {
+            if (userRole.isValid()) {
+                Role role = userRole.getRole();
+                // Add role as authority (ROLE_ADMIN, ROLE_USER, etc.)
+                authorities.add("ROLE_" + role.getName());
+                // Add all permissions from the role
+                authorities.addAll(role.getPermissionAuthorities());
+            }
+        }
+        return authorities;
+    }
+
+    /**
+     * Checks if user has a specific permission.
+     * @param permission the permission name (e.g., "user:read")
+     */
+    public boolean hasPermission(String permission) {
+        return getAllAuthorities().contains(permission);
+    }
+
+    /**
+     * Checks if user has a specific role.
+     * @param roleName the role name (without "ROLE_" prefix)
+     */
+    public boolean hasRole(String roleName) {
+        return getActiveRoles().stream()
+                .anyMatch(r -> r.getName().equalsIgnoreCase(roleName));
+    }
+
+    /**
+     * Checks if user has any of the specified roles.
+     */
+    public boolean hasAnyRole(String... roleNames) {
+        Set<String> userRoleNames = getActiveRoles().stream()
+                .map(Role::getName)
+                .map(String::toUpperCase)
+                .collect(Collectors.toSet());
+        for (String roleName : roleNames) {
+            if (userRoleNames.contains(roleName.toUpperCase())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Checks if user is an administrator (has SUPER_ADMIN or TENANT_ADMIN role).
+     */
+    public boolean isAdmin() {
+        return hasAnyRole("SUPER_ADMIN", "TENANT_ADMIN");
     }
 }
