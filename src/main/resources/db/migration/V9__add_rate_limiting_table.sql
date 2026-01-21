@@ -51,13 +51,13 @@ CREATE INDEX IF NOT EXISTS idx_rate_limit_type
 
 COMMENT ON INDEX idx_rate_limit_type IS 'Queries rate limits by category';
 
--- Partial index for expired buckets cleanup
+-- Index for expired buckets cleanup
 -- Rollback: DROP INDEX idx_rate_limit_expired;
 CREATE INDEX IF NOT EXISTS idx_rate_limit_expired
     ON rate_limit_buckets (expires_at)
-    WHERE expires_at IS NOT NULL AND expires_at < CURRENT_TIMESTAMP;
+    WHERE expires_at IS NOT NULL;
 
-COMMENT ON INDEX idx_rate_limit_expired IS 'Identifies expired rate limit buckets for cleanup';
+COMMENT ON INDEX idx_rate_limit_expired IS 'Identifies rate limit buckets with expiration for cleanup';
 
 -- Index for bucket refill operations
 -- Rollback: DROP INDEX idx_rate_limit_refill;
@@ -67,13 +67,12 @@ CREATE INDEX IF NOT EXISTS idx_rate_limit_refill
 
 COMMENT ON INDEX idx_rate_limit_refill IS 'Optimizes token refill operations';
 
--- Composite index for hot buckets (frequently accessed)
--- Rollback: DROP INDEX idx_rate_limit_hot_buckets;
-CREATE INDEX IF NOT EXISTS idx_rate_limit_hot_buckets
-    ON rate_limit_buckets (limit_type, last_seen_at DESC)
-    WHERE last_seen_at >= CURRENT_TIMESTAMP - INTERVAL '1 hour';
+-- Composite index for bucket access patterns
+-- Rollback: DROP INDEX idx_rate_limit_access;
+CREATE INDEX IF NOT EXISTS idx_rate_limit_access
+    ON rate_limit_buckets (limit_type, last_seen_at DESC);
 
-COMMENT ON INDEX idx_rate_limit_hot_buckets IS 'Identifies actively used rate limit buckets';
+COMMENT ON INDEX idx_rate_limit_access IS 'Identifies rate limit buckets by type and access time';
 
 -- GIN index for metadata queries
 -- Rollback: DROP INDEX idx_rate_limit_metadata_gin;

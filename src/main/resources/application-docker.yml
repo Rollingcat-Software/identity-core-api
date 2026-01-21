@@ -1,0 +1,73 @@
+# Docker Profile Configuration
+# This profile is for running with Docker Compose
+
+spring:
+  application:
+    name: identity-core-api-docker
+
+  # PostgreSQL Database (Docker)
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:postgres}:${DB_PORT:5432}/${DB_NAME:identity_core_db}
+    driver-class-name: org.postgresql.Driver
+    username: ${DB_USERNAME:postgres}
+    password: ${DB_PASSWORD:postgres_dev_password}
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 5
+      connection-timeout: 30000
+
+  # Flyway Migrations
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+    baseline-version: 0
+
+  # JPA/Hibernate
+  jpa:
+    database-platform: org.hibernate.dialect.PostgreSQLDialect
+    hibernate:
+      ddl-auto: validate
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+
+# JWT Configuration
+jwt:
+  secret: ${JWT_SECRET:ZGV2ZWxvcG1lbnRzZWNyZXRrZXlmb3Jsb2NhbHRlc3Rpbmdvbmx5bm90Zm9ycHJvZA==}
+  expiration: 86400000
+  refresh-expiration: 604800000
+
+# Redis Configuration
+redis:
+  host: ${REDIS_HOST:redis}
+  port: ${REDIS_PORT:6379}
+  password: ${REDIS_PASSWORD:redis_dev_password}
+  database: 0
+  event-bus:
+    enabled: true
+
+# Biometric Service
+biometric:
+  service:
+    url: ${BIOMETRIC_SERVICE_URL:http://biometric-processor:8001}
+    timeout: 30000
+
+# Logging
+logging:
+  level:
+    com.fivucsas: DEBUG
+    org.springframework.security: INFO
+    org.hibernate.SQL: DEBUG
+
+# Server
+server:
+  port: 8080
+  error:
+    include-message: always
+    include-binding-errors: always
+
+# CORS
+cors:
+  allowed-origins: http://localhost:5173,http://localhost:3000,http://localhost:3001,http://localhost:4200
