@@ -1,7 +1,7 @@
 -- V6: Create refresh_tokens table
 -- Purpose: Store refresh tokens for secure token rotation and session management
 
-CREATE TABLE refresh_tokens (
+CREATE TABLE IF NOT EXISTS refresh_tokens (
     id UUID PRIMARY KEY,
     user_id UUID NOT NULL,
     token VARCHAR(500) NOT NULL UNIQUE,

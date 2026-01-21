@@ -76,40 +76,39 @@ CREATE INDEX IF NOT EXISTS idx_sessions_user_expires
 
 COMMENT ON INDEX idx_sessions_user_expires IS 'Optimizes session validation and cleanup operations';
 
--- Partial index for expired session cleanup
--- Rollback: DROP INDEX idx_sessions_expired;
-CREATE INDEX IF NOT EXISTS idx_sessions_expired
+-- Index for session expiration queries (used in cleanup jobs)
+-- Rollback: DROP INDEX idx_sessions_expires_at;
+CREATE INDEX IF NOT EXISTS idx_sessions_expires_at
     ON active_sessions (expires_at)
-    WHERE is_active = TRUE AND expires_at < CURRENT_TIMESTAMP;
+    WHERE is_active = TRUE;
 
-COMMENT ON INDEX idx_sessions_expired IS 'Accelerates expired session cleanup tasks';
+COMMENT ON INDEX idx_sessions_expires_at IS 'Accelerates session expiration queries';
 
 -- Refresh tokens indexes
--- Index for token hash lookups during token refresh
--- Already exists in V5/V6, adding if not exists for safety
--- Rollback: DROP INDEX idx_refresh_tokens_hash_lookup;
-CREATE INDEX IF NOT EXISTS idx_refresh_tokens_hash_lookup
-    ON refresh_tokens (token_hash)
+-- Index for token lookups during token refresh
+-- Rollback: DROP INDEX idx_refresh_tokens_lookup;
+CREATE INDEX IF NOT EXISTS idx_refresh_tokens_lookup
+    ON refresh_tokens (token)
     WHERE is_revoked = FALSE;
 
-COMMENT ON INDEX idx_refresh_tokens_hash_lookup IS 'Fast token validation during refresh operations';
+COMMENT ON INDEX idx_refresh_tokens_lookup IS 'Fast token validation during refresh operations';
 
 -- Composite index for user token cleanup
 -- Supports periodic cleanup of expired tokens per user
--- Rollback: DROP INDEX idx_refresh_tokens_user_expires;
-CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user_expires
-    ON refresh_tokens (user_id, expires_at)
+-- Rollback: DROP INDEX idx_refresh_tokens_user_expiry;
+CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user_expiry
+    ON refresh_tokens (user_id, expiry_date)
     WHERE is_revoked = FALSE;
 
-COMMENT ON INDEX idx_refresh_tokens_user_expires IS 'Enables efficient token cleanup per user';
+COMMENT ON INDEX idx_refresh_tokens_user_expiry IS 'Enables efficient token cleanup per user';
 
--- Partial index for expired token cleanup
--- Rollback: DROP INDEX idx_refresh_tokens_expired;
-CREATE INDEX IF NOT EXISTS idx_refresh_tokens_expired
-    ON refresh_tokens (expires_at)
-    WHERE is_revoked = FALSE AND expires_at < CURRENT_TIMESTAMP;
+-- Index for token expiration queries (used in cleanup jobs)
+-- Rollback: DROP INDEX idx_refresh_tokens_expiry;
+CREATE INDEX IF NOT EXISTS idx_refresh_tokens_expiry
+    ON refresh_tokens (expiry_date)
+    WHERE is_revoked = FALSE;
 
-COMMENT ON INDEX idx_refresh_tokens_expired IS 'Identifies expired tokens for cleanup';
+COMMENT ON INDEX idx_refresh_tokens_expiry IS 'Identifies tokens for expiration queries';
 
 -- Security events indexes
 -- Composite index for tenant security monitoring

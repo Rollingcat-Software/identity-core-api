@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS biometric_data
 
     -- Biometric information
     biometric_type biometric_type NOT NULL DEFAULT 'FACE',
-    embedding vector, -- pgvector for face embeddings (flexible dimension: VGG-Face=2622, Facenet512=512)
+    embedding vector(512), -- pgvector for face embeddings (using Facenet512 dimension)
     embedding_model VARCHAR
 (
     50
@@ -36,30 +36,12 @@ CREATE TABLE IF NOT EXISTS biometric_data
     embedding_dimension INTEGER DEFAULT 2622 CHECK (embedding_dimension > 0),
 
     -- Quality metrics
-    quality_score FLOAT CHECK
-(
-    quality_score
-    >=
-    0
-    AND
-    quality_score
-    <=
-    1
-),
+    quality_score FLOAT,
     quality_level biometric_quality,
 
     -- Liveness detection
     liveness_verified BOOLEAN DEFAULT FALSE,
-    liveness_score FLOAT CHECK
-(
-    liveness_score
-    >=
-    0
-    AND
-    liveness_score
-    <=
-    1
-),
+    liveness_score FLOAT,
     liveness_method VARCHAR
 (
     50
@@ -100,30 +82,13 @@ CREATE TABLE IF NOT EXISTS biometric_data
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
     deleted_at TIMESTAMP,
 
-    -- Constraints
-    CONSTRAINT fk_user_tenant CHECK
-(
-    EXISTS
-(
-    SELECT
-    1
-    FROM
-    users
-    u
-    WHERE
-    u
-    .
-    id =
-    user_id
-    AND
-    u
-    .
-    tenant_id =
-    tenant_id
-)
-    ),
-    CONSTRAINT uq_biometric_user_tenant_type UNIQUE (user_id, tenant_id, biometric_type) WHERE deleted_at IS NULL
-    );
+    -- Timestamps constraint (none - removed CHECK with subquery as it's not supported)
+    CONSTRAINT check_quality_score CHECK (quality_score IS NULL OR (quality_score >= 0 AND quality_score <= 1)),
+    CONSTRAINT check_liveness_score CHECK (liveness_score IS NULL OR (liveness_score >= 0 AND liveness_score <= 1))
+);
+
+-- Partial unique index for unique biometric per user per type (excluding deleted)
+CREATE UNIQUE INDEX uq_biometric_user_tenant_type ON biometric_data (user_id, tenant_id, biometric_type) WHERE deleted_at IS NULL;
 
 -- Liveness Detection Attempts Table
 CREATE TABLE IF NOT EXISTS liveness_attempts

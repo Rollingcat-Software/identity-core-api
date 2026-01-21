@@ -110,24 +110,8 @@ CREATE TABLE IF NOT EXISTS users
     tenant_id,
     email
 ),
-    CONSTRAINT valid_email CHECK
-(
-    email
-    ~
-    *
-    '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}$'
-),
-    CONSTRAINT valid_phone CHECK
-(
-    phone_number
-    IS
-    NULL
-    OR
-    phone_number
-    ~
-    *
-    '^\+?[1-9]\d{1,14}$'
-)
+    CONSTRAINT valid_email CHECK (email ~* '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}$'),
+    CONSTRAINT valid_phone CHECK (phone_number IS NULL OR phone_number ~* '^\+?[1-9]\d{1,14}$')
     );
 
 -- Indexes

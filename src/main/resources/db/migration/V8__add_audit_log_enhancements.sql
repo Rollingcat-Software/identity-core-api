@@ -134,8 +134,7 @@ COMMENT ON FUNCTION apply_audit_retention_policy() IS 'Implements tiered audit l
 -- Create index for retention policy queries
 -- Rollback: DROP INDEX idx_audit_retention;
 CREATE INDEX IF NOT EXISTS idx_audit_retention
-    ON audit_logs (created_at)
-    WHERE created_at < CURRENT_TIMESTAMP - INTERVAL '90 days';
+    ON audit_logs (created_at);
 
 COMMENT ON INDEX idx_audit_retention IS 'Optimizes audit log retention policy execution';
 
