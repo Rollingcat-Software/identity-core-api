@@ -71,6 +71,11 @@ public class JwtService implements TokenGenerationPort {
         return (tokenEmail.equals(email)) && !isTokenExpired(token);
     }
 
+    @Override
+    public long getExpirationMillis() {
+        return jwtExpiration;
+    }
+
     private boolean isTokenExpired(String token) {
         return extractExpiration(token).before(new Date());
     }

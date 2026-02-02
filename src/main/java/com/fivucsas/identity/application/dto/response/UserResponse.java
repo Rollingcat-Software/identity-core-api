@@ -6,6 +6,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.time.Instant;
+import java.util.Set;
 
 /**
  * Response for user data.
@@ -29,6 +30,9 @@ public class UserResponse {
     private String address;
     private String idNumber;  // Will be masked
     private String status;
+    private String role;
+    private Set<String> roles;
+    private String tenantId;
     private boolean isBiometricEnrolled;
     private Instant enrolledAt;
     private Instant lastVerifiedAt;

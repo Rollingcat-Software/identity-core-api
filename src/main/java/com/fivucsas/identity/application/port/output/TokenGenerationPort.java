@@ -38,4 +38,11 @@ public interface TokenGenerationPort {
      * @return true if token is valid
      */
     boolean isTokenValid(String token, String email);
+
+    /**
+     * Returns the configured JWT expiration time in milliseconds.
+     *
+     * @return expiration time in milliseconds
+     */
+    long getExpirationMillis();
 }

@@ -18,4 +18,10 @@ public class StatisticsDto {
     private Long biometricEnrolledUsers;
     private Long totalVerifications;
     private Double averageVerificationsPerUser;
+    private Long totalTenants;
+    private Long pendingEnrollments;
+    private Long successfulEnrollments;
+    private Long failedEnrollments;
+    private Double authSuccessRate;
+    private Double verificationSuccessRate;
 }

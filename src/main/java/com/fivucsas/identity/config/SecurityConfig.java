@@ -93,6 +93,12 @@ public class SecurityConfig {
                         // Fine-grained RBAC enforced via @PreAuthorize and @rbac service
                         .requestMatchers("/api/v1/**").authenticated()
 
+                        // Audit log endpoints - require authentication
+                        .requestMatchers("/api/v1/audit-logs/**").authenticated()
+
+                        // Enrollment endpoints - require authentication
+                        .requestMatchers("/api/v1/enrollments/**").authenticated()
+
                         // All other requests require authentication
                         .anyRequest().authenticated()
                 )
@@ -133,7 +139,7 @@ public class SecurityConfig {
         configuration.setAllowedOrigins(origins);
 
         configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"));
-        configuration.setAllowedHeaders(Arrays.asList("Authorization", "Content-Type", "X-Tenant-ID"));
+        configuration.setAllowedHeaders(Arrays.asList("Authorization", "Content-Type", "X-Tenant-ID", "X-CSRF-Token"));
         configuration.setExposedHeaders(List.of("Authorization"));
         configuration.setAllowCredentials(true);
         configuration.setMaxAge(3600L);
