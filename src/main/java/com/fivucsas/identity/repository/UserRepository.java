@@ -7,6 +7,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -48,4 +49,28 @@ public interface UserRepository extends
             "LOWER(u.email) LIKE LOWER(CONCAT('%', :query, '%')) OR " +
             "u.idNumber LIKE CONCAT('%', :query, '%')")
     List<User> searchUsers(@Param("query") String query);
+
+    /**
+     * Find expired guest users that are still active.
+     */
+    @Query("SELECT u FROM User u WHERE u.userType = 'GUEST' " +
+           "AND u.expiresAt IS NOT NULL AND u.expiresAt < :now " +
+           "AND u.status = 'ACTIVE'")
+    List<User> findExpiredGuests(@Param("now") Instant now);
+
+    /**
+     * Find users by tenant and user type.
+     */
+    @Query("SELECT u FROM User u WHERE u.tenant.id = :tenantId AND u.userType = :userType " +
+           "AND u.status = 'ACTIVE'")
+    List<User> findByTenantIdAndUserType(@Param("tenantId") UUID tenantId,
+                                          @Param("userType") String userType);
+
+    /**
+     * Count active users by tenant and user type.
+     */
+    @Query("SELECT COUNT(u) FROM User u WHERE u.tenant.id = :tenantId " +
+           "AND u.userType = :userType AND u.status = 'ACTIVE'")
+    long countByTenantIdAndUserType(@Param("tenantId") UUID tenantId,
+                                     @Param("userType") String userType);
 }

@@ -83,6 +83,19 @@ public class User {
     @Setter  // Allow updating
     private UserStatus status = UserStatus.ACTIVE;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "user_type", nullable = false, length = 20)
+    @Builder.Default
+    private UserType userType = UserType.TENANT_MEMBER;
+
+    @Column(name = "expires_at")
+    @Setter
+    private Instant expiresAt;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "invited_by")
+    private User invitedBy;
+
     @Column(name = "is_biometric_enrolled")
     @Builder.Default
     @Setter  // Allow updating
@@ -357,6 +370,59 @@ public class User {
         return this.email != null && this.email.equalsIgnoreCase(email.getValue());
     }
 
+    // ========== User Type Methods ==========
+
+    /**
+     * Checks if this user is a ROOT (platform super admin).
+     */
+    public boolean isRoot() {
+        return this.userType == UserType.ROOT;
+    }
+
+    /**
+     * Checks if this user is a tenant administrator.
+     */
+    public boolean isTenantAdmin() {
+        return this.userType == UserType.TENANT_ADMIN;
+    }
+
+    /**
+     * Checks if this user is a guest.
+     */
+    public boolean isGuest() {
+        return this.userType == UserType.GUEST;
+    }
+
+    /**
+     * Checks if the guest account has expired.
+     * Non-guest users never expire.
+     */
+    public boolean isExpired() {
+        if (this.userType != UserType.GUEST) return false;
+        return this.expiresAt != null && this.expiresAt.isBefore(Instant.now());
+    }
+
+    /**
+     * Checks if this user can manage the target user based on hierarchy.
+     */
+    public boolean canManage(User target) {
+        if (target == null) return false;
+        // ROOT can manage anyone
+        if (this.userType == UserType.ROOT) return true;
+        // Must be in the same tenant (except ROOT)
+        if (this.tenant == null || target.tenant == null) return false;
+        if (!this.tenant.getId().equals(target.tenant.getId())) return false;
+        // Check hierarchy
+        return this.userType.canManage(target.userType);
+    }
+
+    /**
+     * Sets the user type. Only allows promotion/demotion by authorized callers.
+     */
+    public void setUserType(UserType newType) {
+        this.userType = newType;
+    }
+
     // ========== RBAC Methods ==========
 
     /**
@@ -421,10 +487,14 @@ public class User {
     }
 
     /**
-     * Checks if user is an administrator (has SUPER_ADMIN or TENANT_ADMIN role).
+     * Checks if user is an administrator.
+     * ROOT and TENANT_ADMIN user types are always admins.
+     * Also checks for SUPER_ADMIN or TENANT_ADMIN roles for backwards compatibility.
      */
     public boolean isAdmin() {
-        return hasAnyRole("SUPER_ADMIN", "TENANT_ADMIN");
+        return this.userType == UserType.ROOT
+            || this.userType == UserType.TENANT_ADMIN
+            || hasAnyRole("SUPER_ADMIN", "TENANT_ADMIN");
     }
 
     /**
