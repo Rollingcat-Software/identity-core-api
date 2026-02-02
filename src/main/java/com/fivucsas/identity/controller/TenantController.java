@@ -29,7 +29,7 @@ public class TenantController {
     private final ManageTenantUseCase manageTenantUseCase;
 
     @PostMapping
-    @PreAuthorize("hasAuthority('TENANT:CREATE')")
+    @PreAuthorize("@rbac.isRoot()")
     public ResponseEntity<TenantResponse> createTenant(
             @Valid @RequestBody CreateTenantRequest request) {
 
@@ -51,28 +51,28 @@ public class TenantController {
     }
 
     @GetMapping("/{tenantId}")
-    @PreAuthorize("hasAuthority('TENANT:READ')")
+    @PreAuthorize("@rbac.hasPermission('tenant:read')")
     public ResponseEntity<TenantResponse> getTenantById(@PathVariable String tenantId) {
         TenantResponse response = manageTenantUseCase.getTenantById(tenantId);
         return ResponseEntity.ok(response);
     }
 
     @GetMapping("/slug/{slug}")
-    @PreAuthorize("hasAuthority('TENANT:READ')")
+    @PreAuthorize("@rbac.hasPermission('tenant:read')")
     public ResponseEntity<TenantResponse> getTenantBySlug(@PathVariable String slug) {
         TenantResponse response = manageTenantUseCase.getTenantBySlug(slug);
         return ResponseEntity.ok(response);
     }
 
     @GetMapping
-    @PreAuthorize("hasAuthority('TENANT:READ')")
+    @PreAuthorize("@rbac.hasPermission('tenant:read')")
     public ResponseEntity<List<TenantResponse>> getAllTenants() {
         List<TenantResponse> response = manageTenantUseCase.getAllTenants();
         return ResponseEntity.ok(response);
     }
 
     @PutMapping("/{tenantId}")
-    @PreAuthorize("hasAuthority('TENANT:UPDATE')")
+    @PreAuthorize("@rbac.hasPermission('tenant:configure')")
     public ResponseEntity<TenantResponse> updateTenant(
             @PathVariable String tenantId,
             @Valid @RequestBody UpdateTenantRequest request) {
@@ -95,21 +95,21 @@ public class TenantController {
     }
 
     @PostMapping("/{tenantId}/activate")
-    @PreAuthorize("hasAuthority('TENANT:MANAGE')")
+    @PreAuthorize("@rbac.isRoot()")
     public ResponseEntity<TenantResponse> activateTenant(@PathVariable String tenantId) {
         TenantResponse response = manageTenantUseCase.activateTenant(tenantId);
         return ResponseEntity.ok(response);
     }
 
     @PostMapping("/{tenantId}/suspend")
-    @PreAuthorize("hasAuthority('TENANT:MANAGE')")
+    @PreAuthorize("@rbac.isRoot()")
     public ResponseEntity<TenantResponse> suspendTenant(@PathVariable String tenantId) {
         TenantResponse response = manageTenantUseCase.suspendTenant(tenantId);
         return ResponseEntity.ok(response);
     }
 
     @DeleteMapping("/{tenantId}")
-    @PreAuthorize("hasAuthority('TENANT:DELETE')")
+    @PreAuthorize("@rbac.isRoot()")
     public ResponseEntity<Void> deleteTenant(@PathVariable String tenantId) {
         manageTenantUseCase.deleteTenant(tenantId);
         return ResponseEntity.noContent().build();

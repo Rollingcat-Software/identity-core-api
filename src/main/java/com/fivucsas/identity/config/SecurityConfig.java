@@ -1,10 +1,13 @@
 package com.fivucsas.identity.config;
 
 import com.fivucsas.identity.security.JwtAuthenticationFilter;
+import com.fivucsas.identity.security.RbacPermissionEvaluator;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.security.access.expression.method.DefaultMethodSecurityExpressionHandler;
+import org.springframework.security.access.expression.method.MethodSecurityExpressionHandler;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.AuthenticationProvider;
 import org.springframework.security.authentication.dao.DaoAuthenticationProvider;
@@ -34,9 +37,21 @@ public class SecurityConfig {
 
     private final JwtAuthenticationFilter jwtAuthFilter;
     private final UserDetailsService userDetailsService;
+    private final RbacPermissionEvaluator rbacPermissionEvaluator;
 
     @Value("${cors.allowed-origins:http://localhost:3000,http://localhost:4200,http://localhost:5173}")
     private String allowedOrigins;
+
+    /**
+     * Registers the custom RBAC PermissionEvaluator with Spring Security's
+     * method security expression handler for hierarchical access control.
+     */
+    @Bean
+    public MethodSecurityExpressionHandler methodSecurityExpressionHandler() {
+        DefaultMethodSecurityExpressionHandler handler = new DefaultMethodSecurityExpressionHandler();
+        handler.setPermissionEvaluator(rbacPermissionEvaluator);
+        return handler;
+    }
 
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
@@ -50,6 +65,11 @@ public class SecurityConfig {
                                 "/api/v1/auth/login",
                                 "/api/v1/auth/refresh",
                                 "/api/v1/auth/health"
+                        ).permitAll()
+
+                        // Guest invitation acceptance (token-based, no auth required)
+                        .requestMatchers(
+                                "/api/v1/guests/accept"
                         ).permitAll()
 
                         // Development/Documentation endpoints (should be restricted in production)
@@ -67,19 +87,9 @@ public class SecurityConfig {
                                 "/api/v1/auth/logout"
                         ).authenticated()
 
-                        // User management endpoints - require authentication
-                        // TODO: Add role-based authorization when RBAC is implemented
-                        .requestMatchers("/api/v1/users/**").authenticated()
-
-                        // Biometric endpoints - require authentication
-                        .requestMatchers("/api/v1/biometric/**").authenticated()
-
-                        // Statistics endpoints - require authentication
-                        .requestMatchers("/api/v1/statistics/**").authenticated()
-
-                        // Tenant management endpoints - require authentication
-                        // Actual authorization handled via @PreAuthorize
-                        .requestMatchers("/api/v1/tenants/**").authenticated()
+                        // All API endpoints require authentication
+                        // Fine-grained RBAC enforced via @PreAuthorize and @rbac service
+                        .requestMatchers("/api/v1/**").authenticated()
 
                         // All other requests require authentication
                         .anyRequest().authenticated()
