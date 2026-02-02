@@ -34,7 +34,7 @@ public class RoleController {
 
     @GetMapping
     @Operation(summary = "Get all roles")
-    @PreAuthorize("hasAuthority('role:read')")
+    @PreAuthorize("@rbac.hasPermission('role:read')")
     public ResponseEntity<List<RoleResponse>> getAllRoles(
             @RequestParam(required = false, defaultValue = "false") boolean includeInactive) {
         log.info("GET /api/v1/roles - Get all roles, includeInactive={}", includeInactive);
@@ -50,7 +50,7 @@ public class RoleController {
 
     @GetMapping("/{id}")
     @Operation(summary = "Get role by ID")
-    @PreAuthorize("hasAuthority('role:read')")
+    @PreAuthorize("@rbac.hasPermission('role:read')")
     public ResponseEntity<RoleResponse> getRoleById(@PathVariable String id) {
         log.info("GET /api/v1/roles/{} - Get role by ID", id);
 
@@ -65,7 +65,7 @@ public class RoleController {
 
     @GetMapping("/tenant/{tenantId}")
     @Operation(summary = "Get roles by tenant")
-    @PreAuthorize("hasAuthority('role:read')")
+    @PreAuthorize("@rbac.hasPermission('role:read')")
     public ResponseEntity<List<RoleResponse>> getRolesByTenant(@PathVariable String tenantId) {
         log.info("GET /api/v1/roles/tenant/{} - Get roles by tenant", tenantId);
 
@@ -80,7 +80,7 @@ public class RoleController {
 
     @PostMapping
     @Operation(summary = "Create new role")
-    @PreAuthorize("hasAuthority('role:create')")
+    @PreAuthorize("@rbac.hasPermission('role:create')")
     public ResponseEntity<RoleResponse> createRole(@Valid @RequestBody CreateRoleRequest request) {
         log.info("POST /api/v1/roles - Create role: {}", request.getName());
 
@@ -99,7 +99,7 @@ public class RoleController {
 
     @PutMapping("/{id}")
     @Operation(summary = "Update role")
-    @PreAuthorize("hasAuthority('role:update')")
+    @PreAuthorize("@rbac.hasPermission('role:update')")
     public ResponseEntity<RoleResponse> updateRole(
             @PathVariable String id,
             @Valid @RequestBody UpdateRoleRequest request) {
@@ -119,7 +119,7 @@ public class RoleController {
 
     @DeleteMapping("/{id}")
     @Operation(summary = "Delete role (soft delete)")
-    @PreAuthorize("hasAuthority('role:delete')")
+    @PreAuthorize("@rbac.hasPermission('role:delete')")
     public ResponseEntity<Void> deleteRole(@PathVariable String id) {
         log.info("DELETE /api/v1/roles/{} - Delete role", id);
 
@@ -130,7 +130,7 @@ public class RoleController {
 
     @PostMapping("/{roleId}/permissions/{permissionId}")
     @Operation(summary = "Assign permission to role")
-    @PreAuthorize("hasAuthority('role:update')")
+    @PreAuthorize("@rbac.hasPermission('role:update')")
     public ResponseEntity<Void> assignPermission(
             @PathVariable String roleId,
             @PathVariable String permissionId) {
@@ -148,7 +148,7 @@ public class RoleController {
 
     @DeleteMapping("/{roleId}/permissions/{permissionId}")
     @Operation(summary = "Revoke permission from role")
-    @PreAuthorize("hasAuthority('role:update')")
+    @PreAuthorize("@rbac.hasPermission('role:update')")
     public ResponseEntity<Void> revokePermission(
             @PathVariable String roleId,
             @PathVariable String permissionId) {
