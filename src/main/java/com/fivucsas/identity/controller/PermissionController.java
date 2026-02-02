@@ -30,7 +30,7 @@ public class PermissionController {
 
     @GetMapping
     @Operation(summary = "Get all permissions")
-    @PreAuthorize("hasAuthority('role:read')")
+    @PreAuthorize("@rbac.hasPermission('permission:read')")
     public ResponseEntity<List<PermissionResponse>> getAllPermissions() {
         log.info("GET /api/v1/permissions - Get all permissions");
 
@@ -41,7 +41,7 @@ public class PermissionController {
 
     @GetMapping("/{id}")
     @Operation(summary = "Get permission by ID")
-    @PreAuthorize("hasAuthority('role:read')")
+    @PreAuthorize("@rbac.hasPermission('permission:read')")
     public ResponseEntity<PermissionResponse> getPermissionById(@PathVariable String id) {
         log.info("GET /api/v1/permissions/{} - Get permission by ID", id);
 
@@ -56,7 +56,7 @@ public class PermissionController {
 
     @GetMapping("/resource/{resource}")
     @Operation(summary = "Get permissions by resource")
-    @PreAuthorize("hasAuthority('role:read')")
+    @PreAuthorize("@rbac.hasPermission('permission:read')")
     public ResponseEntity<List<PermissionResponse>> getPermissionsByResource(@PathVariable String resource) {
         log.info("GET /api/v1/permissions/resource/{} - Get permissions by resource", resource);
 
