@@ -35,4 +35,9 @@ public class TokenGenerationAdapter implements TokenGenerationPort {
     public boolean isTokenValid(String token, String email) {
         return jwtService.isTokenValid(token, email);
     }
+
+    @Override
+    public long getExpirationMillis() {
+        return jwtService.getExpirationMillis();
+    }
 }

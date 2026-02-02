@@ -147,6 +147,7 @@ public class AuthController {
         return AuthResponse.of(
             response.getAccessToken(),
             response.getRefreshToken(),
+            response.getExpiresIn(),
             mapToUserDto(response.getUser())
         );
     }
@@ -161,6 +162,9 @@ public class AuthController {
             .address(response.getAddress())
             .idNumber(response.getIdNumber())
             .status(UserStatus.valueOf(response.getStatus()))
+            .role(response.getRole())
+            .roles(response.getRoles())
+            .tenantId(response.getTenantId())
             .isBiometricEnrolled(response.isBiometricEnrolled())
             .enrolledAt(response.getEnrolledAt())
             .lastVerifiedAt(response.getLastVerifiedAt())

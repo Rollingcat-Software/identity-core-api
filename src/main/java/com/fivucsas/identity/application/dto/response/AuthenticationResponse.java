@@ -20,12 +20,14 @@ public class AuthenticationResponse {
 
     private String accessToken;
     private String refreshToken;
+    private Long expiresIn;
     private UserResponse user;
 
-    public static AuthenticationResponse of(String accessToken, String refreshToken, UserResponse user) {
+    public static AuthenticationResponse of(String accessToken, String refreshToken, Long expiresIn, UserResponse user) {
         return AuthenticationResponse.builder()
             .accessToken(accessToken)
             .refreshToken(refreshToken)
+            .expiresIn(expiresIn)
             .user(user)
             .build();
     }

@@ -35,6 +35,7 @@ public class GetCurrentUserService implements GetCurrentUserUseCase {
     }
 
     private UserResponse mapToUserResponse(User user) {
+        var roleNames = user.getRoleNames();
         return UserResponse.builder()
             .id(user.getId().toString())
             .email(user.getEmail())
@@ -44,6 +45,9 @@ public class GetCurrentUserService implements GetCurrentUserUseCase {
             .address(user.getAddress())
             .idNumber(user.getIdNumber() != null ? user.getIdNumberAsValueObject().getMasked() : null)
             .status(user.getStatus().name())
+            .role(roleNames.isEmpty() ? "USER" : roleNames.iterator().next())
+            .roles(roleNames.isEmpty() ? java.util.Set.of("USER") : roleNames)
+            .tenantId(user.getTenant() != null ? user.getTenant().getId().toString() : null)
             .isBiometricEnrolled(user.isBiometricEnrolled())
             .enrolledAt(user.getEnrolledAt())
             .lastVerifiedAt(user.getLastVerifiedAt())

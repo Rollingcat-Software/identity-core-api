@@ -24,4 +24,10 @@ public class StatisticsResponse {
     private long suspendedUsers;
     private long biometricEnrolledUsers;
     private long totalVerifications;
+    private long totalTenants;
+    private long pendingEnrollments;
+    private long successfulEnrollments;
+    private long failedEnrollments;
+    private double authSuccessRate;
+    private double verificationSuccessRate;
 }

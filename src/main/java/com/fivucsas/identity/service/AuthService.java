@@ -59,7 +59,7 @@ public class AuthService {
         String refreshToken = refreshTokenService.createRefreshToken(savedUser, ipAddress, userAgent).getToken();
         UserDto userDto = mapToDto(savedUser);
 
-        return AuthResponse.of(accessToken, refreshToken, userDto);
+        return AuthResponse.of(accessToken, refreshToken, jwtService.getExpirationMillis(), userDto);
     }
 
     @Transactional
@@ -80,7 +80,7 @@ public class AuthService {
         String refreshToken = refreshTokenService.createRefreshToken(user, ipAddress, userAgent).getToken();
         UserDto userDto = mapToDto(user);
 
-        return AuthResponse.of(accessToken, refreshToken, userDto);
+        return AuthResponse.of(accessToken, refreshToken, jwtService.getExpirationMillis(), userDto);
     }
 
     @Transactional
@@ -100,7 +100,7 @@ public class AuthService {
 
         log.info("Token refreshed successfully for user: {}", user.getEmail());
 
-        return AuthResponse.of(accessToken, newRefreshToken.getToken(), userDto);
+        return AuthResponse.of(accessToken, newRefreshToken.getToken(), jwtService.getExpirationMillis(), userDto);
     }
 
     @Transactional

@@ -7,8 +7,13 @@ import com.fivucsas.identity.application.dto.query.GetUserByIdQuery;
 import com.fivucsas.identity.application.dto.query.SearchUsersQuery;
 import com.fivucsas.identity.application.dto.response.UserResponse;
 import com.fivucsas.identity.application.port.input.ManageUserUseCase;
+import com.fivucsas.identity.domain.exception.InvalidCredentialsException;
+import com.fivucsas.identity.domain.exception.UserNotFoundException;
+import com.fivucsas.identity.domain.repository.UserRepository;
+import com.fivucsas.identity.dto.ChangePasswordRequest;
 import com.fivucsas.identity.dto.CreateUserRequest;
 import com.fivucsas.identity.dto.UpdateUserRequest;
+import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.entity.UserStatus;
 import com.fivucsas.identity.dto.UserDto;
 import io.swagger.v3.oas.annotations.Operation;
@@ -19,6 +24,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -37,6 +43,8 @@ import java.util.stream.Collectors;
 public class UserController {
 
     private final ManageUserUseCase manageUserUseCase;
+    private final UserRepository userRepository;
+    private final PasswordEncoder passwordEncoder;
 
     @GetMapping
     @Operation(summary = "Get all users")
@@ -121,6 +129,28 @@ public class UserController {
         return ResponseEntity.noContent().build();
     }
 
+    @PostMapping("/{id}/change-password")
+    @Operation(summary = "Change user password")
+    @PreAuthorize("hasAuthority('user:update') or @userSecurityService.isCurrentUser(#id)")
+    public ResponseEntity<Void> changePassword(
+            @PathVariable String id,
+            @Valid @RequestBody ChangePasswordRequest request) {
+        log.info("POST /api/v1/users/{}/change-password", id);
+
+        java.util.UUID uuid = java.util.UUID.fromString(id);
+        User user = userRepository.findById(uuid)
+                .orElseThrow(() -> new UserNotFoundException(id));
+
+        if (!passwordEncoder.matches(request.getCurrentPassword(), user.getPasswordHash())) {
+            throw new InvalidCredentialsException();
+        }
+
+        user.updatePassword(request.getNewPassword(), passwordEncoder);
+        userRepository.save(user);
+
+        return ResponseEntity.ok().build();
+    }
+
     @GetMapping("/search")
     @Operation(summary = "Search users")
     @PreAuthorize("@rbac.hasPermission('user:read')")
@@ -150,6 +180,9 @@ public class UserController {
             .address(response.getAddress())
             .idNumber(response.getIdNumber())
             .status(UserStatus.valueOf(response.getStatus()))
+            .role(response.getRole())
+            .roles(response.getRoles())
+            .tenantId(response.getTenantId())
             .isBiometricEnrolled(response.isBiometricEnrolled())
             .enrolledAt(response.getEnrolledAt())
             .lastVerifiedAt(response.getLastVerifiedAt())

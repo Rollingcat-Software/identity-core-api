@@ -39,6 +39,10 @@ public class StatisticsController {
     }
 
     private StatisticsDto mapToStatisticsDto(StatisticsResponse response) {
+        double avgVerifications = response.getTotalUsers() > 0
+            ? (double) response.getTotalVerifications() / response.getTotalUsers()
+            : 0.0;
+
         return StatisticsDto.builder()
             .totalUsers(response.getTotalUsers())
             .activeUsers(response.getActiveUsers())
@@ -46,6 +50,13 @@ public class StatisticsController {
             .suspendedUsers(response.getSuspendedUsers())
             .biometricEnrolledUsers(response.getBiometricEnrolledUsers())
             .totalVerifications(response.getTotalVerifications())
+            .averageVerificationsPerUser(avgVerifications)
+            .totalTenants(response.getTotalTenants())
+            .pendingEnrollments(response.getPendingEnrollments())
+            .successfulEnrollments(response.getSuccessfulEnrollments())
+            .failedEnrollments(response.getFailedEnrollments())
+            .authSuccessRate(response.getAuthSuccessRate())
+            .verificationSuccessRate(response.getVerificationSuccessRate())
             .build();
     }
 }
