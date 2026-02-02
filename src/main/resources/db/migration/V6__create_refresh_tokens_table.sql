@@ -1,7 +1,10 @@
--- V6: Create refresh_tokens table
--- Purpose: Store refresh tokens for secure token rotation and session management
+-- V6: Recreate refresh_tokens table with simplified schema
+-- Purpose: Replace V5's refresh_tokens (token_hash-based) with a simpler token-based design
 
-CREATE TABLE IF NOT EXISTS refresh_tokens (
+-- Drop V5's version of the table (different schema: token_hash, tenant_id, device columns)
+DROP TABLE IF EXISTS refresh_tokens CASCADE;
+
+CREATE TABLE refresh_tokens (
     id UUID PRIMARY KEY,
     user_id UUID NOT NULL,
     token VARCHAR(500) NOT NULL UNIQUE,
