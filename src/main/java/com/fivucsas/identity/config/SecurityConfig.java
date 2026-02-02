@@ -76,9 +76,11 @@ public class SecurityConfig {
                         .requestMatchers(
                                 "/h2-console/**",
                                 "/swagger-ui/**",
-                                "/v3/api-docs/**",
                                 "/swagger-ui.html",
-                                "/actuator/health"
+                                "/v3/api-docs/**",
+                                "/api-docs/**",
+                                "/api-docs",
+                                "/actuator/**"
                         ).permitAll()
 
                         // Protected authentication endpoints
