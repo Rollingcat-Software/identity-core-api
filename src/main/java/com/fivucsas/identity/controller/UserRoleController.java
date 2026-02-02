@@ -37,7 +37,7 @@ public class UserRoleController {
 
     @GetMapping
     @Operation(summary = "Get all roles for a user")
-    @PreAuthorize("hasAuthority('role:read') or @userSecurityService.isCurrentUser(#userId)")
+    @PreAuthorize("@rbac.hasPermission('user_role:read') or @userSecurityService.isCurrentUser(#userId)")
     public ResponseEntity<List<UserRoleResponse>> getUserRoles(@PathVariable String userId) {
         log.info("GET /api/v1/users/{}/roles - Get user roles", userId);
 
@@ -52,7 +52,7 @@ public class UserRoleController {
 
     @PostMapping("/{roleId}")
     @Operation(summary = "Assign a role to a user")
-    @PreAuthorize("hasAuthority('role:update')")
+    @PreAuthorize("@rbac.hasPermission('user_role:assign')")
     public ResponseEntity<Void> assignRole(
             @PathVariable String userId,
             @PathVariable String roleId,
@@ -75,7 +75,7 @@ public class UserRoleController {
 
     @DeleteMapping("/{roleId}")
     @Operation(summary = "Revoke a role from a user")
-    @PreAuthorize("hasAuthority('role:update')")
+    @PreAuthorize("@rbac.hasPermission('user_role:revoke')")
     public ResponseEntity<Void> revokeRole(
             @PathVariable String userId,
             @PathVariable String roleId) {
@@ -93,7 +93,7 @@ public class UserRoleController {
 
     @GetMapping("/all/{roleId}")
     @Operation(summary = "Get all users with a specific role")
-    @PreAuthorize("hasAuthority('role:read')")
+    @PreAuthorize("@rbac.hasPermission('user_role:read')")
     public ResponseEntity<List<UserRoleResponse>> getRoleUsers(@PathVariable String roleId) {
         log.info("GET /api/v1/users/*/roles/all/{} - Get role users", roleId);
 
