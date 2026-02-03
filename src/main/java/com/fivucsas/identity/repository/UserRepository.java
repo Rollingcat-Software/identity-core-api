@@ -15,18 +15,11 @@ import java.util.UUID;
 /**
  * JPA Repository for User entity.
  *
- * Extends both:
- * - JpaRepository: Provides JPA/Spring Data features
- * - UserRepository (domain): Implements domain repository contract
- *
- * Following Dependency Inversion Principle:
- * - Infrastructure (this) implements domain interface
- * - Services depend on domain interface, not this
+ * Extends JpaRepository for Spring Data JPA functionality.
+ * Contains all query methods needed by the application.
  */
 @Repository
-public interface UserRepository extends
-        JpaRepository<User, UUID>,
-        com.fivucsas.identity.domain.repository.UserRepository {
+public interface UserRepository extends JpaRepository<User, UUID> {
 
     // JPA-specific query methods
     // Domain methods inherited from domain.repository.UserRepository

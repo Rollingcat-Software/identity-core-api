@@ -10,7 +10,7 @@ import com.fivucsas.identity.dto.UserDto;
 import com.fivucsas.identity.entity.RefreshToken;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.entity.UserStatus;
-import com.fivucsas.identity.domain.repository.UserRepository;
+import com.fivucsas.identity.repository.UserRepository;
 import com.fivucsas.identity.security.JwtService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -23,7 +23,7 @@ import org.springframework.transaction.annotation.Transactional;
 @Slf4j
 public class AuthService {
 
-    private final com.fivucsas.identity.domain.repository.UserRepository userRepository;
+    private final com.fivucsas.identity.repository.UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
     private final RefreshTokenService refreshTokenService;

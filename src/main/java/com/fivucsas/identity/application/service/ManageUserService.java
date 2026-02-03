@@ -11,7 +11,7 @@ import com.fivucsas.identity.application.port.output.PasswordEncoderPort;
 import com.fivucsas.identity.domain.exception.DuplicateEmailException;
 import com.fivucsas.identity.domain.exception.UserNotFoundException;
 import com.fivucsas.identity.domain.model.user.*;
-import com.fivucsas.identity.domain.repository.UserRepository;
+import com.fivucsas.identity.repository.UserRepository;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.entity.UserStatus;
 import lombok.RequiredArgsConstructor;
@@ -33,7 +33,7 @@ import java.util.stream.Collectors;
 @Slf4j
 public class ManageUserService implements ManageUserUseCase {
 
-    private final com.fivucsas.identity.domain.repository.UserRepository userRepository;
+    private final com.fivucsas.identity.repository.UserRepository userRepository;
     private final PasswordEncoderPort passwordEncoder;
 
     @Override

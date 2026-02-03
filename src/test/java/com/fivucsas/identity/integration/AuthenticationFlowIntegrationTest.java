@@ -9,7 +9,7 @@ import com.fivucsas.identity.application.service.AuthenticateUserService;
 import com.fivucsas.identity.application.service.GetCurrentUserService;
 import com.fivucsas.identity.application.service.RegisterUserService;
 import com.fivucsas.identity.application.port.output.TokenGenerationPort;
-import com.fivucsas.identity.domain.repository.UserRepository;
+import com.fivucsas.identity.repository.UserRepository;
 import com.fivucsas.identity.entity.RefreshToken;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.service.RefreshTokenService;

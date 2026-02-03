@@ -81,7 +81,7 @@ public interface UserRepository {
      * @param user the user to save
      * @return the saved user
      */
-    User save(User user);
+    <S extends User> S save(S user);
 
     /**
      * Finds a user by ID.

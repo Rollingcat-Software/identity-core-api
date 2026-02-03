@@ -9,7 +9,7 @@ import com.fivucsas.identity.application.port.input.ManageUserRoleUseCase;
 import com.fivucsas.identity.domain.exception.DuplicateRoleAssignmentException;
 import com.fivucsas.identity.domain.exception.RoleNotFoundException;
 import com.fivucsas.identity.domain.exception.UserNotFoundException;
-import com.fivucsas.identity.domain.repository.UserRepository;
+import com.fivucsas.identity.repository.UserRepository;
 import com.fivucsas.identity.entity.Role;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.entity.UserRole;
