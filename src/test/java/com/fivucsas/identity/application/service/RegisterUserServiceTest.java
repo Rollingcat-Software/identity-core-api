@@ -7,7 +7,7 @@ import com.fivucsas.identity.application.port.output.TokenGenerationPort;
 import com.fivucsas.identity.domain.exception.DuplicateEmailException;
 import com.fivucsas.identity.domain.exception.InvalidEmailException;
 import com.fivucsas.identity.domain.repository.TenantRepository;
-import com.fivucsas.identity.domain.repository.UserRepository;
+import com.fivucsas.identity.repository.UserRepository;
 import com.fivucsas.identity.entity.RefreshToken;
 import com.fivucsas.identity.entity.Tenant;
 import com.fivucsas.identity.entity.TenantStatus;

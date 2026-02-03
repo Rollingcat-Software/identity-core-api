@@ -6,7 +6,7 @@ import com.fivucsas.identity.application.port.input.EnrollBiometricUseCase;
 import com.fivucsas.identity.application.port.output.BiometricServicePort;
 import com.fivucsas.identity.domain.exception.BiometricEnrollmentException;
 import com.fivucsas.identity.domain.exception.UserNotFoundException;
-import com.fivucsas.identity.domain.repository.UserRepository;
+import com.fivucsas.identity.repository.UserRepository;
 import com.fivucsas.identity.entity.User;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -26,7 +26,7 @@ import java.util.UUID;
 @Slf4j
 public class EnrollBiometricService implements EnrollBiometricUseCase {
 
-    private final com.fivucsas.identity.domain.repository.UserRepository userRepository;
+    private final com.fivucsas.identity.repository.UserRepository userRepository;
     private final BiometricServicePort biometricService;
 
     @Override

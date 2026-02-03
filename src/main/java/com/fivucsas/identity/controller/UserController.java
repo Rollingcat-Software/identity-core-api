@@ -9,7 +9,7 @@ import com.fivucsas.identity.application.dto.response.UserResponse;
 import com.fivucsas.identity.application.port.input.ManageUserUseCase;
 import com.fivucsas.identity.domain.exception.InvalidCredentialsException;
 import com.fivucsas.identity.domain.exception.UserNotFoundException;
-import com.fivucsas.identity.domain.repository.UserRepository;
+import com.fivucsas.identity.repository.UserRepository;
 import com.fivucsas.identity.dto.ChangePasswordRequest;
 import com.fivucsas.identity.dto.CreateUserRequest;
 import com.fivucsas.identity.dto.UpdateUserRequest;

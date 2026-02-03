@@ -3,7 +3,7 @@ package com.fivucsas.identity.application.service;
 import com.fivucsas.identity.application.dto.response.StatisticsResponse;
 import com.fivucsas.identity.application.port.input.GetStatisticsUseCase;
 import com.fivucsas.identity.domain.repository.TenantRepository;
-import com.fivucsas.identity.domain.repository.UserRepository;
+import com.fivucsas.identity.repository.UserRepository;
 import com.fivucsas.identity.entity.UserStatus;
 import com.fivucsas.identity.repository.AuditLogRepository;
 import lombok.RequiredArgsConstructor;
