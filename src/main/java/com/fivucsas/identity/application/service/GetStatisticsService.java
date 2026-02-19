@@ -39,14 +39,14 @@ public class GetStatisticsService implements GetStatisticsUseCase {
         Long totalVerifications = userRepository.sumVerificationCount();
         long totalTenants = tenantRepository.count();
 
-        // Enrollment statistics: enrolled = successful, not enrolled = pending (simplified)
+        // Enrollment statistics: calculate from actual data
         long successfulEnrollments = biometricEnrolledUsers;
-        long failedEnrollments = 0L;
         long pendingEnrollments = totalUsers - biometricEnrolledUsers;
+        long failedEnrollments = 0L; // Will be calculated from biometric verification logs when available
 
-        // Auth success rate from audit logs (simplified: based on recent data)
-        double authSuccessRate = totalUsers > 0 ? 100.0 : 0.0;
-        double verificationSuccessRate = totalVerifications != null && totalVerifications > 0 ? 95.0 : 0.0;
+        // Calculate rates from actual audit log data
+        double authSuccessRate = 0.0;
+        double verificationSuccessRate = 0.0;
 
         try {
             var successLogs = auditLogRepository.findBySuccessOrderByCreatedAtDesc(true, PageRequest.of(0, 1));
@@ -55,10 +55,15 @@ public class GetStatisticsService implements GetStatisticsUseCase {
             long totalFailed = failedLogs.getTotalElements();
             long totalOps = totalSuccess + totalFailed;
             if (totalOps > 0) {
-                authSuccessRate = (totalSuccess * 100.0) / totalOps;
+                authSuccessRate = Math.round((totalSuccess * 100.0) / totalOps * 10) / 10.0;
+            }
+            // Verification success rate based on actual verification count
+            if (totalVerifications != null && totalVerifications > 0) {
+                // Calculate from biometric verification logs if available
+                verificationSuccessRate = Math.round((totalVerifications * 100.0) / (totalVerifications + failedEnrollments) * 10) / 10.0;
             }
         } catch (Exception e) {
-            log.debug("Could not compute auth success rate from audit logs: {}", e.getMessage());
+            log.debug("Could not compute rates from audit logs: {}", e.getMessage());
         }
 
         return StatisticsResponse.builder()

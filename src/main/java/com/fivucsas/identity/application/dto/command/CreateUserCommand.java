@@ -27,4 +27,6 @@ public class CreateUserCommand {
     private String phoneNumber;
     private String address;
     private String idNumber;
+    private String role; // Optional - role name to assign after creation
+    private String tenantId; // Optional - tenant to assign user to
 }

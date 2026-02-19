@@ -31,6 +31,8 @@ public class UserDto {
     private Instant enrolledAt;
     private Instant lastVerifiedAt;
     private Integer verificationCount;
+    private Instant lastLoginAt;
+    private String lastLoginIp;
     private Instant createdAt;
     private Instant updatedAt;
 }

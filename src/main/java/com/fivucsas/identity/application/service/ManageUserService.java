@@ -9,11 +9,19 @@ import com.fivucsas.identity.application.dto.response.UserResponse;
 import com.fivucsas.identity.application.port.input.ManageUserUseCase;
 import com.fivucsas.identity.application.port.output.PasswordEncoderPort;
 import com.fivucsas.identity.domain.exception.DuplicateEmailException;
+import com.fivucsas.identity.domain.exception.TenantNotFoundException;
+import com.fivucsas.identity.domain.exception.RoleNotFoundException;
 import com.fivucsas.identity.domain.exception.UserNotFoundException;
 import com.fivucsas.identity.domain.model.user.*;
 import com.fivucsas.identity.repository.UserRepository;
 import com.fivucsas.identity.entity.User;
+import com.fivucsas.identity.entity.Tenant;
+import com.fivucsas.identity.entity.Role;
+import com.fivucsas.identity.entity.UserRole;
 import com.fivucsas.identity.entity.UserStatus;
+import com.fivucsas.identity.domain.repository.TenantRepository;
+import com.fivucsas.identity.repository.RoleRepository;
+import com.fivucsas.identity.repository.UserRoleRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -35,6 +43,9 @@ public class ManageUserService implements ManageUserUseCase {
 
     private final com.fivucsas.identity.repository.UserRepository userRepository;
     private final PasswordEncoderPort passwordEncoder;
+    private final TenantRepository tenantRepository;
+    private final RoleRepository roleRepository;
+    private final UserRoleRepository userRoleRepository;
 
     @Override
     @Transactional
@@ -50,6 +61,14 @@ public class ManageUserService implements ManageUserUseCase {
         FullName fullName = FullName.of(command.getFirstName(), command.getLastName());
         HashedPassword hashedPassword = HashedPassword.of(passwordEncoder.encode(command.getPassword()));
 
+        // Handle tenant assignment
+        Tenant tenant = null;
+        if (command.getTenantId() != null && !command.getTenantId().isEmpty()) {
+            UUID tenantUuid = UUID.fromString(command.getTenantId());
+            tenant = tenantRepository.findById(tenantUuid)
+                .orElseThrow(() -> new TenantNotFoundException(command.getTenantId()));
+        }
+
         User user = User.builder()
             .email(email.getValue())
             .passwordHash(hashedPassword.getValue())
@@ -58,6 +77,7 @@ public class ManageUserService implements ManageUserUseCase {
             .idNumber(command.getIdNumber())
             .phoneNumber(command.getPhoneNumber())
             .address(command.getAddress())
+            .tenant(tenant)
             .status(UserStatus.ACTIVE)
             .isBiometricEnrolled(false)
             .verificationCount(0)
@@ -65,6 +85,30 @@ public class ManageUserService implements ManageUserUseCase {
 
         user = userRepository.save(user);
         log.info("User created successfully: {}", user.getId());
+
+        // Handle role assignment
+        if (command.getRole() != null && !command.getRole().isEmpty()) {
+            try {
+                Role role = null;
+                if (tenant != null) {
+                    // Look for tenant-specific role first
+                    role = roleRepository.findByTenantIdAndNameAndDeletedAtIsNull(tenant.getId(), command.getRole())
+                        .orElse(null);
+                }
+                // Fall back to system role if no tenant-specific role found
+                if (role == null) {
+                    role = roleRepository.findByNameAndDeletedAtIsNull(command.getRole())
+                        .orElseThrow(() -> new RoleNotFoundException(command.getRole()));
+                }
+
+                // Create user-role assignment
+                UserRole userRole = UserRole.create(user, role, null, null);
+                userRoleRepository.save(userRole);
+                log.info("Role {} assigned to user {} during creation", command.getRole(), user.getId());
+            } catch (RoleNotFoundException e) {
+                log.warn("Role {} not found for user creation, skipping role assignment", command.getRole());
+            }
+        }
 
         return mapToUserResponse(user);
     }

@@ -90,6 +90,8 @@ public class UserController {
             .phoneNumber(request.getPhoneNumber())
             .address(request.getAddress())
             .idNumber(request.getIdNumber())
+            .role(request.getRole())
+            .tenantId(request.getTenantId())
             .build();
 
         UserResponse response = manageUserUseCase.createUser(command);
@@ -187,6 +189,8 @@ public class UserController {
             .enrolledAt(response.getEnrolledAt())
             .lastVerifiedAt(response.getLastVerifiedAt())
             .verificationCount(response.getVerificationCount())
+            .lastLoginAt(null) // TODO: Fetch from audit_logs table (action = 'LOGIN')
+            .lastLoginIp(null) // TODO: Fetch from audit_logs table (ip_address column)
             .createdAt(response.getCreatedAt())
             .updatedAt(response.getUpdatedAt())
             .build();
