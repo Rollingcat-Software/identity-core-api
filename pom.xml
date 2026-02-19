@@ -80,6 +80,13 @@
             <version>${totp.version}</version>
         </dependency>
 
+        <!-- WebAuthn / FIDO2 for Hardware Key authentication -->
+        <dependency>
+            <groupId>com.yubico</groupId>
+            <artifactId>webauthn-server-core</artifactId>
+            <version>2.5.2</version>
+        </dependency>
+
         <!-- Metrics and Monitoring -->
         <dependency>
             <groupId>io.micrometer</groupId>

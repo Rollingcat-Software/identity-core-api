@@ -96,4 +96,64 @@ public class BiometricServiceAdapter implements BiometricServicePort {
             );
         }
     }
+
+    @Override
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> verifyFingerprint(UUID userId, String fingerprintData) {
+        log.info("Calling biometric service to verify fingerprint for user: {}", userId);
+
+        try {
+            Map<String, String> body = Map.of(
+                "user_id", userId.toString(),
+                "fingerprint_data", fingerprintData
+            );
+
+            Map<String, Object> response = webClientBuilder.build()
+                .post()
+                .uri(biometricServiceUrl + "/fingerprint/verify")
+                .bodyValue(body)
+                .retrieve()
+                .bodyToMono(Map.class)
+                .block();
+
+            log.info("Fingerprint verification response received for user: {}", userId);
+            return response;
+        } catch (Exception e) {
+            log.error("Error calling biometric service for fingerprint verification: {}", e.getMessage());
+            return Map.of(
+                "success", false,
+                "message", "Fingerprint verification service unavailable: " + e.getMessage()
+            );
+        }
+    }
+
+    @Override
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> verifyVoice(UUID userId, String voiceData) {
+        log.info("Calling biometric service to verify voice for user: {}", userId);
+
+        try {
+            Map<String, String> body = Map.of(
+                "user_id", userId.toString(),
+                "voice_data", voiceData
+            );
+
+            Map<String, Object> response = webClientBuilder.build()
+                .post()
+                .uri(biometricServiceUrl + "/voice/verify")
+                .bodyValue(body)
+                .retrieve()
+                .bodyToMono(Map.class)
+                .block();
+
+            log.info("Voice verification response received for user: {}", userId);
+            return response;
+        } catch (Exception e) {
+            log.error("Error calling biometric service for voice verification: {}", e.getMessage());
+            return Map.of(
+                "success", false,
+                "message", "Voice verification service unavailable: " + e.getMessage()
+            );
+        }
+    }
 }
