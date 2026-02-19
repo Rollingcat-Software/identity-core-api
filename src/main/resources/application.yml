@@ -27,6 +27,15 @@ redis:
   event-bus:
     enabled: ${REDIS_EVENT_BUS_ENABLED:true}
 
+# Email / SMTP Configuration
+mail:
+  host: ${MAIL_HOST:smtp.gmail.com}
+  port: ${MAIL_PORT:587}
+  username: ${MAIL_USERNAME:}
+  password: ${MAIL_PASSWORD:}
+  from: ${MAIL_FROM:noreply@fivucsas.com}
+  enabled: ${MAIL_ENABLED:false}
+
 # JWT Configuration
 # CRITICAL SECURITY: Secret must come from JWT_SECRET environment variable (enforced by JwtSecretProvider)
 jwt:

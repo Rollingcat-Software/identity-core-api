@@ -23,6 +23,7 @@
         <springdoc.version>2.2.0</springdoc.version>
         <bucket4j.version>8.7.0</bucket4j.version>
         <flyway.version>10.4.1</flyway.version>
+        <totp.version>1.7.1</totp.version>
     </properties>
 
     <dependencies>
@@ -48,6 +49,12 @@
             <artifactId>spring-boot-starter-actuator</artifactId>
         </dependency>
 
+        <!-- Email (SMTP) -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-mail</artifactId>
+        </dependency>
+
         <!-- Redis for messaging/caching -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -58,6 +65,19 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-webflux</artifactId>
+        </dependency>
+
+        <!-- WebSocket for cross-device delegation -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-websocket</artifactId>
+        </dependency>
+
+        <!-- TOTP (Time-based One-Time Password) -->
+        <dependency>
+            <groupId>dev.samstevens.totp</groupId>
+            <artifactId>totp</artifactId>
+            <version>${totp.version}</version>
         </dependency>
 
         <!-- Metrics and Monitoring -->

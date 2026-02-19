@@ -136,6 +136,7 @@ class AuthControllerTest {
         AuthenticationResponse authResponse = AuthenticationResponse.of(
                 TEST_ACCESS_TOKEN,
                 TEST_REFRESH_TOKEN,
+                86400000L,
                 userResponse
         );
 
@@ -220,6 +221,7 @@ class AuthControllerTest {
         AuthenticationResponse authResponse = AuthenticationResponse.of(
                 TEST_ACCESS_TOKEN,
                 TEST_REFRESH_TOKEN,
+                86400000L,
                 userResponse
         );
 
@@ -291,6 +293,7 @@ class AuthControllerTest {
         AuthenticationResponse authResponse = AuthenticationResponse.of(
                 "new-access-token",
                 "new-refresh-token",
+                86400000L,
                 UserResponse.builder()
                         .id("123")
                         .email(TEST_EMAIL)

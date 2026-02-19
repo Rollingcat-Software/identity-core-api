@@ -20,6 +20,7 @@ public class TenantResponse {
     private final String contactPhone;
     private final String status;
     private final int maxUsers;
+    private final int currentUsers;
     private final boolean biometricEnabled;
     private final int sessionTimeoutMinutes;
     private final int refreshTokenValidityDays;

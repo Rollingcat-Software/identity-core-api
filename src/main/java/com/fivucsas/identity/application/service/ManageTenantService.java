@@ -30,6 +30,7 @@ import java.util.stream.Collectors;
 public class ManageTenantService implements ManageTenantUseCase {
 
     private final TenantRepository tenantRepository;
+    private final com.fivucsas.identity.repository.UserRepository userRepository;
 
     @Override
     @Transactional
@@ -179,6 +180,7 @@ public class ManageTenantService implements ManageTenantUseCase {
     }
 
     private TenantResponse mapToResponse(Tenant tenant) {
+        long currentUsers = userRepository.countByTenantId(tenant.getId());
         return TenantResponse.builder()
             .id(tenant.getId().toString())
             .name(tenant.getName())
@@ -188,6 +190,7 @@ public class ManageTenantService implements ManageTenantUseCase {
             .contactPhone(tenant.getContactPhone())
             .status(tenant.getStatus().name())
             .maxUsers(tenant.getMaxUsers())
+            .currentUsers((int) currentUsers)
             .biometricEnabled(tenant.isBiometricEnabled())
             .sessionTimeoutMinutes(tenant.getSessionTimeoutMinutes())
             .refreshTokenValidityDays(tenant.getRefreshTokenValidityDays())
