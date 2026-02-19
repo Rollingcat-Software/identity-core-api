@@ -1,6 +1,9 @@
 package com.fivucsas.identity.application.service;
 
 import com.fivucsas.identity.application.dto.command.LogoutCommand;
+import com.fivucsas.identity.application.port.output.AuditLogPort;
+import com.fivucsas.identity.entity.RefreshToken;
+import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.service.RefreshTokenService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -10,6 +13,8 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.util.UUID;
+
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -18,6 +23,9 @@ class LogoutUserServiceTest {
 
     @Mock
     private RefreshTokenService refreshTokenService;
+
+    @Mock
+    private AuditLogPort auditLogPort;
 
     @InjectMocks
     private LogoutUserService logoutUserService;
@@ -34,13 +42,23 @@ class LogoutUserServiceTest {
                 .refreshToken("valid-refresh-token")
                 .build();
 
+            User mockUser = mock(User.class);
+            when(mockUser.getId()).thenReturn(UUID.randomUUID());
+            when(mockUser.getEmail()).thenReturn("test@example.com");
+
+            RefreshToken mockToken = mock(RefreshToken.class);
+            when(mockToken.getUser()).thenReturn(mockUser);
+
+            when(refreshTokenService.findByToken("valid-refresh-token")).thenReturn(mockToken);
             doNothing().when(refreshTokenService).revokeToken("valid-refresh-token");
 
             // When
             logoutUserService.execute(command);
 
             // Then
+            verify(refreshTokenService).findByToken("valid-refresh-token");
             verify(refreshTokenService).revokeToken("valid-refresh-token");
+            verify(auditLogPort).logUserLoggedOut(anyString(), eq("test@example.com"));
         }
     }
 
@@ -56,13 +74,13 @@ class LogoutUserServiceTest {
                 .refreshToken("invalid-refresh-token")
                 .build();
 
-            doThrow(new RuntimeException("Token not found"))
-                .when(refreshTokenService).revokeToken("invalid-refresh-token");
+            when(refreshTokenService.findByToken("invalid-refresh-token"))
+                .thenThrow(new RuntimeException("Token not found"));
 
-            // When/Then - Should not throw
+            // When/Then - Should not throw (caught by try/catch in service)
             logoutUserService.execute(command);
 
-            verify(refreshTokenService).revokeToken("invalid-refresh-token");
+            verify(refreshTokenService).findByToken("invalid-refresh-token");
         }
 
         @Test
@@ -73,13 +91,13 @@ class LogoutUserServiceTest {
                 .refreshToken("revoked-refresh-token")
                 .build();
 
-            doThrow(new RuntimeException("Token already revoked"))
-                .when(refreshTokenService).revokeToken("revoked-refresh-token");
+            when(refreshTokenService.findByToken("revoked-refresh-token"))
+                .thenThrow(new RuntimeException("Token already revoked"));
 
             // When/Then - Should not throw
             logoutUserService.execute(command);
 
-            verify(refreshTokenService).revokeToken("revoked-refresh-token");
+            verify(refreshTokenService).findByToken("revoked-refresh-token");
         }
 
         @Test
@@ -90,13 +108,13 @@ class LogoutUserServiceTest {
                 .refreshToken("expired-refresh-token")
                 .build();
 
-            doThrow(new RuntimeException("Token expired"))
-                .when(refreshTokenService).revokeToken("expired-refresh-token");
+            when(refreshTokenService.findByToken("expired-refresh-token"))
+                .thenThrow(new RuntimeException("Token expired"));
 
             // When/Then - Should not throw
             logoutUserService.execute(command);
 
-            verify(refreshTokenService).revokeToken("expired-refresh-token");
+            verify(refreshTokenService).findByToken("expired-refresh-token");
         }
     }
 
@@ -112,13 +130,13 @@ class LogoutUserServiceTest {
                 .refreshToken("")
                 .build();
 
-            doThrow(new RuntimeException("Empty token"))
-                .when(refreshTokenService).revokeToken("");
+            when(refreshTokenService.findByToken(""))
+                .thenThrow(new RuntimeException("Empty token"));
 
             // When/Then - Should not throw (idempotent)
             logoutUserService.execute(command);
 
-            verify(refreshTokenService).revokeToken("");
+            verify(refreshTokenService).findByToken("");
         }
     }
 }
