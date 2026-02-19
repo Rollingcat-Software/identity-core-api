@@ -98,6 +98,22 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.FORBIDDEN).body(error);
     }
 
+    @ExceptionHandler(BiometricStepUpRequiredException.class)
+    public ResponseEntity<ErrorResponse> handleStepUpRequired(
+            BiometricStepUpRequiredException ex,
+            HttpServletRequest request) {
+        log.warn("Biometric step-up required: {}", ex.getMessage());
+
+        ErrorResponse error = ErrorResponse.of(
+                HttpStatus.FORBIDDEN.value(),
+                ex.getErrorCode(),
+                ex.getMessage(),
+                request.getRequestURI()
+        );
+
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(error);
+    }
+
     @ExceptionHandler({BiometricEnrollmentException.class, BiometricVerificationException.class})
     public ResponseEntity<ErrorResponse> handleBiometricException(
             DomainException ex,
