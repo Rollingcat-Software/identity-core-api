@@ -11,8 +11,10 @@ import org.springframework.context.annotation.Primary;
 import org.springframework.stereotype.Service;
 
 import javax.crypto.SecretKey;
+import java.util.Collection;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
 
@@ -46,6 +48,28 @@ public class JwtService implements TokenGenerationPort {
 
     public String generateToken(Map<String, Object> extraClaims, String email) {
         return buildToken(extraClaims, email, jwtExpiration);
+    }
+
+    public String generateStepUpToken(String email, String userId, long expirationMillis) {
+        Map<String, Object> claims = new HashMap<>();
+        claims.put("amr", List.of("biometric"));
+        claims.put("uid", userId);
+        claims.put("type", "step_up");
+        return buildToken(claims, email, expirationMillis);
+    }
+
+    public String extractUserId(String token) {
+        return extractClaim(token, claims -> claims.get("uid", String.class));
+    }
+
+    public boolean isStepUpTokenValid(String token, String email) {
+        final Claims claims = extractAllClaims(token);
+        final String tokenEmail = claims.getSubject();
+        final String type = claims.get("type", String.class);
+        return email.equals(tokenEmail)
+                && "step_up".equals(type)
+                && hasBiometricAmr(claims)
+                && !claims.getExpiration().before(new Date());
     }
 
     private String buildToken(
@@ -91,6 +115,17 @@ public class JwtService implements TokenGenerationPort {
                 .build()
                 .parseSignedClaims(token)
                 .getPayload();
+    }
+
+    private boolean hasBiometricAmr(Claims claims) {
+        Object amr = claims.get("amr");
+        if (amr instanceof Collection<?> collection) {
+            return collection.stream().anyMatch(value -> "biometric".equals(String.valueOf(value)));
+        }
+        if (amr instanceof String amrString) {
+            return "biometric".equals(amrString);
+        }
+        return false;
     }
 
     private SecretKey getSignInKey() {
