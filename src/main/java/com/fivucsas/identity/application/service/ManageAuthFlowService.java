@@ -11,16 +11,24 @@ import com.fivucsas.identity.entity.*;
 import com.fivucsas.identity.repository.*;
 import jakarta.persistence.EntityNotFoundException;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 @Transactional(readOnly = true)
 public class ManageAuthFlowService implements ManageAuthFlowUseCase {
+
+    private static final Set<OperationType> PASSWORD_MANDATORY_OPERATIONS = Set.of(
+            OperationType.APP_LOGIN,
+            OperationType.API_ACCESS
+    );
 
     private final AuthFlowRepository authFlowRepository;
     private final AuthFlowStepRepository authFlowStepRepository;
@@ -60,6 +68,7 @@ public class ManageAuthFlowService implements ManageAuthFlowUseCase {
         AuthFlow savedFlow = authFlowRepository.save(flow);
 
         if (command.steps() != null) {
+            validatePasswordConstraint(command.operationType(), command.steps());
             for (CreateAuthFlowCommand.FlowStepSpec stepSpec : command.steps()) {
                 AuthMethodType methodType = AuthMethodType.valueOf(stepSpec.authMethodType());
                 AuthMethod method = authMethodRepository.findByType(methodType)
@@ -118,5 +127,23 @@ public class ManageAuthFlowService implements ManageAuthFlowUseCase {
         AuthFlow flow = authFlowRepository.findByIdAndTenantId(flowId, tenantId)
                 .orElseThrow(() -> new EntityNotFoundException("Auth flow not found: " + flowId));
         authFlowRepository.delete(flow);
+    }
+
+    private void validatePasswordConstraint(OperationType operationType,
+                                             List<CreateAuthFlowCommand.FlowStepSpec> steps) {
+        if (!PASSWORD_MANDATORY_OPERATIONS.contains(operationType)) {
+            return;
+        }
+
+        boolean hasPasswordFirst = steps.stream()
+                .filter(s -> s.stepOrder() == 1)
+                .anyMatch(s -> "PASSWORD".equals(s.authMethodType()));
+
+        if (!hasPasswordFirst) {
+            throw new IllegalArgumentException(
+                    operationType + " flows must have PASSWORD as the first step");
+        }
+
+        log.debug("Password constraint validated for {} flow", operationType);
     }
 }
