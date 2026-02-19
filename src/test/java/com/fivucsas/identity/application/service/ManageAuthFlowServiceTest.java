@@ -17,6 +17,8 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -62,11 +64,22 @@ class ManageAuthFlowServiceTest {
         UUID tenantId = UUID.randomUUID();
         UUID flowId = UUID.randomUUID();
         Tenant tenant = mock(Tenant.class);
+        when(tenant.getId()).thenReturn(tenantId);
         AuthFlow flow = mock(AuthFlow.class);
         AuthMethod passwordMethod = mock(AuthMethod.class);
 
         when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
         when(flow.getId()).thenReturn(flowId);
+        when(flow.getTenant()).thenReturn(tenant);
+        when(flow.getName()).thenReturn("Login Flow");
+        when(flow.getDescription()).thenReturn("desc");
+        when(flow.getOperationType()).thenReturn(OperationType.APP_LOGIN);
+        when(flow.isDefault()).thenReturn(false);
+        when(flow.isActive()).thenReturn(true);
+        when(flow.getStepCount()).thenReturn(0);
+        when(flow.getSteps()).thenReturn(new ArrayList<>());
+        when(flow.getCreatedAt()).thenReturn(Instant.now());
+        when(flow.getUpdatedAt()).thenReturn(Instant.now());
         when(authFlowRepository.save(any())).thenReturn(flow);
         when(authFlowRepository.findById(flowId)).thenReturn(Optional.of(flow));
         when(authMethodRepository.findByType(AuthMethodType.PASSWORD)).thenReturn(Optional.of(passwordMethod));
@@ -88,11 +101,22 @@ class ManageAuthFlowServiceTest {
         UUID tenantId = UUID.randomUUID();
         UUID flowId = UUID.randomUUID();
         Tenant tenant = mock(Tenant.class);
+        when(tenant.getId()).thenReturn(tenantId);
         AuthFlow flow = mock(AuthFlow.class);
         AuthMethod faceMethod = mock(AuthMethod.class);
 
         when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
         when(flow.getId()).thenReturn(flowId);
+        when(flow.getTenant()).thenReturn(tenant);
+        when(flow.getName()).thenReturn("Door Flow");
+        when(flow.getDescription()).thenReturn("desc");
+        when(flow.getOperationType()).thenReturn(OperationType.DOOR_ACCESS);
+        when(flow.isDefault()).thenReturn(false);
+        when(flow.isActive()).thenReturn(true);
+        when(flow.getStepCount()).thenReturn(0);
+        when(flow.getSteps()).thenReturn(new ArrayList<>());
+        when(flow.getCreatedAt()).thenReturn(Instant.now());
+        when(flow.getUpdatedAt()).thenReturn(Instant.now());
         when(authFlowRepository.save(any())).thenReturn(flow);
         when(authFlowRepository.findById(flowId)).thenReturn(Optional.of(flow));
         when(authMethodRepository.findByType(AuthMethodType.FACE)).thenReturn(Optional.of(faceMethod));

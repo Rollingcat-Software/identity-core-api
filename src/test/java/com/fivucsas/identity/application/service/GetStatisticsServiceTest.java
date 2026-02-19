@@ -1,8 +1,11 @@
 package com.fivucsas.identity.application.service;
 
 import com.fivucsas.identity.application.dto.response.StatisticsResponse;
+import com.fivucsas.identity.domain.repository.TenantRepository;
+import com.fivucsas.identity.repository.AuditLogRepository;
 import com.fivucsas.identity.repository.UserRepository;
 import com.fivucsas.identity.entity.UserStatus;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -10,8 +13,11 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.domain.Page;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -21,8 +27,25 @@ class GetStatisticsServiceTest {
     @Mock
     private UserRepository userRepository;
 
+    @Mock
+    private TenantRepository tenantRepository;
+
+    @Mock
+    private AuditLogRepository auditLogRepository;
+
     @InjectMocks
     private GetStatisticsService getStatisticsService;
+
+    @BeforeEach
+    void setUp() {
+        // Mock tenantRepository.count() - service calls this outside try/catch
+        lenient().when(tenantRepository.count()).thenReturn(0L);
+        // Mock auditLogRepository - service calls these in try/catch but let's provide proper mocks
+        @SuppressWarnings("unchecked")
+        Page<com.fivucsas.identity.entity.AuditLog> emptyPage = mock(Page.class);
+        lenient().when(emptyPage.getTotalElements()).thenReturn(0L);
+        lenient().when(auditLogRepository.findBySuccessOrderByCreatedAtDesc(any(), any())).thenReturn(emptyPage);
+    }
 
     @Nested
     @DisplayName("Get Statistics")

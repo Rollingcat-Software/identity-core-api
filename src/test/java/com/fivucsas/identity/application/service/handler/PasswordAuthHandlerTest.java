@@ -19,6 +19,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.*;
+import static org.mockito.Mockito.lenient;
 
 @ExtendWith(MockitoExtension.class)
 class PasswordAuthHandlerTest {
@@ -36,9 +37,9 @@ class PasswordAuthHandlerTest {
     @BeforeEach
     void setUp() {
         testUser = mock(User.class);
-        when(testUser.getId()).thenReturn(UUID.randomUUID());
-        when(testUser.getEmail()).thenReturn("user@test.com");
-        when(testUser.isActive()).thenReturn(true);
+        lenient().when(testUser.getId()).thenReturn(UUID.randomUUID());
+        lenient().when(testUser.getEmail()).thenReturn("user@test.com");
+        lenient().when(testUser.isActive()).thenReturn(true);
     }
 
     @Test
