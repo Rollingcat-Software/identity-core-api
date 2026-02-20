@@ -61,6 +61,13 @@ public class ManageDeviceService implements ManageDeviceUseCase {
     }
 
     @Override
+    public List<DeviceResponse> listTenantDevices(UUID tenantId) {
+        return userDeviceRepository.findAllByTenantId(tenantId).stream()
+                .map(DeviceResponse::from)
+                .toList();
+    }
+
+    @Override
     @Transactional
     public DeviceResponse updateDevice(UUID deviceId, String name, String pushToken) {
         UserDevice device = userDeviceRepository.findById(deviceId)

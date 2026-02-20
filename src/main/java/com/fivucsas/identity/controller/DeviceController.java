@@ -21,8 +21,16 @@ public class DeviceController {
 
     @GetMapping
     @PreAuthorize("hasPermission(null, 'Device', 'device:read')")
-    public ResponseEntity<List<DeviceResponse>> getUserDevices(@RequestParam UUID userId) {
-        return ResponseEntity.ok(manageDeviceUseCase.listUserDevices(userId));
+    public ResponseEntity<List<DeviceResponse>> getDevices(
+            @RequestParam(required = false) UUID userId,
+            @RequestParam(required = false) UUID tenantId) {
+        if (userId != null) {
+            return ResponseEntity.ok(manageDeviceUseCase.listUserDevices(userId));
+        }
+        if (tenantId != null) {
+            return ResponseEntity.ok(manageDeviceUseCase.listTenantDevices(tenantId));
+        }
+        return ResponseEntity.badRequest().build();
     }
 
     @PostMapping

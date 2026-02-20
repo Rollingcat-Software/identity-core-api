@@ -11,6 +11,7 @@ import java.util.UUID;
 @Repository
 public interface UserDeviceRepository extends JpaRepository<UserDevice, UUID> {
     List<UserDevice> findAllByUserId(UUID userId);
+    List<UserDevice> findAllByTenantId(UUID tenantId);
     Optional<UserDevice> findByUserIdAndDeviceFingerprint(UUID userId, String fingerprint);
     List<UserDevice> findAllByUserIdAndIsTrustedTrue(UUID userId);
 }
