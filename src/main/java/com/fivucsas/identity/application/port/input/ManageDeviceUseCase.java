@@ -9,6 +9,7 @@ import java.util.UUID;
 public interface ManageDeviceUseCase {
     DeviceResponse registerDevice(UUID userId, UUID tenantId, RegisterDeviceCommand command);
     List<DeviceResponse> listUserDevices(UUID userId);
+    List<DeviceResponse> listTenantDevices(UUID tenantId);
     DeviceResponse updateDevice(UUID deviceId, String name, String pushToken);
     void removeDevice(UUID deviceId);
 }
