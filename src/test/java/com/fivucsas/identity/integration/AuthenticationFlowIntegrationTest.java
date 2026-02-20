@@ -17,6 +17,11 @@ import org.junit.jupiter.api.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
+import org.testcontainers.containers.PostgreSQLContainer;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Optional;
@@ -24,23 +29,46 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * End-to-End Integration Test for Authentication Flow
+ * Integration tests for the authentication flow using TestContainers with real PostgreSQL.
  *
- * This test verifies the complete authentication workflow:
- * 1. Register a new user
- * 2. Login with credentials
- * 3. Receive JWT access token
- * 4. Access protected endpoint using token
+ * Replaces the previously @Disabled H2-based test. PostgreSQL is required because the
+ * auth entities use PostgreSQL-specific column types (text[], jsonb) that H2 cannot
+ * handle, and Flyway migrations must run against the real dialect.
  *
- * Uses H2 in-memory database for testing.
+ * Test scenarios:
+ * 1. Register new user — verifies persistence and password hashing
+ * 2. Login with valid credentials — verifies JWT issuance
+ * 3. Access protected endpoint via JWT — verifies token-to-user resolution
+ * 4. Complete E2E flow — register → login → token → protected resource → refresh token
+ * 5. Multiple login sessions — verifies independent refresh tokens per device
  */
 @SpringBootTest
-@ActiveProfiles("test")
+@Testcontainers
+@ActiveProfiles("integration")
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
-@DisplayName("Authentication Flow Integration Tests")
-@Disabled("H2 does not support PostgreSQL-specific types (text[], jsonb) used by auth entities. " +
-          "Requires Testcontainers with PostgreSQL or a real database.")
+@DisplayName("Authentication Flow Integration Tests (PostgreSQL via Testcontainers)")
 class AuthenticationFlowIntegrationTest {
+
+    // Shared container across all tests in this class (static = reused, not recreated per test)
+    @Container
+    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine")
+            .withDatabaseName("fivucsas_test")
+            .withUsername("test")
+            .withPassword("test");
+
+    /**
+     * Override datasource URL/credentials with the dynamically assigned container ports.
+     * This is required because Testcontainers maps the container's 5432 to a random host port.
+     */
+    @DynamicPropertySource
+    static void configureProperties(DynamicPropertyRegistry registry) {
+        registry.add("spring.datasource.url", postgres::getJdbcUrl);
+        registry.add("spring.datasource.username", postgres::getUsername);
+        registry.add("spring.datasource.password", postgres::getPassword);
+        // Switch driver back to the standard PostgreSQL driver when using DynamicPropertySource
+        // (the tc: JDBC URL in application-integration.yml is only used if this source is absent)
+        registry.add("spring.datasource.driver-class-name", () -> "org.postgresql.Driver");
+    }
 
     @Autowired
     private RegisterUserService registerUserService;
@@ -65,25 +93,33 @@ class AuthenticationFlowIntegrationTest {
     private static final String TEST_FIRST_NAME = "Integration";
     private static final String TEST_LAST_NAME = "Test";
     private static final String TEST_IP_ADDRESS = "127.0.0.1";
-    private static final String TEST_USER_AGENT = "Integration-Test-Agent";
+    private static final String TEST_USER_AGENT = "Integration-Test-Agent/1.0";
 
+    /**
+     * Clean up the test user before each test so tests are independent and order-safe.
+     * Using a programmatic delete rather than @Sql so the same logic works regardless
+     * of whether data was left over from a previous failed run.
+     */
     @BeforeEach
     @Transactional
     void setUp() {
-        // Clean up test user if exists from previous run
         userRepository.findByEmail(TEST_EMAIL).ifPresent(user -> {
             refreshTokenService.revokeAllUserTokens(user);
             userRepository.delete(user);
         });
     }
 
+    // -------------------------------------------------------------------------
+    // Test 1 — Register
+    // -------------------------------------------------------------------------
+
     @Test
     @Order(1)
-    @DisplayName("Step 1: Register new user successfully")
+    @DisplayName("register_WhenValidData_ShouldPersistUserAndReturnTokens")
     @Transactional
-    void testStep1_RegisterUser() {
-        // Given
-        RegisterUserCommand registerCommand = RegisterUserCommand.builder()
+    void register_WhenValidData_ShouldPersistUserAndReturnTokens() {
+        // Arrange
+        RegisterUserCommand command = RegisterUserCommand.builder()
                 .email(TEST_EMAIL)
                 .password(TEST_PASSWORD)
                 .firstName(TEST_FIRST_NAME)
@@ -92,43 +128,47 @@ class AuthenticationFlowIntegrationTest {
                 .userAgent(TEST_USER_AGENT)
                 .build();
 
-        // When
-        AuthenticationResponse authResponse = registerUserService.execute(registerCommand);
+        // Act
+        AuthenticationResponse response = registerUserService.execute(command);
 
-        // Then
-        assertThat(authResponse).isNotNull();
-        assertThat(authResponse.getUser()).isNotNull();
-        assertThat(authResponse.getUser().getEmail()).isEqualTo(TEST_EMAIL);
-        assertThat(authResponse.getUser().getFirstName()).isEqualTo(TEST_FIRST_NAME);
-        assertThat(authResponse.getUser().getLastName()).isEqualTo(TEST_LAST_NAME);
-        assertThat(authResponse.getUser().getStatus()).isEqualTo("ACTIVE");
-        assertThat(authResponse.getUser().isBiometricEnrolled()).isFalse();
-        assertThat(authResponse.getAccessToken()).isNotNull();
-        assertThat(authResponse.getRefreshToken()).isNotNull();
+        // Assert — response shape
+        assertThat(response).isNotNull();
+        assertThat(response.getAccessToken()).isNotNull().isNotEmpty();
+        assertThat(response.getRefreshToken()).isNotNull().isNotEmpty();
+        assertThat(response.getUser()).isNotNull();
+        assertThat(response.getUser().getEmail()).isEqualTo(TEST_EMAIL);
+        assertThat(response.getUser().getFirstName()).isEqualTo(TEST_FIRST_NAME);
+        assertThat(response.getUser().getLastName()).isEqualTo(TEST_LAST_NAME);
+        assertThat(response.getUser().getStatus()).isEqualTo("ACTIVE");
+        assertThat(response.getUser().isBiometricEnrolled()).isFalse();
 
-        // Verify user exists in database
+        // Assert — database state
         Optional<User> savedUser = userRepository.findByEmail(TEST_EMAIL);
         assertThat(savedUser).isPresent();
-        assertThat(savedUser.get().getPasswordHash()).isNotEqualTo(TEST_PASSWORD); // Password should be hashed
+        // Password must be BCrypt-hashed, not stored in plain text
+        assertThat(savedUser.get().getPasswordHash()).isNotEqualTo(TEST_PASSWORD);
+        assertThat(savedUser.get().getPasswordHash()).startsWith("$2");
     }
+
+    // -------------------------------------------------------------------------
+    // Test 2 — Login
+    // -------------------------------------------------------------------------
 
     @Test
     @Order(2)
-    @DisplayName("Step 2: Login with valid credentials and receive JWT token")
+    @DisplayName("login_WhenValidCredentials_ShouldReturnJwtTokens")
     @Transactional
-    void testStep2_LoginAndReceiveToken() {
-        // Given - First register the user
-        RegisterUserCommand registerCommand = RegisterUserCommand.builder()
+    void login_WhenValidCredentials_ShouldReturnJwtTokens() {
+        // Arrange — register the user first so the login has someone to authenticate
+        registerUserService.execute(RegisterUserCommand.builder()
                 .email(TEST_EMAIL)
                 .password(TEST_PASSWORD)
                 .firstName(TEST_FIRST_NAME)
                 .lastName(TEST_LAST_NAME)
                 .ipAddress(TEST_IP_ADDRESS)
                 .userAgent(TEST_USER_AGENT)
-                .build();
-        registerUserService.execute(registerCommand);
+                .build());
 
-        // When - Login with credentials
         AuthenticateUserCommand loginCommand = AuthenticateUserCommand.builder()
                 .email(TEST_EMAIL)
                 .password(TEST_PASSWORD)
@@ -136,168 +176,182 @@ class AuthenticationFlowIntegrationTest {
                 .userAgent(TEST_USER_AGENT)
                 .build();
 
-        AuthenticationResponse authResponse = authenticateUserService.execute(loginCommand);
+        // Act
+        AuthenticationResponse response = authenticateUserService.execute(loginCommand);
 
-        // Then
-        assertThat(authResponse).isNotNull();
-        assertThat(authResponse.getAccessToken()).isNotNull().isNotEmpty();
-        assertThat(authResponse.getRefreshToken()).isNotNull().isNotEmpty();
-        assertThat(authResponse.getUser()).isNotNull();
-        assertThat(authResponse.getUser().getEmail()).isEqualTo(TEST_EMAIL);
+        // Assert — tokens present and distinct
+        assertThat(response).isNotNull();
+        assertThat(response.getAccessToken()).isNotNull().isNotEmpty();
+        assertThat(response.getRefreshToken()).isNotNull().isNotEmpty();
+        assertThat(response.getAccessToken()).isNotEqualTo(response.getRefreshToken());
 
-        // Verify tokens are different
-        assertThat(authResponse.getAccessToken()).isNotEqualTo(authResponse.getRefreshToken());
+        // Assert — user info returned correctly
+        assertThat(response.getUser()).isNotNull();
+        assertThat(response.getUser().getEmail()).isEqualTo(TEST_EMAIL);
 
-        // Verify access token is valid JWT
-        String email = tokenGenerator.extractEmail(authResponse.getAccessToken());
-        assertThat(email).isEqualTo(TEST_EMAIL);
+        // Assert — access token contains the expected subject (email)
+        String emailFromToken = tokenGenerator.extractEmail(response.getAccessToken());
+        assertThat(emailFromToken).isEqualTo(TEST_EMAIL);
     }
+
+    // -------------------------------------------------------------------------
+    // Test 3 — Access protected endpoint via JWT
+    // -------------------------------------------------------------------------
 
     @Test
     @Order(3)
-    @DisplayName("Step 3: Access protected endpoint using JWT token")
+    @DisplayName("getCurrentUser_WhenTokenValid_ShouldReturnUserProfile")
     @Transactional
-    void testStep3_AccessProtectedEndpoint() {
-        // Given - Register and login to get token
-        RegisterUserCommand registerCommand = RegisterUserCommand.builder()
+    void getCurrentUser_WhenTokenValid_ShouldReturnUserProfile() {
+        // Arrange
+        registerUserService.execute(RegisterUserCommand.builder()
                 .email(TEST_EMAIL)
                 .password(TEST_PASSWORD)
                 .firstName(TEST_FIRST_NAME)
                 .lastName(TEST_LAST_NAME)
                 .ipAddress(TEST_IP_ADDRESS)
                 .userAgent(TEST_USER_AGENT)
-                .build();
-        registerUserService.execute(registerCommand);
+                .build());
 
-        AuthenticateUserCommand loginCommand = AuthenticateUserCommand.builder()
-                .email(TEST_EMAIL)
-                .password(TEST_PASSWORD)
-                .ipAddress(TEST_IP_ADDRESS)
-                .userAgent(TEST_USER_AGENT)
-                .build();
+        AuthenticationResponse loginResponse = authenticateUserService.execute(
+                AuthenticateUserCommand.builder()
+                        .email(TEST_EMAIL)
+                        .password(TEST_PASSWORD)
+                        .ipAddress(TEST_IP_ADDRESS)
+                        .userAgent(TEST_USER_AGENT)
+                        .build());
 
-        AuthenticationResponse authResponse = authenticateUserService.execute(loginCommand);
-        String accessToken = authResponse.getAccessToken();
+        // Act — simulate what the JWT filter does: extract email, then call use case
+        String emailFromToken = tokenGenerator.extractEmail(loginResponse.getAccessToken());
+        UserResponse currentUser = getCurrentUserService.execute(
+                GetUserByEmailQuery.builder().email(emailFromToken).build());
 
-        // When - Access protected endpoint (getCurrentUser) using token
-        String emailFromToken = tokenGenerator.extractEmail(accessToken);
-        GetUserByEmailQuery query = GetUserByEmailQuery.builder().email(emailFromToken).build();
-        UserResponse currentUser = getCurrentUserService.execute(query);
-
-        // Then
+        // Assert
         assertThat(currentUser).isNotNull();
         assertThat(currentUser.getEmail()).isEqualTo(TEST_EMAIL);
         assertThat(currentUser.getFirstName()).isEqualTo(TEST_FIRST_NAME);
         assertThat(currentUser.getLastName()).isEqualTo(TEST_LAST_NAME);
     }
 
+    // -------------------------------------------------------------------------
+    // Test 4 — Complete E2E flow
+    // -------------------------------------------------------------------------
+
     @Test
     @Order(4)
-    @DisplayName("Complete E2E Flow: Register → Login → Access Protected Resource")
+    @DisplayName("completeAuthFlow_RegisterLoginAccessProtectedResource_ShouldSucceed")
     @Transactional
-    void testCompleteAuthenticationFlow() {
-        // Step 1: Register User
-        RegisterUserCommand registerCommand = RegisterUserCommand.builder()
-                .email(TEST_EMAIL)
-                .password(TEST_PASSWORD)
-                .firstName(TEST_FIRST_NAME)
-                .lastName(TEST_LAST_NAME)
-                .ipAddress(TEST_IP_ADDRESS)
-                .userAgent(TEST_USER_AGENT)
-                .build();
+    void completeAuthFlow_RegisterLoginAccessProtectedResource_ShouldSucceed() {
+        // Step 1: Register
+        AuthenticationResponse registrationResponse = registerUserService.execute(
+                RegisterUserCommand.builder()
+                        .email(TEST_EMAIL)
+                        .password(TEST_PASSWORD)
+                        .firstName(TEST_FIRST_NAME)
+                        .lastName(TEST_LAST_NAME)
+                        .ipAddress(TEST_IP_ADDRESS)
+                        .userAgent(TEST_USER_AGENT)
+                        .build());
 
-        AuthenticationResponse registrationResponse = registerUserService.execute(registerCommand);
-        assertThat(registrationResponse).isNotNull();
-        assertThat(registrationResponse.getUser()).isNotNull();
         assertThat(registrationResponse.getUser().getEmail()).isEqualTo(TEST_EMAIL);
 
-        // Step 2: Login and Get JWT
-        AuthenticateUserCommand loginCommand = AuthenticateUserCommand.builder()
-                .email(TEST_EMAIL)
-                .password(TEST_PASSWORD)
-                .ipAddress(TEST_IP_ADDRESS)
-                .userAgent(TEST_USER_AGENT)
-                .build();
-
-        AuthenticationResponse authResponse = authenticateUserService.execute(loginCommand);
-        assertThat(authResponse).isNotNull();
-        assertThat(authResponse.getAccessToken()).isNotNull();
+        // Step 2: Login
+        AuthenticationResponse authResponse = authenticateUserService.execute(
+                AuthenticateUserCommand.builder()
+                        .email(TEST_EMAIL)
+                        .password(TEST_PASSWORD)
+                        .ipAddress(TEST_IP_ADDRESS)
+                        .userAgent(TEST_USER_AGENT)
+                        .build());
 
         String accessToken = authResponse.getAccessToken();
         String refreshToken = authResponse.getRefreshToken();
 
-        // Step 3: Verify Access Token
+        assertThat(accessToken).isNotNull();
+        assertThat(refreshToken).isNotNull();
+
+        // Step 3: Verify token subject
         String emailFromToken = tokenGenerator.extractEmail(accessToken);
         assertThat(emailFromToken).isEqualTo(TEST_EMAIL);
 
-        // Step 4: Access Protected Endpoint
-        GetUserByEmailQuery query = GetUserByEmailQuery.builder().email(emailFromToken).build();
-        UserResponse currentUser = getCurrentUserService.execute(query);
+        // Step 4: Access protected resource (getCurrentUser via application service)
+        UserResponse currentUser = getCurrentUserService.execute(
+                GetUserByEmailQuery.builder().email(emailFromToken).build());
+
         assertThat(currentUser).isNotNull();
         assertThat(currentUser.getEmail()).isEqualTo(TEST_EMAIL);
         assertThat(currentUser.getFirstName()).isEqualTo(TEST_FIRST_NAME);
-
-        // Step 5: Verify Refresh Token Exists
-        RefreshToken foundToken = refreshTokenService.findByToken(refreshToken);
-        assertThat(foundToken).isNotNull();
-        assertThat(foundToken.getToken()).isEqualTo(refreshToken);
-
-        // Verify complete user profile
         assertThat(currentUser.getStatus()).isEqualTo("ACTIVE");
         assertThat(currentUser.isBiometricEnrolled()).isFalse();
         assertThat(currentUser.getVerificationCount()).isEqualTo(0);
+
+        // Step 5: Verify refresh token is persisted and valid
+        RefreshToken foundToken = refreshTokenService.findByToken(refreshToken);
+        assertThat(foundToken).isNotNull();
+        assertThat(foundToken.getToken()).isEqualTo(refreshToken);
+        assertThat(foundToken.isRevoked()).isFalse();
+        assertThat(foundToken.isExpired()).isFalse();
     }
+
+    // -------------------------------------------------------------------------
+    // Test 5 — Multiple sessions
+    // -------------------------------------------------------------------------
 
     @Test
     @Order(5)
-    @DisplayName("Multiple login sessions should create multiple refresh tokens")
+    @DisplayName("login_FromMultipleDevices_ShouldCreateIndependentRefreshTokens")
     @Transactional
-    void testMultipleLoginSessions() {
-        // Given - Register user
-        RegisterUserCommand registerCommand = RegisterUserCommand.builder()
+    void login_FromMultipleDevices_ShouldCreateIndependentRefreshTokens() {
+        // Arrange
+        registerUserService.execute(RegisterUserCommand.builder()
                 .email(TEST_EMAIL)
                 .password(TEST_PASSWORD)
                 .firstName(TEST_FIRST_NAME)
                 .lastName(TEST_LAST_NAME)
                 .ipAddress(TEST_IP_ADDRESS)
                 .userAgent(TEST_USER_AGENT)
-                .build();
-        registerUserService.execute(registerCommand);
+                .build());
 
-        // When - Login from different devices
-        AuthenticateUserCommand login1 = AuthenticateUserCommand.builder()
-                .email(TEST_EMAIL)
-                .password(TEST_PASSWORD)
-                .ipAddress("192.168.1.100")
-                .userAgent("Chrome/Windows")
-                .build();
+        // Act — simulate two different devices logging in
+        AuthenticationResponse session1 = authenticateUserService.execute(
+                AuthenticateUserCommand.builder()
+                        .email(TEST_EMAIL)
+                        .password(TEST_PASSWORD)
+                        .ipAddress("192.168.1.100")
+                        .userAgent("Chrome/130 Windows")
+                        .build());
 
-        AuthenticateUserCommand login2 = AuthenticateUserCommand.builder()
-                .email(TEST_EMAIL)
-                .password(TEST_PASSWORD)
-                .ipAddress("192.168.1.101")
-                .userAgent("Safari/MacOS")
-                .build();
+        AuthenticationResponse session2 = authenticateUserService.execute(
+                AuthenticateUserCommand.builder()
+                        .email(TEST_EMAIL)
+                        .password(TEST_PASSWORD)
+                        .ipAddress("192.168.1.101")
+                        .userAgent("Safari/17 macOS")
+                        .build());
 
-        AuthenticationResponse auth1 = authenticateUserService.execute(login1);
-        AuthenticationResponse auth2 = authenticateUserService.execute(login2);
+        // Assert — both sessions have valid access tokens
+        assertThat(session1.getAccessToken()).isNotNull().isNotEmpty();
+        assertThat(session2.getAccessToken()).isNotNull().isNotEmpty();
 
-        // Then - Both sessions should have valid tokens
-        assertThat(auth1.getAccessToken()).isNotNull();
-        assertThat(auth2.getAccessToken()).isNotNull();
-        assertThat(auth1.getRefreshToken()).isNotEqualTo(auth2.getRefreshToken());
+        // Refresh tokens must be unique across sessions
+        assertThat(session1.getRefreshToken()).isNotEqualTo(session2.getRefreshToken());
 
-        // Both refresh tokens should be valid
-        RefreshToken token1 = refreshTokenService.findByToken(auth1.getRefreshToken());
-        RefreshToken token2 = refreshTokenService.findByToken(auth2.getRefreshToken());
+        // Both refresh tokens must be resolvable from the repository
+        RefreshToken token1 = refreshTokenService.findByToken(session1.getRefreshToken());
+        RefreshToken token2 = refreshTokenService.findByToken(session2.getRefreshToken());
+
         assertThat(token1).isNotNull();
         assertThat(token2).isNotNull();
+        assertThat(token1.getToken()).isNotEqualTo(token2.getToken());
     }
+
+    // -------------------------------------------------------------------------
+    // Teardown
+    // -------------------------------------------------------------------------
 
     @AfterEach
     @Transactional
     void tearDown() {
-        // Clean up after each test
         userRepository.findByEmail(TEST_EMAIL).ifPresent(user -> {
             refreshTokenService.revokeAllUserTokens(user);
             userRepository.delete(user);
