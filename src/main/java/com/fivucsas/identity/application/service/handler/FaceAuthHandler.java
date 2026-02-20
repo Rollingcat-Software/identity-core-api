@@ -49,6 +49,14 @@ public class FaceAuthHandler implements AuthMethodHandler {
             Map<String, Object> result = biometricServicePort.verifyFace(
                     session.getUser().getId(), imageFile);
 
+            // Check for spoof detection (anti-spoofing from biometric processor)
+            String errorCode = result.get("error_code") instanceof String ec ? ec : null;
+            if ("SPOOF_DETECTED".equals(errorCode)) {
+                log.warn("Spoof detected for user: {}, score: {}",
+                        session.getUser().getEmail(), result.get("antispoof_score"));
+                return StepResult.failure("Spoof detected: please use a live face, not a photo or screen");
+            }
+
             Object verified = result.get("verified");
             boolean isVerified = Boolean.TRUE.equals(verified)
                     || "true".equalsIgnoreCase(String.valueOf(verified));

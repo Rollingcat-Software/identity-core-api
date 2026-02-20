@@ -1,15 +1,16 @@
 package com.fivucsas.identity.infrastructure.adapter;
 
 import com.fivucsas.identity.application.port.output.BiometricServicePort;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.MultipartBodyBuilder;
 import org.springframework.stereotype.Component;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.reactive.function.BodyInserters;
 import org.springframework.web.reactive.function.client.WebClient;
+import reactor.core.publisher.Mono;
 
 import java.util.Map;
 import java.util.UUID;
@@ -26,14 +27,26 @@ import java.util.UUID;
  * - Abstraction: Hides external service details from application
  */
 @Component
-@RequiredArgsConstructor
 @Slf4j
 public class BiometricServiceAdapter implements BiometricServicePort {
 
-    private final WebClient.Builder webClientBuilder;
+    private final WebClient webClient;
+    private final String biometricServiceUrl;
 
-    @Value("${biometric.service.url}")
-    private String biometricServiceUrl;
+    public BiometricServiceAdapter(
+            WebClient.Builder webClientBuilder,
+            @Value("${biometric.service.url}") String biometricServiceUrl,
+            @Value("${biometric.service.api-key:}") String apiKey) {
+
+        this.biometricServiceUrl = biometricServiceUrl;
+
+        WebClient.Builder builder = webClientBuilder;
+        if (apiKey != null && !apiKey.isBlank()) {
+            builder = builder.defaultHeader("X-API-Key", apiKey);
+            log.info("BiometricServiceAdapter configured with API key authentication");
+        }
+        this.webClient = builder.build();
+    }
 
     @Override
     @SuppressWarnings("unchecked")
@@ -46,13 +59,22 @@ public class BiometricServiceAdapter implements BiometricServicePort {
                 .contentType(MediaType.IMAGE_JPEG);
             bodyBuilder.part("user_id", userId.toString());
 
-            Map<String, Object> response = webClientBuilder.build()
+            Map<String, Object> response = webClient
                 .post()
                 .uri(biometricServiceUrl + "/enroll")
                 .contentType(MediaType.MULTIPART_FORM_DATA)
                 .body(BodyInserters.fromMultipartData(bodyBuilder.build()))
-                .retrieve()
-                .bodyToMono(Map.class)
+                .exchangeToMono(clientResponse -> {
+                    if (clientResponse.statusCode().is2xxSuccessful()) {
+                        return clientResponse.bodyToMono(Map.class);
+                    }
+                    // Preserve error response body (e.g. SPOOF_DETECTED from 403)
+                    return clientResponse.bodyToMono(Map.class)
+                            .defaultIfEmpty(Map.of(
+                                "error_code", "BIOMETRIC_ERROR",
+                                "message", "Biometric service returned " + clientResponse.statusCode()
+                            ));
+                })
                 .block();
 
             log.info("Biometric enrollment response received for user: {}", userId);
@@ -77,13 +99,21 @@ public class BiometricServiceAdapter implements BiometricServicePort {
                 .contentType(MediaType.IMAGE_JPEG);
             bodyBuilder.part("user_id", userId.toString());
 
-            Map<String, Object> response = webClientBuilder.build()
+            Map<String, Object> response = webClient
                 .post()
                 .uri(biometricServiceUrl + "/verify")
                 .contentType(MediaType.MULTIPART_FORM_DATA)
                 .body(BodyInserters.fromMultipartData(bodyBuilder.build()))
-                .retrieve()
-                .bodyToMono(Map.class)
+                .exchangeToMono(clientResponse -> {
+                    if (clientResponse.statusCode().is2xxSuccessful()) {
+                        return clientResponse.bodyToMono(Map.class);
+                    }
+                    return clientResponse.bodyToMono(Map.class)
+                            .defaultIfEmpty(Map.of(
+                                "error_code", "BIOMETRIC_ERROR",
+                                "message", "Biometric service returned " + clientResponse.statusCode()
+                            ));
+                })
                 .block();
 
             log.info("Biometric verification response received for user: {}", userId);
@@ -108,12 +138,20 @@ public class BiometricServiceAdapter implements BiometricServicePort {
                 "fingerprint_data", fingerprintData
             );
 
-            Map<String, Object> response = webClientBuilder.build()
+            Map<String, Object> response = webClient
                 .post()
                 .uri(biometricServiceUrl + "/fingerprint/verify")
                 .bodyValue(body)
-                .retrieve()
-                .bodyToMono(Map.class)
+                .exchangeToMono(clientResponse -> {
+                    if (clientResponse.statusCode().is2xxSuccessful()) {
+                        return clientResponse.bodyToMono(Map.class);
+                    }
+                    return clientResponse.bodyToMono(Map.class)
+                            .defaultIfEmpty(Map.of(
+                                "error_code", "BIOMETRIC_ERROR",
+                                "message", "Biometric service returned " + clientResponse.statusCode()
+                            ));
+                })
                 .block();
 
             log.info("Fingerprint verification response received for user: {}", userId);
@@ -138,12 +176,20 @@ public class BiometricServiceAdapter implements BiometricServicePort {
                 "voice_data", voiceData
             );
 
-            Map<String, Object> response = webClientBuilder.build()
+            Map<String, Object> response = webClient
                 .post()
                 .uri(biometricServiceUrl + "/voice/verify")
                 .bodyValue(body)
-                .retrieve()
-                .bodyToMono(Map.class)
+                .exchangeToMono(clientResponse -> {
+                    if (clientResponse.statusCode().is2xxSuccessful()) {
+                        return clientResponse.bodyToMono(Map.class);
+                    }
+                    return clientResponse.bodyToMono(Map.class)
+                            .defaultIfEmpty(Map.of(
+                                "error_code", "BIOMETRIC_ERROR",
+                                "message", "Biometric service returned " + clientResponse.statusCode()
+                            ));
+                })
                 .block();
 
             log.info("Voice verification response received for user: {}", userId);
