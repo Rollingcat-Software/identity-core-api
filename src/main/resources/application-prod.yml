@@ -50,6 +50,7 @@ biometric:
   service:
     url: ${BIOMETRIC_SERVICE_URL}
     timeout: ${BIOMETRIC_SERVICE_TIMEOUT:30000}
+    api-key: ${BIOMETRIC_SERVICE_API_KEY:}
 
 # Logging (Production)
 # Only log warnings and errors, no sensitive data
