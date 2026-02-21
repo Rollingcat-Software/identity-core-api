@@ -8,6 +8,8 @@ import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -79,6 +81,16 @@ public class Tenant {
     @UpdateTimestamp
     @Column(nullable = false)
     private Instant updatedAt;
+
+    // ========== Auth Flow Relationships ==========
+
+    @OneToMany(mappedBy = "tenant", fetch = FetchType.LAZY, cascade = CascadeType.ALL)
+    @Builder.Default
+    private List<TenantAuthMethod> authMethods = new ArrayList<>();
+
+    @OneToMany(mappedBy = "tenant", fetch = FetchType.LAZY, cascade = CascadeType.ALL)
+    @Builder.Default
+    private List<AuthFlow> authFlows = new ArrayList<>();
 
     // ========== Value Object Getters ==========
 

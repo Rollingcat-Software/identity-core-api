@@ -2,6 +2,8 @@ package com.fivucsas.identity.application.service;
 
 import com.fivucsas.identity.application.dto.command.LogoutCommand;
 import com.fivucsas.identity.application.port.input.LogoutUserUseCase;
+import com.fivucsas.identity.application.port.output.AuditLogPort;
+import com.fivucsas.identity.entity.RefreshToken;
 import com.fivucsas.identity.service.RefreshTokenService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -19,6 +21,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class LogoutUserService implements LogoutUserUseCase {
 
     private final RefreshTokenService refreshTokenService;
+    private final AuditLogPort auditLogPort;
 
     @Override
     @Transactional
@@ -26,8 +29,14 @@ public class LogoutUserService implements LogoutUserUseCase {
         log.info("Logout request");
 
         try {
+            RefreshToken token = refreshTokenService.findByToken(command.getRefreshToken());
+            String userId = token.getUser().getId().toString();
+            String email = token.getUser().getEmail();
+
             refreshTokenService.revokeToken(command.getRefreshToken());
             log.info("Logout successful");
+
+            auditLogPort.logUserLoggedOut(userId, email);
         } catch (Exception e) {
             log.warn("Logout attempted with invalid token: {}", e.getMessage());
             // Don't throw exception - logout should be idempotent

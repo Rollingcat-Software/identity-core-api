@@ -80,8 +80,17 @@ public class EnrollmentController {
                 .userId(user != null ? user.getId().toString() : null)
                 .userName(user != null ? user.getFullName() : null)
                 .userEmail(user != null ? user.getEmail() : null)
-                .status("COMPLETED")
+                .tenantId(user != null && user.getTenant() != null ? user.getTenant().getId().toString() : null)
+                .status(user != null && user.isBiometricEnrolled() ? "COMPLETED" : "PENDING") // Use actual enrollment status
+                .faceImageUrl(null) // TODO: BiometricData entity doesn't store face image URL - may need to add this field
                 .enrolledAt(data.getEnrolledAt())
+                .createdAt(data.getEnrolledAt()) // BiometricData only has enrolledAt, use as createdAt
+                .updatedAt(null) // TODO: BiometricData entity doesn't have updatedAt - may need to add this field
+                .qualityScore(null) // TODO: BiometricData doesn't store quality score - may need integration with biometric-processor
+                .livenessScore(null) // TODO: BiometricData doesn't store liveness score - may need integration with biometric-processor
+                .errorCode(null) // TODO: BiometricData doesn't track enrollment errors - may need to add this field
+                .errorMessage(null) // TODO: BiometricData doesn't track enrollment errors - may need to add this field
+                .completedAt(user != null && user.isBiometricEnrolled() ? data.getEnrolledAt() : null)
                 .build();
     }
 }

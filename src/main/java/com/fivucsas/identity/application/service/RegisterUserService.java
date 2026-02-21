@@ -4,6 +4,7 @@ import com.fivucsas.identity.application.dto.command.RegisterUserCommand;
 import com.fivucsas.identity.application.dto.response.AuthenticationResponse;
 import com.fivucsas.identity.application.dto.response.UserResponse;
 import com.fivucsas.identity.application.port.input.RegisterUserUseCase;
+import com.fivucsas.identity.application.port.output.AuditLogPort;
 import com.fivucsas.identity.application.port.output.PasswordEncoderPort;
 import com.fivucsas.identity.application.port.output.TokenGenerationPort;
 import com.fivucsas.identity.domain.exception.DuplicateEmailException;
@@ -44,6 +45,7 @@ public class RegisterUserService implements RegisterUserUseCase {
     private final PasswordEncoderPort passwordEncoder;
     private final TokenGenerationPort tokenGenerator;
     private final RefreshTokenService refreshTokenService;  // TODO: Convert to port
+    private final AuditLogPort auditLogPort;
 
     @Override
     @Transactional
@@ -83,6 +85,7 @@ public class RegisterUserService implements RegisterUserUseCase {
         // Save user
         User savedUser = userRepository.save(user);
         log.info("User registered successfully: {}", savedUser.getId());
+        auditLogPort.logUserRegistered(savedUser.getId().toString(), savedUser.getEmail(), command.getIpAddress());
 
         // Generate tokens
         String accessToken = tokenGenerator.generateAccessToken(savedUser.getEmail());
