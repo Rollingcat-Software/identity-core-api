@@ -59,6 +59,26 @@ public class UserDevice {
     @Builder.Default
     private Instant registeredAt = Instant.now();
 
+    @Column(name = "public_key", columnDefinition = "TEXT")
+    private String publicKey;
+
+    @Column(name = "public_key_algorithm", length = 20)
+    @Builder.Default
+    private String publicKeyAlgorithm = "EC_P256";
+
+    @Column(name = "step_up_registered_at")
+    private Instant stepUpRegisteredAt;
+
+    public void registerStepUpKey(String publicKey, String algorithm) {
+        this.publicKey = publicKey;
+        this.publicKeyAlgorithm = algorithm != null ? algorithm : "EC_P256";
+        this.stepUpRegisteredAt = Instant.now();
+    }
+
+    public boolean isStepUpEnabled() {
+        return this.publicKey != null;
+    }
+
     public void trust() {
         this.isTrusted = true;
     }
