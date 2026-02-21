@@ -66,4 +66,10 @@ public interface UserRepository extends JpaRepository<User, UUID> {
            "AND u.userType = :userType AND u.status = 'ACTIVE'")
     long countByTenantIdAndUserType(@Param("tenantId") UUID tenantId,
                                      @Param("userType") String userType);
+
+    /**
+     * Count all users by tenant (regardless of status).
+     */
+    @Query("SELECT COUNT(u) FROM User u WHERE u.tenant.id = :tenantId")
+    long countByTenantId(@Param("tenantId") UUID tenantId);
 }

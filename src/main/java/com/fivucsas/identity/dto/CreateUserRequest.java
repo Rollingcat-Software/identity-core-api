@@ -39,4 +39,8 @@ public class CreateUserRequest {
 
     @Size(max = 500, message = "Address must not exceed 500 characters")
     private String address;
+
+    private String role; // Optional - role name to assign after creation
+
+    private String tenantId; // Optional - tenant to assign user to
 }

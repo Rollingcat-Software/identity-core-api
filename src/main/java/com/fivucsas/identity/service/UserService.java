@@ -147,6 +147,8 @@ public class UserService {
                 .enrolledAt(user.getEnrolledAt())
                 .lastVerifiedAt(user.getLastVerifiedAt())
                 .verificationCount(user.getVerificationCount())
+                .lastLoginAt(null) // TODO: Fetch from audit_logs table (action = 'LOGIN')
+                .lastLoginIp(null) // TODO: Fetch from audit_logs table (ip_address column)
                 .createdAt(user.getCreatedAt())
                 .updatedAt(user.getUpdatedAt())
                 .build();

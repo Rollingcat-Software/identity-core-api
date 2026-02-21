@@ -27,6 +27,23 @@ redis:
   event-bus:
     enabled: ${REDIS_EVENT_BUS_ENABLED:true}
 
+# Email / SMTP Configuration
+mail:
+  host: ${MAIL_HOST:smtp.gmail.com}
+  port: ${MAIL_PORT:587}
+  username: ${MAIL_USERNAME:}
+  password: ${MAIL_PASSWORD:}
+  from: ${MAIL_FROM:noreply@fivucsas.com}
+  enabled: ${MAIL_ENABLED:false}
+
+# SMS Gateway (Twilio)
+sms:
+  enabled: ${SMS_ENABLED:false}
+  twilio:
+    account-sid: ${TWILIO_ACCOUNT_SID:}
+    auth-token: ${TWILIO_AUTH_TOKEN:}
+    from-number: ${TWILIO_FROM_NUMBER:}
+
 # JWT Configuration
 # CRITICAL SECURITY: Secret must come from JWT_SECRET environment variable (enforced by JwtSecretProvider)
 jwt:
@@ -38,6 +55,7 @@ biometric:
   service:
     url: ${BIOMETRIC_SERVICE_URL:http://localhost:8001}
     timeout: ${BIOMETRIC_SERVICE_TIMEOUT:30000}
+    api-key: ${BIOMETRIC_SERVICE_API_KEY:}
 
 # Springdoc OpenAPI
 springdoc:

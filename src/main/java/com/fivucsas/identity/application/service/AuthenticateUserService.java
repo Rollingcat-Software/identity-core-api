@@ -4,6 +4,7 @@ import com.fivucsas.identity.application.dto.command.AuthenticateUserCommand;
 import com.fivucsas.identity.application.dto.response.AuthenticationResponse;
 import com.fivucsas.identity.application.dto.response.UserResponse;
 import com.fivucsas.identity.application.port.input.AuthenticateUserUseCase;
+import com.fivucsas.identity.application.port.output.AuditLogPort;
 import com.fivucsas.identity.application.port.output.PasswordEncoderPort;
 import com.fivucsas.identity.application.port.output.TokenGenerationPort;
 import com.fivucsas.identity.domain.exception.InvalidCredentialsException;
@@ -30,6 +31,7 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
     private final PasswordEncoderPort passwordEncoder;
     private final TokenGenerationPort tokenGenerator;
     private final RefreshTokenService refreshTokenService;
+    private final AuditLogPort auditLogPort;
 
     @Override
     @Transactional
@@ -41,10 +43,12 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
 
         if (!passwordEncoder.matches(command.getPassword(), user.getPasswordHash())) {
             log.warn("Invalid password for user: {}", command.getEmail());
+            auditLogPort.logAuthenticationFailed(command.getEmail(), command.getIpAddress(), "Invalid password");
             throw new InvalidCredentialsException();
         }
 
         log.info("User logged in successfully: {}", user.getId());
+        auditLogPort.logUserAuthenticated(user.getId().toString(), user.getEmail(), command.getIpAddress());
 
         String accessToken = tokenGenerator.generateAccessToken(user.getEmail());
         RefreshToken refreshToken = refreshTokenService.createRefreshToken(

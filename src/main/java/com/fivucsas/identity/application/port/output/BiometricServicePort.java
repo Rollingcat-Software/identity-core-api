@@ -38,4 +38,22 @@ public interface BiometricServicePort {
      * @throws com.fivucsas.identity.domain.exception.BiometricVerificationException if verification fails
      */
     Map<String, Object> verifyFace(UUID userId, MultipartFile faceImage);
+
+    /**
+     * Verifies a user's fingerprint against enrolled biometric data.
+     *
+     * @param userId the user ID
+     * @param fingerprintData the fingerprint data (base64-encoded template)
+     * @return Map containing verification response data
+     */
+    Map<String, Object> verifyFingerprint(UUID userId, String fingerprintData);
+
+    /**
+     * Verifies a user's voice against enrolled biometric data.
+     *
+     * @param userId the user ID
+     * @param voiceData the voice recording data (base64-encoded audio)
+     * @return Map containing verification response data
+     */
+    Map<String, Object> verifyVoice(UUID userId, String voiceData);
 }

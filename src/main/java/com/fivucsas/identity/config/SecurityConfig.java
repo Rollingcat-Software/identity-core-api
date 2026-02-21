@@ -11,6 +11,7 @@ import org.springframework.security.access.expression.method.MethodSecurityExpre
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.AuthenticationProvider;
 import org.springframework.security.authentication.dao.DaoAuthenticationProvider;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -39,7 +40,7 @@ public class SecurityConfig {
     private final UserDetailsService userDetailsService;
     private final RbacPermissionEvaluator rbacPermissionEvaluator;
 
-    @Value("${cors.allowed-origins:http://localhost:3000,http://localhost:4200,http://localhost:5173}")
+    @Value("${cors.allowed-origins:http://localhost:3000,http://localhost:4200,http://localhost:5173,https://ica-fivucsas.rollingcatsoftware.com}")
     private String allowedOrigins;
 
     /**
@@ -64,8 +65,13 @@ public class SecurityConfig {
                                 "/api/v1/auth/register",
                                 "/api/v1/auth/login",
                                 "/api/v1/auth/refresh",
-                                "/api/v1/auth/health"
+                                "/api/v1/auth/health",
+                                "/api/v1/auth/sessions"
                         ).permitAll()
+
+                        // Public auth method listing
+                        .requestMatchers(HttpMethod.GET, "/api/v1/auth-methods", "/api/v1/auth-methods/**")
+                        .permitAll()
 
                         // Guest invitation acceptance (token-based, no auth required)
                         .requestMatchers(
