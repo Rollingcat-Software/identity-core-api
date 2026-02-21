@@ -1,7 +1,7 @@
 -- V13: Add biometric step-up device and challenge tables
 
 CREATE TABLE IF NOT EXISTS auth_biometric_device (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY,
     user_id UUID NOT NULL,
     key_id VARCHAR(128) NOT NULL,
     platform VARCHAR(32) NOT NULL,
@@ -22,7 +22,7 @@ CREATE INDEX IF NOT EXISTS idx_auth_biometric_device_user
     WHERE is_active = TRUE;
 
 CREATE TABLE IF NOT EXISTS auth_biometric_challenge (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY,
     challenge_id UUID NOT NULL UNIQUE,
     user_id UUID NOT NULL,
     nonce_base64 VARCHAR(512) NOT NULL,

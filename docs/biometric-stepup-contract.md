@@ -6,9 +6,12 @@ This document freezes the backend contract for biometric step-up in `identity-co
 
 Base path: `/api/v1/auth/biometric`
 
+Legacy base path (backwards compatibility): `/api/v1/step-up`
+
 ### 1.1 Register Device
 
 - **Method/Path**: `POST /api/v1/auth/biometric/devices`
+- **Legacy Alias**: `POST /api/v1/step-up/register-device`
 - **Auth**: Bearer access token required
 - **Request body**:
 
@@ -38,6 +41,7 @@ Base path: `/api/v1/auth/biometric`
 ### 1.2 Create Challenge
 
 - **Method/Path**: `POST /api/v1/auth/biometric/challenge`
+- **Legacy Alias**: `POST /api/v1/step-up/challenge`
 - **Auth**: Bearer access token required
 - **Request body**: none
 - **Response**:
@@ -53,6 +57,7 @@ Base path: `/api/v1/auth/biometric`
 ### 1.3 Verify Challenge
 
 - **Method/Path**: `POST /api/v1/auth/biometric/verify`
+- **Legacy Alias**: `POST /api/v1/step-up/verify`
 - **Auth**: Bearer access token required
 - **Request body**:
 

@@ -91,21 +91,17 @@ public class JwtService implements TokenGenerationPort {
     }
 
     public boolean isTokenValid(String token, String email) {
-        final String tokenEmail = extractEmail(token);
-        return (tokenEmail.equals(email)) && !isTokenExpired(token);
+        final Claims claims = extractAllClaims(token);
+        final String tokenEmail = claims.getSubject();
+        final String type = claims.get("type", String.class);
+        return email.equals(tokenEmail)
+                && !"step_up".equals(type)
+                && !claims.getExpiration().before(new Date());
     }
 
     @Override
     public long getExpirationMillis() {
         return jwtExpiration;
-    }
-
-    private boolean isTokenExpired(String token) {
-        return extractExpiration(token).before(new Date());
-    }
-
-    private Date extractExpiration(String token) {
-        return extractClaim(token, Claims::getExpiration);
     }
 
     private Claims extractAllClaims(String token) {
