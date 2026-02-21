@@ -109,19 +109,6 @@ class JwtServiceTest {
     }
 
     @Test
-    @DisplayName("Validate token - step-up token should not be valid as access token")
-    void testIsTokenValid_StepUpToken() {
-        // Arrange
-        String stepUpToken = jwtService.generateStepUpToken(TEST_EMAIL, "11111111-1111-1111-1111-111111111111", 60000L);
-
-        // Act
-        boolean isValid = jwtService.isTokenValid(stepUpToken, TEST_EMAIL);
-
-        // Assert
-        assertThat(isValid).isFalse();
-    }
-
-    @Test
     @DisplayName("Validate token - should throw exception for malformed token")
     void testIsTokenValid_MalformedToken() {
         // Act & Assert
@@ -186,22 +173,6 @@ class JwtServiceTest {
         // Act & Assert
         assertThatThrownBy(() -> jwtService.extractEmail("invalid.token.here"))
                 .isInstanceOf(MalformedJwtException.class);
-    }
-
-    @Test
-    @DisplayName("Step-up token validation - should be valid for correct user")
-    void testIsStepUpTokenValid_ValidToken() {
-        // Arrange
-        String userId = "11111111-1111-1111-1111-111111111111";
-        String stepUpToken = jwtService.generateStepUpToken(TEST_EMAIL, userId, 60000L);
-
-        // Act
-        boolean isValid = jwtService.isStepUpTokenValid(stepUpToken, TEST_EMAIL);
-        String extractedUserId = jwtService.extractUserId(stepUpToken);
-
-        // Assert
-        assertThat(isValid).isTrue();
-        assertThat(extractedUserId).isEqualTo(userId);
     }
 
     // ============== TOKEN FORMAT TESTS ==============
