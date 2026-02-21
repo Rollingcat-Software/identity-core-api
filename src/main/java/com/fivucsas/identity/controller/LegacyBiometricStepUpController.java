@@ -19,19 +19,24 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+/**
+ * Legacy aliases for biometric step-up endpoints.
+ *
+ * Kept for backwards compatibility with older mobile clients.
+ */
 @RestController
-@RequestMapping("/api/v1/auth/biometric")
+@RequestMapping("/api/v1/step-up")
 @RequiredArgsConstructor
 @Slf4j
-@Tag(name = "Auth Biometric Step-Up", description = "Primary biometric step-up challenge endpoints")
-public class AuthBiometricStepUpController {
+@Tag(name = "Auth Biometric Step-Up (Legacy)", description = "Legacy aliases for biometric step-up endpoints")
+public class LegacyBiometricStepUpController {
 
     private final BiometricStepUpService biometricStepUpService;
 
-    @PostMapping("/devices")
+    @PostMapping("/register-device")
     @Operation(
-            summary = "Register biometric device public key",
-            description = "Primary endpoint. Legacy alias: POST /api/v1/step-up/register-device",
+            summary = "Legacy alias: register biometric device",
+            description = "Legacy alias for POST /api/v1/auth/biometric/devices",
             security = @SecurityRequirement(name = "bearer-jwt")
     )
     public ResponseEntity<BiometricRegisterDeviceResponse> registerDevice(
@@ -44,8 +49,8 @@ public class AuthBiometricStepUpController {
 
     @PostMapping("/challenge")
     @Operation(
-            summary = "Create one-time biometric challenge",
-            description = "Primary endpoint. Legacy alias: POST /api/v1/step-up/challenge",
+            summary = "Legacy alias: create one-time biometric challenge",
+            description = "Legacy alias for POST /api/v1/auth/biometric/challenge",
             security = @SecurityRequirement(name = "bearer-jwt")
     )
     public ResponseEntity<BiometricChallengeResponse> createChallenge(Authentication authentication) {
@@ -54,8 +59,8 @@ public class AuthBiometricStepUpController {
 
     @PostMapping("/verify")
     @Operation(
-            summary = "Verify biometric challenge signature and issue step-up token",
-            description = "Primary endpoint. Legacy alias: POST /api/v1/step-up/verify",
+            summary = "Legacy alias: verify biometric challenge",
+            description = "Legacy alias for POST /api/v1/auth/biometric/verify",
             security = @SecurityRequirement(name = "bearer-jwt")
     )
     public ResponseEntity<BiometricStepUpTokenResponse> verifyChallenge(
