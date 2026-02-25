@@ -121,12 +121,15 @@ public class AuthController {
     }
 
     @PostMapping("/logout")
-    @Operation(summary = "Logout and revoke refresh token")
-    public ResponseEntity<Void> logout(@Valid @RequestBody RefreshTokenRequest request) {
+    @Operation(summary = "Logout and revoke refresh token", security = @SecurityRequirement(name = "bearer-jwt"))
+    public ResponseEntity<Void> logout(
+            @Valid @RequestBody RefreshTokenRequest request,
+            Authentication authentication) {
         log.info("Logout request received");
 
         LogoutCommand command = LogoutCommand.builder()
             .refreshToken(request.getRefreshToken())
+            .currentUserEmail(authentication.getName())
             .build();
 
         logoutUserUseCase.execute(command);

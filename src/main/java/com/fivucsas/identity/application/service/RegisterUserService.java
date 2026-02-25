@@ -44,8 +44,9 @@ public class RegisterUserService implements RegisterUserUseCase {
     private final TenantRepository tenantRepository;
     private final PasswordEncoderPort passwordEncoder;
     private final TokenGenerationPort tokenGenerator;
-    private final RefreshTokenService refreshTokenService;  // TODO: Convert to port
+    private final RefreshTokenService refreshTokenService;
     private final AuditLogPort auditLogPort;
+    private final com.fivucsas.identity.application.port.output.EventPublisherPort eventPublisher;
 
     @Override
     @Transactional
@@ -65,10 +66,17 @@ public class RegisterUserService implements RegisterUserUseCase {
         String hashedPasswordString = passwordEncoder.encode(command.getPassword());
         HashedPassword hashedPassword = HashedPassword.of(hashedPasswordString);
 
-        // Get default tenant (TODO: In production, get from request context or subdomain)
-        Tenant defaultTenant = tenantRepository.findBySlug("test-tenant")
-            .orElseGet(() -> tenantRepository.findAll().stream().findFirst()
-                .orElseThrow(() -> new IllegalStateException("No tenant found in the system")));
+        // Resolve tenant from request context (TenantContext), fallback to default
+        Tenant defaultTenant;
+        java.util.UUID contextTenantId = com.fivucsas.identity.infrastructure.multitenancy.TenantContext.getCurrentTenant();
+        if (contextTenantId != null) {
+            defaultTenant = tenantRepository.findById(contextTenantId)
+                .orElseThrow(() -> new com.fivucsas.identity.domain.exception.TenantNotFoundException(contextTenantId.toString()));
+        } else {
+            defaultTenant = tenantRepository.findAll().stream().findFirst()
+                .orElseThrow(() -> new IllegalStateException("No tenant found in the system"));
+            log.warn("No tenant context set during registration, falling back to default tenant: {}", defaultTenant.getSlug());
+        }
 
         // Create user entity
         User user = User.builder()
@@ -86,6 +94,7 @@ public class RegisterUserService implements RegisterUserUseCase {
         User savedUser = userRepository.save(user);
         log.info("User registered successfully: {}", savedUser.getId());
         auditLogPort.logUserRegistered(savedUser.getId().toString(), savedUser.getEmail(), command.getIpAddress());
+        eventPublisher.publishUserRegistered(savedUser.getId().toString(), savedUser.getEmail());
 
         // Generate tokens
         String accessToken = tokenGenerator.generateAccessToken(savedUser.getEmail());
@@ -96,31 +105,8 @@ public class RegisterUserService implements RegisterUserUseCase {
         );
 
         // Map to response
-        UserResponse userResponse = mapToUserResponse(savedUser);
+        UserResponse userResponse = com.fivucsas.identity.application.mapper.UserResponseMapper.toResponse(savedUser);
 
         return AuthenticationResponse.of(accessToken, refreshToken.getToken(), tokenGenerator.getExpirationMillis(), userResponse);
-    }
-
-    private UserResponse mapToUserResponse(User user) {
-        var roleNames = user.getRoleNames();
-        return UserResponse.builder()
-            .id(user.getId().toString())
-            .email(user.getEmail())
-            .firstName(user.getFirstName())
-            .lastName(user.getLastName())
-            .phoneNumber(user.getPhoneNumber())
-            .address(user.getAddress())
-            .idNumber(user.getIdNumber() != null ? user.getIdNumberAsValueObject().getMasked() : null)
-            .status(user.getStatus().name())
-            .role(roleNames.isEmpty() ? "USER" : roleNames.iterator().next())
-            .roles(roleNames.isEmpty() ? java.util.Set.of("USER") : roleNames)
-            .tenantId(user.getTenant() != null ? user.getTenant().getId().toString() : null)
-            .isBiometricEnrolled(user.isBiometricEnrolled())
-            .enrolledAt(user.getEnrolledAt())
-            .lastVerifiedAt(user.getLastVerifiedAt())
-            .verificationCount(user.getVerificationCount())
-            .createdAt(user.getCreatedAt())
-            .updatedAt(user.getUpdatedAt())
-            .build();
     }
 }
