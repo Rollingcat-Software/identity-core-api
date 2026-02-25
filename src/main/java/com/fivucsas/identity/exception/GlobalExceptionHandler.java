@@ -133,6 +133,70 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.PRECONDITION_FAILED).body(error);
     }
 
+    @ExceptionHandler({DuplicateRoleException.class, DuplicateRoleAssignmentException.class, DuplicateTenantException.class})
+    public ResponseEntity<ErrorResponse> handleDuplicateResource(
+            DomainException ex,
+            HttpServletRequest request) {
+        log.warn("Duplicate resource: {}", ex.getMessage());
+
+        ErrorResponse error = ErrorResponse.of(
+                HttpStatus.CONFLICT.value(),
+                ex.getErrorCode(),
+                ex.getMessage(),
+                request.getRequestURI()
+        );
+
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(error);
+    }
+
+    @ExceptionHandler({RoleNotFoundException.class, PermissionNotFoundException.class, TenantNotFoundException.class})
+    public ResponseEntity<ErrorResponse> handleDomainNotFound(
+            DomainException ex,
+            HttpServletRequest request) {
+        log.warn("Domain resource not found: {}", ex.getMessage());
+
+        ErrorResponse error = ErrorResponse.of(
+                HttpStatus.NOT_FOUND.value(),
+                ex.getErrorCode(),
+                ex.getMessage(),
+                request.getRequestURI()
+        );
+
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(error);
+    }
+
+    @ExceptionHandler(SystemRoleModificationException.class)
+    public ResponseEntity<ErrorResponse> handleSystemRoleModification(
+            SystemRoleModificationException ex,
+            HttpServletRequest request) {
+        log.warn("System role modification attempted: {}", ex.getMessage());
+
+        ErrorResponse error = ErrorResponse.of(
+                HttpStatus.FORBIDDEN.value(),
+                ex.getErrorCode(),
+                ex.getMessage(),
+                request.getRequestURI()
+        );
+
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(error);
+    }
+
+    @ExceptionHandler(InvalidEmailException.class)
+    public ResponseEntity<ErrorResponse> handleInvalidEmail(
+            InvalidEmailException ex,
+            HttpServletRequest request) {
+        log.warn("Invalid email: {}", ex.getMessage());
+
+        ErrorResponse error = ErrorResponse.of(
+                HttpStatus.BAD_REQUEST.value(),
+                ex.getErrorCode(),
+                ex.getMessage(),
+                request.getRequestURI()
+        );
+
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(error);
+    }
+
     @ExceptionHandler(ResourceNotFoundException.class)
     public ResponseEntity<ErrorResponse> handleResourceNotFound(
             ResourceNotFoundException ex,

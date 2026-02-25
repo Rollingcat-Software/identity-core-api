@@ -129,6 +129,44 @@ public class BiometricServiceAdapter implements BiometricServicePort {
 
     @Override
     @SuppressWarnings("unchecked")
+    public Map<String, Object> enrollFingerprint(UUID userId, String fingerprintData) {
+        log.info("Calling biometric service to enroll fingerprint for user: {}", userId);
+
+        try {
+            Map<String, String> body = Map.of(
+                "user_id", userId.toString(),
+                "fingerprint_data", fingerprintData
+            );
+
+            Map<String, Object> response = webClient
+                .post()
+                .uri(biometricServiceUrl + "/fingerprint/enroll")
+                .bodyValue(body)
+                .exchangeToMono(clientResponse -> {
+                    if (clientResponse.statusCode().is2xxSuccessful()) {
+                        return clientResponse.bodyToMono(Map.class);
+                    }
+                    return clientResponse.bodyToMono(Map.class)
+                            .defaultIfEmpty(Map.of(
+                                "error_code", "BIOMETRIC_ERROR",
+                                "message", "Biometric service returned " + clientResponse.statusCode()
+                            ));
+                })
+                .block();
+
+            log.info("Fingerprint enrollment response received for user: {}", userId);
+            return response;
+        } catch (Exception e) {
+            log.error("Error calling biometric service for fingerprint enrollment: {}", e.getMessage());
+            return Map.of(
+                "success", false,
+                "message", "Fingerprint enrollment service unavailable: " + e.getMessage()
+            );
+        }
+    }
+
+    @Override
+    @SuppressWarnings("unchecked")
     public Map<String, Object> verifyFingerprint(UUID userId, String fingerprintData) {
         log.info("Calling biometric service to verify fingerprint for user: {}", userId);
 
@@ -161,6 +199,44 @@ public class BiometricServiceAdapter implements BiometricServicePort {
             return Map.of(
                 "success", false,
                 "message", "Fingerprint verification service unavailable: " + e.getMessage()
+            );
+        }
+    }
+
+    @Override
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> enrollVoice(UUID userId, String voiceData) {
+        log.info("Calling biometric service to enroll voice for user: {}", userId);
+
+        try {
+            Map<String, String> body = Map.of(
+                "user_id", userId.toString(),
+                "voice_data", voiceData
+            );
+
+            Map<String, Object> response = webClient
+                .post()
+                .uri(biometricServiceUrl + "/voice/enroll")
+                .bodyValue(body)
+                .exchangeToMono(clientResponse -> {
+                    if (clientResponse.statusCode().is2xxSuccessful()) {
+                        return clientResponse.bodyToMono(Map.class);
+                    }
+                    return clientResponse.bodyToMono(Map.class)
+                            .defaultIfEmpty(Map.of(
+                                "error_code", "BIOMETRIC_ERROR",
+                                "message", "Biometric service returned " + clientResponse.statusCode()
+                            ));
+                })
+                .block();
+
+            log.info("Voice enrollment response received for user: {}", userId);
+            return response;
+        } catch (Exception e) {
+            log.error("Error calling biometric service for voice enrollment: {}", e.getMessage());
+            return Map.of(
+                "success", false,
+                "message", "Voice enrollment service unavailable: " + e.getMessage()
             );
         }
     }
