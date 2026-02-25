@@ -32,6 +32,7 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
     private final TokenGenerationPort tokenGenerator;
     private final RefreshTokenService refreshTokenService;
     private final AuditLogPort auditLogPort;
+    private final com.fivucsas.identity.application.port.output.EventPublisherPort eventPublisher;
 
     @Override
     @Transactional
@@ -49,6 +50,7 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
 
         log.info("User logged in successfully: {}", user.getId());
         auditLogPort.logUserAuthenticated(user.getId().toString(), user.getEmail(), command.getIpAddress());
+        eventPublisher.publishUserAuthenticated(user.getId().toString(), user.getEmail());
 
         String accessToken = tokenGenerator.generateAccessToken(user.getEmail());
         RefreshToken refreshToken = refreshTokenService.createRefreshToken(
@@ -57,31 +59,8 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
             command.getUserAgent()
         );
 
-        UserResponse userResponse = mapToUserResponse(user);
+        UserResponse userResponse = com.fivucsas.identity.application.mapper.UserResponseMapper.toResponse(user);
 
         return AuthenticationResponse.of(accessToken, refreshToken.getToken(), tokenGenerator.getExpirationMillis(), userResponse);
-    }
-
-    private UserResponse mapToUserResponse(User user) {
-        var roleNames = user.getRoleNames();
-        return UserResponse.builder()
-            .id(user.getId().toString())
-            .email(user.getEmail())
-            .firstName(user.getFirstName())
-            .lastName(user.getLastName())
-            .phoneNumber(user.getPhoneNumber())
-            .address(user.getAddress())
-            .idNumber(user.getIdNumber() != null ? user.getIdNumberAsValueObject().getMasked() : null)
-            .status(user.getStatus().name())
-            .role(roleNames.isEmpty() ? "USER" : roleNames.iterator().next())
-            .roles(roleNames.isEmpty() ? java.util.Set.of("USER") : roleNames)
-            .tenantId(user.getTenant() != null ? user.getTenant().getId().toString() : null)
-            .isBiometricEnrolled(user.isBiometricEnrolled())
-            .enrolledAt(user.getEnrolledAt())
-            .lastVerifiedAt(user.getLastVerifiedAt())
-            .verificationCount(user.getVerificationCount())
-            .createdAt(user.getCreatedAt())
-            .updatedAt(user.getUpdatedAt())
-            .build();
     }
 }

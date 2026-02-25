@@ -18,7 +18,7 @@ import java.util.UUID;
 @Service
 @RequiredArgsConstructor
 @Slf4j
-public class RefreshTokenService {
+public class RefreshTokenService implements com.fivucsas.identity.application.port.output.RefreshTokenPort {
 
     private final RefreshTokenRepository refreshTokenRepository;
 

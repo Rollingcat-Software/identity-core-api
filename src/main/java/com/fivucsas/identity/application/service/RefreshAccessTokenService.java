@@ -44,33 +44,10 @@ public class RefreshAccessTokenService implements RefreshTokenUseCase {
         );
 
         String accessToken = tokenGenerator.generateAccessToken(user.getEmail());
-        UserResponse userResponse = mapToUserResponse(user);
+        UserResponse userResponse = com.fivucsas.identity.application.mapper.UserResponseMapper.toResponse(user);
 
         log.info("Token refreshed successfully for user: {}", user.getEmail());
 
         return AuthenticationResponse.of(accessToken, newRefreshToken.getToken(), tokenGenerator.getExpirationMillis(), userResponse);
-    }
-
-    private UserResponse mapToUserResponse(User user) {
-        var roleNames = user.getRoleNames();
-        return UserResponse.builder()
-            .id(user.getId().toString())
-            .email(user.getEmail())
-            .firstName(user.getFirstName())
-            .lastName(user.getLastName())
-            .phoneNumber(user.getPhoneNumber())
-            .address(user.getAddress())
-            .idNumber(user.getIdNumber() != null ? user.getIdNumberAsValueObject().getMasked() : null)
-            .status(user.getStatus().name())
-            .role(roleNames.isEmpty() ? "USER" : roleNames.iterator().next())
-            .roles(roleNames.isEmpty() ? java.util.Set.of("USER") : roleNames)
-            .tenantId(user.getTenant() != null ? user.getTenant().getId().toString() : null)
-            .isBiometricEnrolled(user.isBiometricEnrolled())
-            .enrolledAt(user.getEnrolledAt())
-            .lastVerifiedAt(user.getLastVerifiedAt())
-            .verificationCount(user.getVerificationCount())
-            .createdAt(user.getCreatedAt())
-            .updatedAt(user.getUpdatedAt())
-            .build();
     }
 }

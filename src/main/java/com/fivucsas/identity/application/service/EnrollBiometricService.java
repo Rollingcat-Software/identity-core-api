@@ -28,6 +28,7 @@ public class EnrollBiometricService implements EnrollBiometricUseCase {
 
     private final com.fivucsas.identity.repository.UserRepository userRepository;
     private final BiometricServicePort biometricService;
+    private final com.fivucsas.identity.application.port.output.EventPublisherPort eventPublisher;
 
     @Override
     @Transactional
@@ -53,6 +54,7 @@ public class EnrollBiometricService implements EnrollBiometricUseCase {
         userRepository.save(user);
 
         log.info("Biometric enrolled successfully for user: {}", user.getId());
+        eventPublisher.publishBiometricEnrolled(command.getUserId());
 
         return BiometricResponse.builder()
             .success(true)

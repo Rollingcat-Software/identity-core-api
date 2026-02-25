@@ -69,6 +69,7 @@ public class ManageAuthFlowService implements ManageAuthFlowUseCase {
 
         if (command.steps() != null) {
             validatePasswordConstraint(command.operationType(), command.steps());
+            validateNoRequiredNfcDocument(command.steps());
             for (CreateAuthFlowCommand.FlowStepSpec stepSpec : command.steps()) {
                 AuthMethodType methodType = AuthMethodType.valueOf(stepSpec.authMethodType());
                 AuthMethod method = authMethodRepository.findByType(methodType)
@@ -145,5 +146,17 @@ public class ManageAuthFlowService implements ManageAuthFlowUseCase {
         }
 
         log.debug("Password constraint validated for {} flow", operationType);
+    }
+
+    private void validateNoRequiredNfcDocument(List<CreateAuthFlowCommand.FlowStepSpec> steps) {
+        boolean hasRequiredNfc = steps.stream()
+                .anyMatch(s -> "NFC_DOCUMENT".equals(s.authMethodType()) && s.isRequired());
+
+        if (hasRequiredNfc) {
+            throw new IllegalArgumentException(
+                    "NFC_DOCUMENT cannot be configured as a required auth step " +
+                    "because the hardware integration is not yet available. " +
+                    "Use it as an optional step or choose a different method.");
+        }
     }
 }
