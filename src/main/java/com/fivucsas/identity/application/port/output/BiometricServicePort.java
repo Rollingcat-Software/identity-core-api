@@ -40,6 +40,16 @@ public interface BiometricServicePort {
     Map<String, Object> verifyFace(UUID userId, MultipartFile faceImage);
 
     /**
+     * Enrolls a user's fingerprint in the biometric system.
+     *
+     * @param userId the user ID
+     * @param fingerprintData the fingerprint data (base64-encoded template)
+     * @return Map containing enrollment response data
+     * @throws com.fivucsas.identity.domain.exception.BiometricEnrollmentException if enrollment fails
+     */
+    Map<String, Object> enrollFingerprint(UUID userId, String fingerprintData);
+
+    /**
      * Verifies a user's fingerprint against enrolled biometric data.
      *
      * @param userId the user ID
@@ -47,6 +57,16 @@ public interface BiometricServicePort {
      * @return Map containing verification response data
      */
     Map<String, Object> verifyFingerprint(UUID userId, String fingerprintData);
+
+    /**
+     * Enrolls a user's voice in the biometric system.
+     *
+     * @param userId the user ID
+     * @param voiceData the voice recording data (base64-encoded audio)
+     * @return Map containing enrollment response data
+     * @throws com.fivucsas.identity.domain.exception.BiometricEnrollmentException if enrollment fails
+     */
+    Map<String, Object> enrollVoice(UUID userId, String voiceData);
 
     /**
      * Verifies a user's voice against enrolled biometric data.

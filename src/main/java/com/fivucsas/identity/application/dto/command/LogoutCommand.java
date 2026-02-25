@@ -21,4 +21,5 @@ import lombok.NoArgsConstructor;
 public class LogoutCommand {
 
     private String refreshToken;
+    private String currentUserEmail;
 }
