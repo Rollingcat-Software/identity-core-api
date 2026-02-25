@@ -66,8 +66,13 @@ public class SecurityConfig {
                                 "/api/v1/auth/login",
                                 "/api/v1/auth/refresh",
                                 "/api/v1/auth/health",
-                                "/api/v1/auth/sessions"
+                                "/api/v1/auth/forgot-password",
+                                "/api/v1/auth/reset-password"
                         ).permitAll()
+
+                        // Auth session endpoints must be public (multi-step auth before JWT)
+                        .requestMatchers("/api/v1/auth/sessions", "/api/v1/auth/sessions/**")
+                        .permitAll()
 
                         // Public auth method listing
                         .requestMatchers(HttpMethod.GET, "/api/v1/auth-methods", "/api/v1/auth-methods/**")

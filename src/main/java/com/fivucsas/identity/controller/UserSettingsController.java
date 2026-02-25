@@ -7,6 +7,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.HashMap;
@@ -41,6 +42,7 @@ public class UserSettingsController {
 
     @GetMapping
     @Operation(summary = "Get user settings")
+    @PreAuthorize("hasPermission(#userId, 'user_settings', 'read') or @userSecurityService.isCurrentUser(#userId)")
     public ResponseEntity<Map<String, Object>> getUserSettings(@PathVariable String userId) {
         log.info("GET /api/v1/users/{}/settings", userId);
 
@@ -52,6 +54,7 @@ public class UserSettingsController {
 
     @PutMapping
     @Operation(summary = "Update user settings")
+    @PreAuthorize("hasPermission(#userId, 'user_settings', 'write') or @userSecurityService.isCurrentUser(#userId)")
     public ResponseEntity<Map<String, Object>> updateUserSettings(
             @PathVariable String userId,
             @RequestBody Map<String, Object> newSettings) {
@@ -75,12 +78,14 @@ public class UserSettingsController {
 
     @GetMapping("/notifications")
     @Operation(summary = "Get notification settings")
+    @PreAuthorize("hasPermission(#userId, 'user_settings', 'read') or @userSecurityService.isCurrentUser(#userId)")
     public ResponseEntity<Object> getNotificationSettings(@PathVariable String userId) {
         return getSettingsSection(userId, "notifications");
     }
 
     @PutMapping("/notifications")
     @Operation(summary = "Update notification settings")
+    @PreAuthorize("hasPermission(#userId, 'user_settings', 'write') or @userSecurityService.isCurrentUser(#userId)")
     public ResponseEntity<Object> updateNotificationSettings(
             @PathVariable String userId,
             @RequestBody Map<String, Object> notificationSettings) {
@@ -89,12 +94,14 @@ public class UserSettingsController {
 
     @GetMapping("/security")
     @Operation(summary = "Get security settings")
+    @PreAuthorize("hasPermission(#userId, 'user_settings', 'read') or @userSecurityService.isCurrentUser(#userId)")
     public ResponseEntity<Object> getSecuritySettings(@PathVariable String userId) {
         return getSettingsSection(userId, "security");
     }
 
     @PutMapping("/security")
     @Operation(summary = "Update security settings")
+    @PreAuthorize("hasPermission(#userId, 'user_settings', 'write') or @userSecurityService.isCurrentUser(#userId)")
     public ResponseEntity<Object> updateSecuritySettings(
             @PathVariable String userId,
             @RequestBody Map<String, Object> securitySettings) {
@@ -103,12 +110,14 @@ public class UserSettingsController {
 
     @GetMapping("/appearance")
     @Operation(summary = "Get appearance settings")
+    @PreAuthorize("hasPermission(#userId, 'user_settings', 'read') or @userSecurityService.isCurrentUser(#userId)")
     public ResponseEntity<Object> getAppearanceSettings(@PathVariable String userId) {
         return getSettingsSection(userId, "appearance");
     }
 
     @PutMapping("/appearance")
     @Operation(summary = "Update appearance settings")
+    @PreAuthorize("hasPermission(#userId, 'user_settings', 'write') or @userSecurityService.isCurrentUser(#userId)")
     public ResponseEntity<Object> updateAppearanceSettings(
             @PathVariable String userId,
             @RequestBody Map<String, Object> appearanceSettings) {
