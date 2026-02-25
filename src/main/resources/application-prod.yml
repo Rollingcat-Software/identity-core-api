@@ -93,6 +93,13 @@ management:
       prometheus:
         enabled: true
 
+# Swagger/OpenAPI (Disabled in production)
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false
+
 # Security Headers (Production)
 security:
   headers:

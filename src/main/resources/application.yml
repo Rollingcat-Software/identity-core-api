@@ -64,6 +64,10 @@ springdoc:
   swagger-ui:
     path: /swagger-ui.html
     enabled: ${SWAGGER_ENABLED:true}  # Can disable in production
+    tags-sorter: alpha
+    operations-sorter: alpha
+  packages-to-scan: com.fivucsas.identity.controller
+  show-actuator: false
 
 # Server
 server:

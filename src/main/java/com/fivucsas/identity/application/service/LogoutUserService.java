@@ -26,17 +26,25 @@ public class LogoutUserService implements LogoutUserUseCase {
     @Override
     @Transactional
     public void execute(LogoutCommand command) {
-        log.info("Logout request");
+        log.info("Logout request for user: {}", command.getCurrentUserEmail());
 
         try {
             RefreshToken token = refreshTokenService.findByToken(command.getRefreshToken());
             String userId = token.getUser().getId().toString();
             String email = token.getUser().getEmail();
 
+            // Validate token ownership - prevent revoking another user's token
+            if (command.getCurrentUserEmail() != null && !email.equals(command.getCurrentUserEmail())) {
+                log.warn("User {} attempted to revoke token belonging to {}", command.getCurrentUserEmail(), email);
+                throw new com.fivucsas.identity.domain.exception.UnauthorizedException("Cannot revoke another user's token");
+            }
+
             refreshTokenService.revokeToken(command.getRefreshToken());
-            log.info("Logout successful");
+            log.info("Logout successful for user: {}", email);
 
             auditLogPort.logUserLoggedOut(userId, email);
+        } catch (com.fivucsas.identity.domain.exception.UnauthorizedException e) {
+            throw e; // Re-throw authorization errors
         } catch (Exception e) {
             log.warn("Logout attempted with invalid token: {}", e.getMessage());
             // Don't throw exception - logout should be idempotent

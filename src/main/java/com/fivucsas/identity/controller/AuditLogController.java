@@ -11,6 +11,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.HashMap;
@@ -28,6 +29,7 @@ public class AuditLogController {
 
     @GetMapping
     @Operation(summary = "Get audit logs with pagination")
+    @PreAuthorize("hasPermission(null, 'audit', 'read')")
     public ResponseEntity<Map<String, Object>> getAuditLogs(
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size,
@@ -59,6 +61,7 @@ public class AuditLogController {
 
     @GetMapping("/{id}")
     @Operation(summary = "Get audit log by ID")
+    @PreAuthorize("hasPermission(null, 'audit', 'read')")
     public ResponseEntity<AuditLogDto> getAuditLogById(@PathVariable String id) {
         log.info("GET /api/v1/audit-logs/{}", id);
 

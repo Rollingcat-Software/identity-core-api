@@ -12,8 +12,13 @@ import com.fivucsas.identity.dto.AuthResponse;
 import com.fivucsas.identity.dto.LoginRequest;
 import com.fivucsas.identity.dto.RefreshTokenRequest;
 import com.fivucsas.identity.dto.RegisterRequest;
+import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.entity.UserStatus;
 import com.fivucsas.identity.dto.UserDto;
+import com.fivucsas.identity.infrastructure.email.EmailService;
+import com.fivucsas.identity.infrastructure.otp.OtpService;
+import com.fivucsas.identity.repository.UserRepository;
+import com.fivucsas.identity.security.RateLimitService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -23,7 +28,10 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.Map;
 
 /**
  * REST controller for authentication endpoints.
@@ -48,6 +56,11 @@ public class AuthController {
     private final RefreshTokenUseCase refreshTokenUseCase;
     private final LogoutUserUseCase logoutUserUseCase;
     private final GetCurrentUserUseCase getCurrentUserUseCase;
+    private final UserRepository userRepository;
+    private final OtpService otpService;
+    private final EmailService emailService;
+    private final PasswordEncoder passwordEncoder;
+    private final RateLimitService rateLimitService;
 
     @PostMapping("/register")
     @Operation(summary = "Register a new user")
@@ -108,12 +121,15 @@ public class AuthController {
     }
 
     @PostMapping("/logout")
-    @Operation(summary = "Logout and revoke refresh token")
-    public ResponseEntity<Void> logout(@Valid @RequestBody RefreshTokenRequest request) {
+    @Operation(summary = "Logout and revoke refresh token", security = @SecurityRequirement(name = "bearer-jwt"))
+    public ResponseEntity<Void> logout(
+            @Valid @RequestBody RefreshTokenRequest request,
+            Authentication authentication) {
         log.info("Logout request received");
 
         LogoutCommand command = LogoutCommand.builder()
             .refreshToken(request.getRefreshToken())
+            .currentUserEmail(authentication.getName())
             .build();
 
         logoutUserUseCase.execute(command);
@@ -133,6 +149,68 @@ public class AuthController {
         UserResponse response = getCurrentUserUseCase.execute(query);
 
         return ResponseEntity.ok(mapToUserDto(response));
+    }
+
+    @PostMapping("/forgot-password")
+    @Operation(summary = "Request a password reset code via email")
+    public ResponseEntity<Map<String, String>> forgotPassword(
+            @RequestBody Map<String, String> request,
+            HttpServletRequest httpRequest) {
+        String email = request.get("email");
+        log.info("Forgot password request for email: {}", email);
+
+        if (email == null || email.isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("message", "Email is required"));
+        }
+
+        String clientIp = getClientIP(httpRequest);
+        if (!rateLimitService.allowPasswordResetAttempt(clientIp)) {
+            return ResponseEntity.status(429).body(Map.of("message", "Too many password reset requests. Please try again later."));
+        }
+
+        // Always return success to prevent email enumeration
+        userRepository.findByEmail(email).ifPresent(user -> {
+            String otpKey = "password-reset:" + user.getId();
+            String code = otpService.generate(otpKey);
+            emailService.sendOtp(email, code);
+            log.info("Password reset code sent to: {}", email);
+        });
+
+        return ResponseEntity.ok(Map.of("message", "If an account with that email exists, a reset code has been sent."));
+    }
+
+    @PostMapping("/reset-password")
+    @Operation(summary = "Reset password using the code from email")
+    public ResponseEntity<Map<String, String>> resetPassword(
+            @RequestBody Map<String, String> request) {
+        String email = request.get("email");
+        String code = request.get("code");
+        String newPassword = request.get("newPassword");
+        log.info("Reset password request for email: {}", email);
+
+        if (email == null || code == null || newPassword == null) {
+            return ResponseEntity.badRequest().body(Map.of("message", "email, code, and newPassword are required"));
+        }
+
+        if (newPassword.length() < 8) {
+            return ResponseEntity.badRequest().body(Map.of("message", "Password must be at least 8 characters"));
+        }
+
+        User user = userRepository.findByEmail(email).orElse(null);
+        if (user == null) {
+            return ResponseEntity.badRequest().body(Map.of("message", "Invalid email or reset code"));
+        }
+
+        String otpKey = "password-reset:" + user.getId();
+        if (!otpService.validate(otpKey, code)) {
+            return ResponseEntity.badRequest().body(Map.of("message", "Invalid or expired reset code"));
+        }
+
+        user.updatePassword(newPassword, passwordEncoder);
+        userRepository.save(user);
+        log.info("Password successfully reset for user: {}", user.getId());
+
+        return ResponseEntity.ok(Map.of("message", "Password has been reset successfully"));
     }
 
     @GetMapping("/health")

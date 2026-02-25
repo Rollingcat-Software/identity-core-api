@@ -43,6 +43,9 @@ public class SecurityConfig {
     @Value("${cors.allowed-origins:http://localhost:3000,http://localhost:4200,http://localhost:5173,https://ica-fivucsas.rollingcatsoftware.com}")
     private String allowedOrigins;
 
+    @Value("${spring.profiles.active:dev}")
+    private String activeProfile;
+
     /**
      * Registers the custom RBAC PermissionEvaluator with Spring Security's
      * method security expression handler for hierarchical access control.
@@ -66,8 +69,13 @@ public class SecurityConfig {
                                 "/api/v1/auth/login",
                                 "/api/v1/auth/refresh",
                                 "/api/v1/auth/health",
-                                "/api/v1/auth/sessions"
+                                "/api/v1/auth/forgot-password",
+                                "/api/v1/auth/reset-password"
                         ).permitAll()
+
+                        // Auth session endpoints must be public (multi-step auth before JWT)
+                        .requestMatchers("/api/v1/auth/sessions", "/api/v1/auth/sessions/**")
+                        .permitAll()
 
                         // Public auth method listing
                         .requestMatchers(HttpMethod.GET, "/api/v1/auth-methods", "/api/v1/auth-methods/**")
@@ -78,16 +86,21 @@ public class SecurityConfig {
                                 "/api/v1/guests/accept"
                         ).permitAll()
 
-                        // Development/Documentation endpoints (should be restricted in production)
+                        // Development/Documentation endpoints - restricted by profile
+                        .requestMatchers("/h2-console/**").access((authentication, context) ->
+                                new org.springframework.security.authorization.AuthorizationDecision(!isProductionProfile()))
                         .requestMatchers(
-                                "/h2-console/**",
                                 "/swagger-ui/**",
                                 "/swagger-ui.html",
                                 "/v3/api-docs/**",
                                 "/api-docs/**",
-                                "/api-docs",
-                                "/actuator/**"
-                        ).permitAll()
+                                "/api-docs"
+                        ).access((authentication, context) ->
+                                new org.springframework.security.authorization.AuthorizationDecision(!isProductionProfile()))
+                        // Actuator: health is public, others require auth in prod
+                        .requestMatchers("/actuator/health").permitAll()
+                        .requestMatchers("/actuator/**").access((authentication, context) ->
+                                new org.springframework.security.authorization.AuthorizationDecision(!isProductionProfile()))
 
                         // Protected authentication endpoints
                         .requestMatchers(
@@ -112,10 +125,18 @@ public class SecurityConfig {
                         .sessionCreationPolicy(SessionCreationPolicy.STATELESS)
                 )
                 .authenticationProvider(authenticationProvider())
-                .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class)
-                .headers(headers -> headers.frameOptions().disable()); // For H2 console
+                .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
+
+        // Only disable frame options for H2 console in non-prod profiles
+        if (!isProductionProfile()) {
+            http.headers(headers -> headers.frameOptions().disable());
+        }
 
         return http.build();
+    }
+
+    private boolean isProductionProfile() {
+        return "prod".equalsIgnoreCase(activeProfile) || "production".equalsIgnoreCase(activeProfile);
     }
 
     @Bean
