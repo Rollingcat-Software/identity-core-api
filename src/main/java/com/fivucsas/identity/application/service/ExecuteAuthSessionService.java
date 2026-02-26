@@ -13,6 +13,7 @@ import com.fivucsas.identity.domain.model.auth.*;
 import com.fivucsas.identity.domain.repository.TenantRepository;
 import com.fivucsas.identity.entity.*;
 import com.fivucsas.identity.repository.*;
+import com.fivucsas.identity.service.RefreshTokenService;
 import jakarta.persistence.EntityNotFoundException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -41,6 +42,7 @@ public class ExecuteAuthSessionService implements ExecuteAuthSessionUseCase {
     private final AuthMethodHandlerRegistry handlerRegistry;
     private final TokenGenerationPort tokenGenerator;
     private final AuditLogPort auditLogPort;
+    private final RefreshTokenService refreshTokenService;
 
     private static final int SESSION_TIMEOUT_MINUTES = 10;
     private static final Set<OperationType> PASSWORD_MANDATORY_OPERATIONS = Set.of(
@@ -164,8 +166,11 @@ public class ExecuteAuthSessionService implements ExecuteAuthSessionUseCase {
                 StepResultResponse.AuthenticationResult authResult = null;
                 if (session.getUser() != null) {
                     String accessToken = tokenGenerator.generateAccessToken(session.getUser().getEmail());
+                    RefreshToken refreshToken = refreshTokenService.createRefreshToken(
+                            session.getUser(), session.getIpAddress(), session.getUserAgent());
                     authResult = new StepResultResponse.AuthenticationResult(
-                            accessToken, null, 3600, session.getUser().getId());
+                            accessToken, refreshToken.getToken(),
+                            tokenGenerator.getExpirationMillis() / 1000, session.getUser().getId());
                 }
                 return buildStepResult(currentStep, session, authResult);
             } else {

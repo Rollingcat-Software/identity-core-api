@@ -4,7 +4,9 @@ import com.fivucsas.identity.domain.model.auth.AuthMethodType;
 import com.fivucsas.identity.entity.AuthFlowStep;
 import com.fivucsas.identity.entity.AuthSession;
 import com.fivucsas.identity.entity.User;
+import com.fivucsas.identity.entity.WebAuthnCredential;
 import com.fivucsas.identity.infrastructure.webauthn.WebAuthnService;
+import com.fivucsas.identity.repository.WebAuthnCredentialRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -12,6 +14,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -21,6 +24,7 @@ import static org.mockito.Mockito.*;
 class HardwareKeyAuthHandlerTest {
 
     @Mock private WebAuthnService webAuthnService;
+    @Mock private WebAuthnCredentialRepository credentialRepository;
     @Mock private AuthSession session;
     @Mock private AuthFlowStep step;
 
@@ -37,6 +41,7 @@ class HardwareKeyAuthHandlerTest {
         UUID sessionId = UUID.randomUUID();
         when(session.getId()).thenReturn(sessionId);
         when(webAuthnService.generateChallenge(sessionId)).thenReturn("challengeBase64");
+        when(webAuthnService.getRpId()).thenReturn("fivucsas.rollingcatsoftware.com");
 
         StepResult result = handler.validate(session, step, Map.of("action", "challenge"));
 
@@ -48,11 +53,23 @@ class HardwareKeyAuthHandlerTest {
     @Test
     void validate_WhenValidAssertion_ShouldReturnSuccess() {
         UUID sessionId = UUID.randomUUID();
+        UUID userId = UUID.randomUUID();
         User user = mock(User.class);
+        when(user.getId()).thenReturn(userId);
         when(session.getUser()).thenReturn(user);
         when(session.getId()).thenReturn(sessionId);
-        when(webAuthnService.verifyAssertion(sessionId, "credId", "authData", "clientData", "sig"))
+
+        WebAuthnCredential credential = mock(WebAuthnCredential.class);
+        User credUser = mock(User.class);
+        when(credUser.getId()).thenReturn(userId);
+        when(credential.getUser()).thenReturn(credUser);
+        when(credential.getPublicKey()).thenReturn("publicKeyBase64");
+        when(credential.getSignCount()).thenReturn(0L);
+
+        when(credentialRepository.findByCredentialId("credId")).thenReturn(Optional.of(credential));
+        when(webAuthnService.verifyAssertion(sessionId, "credId", "authData", "clientData", "sig", "publicKeyBase64"))
                 .thenReturn(true);
+        when(webAuthnService.extractSignCount("authData")).thenReturn(1L);
 
         StepResult result = handler.validate(session, step, Map.of(
                 "credentialId", "credId",
@@ -62,15 +79,71 @@ class HardwareKeyAuthHandlerTest {
         ));
 
         assertThat(result.isSuccess()).isTrue();
+        verify(credential).updateSignCount(1L);
+        verify(credentialRepository).save(credential);
+    }
+
+    @Test
+    void validate_WhenCredentialNotFound_ShouldReturnFailure() {
+        User user = mock(User.class);
+        when(session.getUser()).thenReturn(user);
+        when(credentialRepository.findByCredentialId("unknownCred")).thenReturn(Optional.empty());
+
+        StepResult result = handler.validate(session, step, Map.of(
+                "credentialId", "unknownCred",
+                "authenticatorData", "authData",
+                "clientDataJSON", "clientData",
+                "signature", "sig"
+        ));
+
+        assertThat(result.isSuccess()).isFalse();
+        assertThat(result.error()).isEqualTo("Credential not registered");
+    }
+
+    @Test
+    void validate_WhenCredentialBelongsToDifferentUser_ShouldReturnFailure() {
+        UUID sessionUserId = UUID.randomUUID();
+        UUID credentialUserId = UUID.randomUUID();
+
+        User sessionUser = mock(User.class);
+        when(sessionUser.getId()).thenReturn(sessionUserId);
+        when(session.getUser()).thenReturn(sessionUser);
+
+        WebAuthnCredential credential = mock(WebAuthnCredential.class);
+        User credUser = mock(User.class);
+        when(credUser.getId()).thenReturn(credentialUserId);
+        when(credential.getUser()).thenReturn(credUser);
+
+        when(credentialRepository.findByCredentialId("credId")).thenReturn(Optional.of(credential));
+
+        StepResult result = handler.validate(session, step, Map.of(
+                "credentialId", "credId",
+                "authenticatorData", "authData",
+                "clientDataJSON", "clientData",
+                "signature", "sig"
+        ));
+
+        assertThat(result.isSuccess()).isFalse();
+        assertThat(result.error()).isEqualTo("Credential does not belong to this user");
     }
 
     @Test
     void validate_WhenInvalidAssertion_ShouldReturnFailure() {
         UUID sessionId = UUID.randomUUID();
+        UUID userId = UUID.randomUUID();
         User user = mock(User.class);
+        when(user.getId()).thenReturn(userId);
         when(session.getUser()).thenReturn(user);
         when(session.getId()).thenReturn(sessionId);
-        when(webAuthnService.verifyAssertion(sessionId, "credId", "authData", "clientData", "sig"))
+
+        WebAuthnCredential credential = mock(WebAuthnCredential.class);
+        User credUser = mock(User.class);
+        when(credUser.getId()).thenReturn(userId);
+        when(credential.getUser()).thenReturn(credUser);
+        when(credential.getPublicKey()).thenReturn("publicKeyBase64");
+
+        when(credentialRepository.findByCredentialId("credId")).thenReturn(Optional.of(credential));
+        when(webAuthnService.verifyAssertion(sessionId, "credId", "authData", "clientData", "sig", "publicKeyBase64"))
                 .thenReturn(false);
 
         StepResult result = handler.validate(session, step, Map.of(

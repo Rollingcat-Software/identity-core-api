@@ -3,10 +3,13 @@ package com.fivucsas.identity.application.service;
 import com.fivucsas.identity.application.dto.command.RegisterUserCommand;
 import com.fivucsas.identity.application.dto.response.AuthenticationResponse;
 import com.fivucsas.identity.application.port.output.AuditLogPort;
+import com.fivucsas.identity.application.port.output.EventPublisherPort;
 import com.fivucsas.identity.application.port.output.PasswordEncoderPort;
 import com.fivucsas.identity.application.port.output.TokenGenerationPort;
 import com.fivucsas.identity.domain.exception.DuplicateEmailException;
 import com.fivucsas.identity.domain.exception.InvalidEmailException;
+import com.fivucsas.identity.infrastructure.email.EmailService;
+import com.fivucsas.identity.infrastructure.otp.OtpService;
 import com.fivucsas.identity.domain.repository.TenantRepository;
 import com.fivucsas.identity.repository.UserRepository;
 import com.fivucsas.identity.entity.RefreshToken;
@@ -62,6 +65,15 @@ class RegisterUserServiceTest {
 
     @Mock
     private AuditLogPort auditLogPort;
+
+    @Mock
+    private EventPublisherPort eventPublisher;
+
+    @Mock
+    private OtpService otpService;
+
+    @Mock
+    private EmailService emailService;
 
     @InjectMocks
     private RegisterUserService registerUserService;

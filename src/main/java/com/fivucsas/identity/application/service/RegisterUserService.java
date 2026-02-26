@@ -47,6 +47,8 @@ public class RegisterUserService implements RegisterUserUseCase {
     private final RefreshTokenService refreshTokenService;
     private final AuditLogPort auditLogPort;
     private final com.fivucsas.identity.application.port.output.EventPublisherPort eventPublisher;
+    private final com.fivucsas.identity.infrastructure.otp.OtpService otpService;
+    private final com.fivucsas.identity.infrastructure.email.EmailService emailService;
 
     @Override
     @Transactional
@@ -95,6 +97,15 @@ public class RegisterUserService implements RegisterUserUseCase {
         log.info("User registered successfully: {}", savedUser.getId());
         auditLogPort.logUserRegistered(savedUser.getId().toString(), savedUser.getEmail(), command.getIpAddress());
         eventPublisher.publishUserRegistered(savedUser.getId().toString(), savedUser.getEmail());
+
+        // Send email verification code
+        try {
+            String verificationCode = otpService.generate("email-verify:" + savedUser.getId());
+            emailService.sendOtp(savedUser.getEmail(), verificationCode);
+            log.info("Email verification code sent to: {}", savedUser.getEmail());
+        } catch (Exception e) {
+            log.warn("Failed to send email verification code to: {}", savedUser.getEmail(), e);
+        }
 
         // Generate tokens
         String accessToken = tokenGenerator.generateAccessToken(savedUser.getEmail());
