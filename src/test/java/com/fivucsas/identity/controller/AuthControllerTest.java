@@ -15,8 +15,13 @@ import com.fivucsas.identity.domain.exception.InvalidCredentialsException;
 import com.fivucsas.identity.domain.repository.TenantRepository;
 import com.fivucsas.identity.dto.LoginRequest;
 import com.fivucsas.identity.dto.RegisterRequest;
+import com.fivucsas.identity.infrastructure.email.EmailService;
+import com.fivucsas.identity.infrastructure.otp.OtpService;
+import com.fivucsas.identity.infrastructure.sms.SmsService;
+import com.fivucsas.identity.repository.UserRepository;
 import com.fivucsas.identity.security.JwtAuthenticationFilter;
 import com.fivucsas.identity.security.RateLimitService;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -24,6 +29,7 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.http.MediaType;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.context.ActiveProfiles;
@@ -93,6 +99,21 @@ class AuthControllerTest {
 
     @MockBean
     private TenantRepository tenantRepository;
+
+    @MockBean
+    private UserRepository userRepository;
+
+    @MockBean
+    private OtpService otpService;
+
+    @MockBean
+    private EmailService emailService;
+
+    @MockBean
+    private SmsService smsService;
+
+    @MockBean
+    private PasswordEncoder passwordEncoder;
 
     // Test Data
     private static final String TEST_EMAIL = "test@fivucsas.com";
@@ -342,7 +363,6 @@ class AuthControllerTest {
 
     @Test
     @DisplayName("POST /api/v1/auth/logout - Success (200)")
-    @WithMockUser(username = TEST_EMAIL)
     void testLogout_Success() throws Exception {
         // Arrange
         String requestJson = "{\"refreshToken\":\"" + TEST_REFRESH_TOKEN + "\"}";
@@ -350,8 +370,11 @@ class AuthControllerTest {
         doNothing().when(logoutUserUseCase).execute(any());
 
         // Act & Assert - Controller returns empty 200 OK
+        // Provide principal directly since addFilters=false prevents
+        // SecurityContextHolderAwareRequestFilter from wrapping the request
         mockMvc.perform(post("/api/v1/auth/logout")
                         .with(csrf())
+                        .principal(new UsernamePasswordAuthenticationToken(TEST_EMAIL, null, java.util.Collections.emptyList()))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(requestJson))
                 .andExpect(status().isOk());
