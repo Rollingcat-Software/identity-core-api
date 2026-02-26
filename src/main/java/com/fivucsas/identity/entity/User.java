@@ -98,6 +98,20 @@ public class User {
     @JoinColumn(name = "invited_by")
     private User invitedBy;
 
+    @Column(name = "email_verified", nullable = false)
+    @Builder.Default
+    private boolean emailVerified = false;
+
+    @Column(name = "email_verification_token")
+    private String emailVerificationToken;
+
+    @Column(name = "email_verification_sent_at")
+    private Instant emailVerificationSentAt;
+
+    @Column(name = "phone_verified")
+    @Builder.Default
+    private boolean phoneVerified = false;
+
     @Column(name = "is_biometric_enrolled")
     @Builder.Default
     @Setter  // Allow updating
@@ -330,6 +344,22 @@ public class User {
     public void incrementVerificationCount() {
         this.verificationCount++;
         this.lastVerifiedAt = Instant.now();
+    }
+
+    /**
+     * Marks user's email as verified.
+     */
+    public void verifyEmail() {
+        this.emailVerified = true;
+        this.emailVerificationToken = null;
+        this.emailVerificationSentAt = null;
+    }
+
+    /**
+     * Marks user's phone number as verified.
+     */
+    public void verifyPhone() {
+        this.phoneVerified = true;
     }
 
     /**

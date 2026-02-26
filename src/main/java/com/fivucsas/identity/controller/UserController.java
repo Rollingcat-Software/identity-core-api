@@ -9,10 +9,13 @@ import com.fivucsas.identity.application.dto.response.UserResponse;
 import com.fivucsas.identity.application.port.input.ManageUserUseCase;
 import com.fivucsas.identity.domain.exception.InvalidCredentialsException;
 import com.fivucsas.identity.domain.exception.UserNotFoundException;
+import com.fivucsas.identity.repository.AuditLogRepository;
+import com.fivucsas.identity.repository.PasswordHistoryRepository;
 import com.fivucsas.identity.repository.UserRepository;
 import com.fivucsas.identity.dto.ChangePasswordRequest;
 import com.fivucsas.identity.dto.CreateUserRequest;
 import com.fivucsas.identity.dto.UpdateUserRequest;
+import com.fivucsas.identity.entity.PasswordHistory;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.entity.UserStatus;
 import com.fivucsas.identity.dto.UserDto;
@@ -27,7 +30,9 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.Instant;
 import java.util.List;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 /**
@@ -42,9 +47,13 @@ import java.util.stream.Collectors;
 @Tag(name = "User Management", description = "User CRUD operations")
 public class UserController {
 
+    private static final int PASSWORD_HISTORY_LIMIT = 5;
+
     private final ManageUserUseCase manageUserUseCase;
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
+    private final PasswordHistoryRepository passwordHistoryRepository;
+    private final AuditLogRepository auditLogRepository;
 
     @GetMapping
     @Operation(summary = "Get all users")
@@ -147,6 +156,22 @@ public class UserController {
             throw new InvalidCredentialsException();
         }
 
+        // Check password history to prevent reuse
+        var recentPasswords = passwordHistoryRepository.findRecentByUserId(
+                uuid, org.springframework.data.domain.PageRequest.of(0, PASSWORD_HISTORY_LIMIT));
+        for (PasswordHistory ph : recentPasswords) {
+            if (passwordEncoder.matches(request.getNewPassword(), ph.getPasswordHash())) {
+                throw new IllegalArgumentException(
+                        "New password must not match any of the last " + PASSWORD_HISTORY_LIMIT + " passwords");
+            }
+        }
+
+        // Save current password to history before changing
+        passwordHistoryRepository.save(PasswordHistory.builder()
+                .userId(uuid)
+                .passwordHash(user.getPasswordHash())
+                .build());
+
         user.updatePassword(request.getNewPassword(), passwordEncoder);
         userRepository.save(user);
 
@@ -182,6 +207,8 @@ public class UserController {
             .address(response.getAddress())
             .idNumber(response.getIdNumber())
             .status(UserStatus.valueOf(response.getStatus()))
+            .emailVerified(response.isEmailVerified())
+            .phoneVerified(response.isPhoneVerified())
             .role(response.getRole())
             .roles(response.getRoles())
             .tenantId(response.getTenantId())
@@ -189,10 +216,32 @@ public class UserController {
             .enrolledAt(response.getEnrolledAt())
             .lastVerifiedAt(response.getLastVerifiedAt())
             .verificationCount(response.getVerificationCount())
-            .lastLoginAt(null) // TODO: Fetch from audit_logs table (action = 'LOGIN')
-            .lastLoginIp(null) // TODO: Fetch from audit_logs table (ip_address column)
+            .lastLoginAt(getLastLoginAt(response.getId()))
+            .lastLoginIp(getLastLoginIp(response.getId()))
             .createdAt(response.getCreatedAt())
             .updatedAt(response.getUpdatedAt())
             .build();
+    }
+
+    private Instant getLastLoginAt(String userId) {
+        try {
+            var page = auditLogRepository.findByUserIdAndActionOrderByCreatedAtDesc(
+                    UUID.fromString(userId), "USER_AUTHENTICATED",
+                    org.springframework.data.domain.PageRequest.of(0, 1));
+            return page.hasContent() ? page.getContent().getFirst().getCreatedAt() : null;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private String getLastLoginIp(String userId) {
+        try {
+            var page = auditLogRepository.findByUserIdAndActionOrderByCreatedAtDesc(
+                    UUID.fromString(userId), "USER_AUTHENTICATED",
+                    org.springframework.data.domain.PageRequest.of(0, 1));
+            return page.hasContent() ? page.getContent().getFirst().getIpAddress() : null;
+        } catch (Exception e) {
+            return null;
+        }
     }
 }
