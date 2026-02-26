@@ -142,6 +142,46 @@ public class BiometricServiceAdapter implements BiometricServicePort {
         }
     }
 
+    @Override
+    public Map<String, Object> deleteFace(UUID userId) {
+        log.info("Calling biometric service to delete face data for user: {}", userId);
+        try {
+            return deleteResource("/enroll/" + userId);
+        } catch (Exception e) {
+            log.error("Error calling biometric service for face deletion: {}", e.getMessage());
+            return errorResponse("Face deletion service unavailable: " + e.getMessage());
+        }
+    }
+
+    @Override
+    public Map<String, Object> deleteFingerprint(UUID userId) {
+        log.info("Calling biometric service to delete fingerprint data for user: {}", userId);
+        try {
+            return deleteResource("/fingerprint/enroll/" + userId);
+        } catch (Exception e) {
+            log.error("Error calling biometric service for fingerprint deletion: {}", e.getMessage());
+            return errorResponse("Fingerprint deletion service unavailable: " + e.getMessage());
+        }
+    }
+
+    @Override
+    public Map<String, Object> deleteVoice(UUID userId) {
+        log.info("Calling biometric service to delete voice data for user: {}", userId);
+        try {
+            return deleteResource("/voice/enroll/" + userId);
+        } catch (Exception e) {
+            log.error("Error calling biometric service for voice deletion: {}", e.getMessage());
+            return errorResponse("Voice deletion service unavailable: " + e.getMessage());
+        }
+    }
+
+    private Map<String, Object> deleteResource(String path) {
+        return restClient.delete()
+                .uri(path)
+                .retrieve()
+                .body(MAP_TYPE);
+    }
+
     private Map<String, Object> postMultipart(String path, MultiValueMap<String, org.springframework.http.HttpEntity<?>> parts) {
         return restClient.post()
                 .uri(path)

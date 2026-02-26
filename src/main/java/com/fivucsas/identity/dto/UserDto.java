@@ -24,6 +24,8 @@ public class UserDto {
     private String phoneNumber;
     private String address;
     private UserStatus status;
+    private boolean emailVerified;
+    private boolean phoneVerified;
     private String role;
     private Set<String> roles;
     private String tenantId;

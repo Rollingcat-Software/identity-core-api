@@ -3,6 +3,7 @@ package com.fivucsas.identity.application.service;
 import com.fivucsas.identity.application.dto.command.VerifyBiometricCommand;
 import com.fivucsas.identity.application.dto.response.BiometricResponse;
 import com.fivucsas.identity.application.port.output.BiometricServicePort;
+import com.fivucsas.identity.application.port.output.EventPublisherPort;
 import com.fivucsas.identity.domain.exception.BiometricNotEnrolledException;
 import com.fivucsas.identity.domain.exception.BiometricVerificationException;
 import com.fivucsas.identity.domain.exception.UserNotFoundException;
@@ -44,6 +45,9 @@ class VerifyBiometricServiceTest {
 
     @Mock
     private BiometricServicePort biometricService;
+
+    @Mock
+    private EventPublisherPort eventPublisher;
 
     @Mock
     private MultipartFile faceImage;

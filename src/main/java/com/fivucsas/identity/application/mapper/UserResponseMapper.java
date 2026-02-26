@@ -26,6 +26,8 @@ public final class UserResponseMapper {
                 .address(user.getAddress())
                 .idNumber(user.getIdNumber() != null ? user.getIdNumberAsValueObject().getMasked() : null)
                 .status(user.getStatus().name())
+                .emailVerified(user.isEmailVerified())
+                .phoneVerified(user.isPhoneVerified())
                 .role(roleNames.isEmpty() ? "USER" : roleNames.iterator().next())
                 .roles(roleNames.isEmpty() ? java.util.Set.of("USER") : roleNames)
                 .tenantId(user.getTenant() != null ? user.getTenant().getId().toString() : null)

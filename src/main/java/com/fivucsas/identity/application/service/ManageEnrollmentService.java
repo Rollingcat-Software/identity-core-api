@@ -2,6 +2,7 @@ package com.fivucsas.identity.application.service;
 
 import com.fivucsas.identity.application.dto.response.EnrollmentResponse;
 import com.fivucsas.identity.application.port.input.ManageEnrollmentUseCase;
+import com.fivucsas.identity.application.port.output.BiometricServicePort;
 import com.fivucsas.identity.domain.model.auth.AuthMethodType;
 import com.fivucsas.identity.entity.Tenant;
 import com.fivucsas.identity.entity.User;
@@ -11,20 +12,27 @@ import com.fivucsas.identity.repository.UserEnrollmentRepository;
 import com.fivucsas.identity.repository.UserRepository;
 import jakarta.persistence.EntityNotFoundException;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
+@Slf4j
 public class ManageEnrollmentService implements ManageEnrollmentUseCase {
+
+    private static final Set<AuthMethodType> BIOMETRIC_TYPES = Set.of(
+            AuthMethodType.FACE, AuthMethodType.FINGERPRINT, AuthMethodType.VOICE);
 
     private final UserEnrollmentRepository userEnrollmentRepository;
     private final UserRepository userRepository;
     private final TenantRepository tenantRepository;
+    private final BiometricServicePort biometricServicePort;
 
     @Override
     public List<EnrollmentResponse> getUserEnrollments(UUID userId) {
@@ -72,7 +80,27 @@ public class ManageEnrollmentService implements ManageEnrollmentUseCase {
                 .findByUserIdAndAuthMethodType(userId, methodType)
                 .orElseThrow(() -> new EntityNotFoundException("Enrollment not found for user: " + userId + " method: " + methodType));
 
+        // Delete biometric data from external service when revoking biometric enrollments
+        if (BIOMETRIC_TYPES.contains(methodType)) {
+            deleteBiometricData(userId, methodType);
+        }
+
         enrollment.revoke();
         userEnrollmentRepository.save(enrollment);
+    }
+
+    private void deleteBiometricData(UUID userId, AuthMethodType methodType) {
+        try {
+            switch (methodType) {
+                case FACE -> biometricServicePort.deleteFace(userId);
+                case FINGERPRINT -> biometricServicePort.deleteFingerprint(userId);
+                case VOICE -> biometricServicePort.deleteVoice(userId);
+                default -> { /* no-op for non-biometric types */ }
+            }
+            log.info("Biometric data deleted from external service for user: {} method: {}", userId, methodType);
+        } catch (Exception e) {
+            log.warn("Failed to delete biometric data from external service for user: {} method: {}. " +
+                     "Enrollment revocation will proceed. Error: {}", userId, methodType, e.getMessage());
+        }
     }
 }
