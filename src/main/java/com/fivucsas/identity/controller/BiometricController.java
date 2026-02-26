@@ -186,6 +186,57 @@ public class BiometricController {
             .build());
     }
 
+    @DeleteMapping("/face/{userId}")
+    @Operation(summary = "Delete user's enrolled face biometric data")
+    @PreAuthorize("hasAuthority('biometric:delete') or @userSecurityService.isCurrentUser(#userId)")
+    public ResponseEntity<BiometricVerificationResponse> deleteFace(@PathVariable UUID userId) {
+        log.info("Face deletion request for user: {}", userId);
+
+        Map<String, Object> result = biometricServicePort.deleteFace(userId);
+        boolean success = Boolean.TRUE.equals(result.get("success"))
+                || "true".equalsIgnoreCase(String.valueOf(result.get("success")));
+
+        return ResponseEntity.ok(BiometricVerificationResponse.builder()
+            .verified(success)
+            .confidence(0.0)
+            .message(success ? "Face data deleted successfully" : String.valueOf(result.get("message")))
+            .build());
+    }
+
+    @DeleteMapping("/fingerprint/{userId}")
+    @Operation(summary = "Delete user's enrolled fingerprint biometric data")
+    @PreAuthorize("hasAuthority('biometric:delete') or @userSecurityService.isCurrentUser(#userId)")
+    public ResponseEntity<BiometricVerificationResponse> deleteFingerprint(@PathVariable UUID userId) {
+        log.info("Fingerprint deletion request for user: {}", userId);
+
+        Map<String, Object> result = biometricServicePort.deleteFingerprint(userId);
+        boolean success = Boolean.TRUE.equals(result.get("success"))
+                || "true".equalsIgnoreCase(String.valueOf(result.get("success")));
+
+        return ResponseEntity.ok(BiometricVerificationResponse.builder()
+            .verified(success)
+            .confidence(0.0)
+            .message(success ? "Fingerprint data deleted successfully" : String.valueOf(result.get("message")))
+            .build());
+    }
+
+    @DeleteMapping("/voice/{userId}")
+    @Operation(summary = "Delete user's enrolled voice biometric data")
+    @PreAuthorize("hasAuthority('biometric:delete') or @userSecurityService.isCurrentUser(#userId)")
+    public ResponseEntity<BiometricVerificationResponse> deleteVoice(@PathVariable UUID userId) {
+        log.info("Voice deletion request for user: {}", userId);
+
+        Map<String, Object> result = biometricServicePort.deleteVoice(userId);
+        boolean success = Boolean.TRUE.equals(result.get("success"))
+                || "true".equalsIgnoreCase(String.valueOf(result.get("success")));
+
+        return ResponseEntity.ok(BiometricVerificationResponse.builder()
+            .verified(success)
+            .confidence(0.0)
+            .message(success ? "Voice data deleted successfully" : String.valueOf(result.get("message")))
+            .build());
+    }
+
     private BiometricVerificationResponse mapToVerificationResponse(BiometricResponse response) {
         return BiometricVerificationResponse.builder()
             .verified(response.isSuccess())

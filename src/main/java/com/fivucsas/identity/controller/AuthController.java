@@ -17,6 +17,7 @@ import com.fivucsas.identity.entity.UserStatus;
 import com.fivucsas.identity.dto.UserDto;
 import com.fivucsas.identity.infrastructure.email.EmailService;
 import com.fivucsas.identity.infrastructure.otp.OtpService;
+import com.fivucsas.identity.infrastructure.sms.SmsService;
 import com.fivucsas.identity.repository.UserRepository;
 import com.fivucsas.identity.security.RateLimitService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -59,8 +60,12 @@ public class AuthController {
     private final UserRepository userRepository;
     private final OtpService otpService;
     private final EmailService emailService;
+    private final SmsService smsService;
     private final PasswordEncoder passwordEncoder;
     private final RateLimitService rateLimitService;
+
+    private static final String EMAIL_VERIFY_OTP_PREFIX = "email-verify:";
+    private static final String PHONE_VERIFY_OTP_PREFIX = "phone-verify:";
 
     @PostMapping("/register")
     @Operation(summary = "Register a new user")
@@ -213,6 +218,102 @@ public class AuthController {
         return ResponseEntity.ok(Map.of("message", "Password has been reset successfully"));
     }
 
+    @PostMapping("/send-email-verification")
+    @Operation(summary = "Send email verification code", security = @SecurityRequirement(name = "bearer-jwt"))
+    public ResponseEntity<Map<String, String>> sendEmailVerification(Authentication authentication) {
+        User user = userRepository.findByEmail(authentication.getName())
+                .orElseThrow(() -> new jakarta.persistence.EntityNotFoundException("User not found"));
+
+        if (user.isEmailVerified()) {
+            return ResponseEntity.ok(Map.of("message", "Email is already verified"));
+        }
+
+        String code = otpService.generate(EMAIL_VERIFY_OTP_PREFIX + user.getId());
+        emailService.sendOtp(user.getEmail(), code);
+        log.info("Email verification code sent to: {}", user.getEmail());
+
+        return ResponseEntity.ok(Map.of("message", "Verification code sent to your email"));
+    }
+
+    @PostMapping("/verify-email")
+    @Operation(summary = "Verify email address using OTP code", security = @SecurityRequirement(name = "bearer-jwt"))
+    public ResponseEntity<Map<String, Object>> verifyEmail(
+            @RequestBody Map<String, String> request,
+            Authentication authentication) {
+        String code = request.get("code");
+        if (code == null || code.isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("success", false, "message", "code is required"));
+        }
+
+        User user = userRepository.findByEmail(authentication.getName())
+                .orElseThrow(() -> new jakarta.persistence.EntityNotFoundException("User not found"));
+
+        if (user.isEmailVerified()) {
+            return ResponseEntity.ok(Map.of("success", true, "message", "Email is already verified"));
+        }
+
+        boolean valid = otpService.validate(EMAIL_VERIFY_OTP_PREFIX + user.getId(), code);
+        if (!valid) {
+            return ResponseEntity.ok(Map.of("success", false, "message", "Invalid or expired verification code"));
+        }
+
+        user.verifyEmail();
+        userRepository.save(user);
+        log.info("Email verified for user: {}", user.getId());
+
+        return ResponseEntity.ok(Map.of("success", true, "message", "Email verified successfully"));
+    }
+
+    @PostMapping("/send-phone-verification")
+    @Operation(summary = "Send phone verification code via SMS", security = @SecurityRequirement(name = "bearer-jwt"))
+    public ResponseEntity<Map<String, String>> sendPhoneVerification(Authentication authentication) {
+        User user = userRepository.findByEmail(authentication.getName())
+                .orElseThrow(() -> new jakarta.persistence.EntityNotFoundException("User not found"));
+
+        if (user.getPhoneNumber() == null || user.getPhoneNumber().isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("message", "No phone number configured on this account"));
+        }
+
+        if (user.isPhoneVerified()) {
+            return ResponseEntity.ok(Map.of("message", "Phone number is already verified"));
+        }
+
+        String code = otpService.generate(PHONE_VERIFY_OTP_PREFIX + user.getId());
+        smsService.sendOtp(user.getPhoneNumber(), code);
+        log.info("Phone verification code sent to user: {}", user.getId());
+
+        return ResponseEntity.ok(Map.of("message", "Verification code sent via SMS"));
+    }
+
+    @PostMapping("/verify-phone")
+    @Operation(summary = "Verify phone number using OTP code", security = @SecurityRequirement(name = "bearer-jwt"))
+    public ResponseEntity<Map<String, Object>> verifyPhone(
+            @RequestBody Map<String, String> request,
+            Authentication authentication) {
+        String code = request.get("code");
+        if (code == null || code.isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("success", false, "message", "code is required"));
+        }
+
+        User user = userRepository.findByEmail(authentication.getName())
+                .orElseThrow(() -> new jakarta.persistence.EntityNotFoundException("User not found"));
+
+        if (user.isPhoneVerified()) {
+            return ResponseEntity.ok(Map.of("success", true, "message", "Phone number is already verified"));
+        }
+
+        boolean valid = otpService.validate(PHONE_VERIFY_OTP_PREFIX + user.getId(), code);
+        if (!valid) {
+            return ResponseEntity.ok(Map.of("success", false, "message", "Invalid or expired verification code"));
+        }
+
+        user.verifyPhone();
+        userRepository.save(user);
+        log.info("Phone verified for user: {}", user.getId());
+
+        return ResponseEntity.ok(Map.of("success", true, "message", "Phone number verified successfully"));
+    }
+
     @GetMapping("/health")
     @Operation(summary = "Health check")
     public ResponseEntity<String> health() {
@@ -240,6 +341,8 @@ public class AuthController {
             .address(response.getAddress())
             .idNumber(response.getIdNumber())
             .status(UserStatus.valueOf(response.getStatus()))
+            .emailVerified(response.isEmailVerified())
+            .phoneVerified(response.isPhoneVerified())
             .role(response.getRole())
             .roles(response.getRoles())
             .tenantId(response.getTenantId())

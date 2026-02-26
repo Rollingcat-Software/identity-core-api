@@ -76,4 +76,28 @@ public interface BiometricServicePort {
      * @return Map containing verification response data
      */
     Map<String, Object> verifyVoice(UUID userId, String voiceData);
+
+    /**
+     * Deletes a user's enrolled face biometric data.
+     *
+     * @param userId the user ID
+     * @return Map containing deletion response data
+     */
+    Map<String, Object> deleteFace(UUID userId);
+
+    /**
+     * Deletes a user's enrolled fingerprint biometric data.
+     *
+     * @param userId the user ID
+     * @return Map containing deletion response data
+     */
+    Map<String, Object> deleteFingerprint(UUID userId);
+
+    /**
+     * Deletes a user's enrolled voice biometric data.
+     *
+     * @param userId the user ID
+     * @return Map containing deletion response data
+     */
+    Map<String, Object> deleteVoice(UUID userId);
 }

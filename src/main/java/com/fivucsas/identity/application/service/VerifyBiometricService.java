@@ -29,6 +29,7 @@ public class VerifyBiometricService implements VerifyBiometricUseCase {
 
     private final com.fivucsas.identity.repository.UserRepository userRepository;
     private final BiometricServicePort biometricService;
+    private final com.fivucsas.identity.application.port.output.EventPublisherPort eventPublisher;
 
     @Override
     @Transactional
@@ -61,6 +62,7 @@ public class VerifyBiometricService implements VerifyBiometricUseCase {
         userRepository.save(user);
 
         log.info("Biometric verified successfully for user: {}", user.getId());
+        eventPublisher.publishBiometricVerified(command.getUserId(), true);
 
         return BiometricResponse.builder()
             .success(true)

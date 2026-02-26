@@ -516,6 +516,50 @@ class UserTest {
         assertFalse(userWithoutEmail.hasEmail(email));
     }
 
+    // ========== Email/Phone Verification Tests ==========
+
+    @Test
+    void shouldVerifyEmail() {
+        // Given - user starts with email unverified
+        assertFalse(user.isEmailVerified());
+
+        // When
+        user.verifyEmail();
+
+        // Then
+        assertTrue(user.isEmailVerified());
+    }
+
+    @Test
+    void shouldVerifyPhone() {
+        // Given - user starts with phone unverified
+        assertFalse(user.isPhoneVerified());
+
+        // When
+        user.verifyPhone();
+
+        // Then
+        assertTrue(user.isPhoneVerified());
+    }
+
+    @Test
+    void shouldClearVerificationTokenOnEmailVerify() {
+        // Given - simulate a user who was built with defaults (emailVerified=false)
+        User userWithDefaults = User.builder()
+                .email("test@example.com")
+                .firstName("Test")
+                .lastName("User")
+                .build();
+
+        // When
+        userWithDefaults.verifyEmail();
+
+        // Then
+        assertTrue(userWithDefaults.isEmailVerified());
+        assertNull(userWithDefaults.getEmailVerificationToken());
+        assertNull(userWithDefaults.getEmailVerificationSentAt());
+    }
+
     // ========== Builder Tests ==========
 
     @Test
