@@ -17,8 +17,6 @@ import com.fivucsas.identity.dto.CreateUserRequest;
 import com.fivucsas.identity.dto.UpdateUserRequest;
 import com.fivucsas.identity.entity.PasswordHistory;
 import com.fivucsas.identity.entity.User;
-import com.fivucsas.identity.entity.UserStatus;
-import com.fivucsas.identity.dto.UserDto;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -67,8 +65,8 @@ public class UserController {
 
         List<UserResponse> responses = manageUserUseCase.getAllUsers(new GetAllUsersQuery());
 
-        List<UserDto> allUsers = responses.stream()
-            .map(this::mapToUserDto)
+        List<UserResponse> allUsers = responses.stream()
+            .map(this::enrichWithLoginInfo)
             .collect(Collectors.toList());
 
         int totalElements = allUsers.size();
@@ -76,7 +74,7 @@ public class UserController {
         int fromIndex = Math.min(page * size, totalElements);
         int toIndex = Math.min(fromIndex + size, totalElements);
 
-        List<UserDto> pagedUsers = allUsers.subList(fromIndex, toIndex);
+        List<UserResponse> pagedUsers = allUsers.subList(fromIndex, toIndex);
 
         Map<String, Object> response = new HashMap<>();
         response.put("content", pagedUsers);
@@ -91,7 +89,7 @@ public class UserController {
     @GetMapping("/{id}")
     @Operation(summary = "Get user by ID")
     @PreAuthorize("@rbac.hasPermission('user:read') or @userSecurityService.isCurrentUser(#id)")
-    public ResponseEntity<UserDto> getUserById(@PathVariable String id) {
+    public ResponseEntity<UserResponse> getUserById(@PathVariable String id) {
         log.info("GET /api/v1/users/{} - Get user by ID", id);
 
         GetUserByIdQuery query = GetUserByIdQuery.builder()
@@ -100,13 +98,13 @@ public class UserController {
 
         UserResponse response = manageUserUseCase.getUserById(query);
 
-        return ResponseEntity.ok(mapToUserDto(response));
+        return ResponseEntity.ok(enrichWithLoginInfo(response));
     }
 
     @PostMapping
     @Operation(summary = "Create new user")
     @PreAuthorize("@rbac.hasPermission('user:create')")
-    public ResponseEntity<UserDto> createUser(@Valid @RequestBody CreateUserRequest request) {
+    public ResponseEntity<UserResponse> createUser(@Valid @RequestBody CreateUserRequest request) {
         log.info("POST /api/v1/users - Create user: {}", request.getEmail());
 
         CreateUserCommand command = CreateUserCommand.builder()
@@ -123,13 +121,13 @@ public class UserController {
 
         UserResponse response = manageUserUseCase.createUser(command);
 
-        return ResponseEntity.status(HttpStatus.CREATED).body(mapToUserDto(response));
+        return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
 
     @PutMapping("/{id}")
     @Operation(summary = "Update user")
     @PreAuthorize("@rbac.hasPermission('user:update') or @userSecurityService.isCurrentUser(#id)")
-    public ResponseEntity<UserDto> updateUser(
+    public ResponseEntity<UserResponse> updateUser(
             @PathVariable String id,
             @Valid @RequestBody UpdateUserRequest request) {
         log.info("PUT /api/v1/users/{} - Update user", id);
@@ -144,7 +142,7 @@ public class UserController {
 
         UserResponse response = manageUserUseCase.updateUser(command);
 
-        return ResponseEntity.ok(mapToUserDto(response));
+        return ResponseEntity.ok(response);
     }
 
     @DeleteMapping("/{id}")
@@ -199,7 +197,7 @@ public class UserController {
     @GetMapping("/search")
     @Operation(summary = "Search users")
     @PreAuthorize("@rbac.hasPermission('user:read')")
-    public ResponseEntity<List<UserDto>> searchUsers(@RequestParam String query) {
+    public ResponseEntity<List<UserResponse>> searchUsers(@RequestParam String query) {
         log.info("GET /api/v1/users/search?query={} - Search users", query);
 
         SearchUsersQuery searchQuery = SearchUsersQuery.builder()
@@ -208,36 +206,17 @@ public class UserController {
 
         List<UserResponse> responses = manageUserUseCase.searchUsers(searchQuery);
 
-        List<UserDto> users = responses.stream()
-            .map(this::mapToUserDto)
+        List<UserResponse> users = responses.stream()
+            .map(this::enrichWithLoginInfo)
             .collect(Collectors.toList());
 
         return ResponseEntity.ok(users);
     }
 
-    private UserDto mapToUserDto(UserResponse response) {
-        return UserDto.builder()
-            .id(response.getId())
-            .email(response.getEmail())
-            .firstName(response.getFirstName())
-            .lastName(response.getLastName())
-            .phoneNumber(response.getPhoneNumber())
-            .address(response.getAddress())
-            .idNumber(response.getIdNumber())
-            .status(UserStatus.valueOf(response.getStatus()))
-            .emailVerified(response.isEmailVerified())
-            .phoneVerified(response.isPhoneVerified())
-            .role(response.getRole())
-            .roles(response.getRoles())
-            .tenantId(response.getTenantId())
-            .isBiometricEnrolled(response.isBiometricEnrolled())
-            .enrolledAt(response.getEnrolledAt())
-            .lastVerifiedAt(response.getLastVerifiedAt())
-            .verificationCount(response.getVerificationCount())
+    private UserResponse enrichWithLoginInfo(UserResponse response) {
+        return response.toBuilder()
             .lastLoginAt(getLastLoginAt(response.getId()))
             .lastLoginIp(getLastLoginIp(response.getId()))
-            .createdAt(response.getCreatedAt())
-            .updatedAt(response.getUpdatedAt())
             .build();
     }
 
