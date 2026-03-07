@@ -73,9 +73,11 @@ public class EnrollmentController {
                 .userName(enrollment.getUser() != null ? enrollment.getUser().getFullName() : null)
                 .userEmail(enrollment.getUser() != null ? enrollment.getUser().getEmail() : null)
                 .tenantId(enrollment.getTenant() != null ? enrollment.getTenant().getId().toString() : null)
+                .authMethodType(enrollment.getAuthMethodType() != null ? enrollment.getAuthMethodType().name() : null)
                 .status(enrollment.getStatus().name())
                 .enrolledAt(enrollment.getEnrolledAt())
                 .createdAt(enrollment.getCreatedAt())
+                .updatedAt(enrollment.getUpdatedAt())
                 .completedAt(enrollment.isEnrolled() ? enrollment.getEnrolledAt() : null)
                 .build();
     }
