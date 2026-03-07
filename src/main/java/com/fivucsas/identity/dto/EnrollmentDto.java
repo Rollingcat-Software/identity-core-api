@@ -18,6 +18,7 @@ public class EnrollmentDto {
     private String userName;
     private String userEmail;
     private String tenantId;
+    private String authMethodType;
     private String status;
     private String faceImageUrl;
     private Instant enrolledAt;
