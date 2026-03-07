@@ -12,7 +12,9 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * REST controller for tenant management.
@@ -66,8 +68,25 @@ public class TenantController {
 
     @GetMapping
     @PreAuthorize("@rbac.hasPermission('tenant:read')")
-    public ResponseEntity<List<TenantResponse>> getAllTenants() {
-        List<TenantResponse> response = manageTenantUseCase.getAllTenants();
+    public ResponseEntity<Map<String, Object>> getAllTenants(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        List<TenantResponse> allTenants = manageTenantUseCase.getAllTenants();
+
+        int totalElements = allTenants.size();
+        int totalPages = (int) Math.ceil((double) totalElements / size);
+        int fromIndex = Math.min(page * size, totalElements);
+        int toIndex = Math.min(fromIndex + size, totalElements);
+
+        List<TenantResponse> pagedTenants = allTenants.subList(fromIndex, toIndex);
+
+        Map<String, Object> response = new HashMap<>();
+        response.put("content", pagedTenants);
+        response.put("totalElements", totalElements);
+        response.put("totalPages", totalPages);
+        response.put("page", page);
+        response.put("size", size);
+
         return ResponseEntity.ok(response);
     }
 

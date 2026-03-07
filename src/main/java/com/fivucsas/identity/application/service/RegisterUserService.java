@@ -20,6 +20,7 @@ import com.fivucsas.identity.entity.UserStatus;
 import com.fivucsas.identity.service.RefreshTokenService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -50,6 +51,9 @@ public class RegisterUserService implements RegisterUserUseCase {
     private final com.fivucsas.identity.infrastructure.otp.OtpService otpService;
     private final com.fivucsas.identity.infrastructure.email.EmailService emailService;
 
+    @Value("${app.default-tenant-slug:default}")
+    private String defaultTenantSlug;
+
     @Override
     @Transactional
     public AuthenticationResponse execute(RegisterUserCommand command) {
@@ -75,8 +79,9 @@ public class RegisterUserService implements RegisterUserUseCase {
             defaultTenant = tenantRepository.findById(contextTenantId)
                 .orElseThrow(() -> new com.fivucsas.identity.domain.exception.TenantNotFoundException(contextTenantId.toString()));
         } else {
-            defaultTenant = tenantRepository.findAll().stream().findFirst()
-                .orElseThrow(() -> new IllegalStateException("No tenant found in the system"));
+            defaultTenant = tenantRepository.findBySlug(defaultTenantSlug)
+                .orElseGet(() -> tenantRepository.findAll().stream().findFirst()
+                    .orElseThrow(() -> new IllegalStateException("No tenant found in the system")));
             log.warn("No tenant context set during registration, falling back to default tenant: {}", defaultTenant.getSlug());
         }
 
