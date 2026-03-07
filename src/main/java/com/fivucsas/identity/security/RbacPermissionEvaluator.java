@@ -17,10 +17,10 @@ import java.io.Serializable;
  * <p>Usage in controllers:
  * <pre>
  * {@code @PreAuthorize("hasPermission(null, 'user', 'read')")}
- * public ResponseEntity<List<UserDto>> listUsers() { ... }
+ * public ResponseEntity<List<UserResponse>> listUsers() { ... }
  *
  * {@code @PreAuthorize("@rbac.hasPermission('user:read')")}
- * public ResponseEntity<UserDto> getUser() { ... }
+ * public ResponseEntity<UserResponse> getUser() { ... }
  * </pre>
  */
 @Component

@@ -13,8 +13,6 @@ import com.fivucsas.identity.dto.LoginRequest;
 import com.fivucsas.identity.dto.RefreshTokenRequest;
 import com.fivucsas.identity.dto.RegisterRequest;
 import com.fivucsas.identity.entity.User;
-import com.fivucsas.identity.entity.UserStatus;
-import com.fivucsas.identity.dto.UserDto;
 import com.fivucsas.identity.infrastructure.email.EmailService;
 import com.fivucsas.identity.infrastructure.otp.OtpService;
 import com.fivucsas.identity.infrastructure.sms.SmsService;
@@ -144,7 +142,7 @@ public class AuthController {
 
     @GetMapping("/me")
     @Operation(summary = "Get current authenticated user", security = @SecurityRequirement(name = "bearer-jwt"))
-    public ResponseEntity<UserDto> getCurrentUser(Authentication authentication) {
+    public ResponseEntity<UserResponse> getCurrentUser(Authentication authentication) {
         log.info("Get current user request");
 
         GetUserByEmailQuery query = GetUserByEmailQuery.builder()
@@ -153,7 +151,7 @@ public class AuthController {
 
         UserResponse response = getCurrentUserUseCase.execute(query);
 
-        return ResponseEntity.ok(mapToUserDto(response));
+        return ResponseEntity.ok(response);
     }
 
     @PostMapping("/forgot-password")
@@ -327,32 +325,8 @@ public class AuthController {
             response.getAccessToken(),
             response.getRefreshToken(),
             response.getExpiresIn(),
-            mapToUserDto(response.getUser())
+            response.getUser()
         );
-    }
-
-    private UserDto mapToUserDto(UserResponse response) {
-        return UserDto.builder()
-            .id(response.getId())
-            .email(response.getEmail())
-            .firstName(response.getFirstName())
-            .lastName(response.getLastName())
-            .phoneNumber(response.getPhoneNumber())
-            .address(response.getAddress())
-            .idNumber(response.getIdNumber())
-            .status(UserStatus.valueOf(response.getStatus()))
-            .emailVerified(response.isEmailVerified())
-            .phoneVerified(response.isPhoneVerified())
-            .role(response.getRole())
-            .roles(response.getRoles())
-            .tenantId(response.getTenantId())
-            .isBiometricEnrolled(response.isBiometricEnrolled())
-            .enrolledAt(response.getEnrolledAt())
-            .lastVerifiedAt(response.getLastVerifiedAt())
-            .verificationCount(response.getVerificationCount())
-            .createdAt(response.getCreatedAt())
-            .updatedAt(response.getUpdatedAt())
-            .build();
     }
 
     // Utility methods
