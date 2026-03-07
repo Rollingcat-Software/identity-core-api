@@ -15,6 +15,7 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -57,6 +58,28 @@ public class AuditLogController {
         response.put("size", auditLogs.getSize());
 
         return ResponseEntity.ok(response);
+    }
+
+    @GetMapping("/action-types")
+    @Operation(summary = "Get available audit log action types")
+    @PreAuthorize("hasPermission(null, 'audit', 'read')")
+    public ResponseEntity<List<String>> getActionTypes() {
+        return ResponseEntity.ok(List.of(
+            "USER_CREATED", "USER_UPDATED", "USER_DELETED",
+            "USER_AUTHENTICATED", "USER_REGISTERED", "USER_LOGGED_OUT",
+            "BIOMETRIC_ENROLLED", "BIOMETRIC_VERIFIED", "BIOMETRIC_DELETED",
+            "ROLE_CREATED", "ROLE_UPDATED", "ROLE_DELETED",
+            "ROLE_ASSIGNED", "ROLE_REVOKED",
+            "PERMISSION_GRANTED", "PERMISSION_REVOKED",
+            "TENANT_CREATED", "TENANT_UPDATED", "TENANT_DELETED",
+            "TENANT_ACTIVATED", "TENANT_SUSPENDED",
+            "SETTINGS_UPDATED", "PASSWORD_CHANGED", "PASSWORD_RESET",
+            "EMAIL_VERIFIED", "PHONE_VERIFIED",
+            "ENROLLMENT_STARTED", "ENROLLMENT_COMPLETED", "ENROLLMENT_FAILED",
+            "AUTH_FLOW_CREATED", "AUTH_FLOW_UPDATED", "AUTH_FLOW_DELETED",
+            "DEVICE_REGISTERED", "DEVICE_REMOVED",
+            "GUEST_INVITED", "GUEST_ACCEPTED", "GUEST_REVOKED"
+        ));
     }
 
     @GetMapping("/{id}")

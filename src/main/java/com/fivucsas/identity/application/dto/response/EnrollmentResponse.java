@@ -13,7 +13,16 @@ public record EnrollmentResponse(
     EnrollmentStatus status,
     Instant enrolledAt,
     Instant expiresAt,
-    Instant createdAt
+    Instant createdAt,
+    String userId,
+    String userName,
+    String userEmail,
+    String tenantId,
+    Double qualityScore,
+    Double livenessScore,
+    String errorCode,
+    String errorMessage,
+    Instant completedAt
 ) {
     public static EnrollmentResponse from(UserEnrollment entity) {
         return new EnrollmentResponse(
@@ -22,7 +31,16 @@ public record EnrollmentResponse(
             entity.getStatus(),
             entity.getEnrolledAt(),
             entity.getExpiresAt(),
-            entity.getCreatedAt()
+            entity.getCreatedAt(),
+            entity.getUser() != null ? entity.getUser().getId().toString() : null,
+            entity.getUser() != null ? entity.getUser().getFullName() : null,
+            entity.getUser() != null ? entity.getUser().getEmail() : null,
+            entity.getTenant() != null ? entity.getTenant().getId().toString() : null,
+            null, // qualityScore - populated by biometric service
+            null, // livenessScore - populated by biometric service
+            null, // errorCode
+            null, // errorMessage
+            entity.getStatus() == EnrollmentStatus.ENROLLED ? entity.getEnrolledAt() : null
         );
     }
 }

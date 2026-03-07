@@ -1,5 +1,6 @@
 package com.fivucsas.identity.application.dto.response;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fivucsas.identity.domain.model.auth.DevicePlatform;
 import com.fivucsas.identity.entity.UserDevice;
 
@@ -11,11 +12,11 @@ public record DeviceResponse(
     UUID id,
     String deviceName,
     DevicePlatform platform,
-    String deviceFingerprint,
+    @JsonProperty("fingerprint") String deviceFingerprint,
     List<String> capabilities,
     boolean isTrusted,
-    Instant lastUsedAt,
-    Instant registeredAt
+    @JsonProperty("lastUsed") Instant lastUsedAt,
+    @JsonProperty("createdAt") Instant registeredAt
 ) {
     public static DeviceResponse from(UserDevice entity) {
         return new DeviceResponse(
