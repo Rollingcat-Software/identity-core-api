@@ -31,7 +31,9 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.Instant;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -58,16 +60,32 @@ public class UserController {
     @GetMapping
     @Operation(summary = "Get all users")
     @PreAuthorize("@rbac.hasPermission('user:read')")
-    public ResponseEntity<List<UserDto>> getAllUsers() {
-        log.info("GET /api/v1/users - Get all users");
+    public ResponseEntity<Map<String, Object>> getAllUsers(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        log.info("GET /api/v1/users - Get all users (page={}, size={})", page, size);
 
         List<UserResponse> responses = manageUserUseCase.getAllUsers(new GetAllUsersQuery());
 
-        List<UserDto> users = responses.stream()
+        List<UserDto> allUsers = responses.stream()
             .map(this::mapToUserDto)
             .collect(Collectors.toList());
 
-        return ResponseEntity.ok(users);
+        int totalElements = allUsers.size();
+        int totalPages = (int) Math.ceil((double) totalElements / size);
+        int fromIndex = Math.min(page * size, totalElements);
+        int toIndex = Math.min(fromIndex + size, totalElements);
+
+        List<UserDto> pagedUsers = allUsers.subList(fromIndex, toIndex);
+
+        Map<String, Object> response = new HashMap<>();
+        response.put("content", pagedUsers);
+        response.put("totalElements", totalElements);
+        response.put("totalPages", totalPages);
+        response.put("page", page);
+        response.put("size", size);
+
+        return ResponseEntity.ok(response);
     }
 
     @GetMapping("/{id}")
