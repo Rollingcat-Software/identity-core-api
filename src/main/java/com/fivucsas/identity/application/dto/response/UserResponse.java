@@ -17,7 +17,7 @@ import java.util.Set;
  * - Security: Excludes sensitive data (password hash)
  */
 @Data
-@Builder
+@Builder(toBuilder = true)
 @NoArgsConstructor
 @AllArgsConstructor
 public class UserResponse {
@@ -39,6 +39,8 @@ public class UserResponse {
     private Instant enrolledAt;
     private Instant lastVerifiedAt;
     private int verificationCount;
+    private Instant lastLoginAt;
+    private String lastLoginIp;
     private Instant createdAt;
     private Instant updatedAt;
 }

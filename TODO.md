@@ -20,7 +20,7 @@ Previous audit (Feb 2026, AUDIT_REPORT.md) identified:
 ### CRITICAL - Breaking frontend integration
 
 - [x] **XC1** UserController.getAllUsers() already returns paginated format (content, totalElements, totalPages, page, size) via in-memory pagination. Frontend UserRepository handles both formats. **RESOLVED**.
-- [ ] **XC2** `UserController` maps `UserResponse` to legacy `UserDto` via `mapToUserDto()`, adding an unnecessary translation layer. The `UserDto` class (legacy package) duplicates `UserResponse` fields. **Fix**: Return `UserResponse` directly from controllers or consolidate.
+- [x] **XC2** `UserController` maps `UserResponse` to legacy `UserDto` via `mapToUserDto()`, adding an unnecessary translation layer. The `UserDto` class (legacy package) duplicates `UserResponse` fields. **RESOLVED**: Deleted `UserDto`, controllers now return `UserResponse` directly. Added `lastLoginAt`/`lastLoginIp` fields to `UserResponse`. `AuthResponse` updated to use `UserResponse`.
 - [x] **XC3** TenantController.getAllTenants() already returns paginated format via in-memory pagination. **RESOLVED**.
 - [x] **XC4** EnrollmentController.retryEnrollment() validates only FAILED enrollments can be retried, resets to PENDING, and saves. **RESOLVED**.
 - [x] **XC5** EnrollmentDto includes all frontend-expected fields (authMethodType, faceImageUrl, qualityScore, livenessScore, errorCode, errorMessage). EnrollmentQueryService updated to use UserEnrollment entity. **RESOLVED**.
@@ -35,7 +35,7 @@ Previous audit (Feb 2026, AUDIT_REPORT.md) identified:
 - [ ] **XH6** **Guest Management API** - Backend `GuestController` is fully implemented but frontend has no guest UI. Ensure guest API is well-documented for frontend integration.
 - [ ] **XH7** **TOTP Setup API** - Backend `TotpController` has setup/verify/disable/status. Frontend `TotpEnrollment.tsx` exists but isn't connected. Ensure API contract documentation is clear.
 - [ ] **XH8** **Change Password API** - Backend `POST /api/v1/users/{id}/change-password` exists with password history validation. Needs frontend integration (Settings page).
-- [ ] **XH9** **Email Verification Flow** (from AUDIT_REPORT) - No `POST /api/v1/auth/verify-email` endpoint exists. Frontend registration should trigger email verification.
+- [x] **XH9** **Email Verification Flow** (from AUDIT_REPORT) - `POST /api/v1/auth/verify-email`, `POST /api/v1/auth/send-email-verification`, `POST /api/v1/auth/forgot-password`, `POST /api/v1/auth/reset-password` endpoints now exist. **RESOLVED**.
 
 ### MEDIUM - API consistency and documentation
 
@@ -49,29 +49,29 @@ Previous audit (Feb 2026, AUDIT_REPORT.md) identified:
 
 ### LOW - Architecture and cleanup
 
-- [ ] **XL1** Delete 4 legacy dead code files: `service/AuthService.java`, `service/UserService.java`, `service/BiometricService.java`, `service/StatisticsService.java`.
+- [x] **XL1** Delete 4 legacy dead code files: `service/AuthService.java`, `service/UserService.java`, `service/BiometricService.java`, `service/StatisticsService.java`. **RESOLVED**.
 - [ ] **XL2** Extract `RefreshTokenService` as port/adapter (HIGH-4 from previous audit).
 - [ ] **XL3** Wire `EventPublisherPort` into services (HIGH-1 from previous audit).
 - [ ] **XL4** Restrict Swagger/H2/Actuator in prod profile (HIGH-5 from previous audit).
-- [ ] **XL5** Fix `RegisterUserService` tenant assignment from `TenantContext` instead of hardcoding "test-tenant" (HIGH-10 from previous audit).
-- [ ] **XL6** Add token ownership validation in logout (CRITICAL-3 from previous audit).
+- [x] **XL5** Fix `RegisterUserService` tenant assignment from `TenantContext` instead of hardcoding "test-tenant" (HIGH-10 from previous audit). **RESOLVED**: Uses `TenantContext.getCurrentTenant()` with configurable `app.default-tenant-slug` fallback.
+- [x] **XL6** Add token ownership validation in logout (CRITICAL-3 from previous audit). **RESOLVED**: `LogoutUserService` validates token's `userId` matches authenticated user before revoking.
 - [ ] **XL7** Replace blocking `WebClient.block()` calls in `BiometricServiceAdapter` with `RestClient`.
 
 ### Remaining from Previous Audit (not yet fixed)
 
 - [ ] CRITICAL-1: WebAuthn cryptographic verification (needs Yubico library)
 - [ ] CRITICAL-2: NFC Document auth always fails (prevent as required step)
-- [ ] CRITICAL-3: Logout doesn't validate token ownership
+- [x] CRITICAL-3: Logout doesn't validate token ownership **RESOLVED**
 - [ ] HIGH-1: EventPublisherPort not wired
-- [ ] HIGH-2: Delete legacy dead code
-- [ ] HIGH-3: Consolidate dual DTO layer
+- [x] HIGH-2: Delete legacy dead code **RESOLVED**
+- [x] HIGH-3: Consolidate dual DTO layer **RESOLVED** (UserDto eliminated)
 - [ ] HIGH-4: RefreshTokenService not abstracted as port
 - [ ] HIGH-5: Swagger/H2/Actuator accessible in prod
-- [ ] HIGH-6: No email verification flow
+- [x] HIGH-6: No email verification flow **RESOLVED** (send-email-verification, verify-email, send-phone-verification, verify-phone endpoints added)
 - [ ] HIGH-7: EnrollmentController bypasses hexagonal architecture
 - [ ] HIGH-8: Blocking WebClient calls
 - [ ] HIGH-9: No exportable OpenAPI spec
-- [ ] HIGH-10: RegisterUserService hardcodes default tenant
+- [x] HIGH-10: RegisterUserService hardcodes default tenant **RESOLVED**
 
 ---
 
