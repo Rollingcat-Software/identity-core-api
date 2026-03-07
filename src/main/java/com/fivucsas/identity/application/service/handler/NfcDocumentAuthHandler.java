@@ -25,20 +25,29 @@ public class NfcDocumentAuthHandler implements AuthMethodHandler {
         if (nfcData == null || nfcData.isEmpty()) {
             return StepResult.failure(
                     "NFC document scanning requires physical NFC hardware. " +
-                    "This authentication method is only available on devices with NFC readers.");
+                    "This authentication method is only available on mobile devices with NFC readers.");
         }
 
         if (session.getUser() == null) {
             return StepResult.failure("User must be identified before NFC document verification");
         }
 
-        // NFC document verification is a stub - requires physical hardware integration.
-        // In production, this would validate the NFC chip data against stored document hashes.
-        log.warn("NFC document authentication attempted for session: {} - hardware integration pending",
-                session.getId());
+        // NFC document verification requires physical NFC reader hardware integration.
+        // In production, this would:
+        // 1. Read NFC chip data from the ID document (MRTD/ICAO standard)
+        // 2. Verify BAC/PACE authentication
+        // 3. Validate document certificate chain
+        // 4. Extract and verify biometric data from EF.DG2
+        // 5. Compare against stored document hashes
+        //
+        // See TODO.md AUTH-1 and ROADMAP.md Phase 1 for implementation plans.
+        // This method should NOT be configured as a required step until hardware integration is complete.
+        log.warn("NFC document authentication attempted for session: {} - hardware integration pending. " +
+                "This auth method should not be configured as a required step.", session.getId());
         return StepResult.failure(
                 "NFC document verification is not yet available. " +
-                "Physical NFC reader hardware integration is pending.");
+                "This method requires a mobile device with NFC reader hardware. " +
+                "Please contact your administrator to use an alternative authentication method.");
     }
 
     @Override

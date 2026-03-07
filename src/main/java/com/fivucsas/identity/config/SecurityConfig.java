@@ -40,11 +40,14 @@ public class SecurityConfig {
     private final UserDetailsService userDetailsService;
     private final RbacPermissionEvaluator rbacPermissionEvaluator;
 
-    @Value("${cors.allowed-origins:http://localhost:3000,http://localhost:4200,http://localhost:5173,https://ica-fivucsas.rollingcatsoftware.com}")
+    @Value("${app.cors.allowed-origins:http://localhost:5173,http://localhost:3000,http://localhost:8080,http://localhost:4200,https://ica-fivucsas.rollingcatsoftware.com}")
     private String allowedOrigins;
 
     @Value("${spring.profiles.active:dev}")
     private String activeProfile;
+
+    @Value("${app.security.expose-docs:true}")
+    private boolean exposeDocs;
 
     /**
      * Registers the custom RBAC PermissionEvaluator with Spring Security's
@@ -86,9 +89,9 @@ public class SecurityConfig {
                                 "/api/v1/guests/accept"
                         ).permitAll()
 
-                        // Development/Documentation endpoints - restricted by profile
+                        // Development/Documentation endpoints - restricted by profile and expose-docs flag
                         .requestMatchers("/h2-console/**").access((authentication, context) ->
-                                new org.springframework.security.authorization.AuthorizationDecision(!isProductionProfile()))
+                                new org.springframework.security.authorization.AuthorizationDecision(exposeDocs && !isProductionProfile()))
                         .requestMatchers(
                                 "/swagger-ui/**",
                                 "/swagger-ui.html",
@@ -96,11 +99,11 @@ public class SecurityConfig {
                                 "/api-docs/**",
                                 "/api-docs"
                         ).access((authentication, context) ->
-                                new org.springframework.security.authorization.AuthorizationDecision(!isProductionProfile()))
+                                new org.springframework.security.authorization.AuthorizationDecision(exposeDocs && !isProductionProfile()))
                         // Actuator: health is public, others require auth in prod
                         .requestMatchers("/actuator/health").permitAll()
                         .requestMatchers("/actuator/**").access((authentication, context) ->
-                                new org.springframework.security.authorization.AuthorizationDecision(!isProductionProfile()))
+                                new org.springframework.security.authorization.AuthorizationDecision(exposeDocs && !isProductionProfile()))
 
                         // Protected authentication endpoints
                         .requestMatchers(
