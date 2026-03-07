@@ -92,6 +92,36 @@ The identity-core-api communicates with biometric-processor via `BiometricServic
 
 ---
 
+## AUTH METHOD INTEGRATION GAPS (March 2026)
+
+### Auth Handler Status Matrix
+
+| Auth Method | Handler | BiometricServicePort | biometric-processor | Runtime Status |
+|---|---|---|---|---|
+| PASSWORD | PasswordAuthHandler | N/A | N/A | Working |
+| EMAIL_OTP | EmailOtpAuthHandler | N/A | N/A | Working |
+| SMS_OTP | SmsOtpAuthHandler | N/A | N/A | Working |
+| TOTP | TotpAuthHandler | N/A | N/A | Working |
+| QR_CODE | QrCodeAuthHandler | N/A | N/A | Working |
+| FACE | FaceAuthHandler | enrollFace/verifyFace | Full implementation | Working |
+| FINGERPRINT | FingerprintAuthHandler | verifyFingerprint | **STUB (always fails)** | **BROKEN** |
+| VOICE | VoiceAuthHandler | verifyVoice | **STUB (always fails)** | **BROKEN** |
+| NFC_DOCUMENT | NfcDocumentAuthHandler | N/A (hardcoded fail) | N/A | **BROKEN - always fails** |
+| HARDWARE_KEY | HardwareKeyAuthHandler | N/A (WebAuthn) | N/A | Working (needs enrollment UI) |
+
+### Auth Integration TODOs
+
+- [ ] **AUTH-1** NfcDocumentAuthHandler always returns failure - should either implement or prevent as required step
+- [ ] **AUTH-2** FingerprintAuthHandler calls biometric-processor stub - always fails at runtime
+- [ ] **AUTH-3** VoiceAuthHandler calls biometric-processor stub - always fails at runtime
+- [ ] **AUTH-4** WebAuthnController has registration endpoints but web-app has no enrollment UI
+- [ ] **AUTH-5** TotpController setup/verify/disable/status endpoints not connected to frontend TotpEnrollment
+- [ ] **AUTH-6** QrCodeController generate/invalidate endpoints not connected to QrCodeStep
+- [ ] **AUTH-7** EnrollmentManagementController per-user endpoints not used by frontend
+- [ ] **AUTH-8** BiometricServicePort.enrollFingerprint/enrollVoice call stubs in biometric-processor
+
+---
+
 ## Summary
 
 | Priority | Count | Description |
@@ -100,12 +130,13 @@ The identity-core-api communicates with biometric-processor via `BiometricServic
 | High | 9 | Missing endpoints, features frontend needs |
 | Medium | 7 | API consistency, documentation |
 | Low | 7 | Architecture cleanup, previous audit items |
+| Auth | 8 | Auth method integration gaps |
 | Previous | 13 | Unresolved items from Feb 2026 audit |
-| **Total** | **41** | |
+| **Total** | **49** | |
 
 ### Priority Order
 
-**Week 1**: XC1-XC5 (fix breaking frontend contracts), XL6 (logout security)
-**Week 2**: XH1-XH9 (backend support for frontend features)
-**Week 3**: XM1-XM7 (API consistency), XL1-XL5 (cleanup)
+**Week 1**: XC1-XC5 (fix breaking frontend contracts), XL6 (logout security), AUTH-1 (NFC stub)
+**Week 2**: XH1-XH9 (backend support for frontend features), AUTH-4-7 (auth endpoint connections)
+**Week 3**: XM1-XM7 (API consistency), XL1-XL5 (cleanup), AUTH-2-3,8 (biometric stubs)
 **Week 4**: Previous audit critical + high items

@@ -957,6 +957,25 @@ We welcome contributions from the team! Please follow these guidelines:
 
 Types: `feat`, `fix`, `docs`, `style`, `refactor`, `test`, `chore`
 
+## Auth Method Support Status
+
+The system supports 10 authentication methods via pluggable handlers:
+
+| Auth Method | Handler | Status | Notes |
+|---|---|---|---|
+| PASSWORD | PasswordAuthHandler | Working | BCrypt with password history |
+| EMAIL_OTP | EmailOtpAuthHandler | Working | 6-digit OTP via email |
+| SMS_OTP | SmsOtpAuthHandler | Working | 6-digit OTP via SMS |
+| TOTP | TotpAuthHandler | Working | Authenticator app codes |
+| QR_CODE | QrCodeAuthHandler | Working | Token-based QR scanning |
+| FACE | FaceAuthHandler | Working | Via biometric-processor DeepFace |
+| FINGERPRINT | FingerprintAuthHandler | **Broken** | biometric-processor stub always fails |
+| VOICE | VoiceAuthHandler | **Broken** | biometric-processor stub always fails |
+| NFC_DOCUMENT | NfcDocumentAuthHandler | **Broken** | Hardcoded failure, needs hardware |
+| HARDWARE_KEY | HardwareKeyAuthHandler | Working | WebAuthn/FIDO2, needs enrollment UI |
+
+See [TODO.md](./TODO.md) for detailed integration audit and [ROADMAP.md](./ROADMAP.md) for fix plan.
+
 ## Roadmap
 
 ### Phase 1: MVP (Current)
@@ -964,8 +983,11 @@ Types: `feat`, `fix`, `docs`, `style`, `refactor`, `test`, `chore`
 - [x] User authentication with JWT
 - [x] Multi-tenant architecture
 - [x] Role-based access control
-- [ ] Biometric integration
-- [ ] Basic API documentation
+- [x] 10 auth method handlers implemented
+- [x] Multi-step auth flow engine
+- [x] WebAuthn/FIDO2 support
+- [ ] Fix broken auth methods (Fingerprint, Voice, NFC)
+- [ ] Connect all auth endpoints to frontend
 
 ### Phase 2: Enhanced Features
 
