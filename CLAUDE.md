@@ -44,7 +44,7 @@ All handlers in `application/service/handler/`:
 - TotpController not connected to frontend TotpEnrollment component
 - QrCodeController not connected to frontend QrCodeStep
 - EnrollmentManagementController per-user endpoints unused by frontend
-- UserController.getAllUsers() returns flat List, not paginated Page<T>
+- UserController.getAllUsers() uses in-memory pagination (fetches all, then slices) - works but inefficient for large datasets
 
 ### Cross-repo dependencies:
 - Communicates with **biometric-processor** (Python/FastAPI on port 8001) via BiometricServiceAdapter

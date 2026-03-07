@@ -19,17 +19,17 @@ Previous audit (Feb 2026, AUDIT_REPORT.md) identified:
 
 ### CRITICAL - Breaking frontend integration
 
-- [ ] **XC1** `UserController.getAllUsers()` returns `List<UserDto>` (flat array) but frontend expects Spring `Page<T>` format with `content`, `totalElements`, `totalPages`, `page`, `size`. Frontend will fail to parse pagination. **Fix**: Add `Pageable` parameter and return `Page<UserDto>`.
+- [x] **XC1** UserController.getAllUsers() already returns paginated format (content, totalElements, totalPages, page, size) via in-memory pagination. Frontend UserRepository handles both formats. **RESOLVED**.
 - [ ] **XC2** `UserController` maps `UserResponse` to legacy `UserDto` via `mapToUserDto()`, adding an unnecessary translation layer. The `UserDto` class (legacy package) duplicates `UserResponse` fields. **Fix**: Return `UserResponse` directly from controllers or consolidate.
-- [ ] **XC3** `TenantController.getAllTenants()` returns `List<TenantResponse>` (flat array). Frontend pagination handler expects Spring Page format. **Fix**: Add `Pageable` parameter.
-- [ ] **XC4** `EnrollmentController` is a stub - `retryEnrollment()` returns existing data without retrying. Frontend `EnrollmentsListPage` has a "Retry" button that calls this. **Fix**: Implement actual retry logic or return appropriate error.
-- [ ] **XC5** Backend `EnrollmentResponse` record has fields (`authMethodType`, `enrolledAt`, `expiresAt`) that don't match what frontend expects (`faceImageUrl`, `qualityScore`, `livenessScore`, `errorCode`, `errorMessage`). Need to align the response format.
+- [x] **XC3** TenantController.getAllTenants() already returns paginated format via in-memory pagination. **RESOLVED**.
+- [x] **XC4** EnrollmentController.retryEnrollment() validates only FAILED enrollments can be retried, resets to PENDING, and saves. **RESOLVED**.
+- [x] **XC5** EnrollmentDto includes all frontend-expected fields (authMethodType, faceImageUrl, qualityScore, livenessScore, errorCode, errorMessage). EnrollmentQueryService updated to use UserEnrollment entity. **RESOLVED**.
 
 ### HIGH - Frontend features that need backend support
 
 - [ ] **XH1** **httpOnly Cookie Token Storage** (web-app L10) - Frontend currently stores JWT in localStorage. Backend should support `Set-Cookie` with `HttpOnly; Secure; SameSite=Strict` flags. **Add**: Cookie-based auth option in `AuthController`.
-- [ ] **XH2** **Paginated User List** - Frontend supports pagination params (`page`, `size`). Backend `UserController.getAllUsers()` has no `Pageable`. **Fix**: Add `Pageable` parameter to `getAllUsers()`.
-- [ ] **XH3** **Paginated Tenant List** - Same as XH2 for `TenantController`.
+- [x] **XH2** **Paginated User List** - UserController already accepts page/size params and returns paginated format. **RESOLVED**.
+- [x] **XH3** **Paginated Tenant List** - TenantController already accepts page/size params and returns paginated format. **RESOLVED**.
 - [ ] **XH4** **Statistics Export** - Backend has `GET /api/v1/statistics/export?format=` endpoint (documented in IMPLEMENTATION_PLAN) but frontend doesn't use it. Verify endpoint actually works and returns CSV/PDF.
 - [ ] **XH5** **Auth Methods from DB** - Frontend hardcodes auth methods. Backend `AuthMethodController` returns them from DB. Frontend should call this endpoint instead. Ensure `AuthMethodResponse` format is compatible.
 - [ ] **XH6** **Guest Management API** - Backend `GuestController` is fully implemented but frontend has no guest UI. Ensure guest API is well-documented for frontend integration.
@@ -45,7 +45,7 @@ Previous audit (Feb 2026, AUDIT_REPORT.md) identified:
 - [ ] **XM4** **Error Code Catalog** - `ErrorResponse` has error codes but no documented catalog for frontend to map to user-facing messages. **Fix**: Create error code documentation.
 - [ ] **XM5** **Tenant Status Enum** - Backend `TenantEntity` has status as String but frontend expects `ACTIVE | TRIAL | SUSPENDED | INACTIVE | PENDING`. Ensure backend returns these exact values.
 - [ ] **XM6** **CORS Configuration** - Hardcoded development origins in `SecurityConfig`. Document required CORS setup for production deployment.
-- [ ] **XM7** **Device Response Mismatch** - Backend `DeviceResponse` has `deviceFingerprint`, `capabilities`, `isTrusted`, `lastUsedAt`, `registeredAt` but frontend expects `fingerprint`, `lastUsed`, `createdAt`. Need alignment.
+- [x] **XM7** **Device Response Mismatch** - Backend DeviceResponse uses @JsonProperty annotations to serialize as fingerprint, lastUsed, createdAt. **RESOLVED**.
 
 ### LOW - Architecture and cleanup
 
@@ -83,10 +83,10 @@ The identity-core-api communicates with biometric-processor via `BiometricServic
 |------------------------|------------------------------|--------|
 | `enrollFace()` | `POST /api/v1/enroll` | Working |
 | `verifyFace()` | `POST /api/v1/verify` | Working |
-| `enrollFingerprint()` | Not a biometric-processor endpoint | Needs review |
-| `enrollVoice()` | Not a biometric-processor endpoint | Needs review |
-| `verifyFingerprint()` | Not a biometric-processor endpoint | Needs review |
-| `verifyVoice()` | Not a biometric-processor endpoint | Needs review |
+| `enrollFingerprint()` | `POST /api/v1/fingerprint/enroll` | Stub (returns structured error) |
+| `enrollVoice()` | `POST /api/v1/voice/enroll` | Stub (returns structured error) |
+| `verifyFingerprint()` | `POST /api/v1/fingerprint/verify` | Stub (returns structured error) |
+| `verifyVoice()` | `POST /api/v1/voice/verify` | Stub (returns structured error) |
 
 **Note**: biometric-processor only handles face biometrics. Fingerprint, voice, and other biometric types need separate infrastructure or the `BiometricServiceAdapter` needs to handle these differently (possibly stub/simulate for MVP).
 
