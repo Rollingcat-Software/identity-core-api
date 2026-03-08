@@ -31,6 +31,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.time.Instant;
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -125,6 +126,7 @@ class RegisterUserServiceTest {
 
         // Configure tenant repository mock to return test tenant
         lenient().when(tenantRepository.findBySlug("test-tenant")).thenReturn(Optional.of(testTenant));
+        lenient().when(tenantRepository.findAll()).thenReturn(List.of(testTenant));
     }
 
     @Nested
