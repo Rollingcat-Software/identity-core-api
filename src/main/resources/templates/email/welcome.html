@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <title>Welcome - FIVUCSAS</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .header {
+            background: #1976d2;
+            color: white;
+            padding: 20px;
+            text-align: center;
+            border-radius: 5px 5px 0 0;
+        }
+        .content {
+            padding: 30px;
+            background: #f9f9f9;
+            border: 1px solid #ddd;
+            border-top: none;
+        }
+        .button {
+            display: inline-block;
+            padding: 12px 24px;
+            background: #1976d2;
+            color: white;
+            text-decoration: none;
+            border-radius: 4px;
+            margin: 20px 0;
+        }
+        .footer {
+            text-align: center;
+            padding: 20px;
+            font-size: 12px;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Welcome to FIVUCSAS!</h1>
+    </div>
+    <div class="content">
+        <p>Hello <span th:text="${userName}">User</span>,</p>
+        <p>Welcome to FIVUCSAS Identity Management System. Your account has been successfully created.</p>
+        <p>You can now log in and access all features of the platform.</p>
+        <div style="text-align: center;">
+            <a th:href="${loginLink}" class="button">Go to Login</a>
+        </div>
+        <p>If you have any questions, please don't hesitate to contact our support team.</p>
+    </div>
+    <div class="footer">
+        <p>&copy; 2026 FIVUCSAS. All rights reserved.</p>
+    </div>
+</body>
+</html>

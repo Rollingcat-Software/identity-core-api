@@ -1,0 +1,38 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git submodule status:*)",
+      "Bash(if not exist \"C:\\\\Users\\\\ahabg\\\\OneDrive\\\\Belgeler\\\\GitHub\\\\FIVUCSAS\\\\identity-core-api\\\\scripts\" mkdir \"C:\\\\Users\\\\ahabg\\\\OneDrive\\\\Belgeler\\\\GitHub\\\\FIVUCSAS\\\\identity-core-api\\\\scripts\")",
+      "Bash(openssl rand:*)",
+      "Bash(gcloud config:*)",
+      "Bash(bash scripts/deploy-gcp.sh:*)",
+      "Bash(gcloud compute ssh:*)",
+      "Bash(gcloud compute scp:*)",
+      "Bash(gcloud compute firewall-rules describe:*)",
+      "Bash(gcloud compute firewall-rules create:*)",
+      "Bash(gcloud compute instances describe:*)",
+      "Bash(curl -s http://34.116.152.5:8080/actuator/health)",
+      "Bash(gcloud compute instances list:*)",
+      "Bash(gcloud compute instances delete:*)",
+      "Bash(gcloud compute firewall-rules delete:*)",
+      "Bash(gcloud projects list:*)",
+      "Bash(gcloud compute instances create:*)",
+      "Bash(curl -s http://34.116.233.134:8080/actuator/health)",
+      "Bash(curl:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(gradlew.bat compileJava:*)",
+      "Bash(cmd /c \"gradlew.bat compileJava 2>&1\")",
+      "Bash(./gradlew compileJava:*)",
+      "Bash(mvn compile:*)",
+      "Bash(findstr:*)",
+      "Bash(more:*)",
+      "Bash(npm run build:*)",
+      "Bash(git push)",
+      "Bash(git pull:*)",
+      "Bash(git checkout:*)",
+      "Bash(git rebase:*)",
+      "Bash(gcloud --version)"
+    ]
+  }
+}
