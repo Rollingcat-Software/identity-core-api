@@ -2,6 +2,7 @@ package com.fivucsas.identity.application.port.output;
 
 import org.springframework.web.multipart.MultipartFile;
 
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -100,4 +101,22 @@ public interface BiometricServicePort {
      * @return Map containing deletion response data
      */
     Map<String, Object> deleteVoice(UUID userId);
+
+    /**
+     * Generates a liveness puzzle challenge from the biometric processor.
+     *
+     * @param userId optional user identifier
+     * @param difficulty puzzle difficulty (easy, standard, hard)
+     * @return Map containing puzzle data (puzzle_id, steps, timeout, etc.)
+     */
+    Map<String, Object> generateLivenessPuzzle(String userId, String difficulty);
+
+    /**
+     * Verifies liveness puzzle completion with frame evidence.
+     *
+     * @param puzzleId the puzzle identifier to verify
+     * @param frames the captured video frames as evidence
+     * @return Map containing verification result (success, liveness_confirmed, score, etc.)
+     */
+    Map<String, Object> verifyLivenessPuzzle(String puzzleId, List<MultipartFile> frames);
 }

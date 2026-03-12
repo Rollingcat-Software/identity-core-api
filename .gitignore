@@ -131,3 +131,7 @@ Thumbs.db
 *.swp
 *.swo
 *~
+
+# Node (not used in this project)
+node_modules/
+package-lock.json
