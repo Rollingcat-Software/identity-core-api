@@ -157,7 +157,7 @@ public class BiometricServiceAdapter implements BiometricServicePort {
     public Map<String, Object> deleteFingerprint(UUID userId) {
         log.info("Calling biometric service to delete fingerprint data for user: {}", userId);
         try {
-            return deleteResource("/fingerprint/enroll/" + userId);
+            return deleteResource("/fingerprint/" + userId);
         } catch (Exception e) {
             log.error("Error calling biometric service for fingerprint deletion: {}", e.getMessage());
             return errorResponse("Fingerprint deletion service unavailable: " + e.getMessage());
@@ -168,10 +168,51 @@ public class BiometricServiceAdapter implements BiometricServicePort {
     public Map<String, Object> deleteVoice(UUID userId) {
         log.info("Calling biometric service to delete voice data for user: {}", userId);
         try {
-            return deleteResource("/voice/enroll/" + userId);
+            return deleteResource("/voice/" + userId);
         } catch (Exception e) {
             log.error("Error calling biometric service for voice deletion: {}", e.getMessage());
             return errorResponse("Voice deletion service unavailable: " + e.getMessage());
+        }
+    }
+
+    @Override
+    public Map<String, Object> generateLivenessPuzzle(String userId, String difficulty) {
+        log.info("Calling biometric service to generate liveness puzzle for user: {}", userId);
+        try {
+            Map<String, Object> requestBody = new java.util.HashMap<>();
+            if (userId != null) requestBody.put("user_id", userId);
+            if (difficulty != null) requestBody.put("difficulty", difficulty);
+            else requestBody.put("difficulty", "standard");
+
+            return restClient.post()
+                    .uri("/liveness/generate-puzzle")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(requestBody)
+                    .retrieve()
+                    .body(MAP_TYPE);
+        } catch (Exception e) {
+            log.error("Error calling biometric service for liveness puzzle: {}", e.getMessage());
+            return errorResponse("Liveness puzzle service unavailable: " + e.getMessage());
+        }
+    }
+
+    @Override
+    public Map<String, Object> verifyLivenessPuzzle(String puzzleId, java.util.List<MultipartFile> frames) {
+        log.info("Calling biometric service to verify liveness puzzle: {}", puzzleId);
+        try {
+            Map<String, Object> requestBody = new java.util.HashMap<>();
+            requestBody.put("puzzle_id", puzzleId);
+            requestBody.put("results", java.util.List.of());
+
+            return restClient.post()
+                    .uri("/liveness/verify")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(requestBody)
+                    .retrieve()
+                    .body(MAP_TYPE);
+        } catch (Exception e) {
+            log.error("Error calling biometric service for liveness verification: {}", e.getMessage());
+            return errorResponse("Liveness verification service unavailable: " + e.getMessage());
         }
     }
 

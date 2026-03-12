@@ -80,6 +80,10 @@ public class SecurityConfig {
                         .requestMatchers("/api/v1/auth/sessions", "/api/v1/auth/sessions/**")
                         .permitAll()
 
+                        // QR session creation and polling must be public (unauthenticated clients)
+                        .requestMatchers(HttpMethod.POST, "/api/v1/auth/qr/session").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/v1/auth/qr/session/**").permitAll()
+
                         // Public auth method listing
                         .requestMatchers(HttpMethod.GET, "/api/v1/auth-methods", "/api/v1/auth-methods/**")
                         .permitAll()
