@@ -7,7 +7,7 @@ import com.fivucsas.identity.infrastructure.sms.SmsService;
 import com.fivucsas.identity.repository.UserRepository;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import jakarta.persistence.EntityNotFoundException;
+import com.fivucsas.identity.domain.exception.UserNotFoundException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
@@ -39,7 +39,7 @@ public class OtpController {
         log.info("Email OTP send request for user: {}", userId);
 
         User user = userRepository.findById(userId)
-                .orElseThrow(() -> new EntityNotFoundException("User not found: " + userId));
+                .orElseThrow(() -> new UserNotFoundException(userId.toString()));
 
         String code = otpService.generate(EMAIL_OTP_PREFIX + userId);
         emailService.sendOtp(user.getEmail(), code);
@@ -79,7 +79,7 @@ public class OtpController {
         log.info("SMS OTP send request for user: {}", userId);
 
         User user = userRepository.findById(userId)
-                .orElseThrow(() -> new EntityNotFoundException("User not found: " + userId));
+                .orElseThrow(() -> new UserNotFoundException(userId.toString()));
 
         if (user.getPhoneNumber() == null || user.getPhoneNumber().isBlank()) {
             return ResponseEntity.badRequest().body(Map.of(
