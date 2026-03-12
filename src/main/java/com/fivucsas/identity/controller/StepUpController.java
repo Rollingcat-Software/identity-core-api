@@ -18,6 +18,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import com.fivucsas.identity.domain.exception.UnauthorizedException;
+
 @RestController
 @RequestMapping("/api/v1/step-up")
 @RequiredArgsConstructor
@@ -32,7 +34,7 @@ public class StepUpController {
     @Operation(summary = "Register device public key for step-up auth")
     public ResponseEntity<DeviceResponse> registerDevice(@Valid @RequestBody RegisterStepUpDeviceRequest request) {
         User currentUser = rbacService.getCurrentUser()
-                .orElseThrow(() -> new IllegalStateException("Not authenticated"));
+                .orElseThrow(() -> new UnauthorizedException());
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(stepUpAuthUseCase.registerStepUpDevice(
                         currentUser.getId(), currentUser.getTenant().getId(), request));
@@ -43,7 +45,7 @@ public class StepUpController {
     public ResponseEntity<StepUpChallengeResponse> requestChallenge(
             @Valid @RequestBody StepUpChallengeRequest request) {
         User currentUser = rbacService.getCurrentUser()
-                .orElseThrow(() -> new IllegalStateException("Not authenticated"));
+                .orElseThrow(() -> new UnauthorizedException());
         return ResponseEntity.ok(stepUpAuthUseCase.requestChallenge(currentUser.getId(), request));
     }
 
@@ -52,7 +54,7 @@ public class StepUpController {
     public ResponseEntity<StepUpVerifyResponse> verifyChallenge(
             @Valid @RequestBody StepUpVerifyRequest request) {
         User currentUser = rbacService.getCurrentUser()
-                .orElseThrow(() -> new IllegalStateException("Not authenticated"));
+                .orElseThrow(() -> new UnauthorizedException());
         return ResponseEntity.ok(stepUpAuthUseCase.verifyChallenge(currentUser.getId(), request));
     }
 }

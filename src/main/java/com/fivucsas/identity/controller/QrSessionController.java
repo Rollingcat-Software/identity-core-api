@@ -1,5 +1,7 @@
 package com.fivucsas.identity.controller;
 
+import com.fivucsas.identity.application.dto.command.QrSessionApproveRequest;
+import com.fivucsas.identity.application.dto.command.QrSessionCreateRequest;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.infrastructure.qrcode.QrSessionService;
 import com.fivucsas.identity.security.RbacAuthorizationService;
@@ -33,10 +35,6 @@ public class QrSessionController {
 
     private final QrSessionService qrSessionService;
     private final RbacAuthorizationService rbacService;
-
-    public record QrSessionCreateRequest(String platform) {}
-
-    public record QrSessionApproveRequest(String approverPlatform) {}
 
     @PostMapping
     @Operation(summary = "Create a new QR login session")

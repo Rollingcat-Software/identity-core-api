@@ -1,5 +1,7 @@
 package com.fivucsas.identity.controller;
 
+import com.fivucsas.identity.application.dto.command.BiometricDeviceRequest;
+import com.fivucsas.identity.application.dto.command.BiometricVerifyRequest;
 import com.fivucsas.identity.application.dto.command.RegisterStepUpDeviceRequest;
 import com.fivucsas.identity.application.dto.command.StepUpChallengeRequest;
 import com.fivucsas.identity.application.dto.command.StepUpVerifyRequest;
@@ -13,7 +15,6 @@ import com.fivucsas.identity.security.RbacAuthorizationService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
-import jakarta.validation.constraints.NotBlank;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
@@ -42,26 +43,6 @@ public class AuthBiometricController {
     private final StepUpAuthUseCase stepUpAuthUseCase;
     private final RbacAuthorizationService rbacService;
 
-    /**
-     * Client request DTO for device registration.
-     * Maps client field names to internal StepUpDeviceRequest.
-     */
-    public record BiometricDeviceRequest(
-        @NotBlank String keyId,
-        @NotBlank String platform,
-        @NotBlank String publicKeyJwk
-    ) {}
-
-    /**
-     * Client request DTO for challenge verification.
-     * Maps client field names to internal StepUpVerifyRequest.
-     */
-    public record BiometricVerifyRequest(
-        @NotBlank String challengeId,
-        @NotBlank String keyId,
-        @NotBlank String signatureBase64
-    ) {}
-
     @PostMapping("/devices")
     @Operation(summary = "Register a biometric device for step-up authentication")
     public ResponseEntity<DeviceResponse> registerDevice(@Valid @RequestBody BiometricDeviceRequest request) {
@@ -72,7 +53,8 @@ public class AuthBiometricController {
         try {
             devicePlatform = DevicePlatform.valueOf(request.platform().toUpperCase());
         } catch (IllegalArgumentException e) {
-            devicePlatform = DevicePlatform.ANDROID;
+            throw new IllegalArgumentException(
+                    "Invalid platform: '" + request.platform() + "'. Allowed values: WEB, ANDROID, IOS, DESKTOP");
         }
 
         RegisterStepUpDeviceRequest stepUpRequest = new RegisterStepUpDeviceRequest(
