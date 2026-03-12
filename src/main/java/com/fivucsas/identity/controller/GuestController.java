@@ -19,6 +19,8 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
+import com.fivucsas.identity.domain.exception.UnauthorizedException;
+
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -55,7 +57,7 @@ public class GuestController {
             @Valid @RequestBody InviteGuestRequest request) {
 
         User currentUser = rbacService.getCurrentUser()
-                .orElseThrow(() -> new IllegalStateException("Authenticated user not found"));
+                .orElseThrow(() -> new UnauthorizedException());
 
         log.info("POST /api/v1/guests/invite - Inviting guest {} by {}",
                 request.getEmail(), currentUser.getEmail());
@@ -98,7 +100,7 @@ public class GuestController {
             @RequestParam(required = false) String status) {
 
         User currentUser = rbacService.getCurrentUser()
-                .orElseThrow(() -> new IllegalStateException("Authenticated user not found"));
+                .orElseThrow(() -> new UnauthorizedException());
 
         UUID tenantId = currentUser.getTenant().getId();
 
@@ -124,7 +126,7 @@ public class GuestController {
     @PreAuthorize("@rbac.hasPermission('guest:read')")
     public ResponseEntity<Long> countActiveGuests() {
         User currentUser = rbacService.getCurrentUser()
-                .orElseThrow(() -> new IllegalStateException("Authenticated user not found"));
+                .orElseThrow(() -> new UnauthorizedException());
 
         long count = invitationRepository.countActiveGuestsInTenant(
                 currentUser.getTenant().getId(), Instant.now());
@@ -138,7 +140,7 @@ public class GuestController {
     @PreAuthorize("@rbac.hasPermission('guest:revoke')")
     public ResponseEntity<Void> revokeGuestAccess(@PathVariable UUID guestUserId) {
         User currentUser = rbacService.getCurrentUser()
-                .orElseThrow(() -> new IllegalStateException("Authenticated user not found"));
+                .orElseThrow(() -> new UnauthorizedException());
 
         log.info("POST /api/v1/guests/{}/revoke - Revoking access by {}",
                 guestUserId, currentUser.getEmail());
@@ -157,7 +159,7 @@ public class GuestController {
             @Valid @RequestBody ExtendGuestAccessRequest request) {
 
         User currentUser = rbacService.getCurrentUser()
-                .orElseThrow(() -> new IllegalStateException("Authenticated user not found"));
+                .orElseThrow(() -> new UnauthorizedException());
 
         log.info("POST /api/v1/guests/{}/extend - Extending access by {} hours by {}",
                 guestUserId, request.getAdditionalHours(), currentUser.getEmail());
