@@ -5,7 +5,7 @@ import com.fivucsas.identity.repository.UserRepository;
 import com.fivucsas.identity.entity.User;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import jakarta.persistence.EntityNotFoundException;
+import com.fivucsas.identity.domain.exception.UserNotFoundException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -36,7 +36,7 @@ public class TotpController {
         log.info("TOTP setup request for user: {}", userId);
 
         User user = userRepository.findById(userId)
-                .orElseThrow(() -> new EntityNotFoundException("User not found: " + userId));
+                .orElseThrow(() -> new UserNotFoundException(userId.toString()));
 
         String secret = totpService.generateSecret();
         String otpAuthUri = totpService.buildOtpAuthUri(secret, user.getEmail(), "FivucsasIdentity");

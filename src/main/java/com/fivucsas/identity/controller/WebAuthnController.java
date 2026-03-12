@@ -7,7 +7,8 @@ import com.fivucsas.identity.repository.UserRepository;
 import com.fivucsas.identity.repository.WebAuthnCredentialRepository;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import jakarta.persistence.EntityNotFoundException;
+import com.fivucsas.identity.domain.exception.ResourceNotFoundException;
+import com.fivucsas.identity.domain.exception.UserNotFoundException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
@@ -37,7 +38,7 @@ public class WebAuthnController {
         log.info("WebAuthn registration options request for user: {}", userId);
 
         User user = userRepository.findById(userId)
-                .orElseThrow(() -> new EntityNotFoundException("User not found: " + userId));
+                .orElseThrow(() -> new UserNotFoundException(userId.toString()));
 
         UUID sessionId = UUID.randomUUID();
         String challenge = webAuthnService.generateChallenge(sessionId);
@@ -103,7 +104,7 @@ public class WebAuthnController {
         }
 
         User user = userRepository.findById(userId)
-                .orElseThrow(() -> new EntityNotFoundException("User not found: " + userId));
+                .orElseThrow(() -> new UserNotFoundException(userId.toString()));
 
         WebAuthnCredential credential = WebAuthnCredential.builder()
                 .user(user)
@@ -149,7 +150,7 @@ public class WebAuthnController {
         log.info("WebAuthn credential deletion request: {}", credentialId);
 
         if (!credentialRepository.existsByCredentialId(credentialId)) {
-            throw new EntityNotFoundException("Credential not found: " + credentialId);
+            throw new ResourceNotFoundException("Credential", credentialId);
         }
 
         credentialRepository.deleteByCredentialId(credentialId);
