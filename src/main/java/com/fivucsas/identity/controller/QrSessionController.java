@@ -11,6 +11,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import com.fivucsas.identity.domain.exception.UnauthorizedException;
+
 import java.util.Map;
 
 /**
@@ -60,7 +62,7 @@ public class QrSessionController {
             @PathVariable @NotBlank String sessionId,
             @RequestBody(required = false) QrSessionApproveRequest request) {
         User currentUser = rbacService.getCurrentUser()
-                .orElseThrow(() -> new IllegalStateException("Not authenticated"));
+                .orElseThrow(() -> new UnauthorizedException());
 
         log.info("QR session approve request: session={}, approver={}", sessionId, currentUser.getId());
 

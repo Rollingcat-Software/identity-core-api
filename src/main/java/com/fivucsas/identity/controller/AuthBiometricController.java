@@ -20,6 +20,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import com.fivucsas.identity.domain.exception.UnauthorizedException;
+
 import java.util.List;
 import java.util.Map;
 
@@ -64,7 +66,7 @@ public class AuthBiometricController {
     @Operation(summary = "Register a biometric device for step-up authentication")
     public ResponseEntity<DeviceResponse> registerDevice(@Valid @RequestBody BiometricDeviceRequest request) {
         User currentUser = rbacService.getCurrentUser()
-                .orElseThrow(() -> new IllegalStateException("Not authenticated"));
+                .orElseThrow(() -> new UnauthorizedException());
 
         DevicePlatform devicePlatform;
         try {
@@ -91,7 +93,7 @@ public class AuthBiometricController {
     @Operation(summary = "Request a challenge nonce for biometric verification")
     public ResponseEntity<Map<String, Object>> createChallenge() {
         User currentUser = rbacService.getCurrentUser()
-                .orElseThrow(() -> new IllegalStateException("Not authenticated"));
+                .orElseThrow(() -> new UnauthorizedException());
 
         StepUpChallengeRequest challengeRequest = new StepUpChallengeRequest("default");
         StepUpChallengeResponse response = stepUpAuthUseCase.requestChallenge(
@@ -107,7 +109,7 @@ public class AuthBiometricController {
     @Operation(summary = "Verify a signed biometric challenge")
     public ResponseEntity<Map<String, Object>> verifySignature(@Valid @RequestBody BiometricVerifyRequest request) {
         User currentUser = rbacService.getCurrentUser()
-                .orElseThrow(() -> new IllegalStateException("Not authenticated"));
+                .orElseThrow(() -> new UnauthorizedException());
 
         StepUpVerifyRequest verifyRequest = new StepUpVerifyRequest(
                 request.keyId(),

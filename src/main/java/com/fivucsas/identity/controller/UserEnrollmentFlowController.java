@@ -13,6 +13,8 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
+import com.fivucsas.identity.domain.exception.UnauthorizedException;
+
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -47,7 +49,7 @@ public class UserEnrollmentFlowController {
             @RequestPart("faceImage") MultipartFile faceImage) {
 
         User currentUser = rbacService.getCurrentUser()
-                .orElseThrow(() -> new IllegalStateException("Not authenticated"));
+                .orElseThrow(() -> new UnauthorizedException());
 
         log.info("Enrollment submission for user: {}, nationalId: {}", currentUser.getId(), nationalId);
 
@@ -69,7 +71,7 @@ public class UserEnrollmentFlowController {
     @Operation(summary = "Get current user's enrollment status")
     public ResponseEntity<Map<String, Object>> getEnrollmentStatus() {
         User currentUser = rbacService.getCurrentUser()
-                .orElseThrow(() -> new IllegalStateException("Not authenticated"));
+                .orElseThrow(() -> new UnauthorizedException());
 
         boolean enrolled = biometricDataRepository.findByUserId(currentUser.getId()).isPresent();
 
@@ -88,7 +90,7 @@ public class UserEnrollmentFlowController {
             @RequestBody(required = false) Map<String, Object> body) {
 
         User currentUser = rbacService.getCurrentUser()
-                .orElseThrow(() -> new IllegalStateException("Not authenticated"));
+                .orElseThrow(() -> new UnauthorizedException());
 
         log.info("Liveness challenge requested for user: {}", currentUser.getId());
 
@@ -113,7 +115,7 @@ public class UserEnrollmentFlowController {
             @RequestPart(value = "frame_2", required = false) MultipartFile frame2) {
 
         User currentUser = rbacService.getCurrentUser()
-                .orElseThrow(() -> new IllegalStateException("Not authenticated"));
+                .orElseThrow(() -> new UnauthorizedException());
 
         log.info("Liveness verification for user: {}, challengeId: {}", currentUser.getId(), challengeId);
 
