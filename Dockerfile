@@ -25,6 +25,9 @@ RUN mvn clean package -DskipTests -B
 # =============================================================================
 FROM eclipse-temurin:21-jre-alpine
 
+# Install curl for health checks
+RUN apk add --no-cache curl
+
 # Add non-root user for security
 RUN addgroup -S spring && adduser -S spring -G spring
 
@@ -44,7 +47,7 @@ EXPOSE 8080
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD wget --no-verbose --tries=1 --spider http://localhost:8080/actuator/health || exit 1
+    CMD curl -f http://localhost:8080/actuator/health || exit 1
 
 # JVM options for containers
 ENV JAVA_OPTS="-Xms256m -Xmx512m -XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0"

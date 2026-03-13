@@ -77,6 +77,14 @@ public class AuditLogAdapter implements AuditLogPort {
         saveAuditLog("BIOMETRIC_VERIFICATION", "BIOMETRIC", userId, success, null, Map.of());
     }
 
+    @Override
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void logSecurityEvent(String userId, String eventType, String ipAddress, String details) {
+        log.info("AUDIT: Security event - userId={}, type={}, ip={}, details={}", userId, eventType, ipAddress, details);
+        saveAuditLog(eventType, "SECURITY", userId, true, ipAddress,
+                Map.of("details", details != null ? details : ""));
+    }
+
     private void saveAuditLog(String action, String resourceType, String userId,
                               boolean success, String ipAddress, Map<String, Object> metadata) {
         try {

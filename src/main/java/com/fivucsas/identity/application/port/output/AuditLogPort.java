@@ -65,4 +65,14 @@ public interface AuditLogPort {
      * @param success whether verification was successful
      */
     void logBiometricVerification(String userId, boolean success);
+
+    /**
+     * Logs a generic security event.
+     *
+     * @param userId the user ID (or "UNKNOWN")
+     * @param eventType the type of event (e.g., "PASSWORD_CHANGED")
+     * @param ipAddress the client IP address
+     * @param details additional event details
+     */
+    void logSecurityEvent(String userId, String eventType, String ipAddress, String details);
 }

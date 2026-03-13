@@ -108,9 +108,48 @@ public class User {
     @Column(name = "email_verification_sent_at")
     private Instant emailVerificationSentAt;
 
+    @Column(name = "password_reset_token")
+    private String passwordResetToken;
+
+    @Column(name = "password_reset_sent_at")
+    private Instant passwordResetSentAt;
+
+    @Column(name = "password_reset_expires_at")
+    private Instant passwordResetExpiresAt;
+
+    @Column(name = "password_changed_at")
+    private Instant passwordChangedAt;
+
+    @Column(name = "is_active", nullable = false)
+    @Builder.Default
+    private boolean isActive = true;
+
+    @Column(name = "is_locked", nullable = false)
+    @Builder.Default
+    private boolean isLocked = false;
+
+    @Column(name = "locked_until")
+    private Instant lockedUntil;
+
+    @Column(name = "failed_login_attempts", nullable = false)
+    @Builder.Default
+    private int failedLoginAttempts = 0;
+
+    @Column(name = "last_login_at")
+    private Instant lastLoginAt;
+
+    @Column(name = "last_login_ip", length = 45)
+    private String lastLoginIp;
+
     @Column(name = "phone_verified")
     @Builder.Default
     private boolean phoneVerified = false;
+
+    @Transient
+    private String twoFactorSecret;
+
+    @Transient
+    private String twoFactorBackupCodes;
 
     @Column(name = "is_biometric_enrolled")
     @Builder.Default
@@ -559,5 +598,75 @@ public class User {
         return getActiveRoles().stream()
                 .map(Role::getName)
                 .collect(Collectors.toSet());
+    }
+
+    // ========== Password Reset Methods ==========
+
+    public String generatePasswordResetToken() {
+        this.passwordResetToken = UUID.randomUUID().toString();
+        this.passwordResetSentAt = Instant.now();
+        this.passwordResetExpiresAt = Instant.now().plus(java.time.Duration.ofHours(1));
+        return this.passwordResetToken;
+    }
+
+    public boolean isPasswordResetTokenExpired() {
+        return this.passwordResetExpiresAt == null || Instant.now().isAfter(this.passwordResetExpiresAt);
+    }
+
+    public boolean resetPassword(String token, String newPasswordHash) {
+        if (this.passwordResetToken == null || !this.passwordResetToken.equals(token)) {
+            return false;
+        }
+        this.passwordHash = newPasswordHash;
+        this.passwordResetToken = null;
+        this.passwordResetSentAt = null;
+        this.passwordResetExpiresAt = null;
+        this.passwordChangedAt = Instant.now();
+        return true;
+    }
+
+    public void resetFailedLoginAttempts() {
+        this.failedLoginAttempts = 0;
+        this.isLocked = false;
+        this.lockedUntil = null;
+    }
+
+    // ========== Email Verification Methods ==========
+
+    public String generateEmailVerificationToken() {
+        this.emailVerificationToken = UUID.randomUUID().toString();
+        this.emailVerificationSentAt = Instant.now();
+        return this.emailVerificationToken;
+    }
+
+    public boolean isVerificationTokenExpired() {
+        return this.emailVerificationSentAt == null
+                || Instant.now().isAfter(this.emailVerificationSentAt.plus(java.time.Duration.ofHours(24)));
+    }
+
+    public boolean verifyEmail(String token) {
+        if (this.emailVerificationToken == null || !this.emailVerificationToken.equals(token)) {
+            return false;
+        }
+        this.emailVerified = true;
+        this.emailVerificationToken = null;
+        this.emailVerificationSentAt = null;
+        return true;
+    }
+
+    // ========== 2FA Methods ==========
+
+    public boolean is2faEnabled() {
+        return this.twoFactorSecret != null;
+    }
+
+    public void enable2FA(String secret, String[] backupCodes) {
+        this.twoFactorSecret = secret;
+        this.twoFactorBackupCodes = backupCodes != null ? String.join(",", backupCodes) : null;
+    }
+
+    public void disable2FA() {
+        this.twoFactorSecret = null;
+        this.twoFactorBackupCodes = null;
     }
 }

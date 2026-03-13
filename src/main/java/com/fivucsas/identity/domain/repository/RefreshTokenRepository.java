@@ -68,4 +68,8 @@ public interface RefreshTokenRepository {
      * @return true if active token exists
      */
     boolean existsByTokenAndIsRevokedFalse(String token);
+
+    int revokeUserToken(User user, UUID tokenId, Instant revokedAt);
+
+    int revokeAllUserTokensExceptCurrent(User user, UUID currentTokenId, Instant revokedAt);
 }
