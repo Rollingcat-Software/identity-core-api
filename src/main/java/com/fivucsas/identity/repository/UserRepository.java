@@ -72,4 +72,8 @@ public interface UserRepository extends JpaRepository<User, UUID> {
      */
     @Query("SELECT COUNT(u) FROM User u WHERE u.tenant.id = :tenantId")
     long countByTenantId(@Param("tenantId") UUID tenantId);
+
+    Optional<User> findByPasswordResetToken(String token);
+
+    Optional<User> findByEmailVerificationToken(String token);
 }

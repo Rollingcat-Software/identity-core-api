@@ -39,4 +39,12 @@ public interface RefreshTokenRepository extends
     int deleteExpiredTokens(Instant expiryDate);
 
     boolean existsByTokenAndIsRevokedFalse(String token);
+
+    @Modifying
+    @Query("UPDATE RefreshToken rt SET rt.isRevoked = true, rt.revokedAt = :revokedAt WHERE rt.user = :user AND rt.id = :tokenId AND rt.isRevoked = false")
+    int revokeUserToken(User user, UUID tokenId, Instant revokedAt);
+
+    @Modifying
+    @Query("UPDATE RefreshToken rt SET rt.isRevoked = true, rt.revokedAt = :revokedAt WHERE rt.user = :user AND rt.id != :currentTokenId AND rt.isRevoked = false")
+    int revokeAllUserTokensExceptCurrent(User user, UUID currentTokenId, Instant revokedAt);
 }

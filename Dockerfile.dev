@@ -1,0 +1,24 @@
+# Fast dev Dockerfile - copies pre-built JAR (no Maven build inside Docker)
+FROM eclipse-temurin:21-jre-alpine
+
+RUN apk add --no-cache curl
+
+RUN addgroup -S spring && adduser -S spring -G spring
+
+WORKDIR /app
+
+# Copy pre-built JAR from local target/
+COPY target/*.jar app.jar
+
+RUN chown -R spring:spring /app
+
+USER spring
+
+EXPOSE 8080
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:8080/actuator/health || exit 1
+
+ENV JAVA_OPTS="-Xms256m -Xmx512m -XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0"
+
+ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS -jar app.jar"]

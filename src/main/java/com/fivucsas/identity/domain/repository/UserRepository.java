@@ -107,4 +107,8 @@ public interface UserRepository {
      * @param user the user to delete
      */
     void delete(User user);
+
+    Optional<User> findByPasswordResetToken(String token);
+
+    Optional<User> findByEmailVerificationToken(String token);
 }

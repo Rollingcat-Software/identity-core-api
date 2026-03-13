@@ -30,6 +30,12 @@ public class ManageAuthFlowService implements ManageAuthFlowUseCase {
             OperationType.API_ACCESS
     );
 
+    private static final Set<String> REQUIRED_UNSUPPORTED_METHODS = Set.of(
+            "NFC_DOCUMENT",
+            "FINGERPRINT",
+            "VOICE"
+    );
+
     private final AuthFlowRepository authFlowRepository;
     private final AuthFlowStepRepository authFlowStepRepository;
     private final AuthMethodRepository authMethodRepository;
@@ -69,7 +75,7 @@ public class ManageAuthFlowService implements ManageAuthFlowUseCase {
 
         if (command.steps() != null) {
             validatePasswordConstraint(command.operationType(), command.steps());
-            validateNoRequiredNfcDocument(command.steps());
+            validateNoRequiredUnsupportedMethods(command.steps());
             for (CreateAuthFlowCommand.FlowStepSpec stepSpec : command.steps()) {
                 AuthMethodType methodType = AuthMethodType.valueOf(stepSpec.authMethodType());
                 AuthMethod method = authMethodRepository.findByType(methodType)
@@ -148,15 +154,20 @@ public class ManageAuthFlowService implements ManageAuthFlowUseCase {
         log.debug("Password constraint validated for {} flow", operationType);
     }
 
-    private void validateNoRequiredNfcDocument(List<CreateAuthFlowCommand.FlowStepSpec> steps) {
-        boolean hasRequiredNfc = steps.stream()
-                .anyMatch(s -> "NFC_DOCUMENT".equals(s.authMethodType()) && s.isRequired());
+    private void validateNoRequiredUnsupportedMethods(List<CreateAuthFlowCommand.FlowStepSpec> steps) {
+        List<String> requiredUnsupportedMethods = steps.stream()
+                .filter(CreateAuthFlowCommand.FlowStepSpec::isRequired)
+                .map(CreateAuthFlowCommand.FlowStepSpec::authMethodType)
+                .filter(REQUIRED_UNSUPPORTED_METHODS::contains)
+                .distinct()
+                .toList();
 
-        if (hasRequiredNfc) {
+        if (!requiredUnsupportedMethods.isEmpty()) {
             throw new IllegalArgumentException(
-                    "NFC_DOCUMENT cannot be configured as a required auth step " +
-                    "because the hardware integration is not yet available. " +
-                    "Use it as an optional step or choose a different method.");
+                    "The following methods cannot be configured as required auth steps yet: " +
+                    requiredUnsupportedMethods +
+                    ". These flows rely on hardware/biometric integrations that are not fully available. " +
+                    "Configure them as optional steps or choose a different method.");
         }
     }
 }

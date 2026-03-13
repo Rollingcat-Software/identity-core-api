@@ -139,9 +139,9 @@ public class QrSessionService {
         User user = approver.get();
         String accessToken = jwtService.generateAccessToken(user.getEmail());
         long expiresIn = jwtService.getExpirationMillis() / 1000;
-        String role = user.getRoles() != null && !user.getRoles().isEmpty()
-                ? user.getRoles().iterator().next().getName()
-                : "USER";
+        String role = user.getRoleNames().stream()
+                .findFirst()
+                .orElseGet(() -> user.getUserType() != null ? user.getUserType().name() : "USER");
 
         Map<String, String> updates = new HashMap<>();
         updates.put("status", "APPROVED");
