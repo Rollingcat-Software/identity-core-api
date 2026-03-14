@@ -22,24 +22,52 @@ ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT 
 -- 2. Migrate data from old columns to settings JSONB
 -- ============================================================================
 
-UPDATE user_settings
-SET settings = jsonb_build_object(
-    'notifications', jsonb_build_object(
-        'email', COALESCE(notifications_enabled, true),
-        'push', true,
-        'securityAlerts', true
-    ),
-    'security', jsonb_build_object(
-        'twoFactorEnabled', false,
-        'sessionTimeout', 30
-    ),
-    'appearance', jsonb_build_object(
-        'theme', COALESCE(LOWER(theme), 'light'),
-        'language', COALESCE(language, 'en'),
-        'density', 'comfortable'
-    )
-) || COALESCE(settings_json, '{}'::jsonb)
-WHERE settings = '{}' OR settings IS NULL;
+-- Conditionally migrate: old columns may not exist in fresh databases
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.columns
+               WHERE table_name = 'user_settings' AND column_name = 'notifications_enabled') THEN
+        -- Legacy database: migrate existing old-column values
+        UPDATE user_settings
+        SET settings = jsonb_build_object(
+            'notifications', jsonb_build_object(
+                'email', COALESCE(notifications_enabled, true),
+                'push', true,
+                'securityAlerts', true
+            ),
+            'security', jsonb_build_object(
+                'twoFactorEnabled', false,
+                'sessionTimeout', 30
+            ),
+            'appearance', jsonb_build_object(
+                'theme', COALESCE(LOWER(theme), 'light'),
+                'language', COALESCE(language, 'en'),
+                'density', 'comfortable'
+            )
+        ) || COALESCE(settings_json, '{}'::jsonb)
+        WHERE settings = '{}' OR settings IS NULL;
+    ELSE
+        -- Fresh database: initialize with sensible defaults
+        UPDATE user_settings
+        SET settings = jsonb_build_object(
+            'notifications', jsonb_build_object(
+                'email', true,
+                'push', true,
+                'securityAlerts', true
+            ),
+            'security', jsonb_build_object(
+                'twoFactorEnabled', false,
+                'sessionTimeout', 30
+            ),
+            'appearance', jsonb_build_object(
+                'theme', 'light',
+                'language', 'en',
+                'density', 'comfortable'
+            )
+        )
+        WHERE settings = '{}' OR settings IS NULL;
+    END IF;
+END $$;
 
 -- ============================================================================
 -- 3. Drop old columns (no longer needed)
