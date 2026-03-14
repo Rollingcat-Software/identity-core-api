@@ -22,6 +22,10 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.ResponseEntity;
 
+import com.fivucsas.identity.domain.model.auth.DevicePlatform;
+
+import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -76,7 +80,9 @@ class AuthBiometricControllerTest {
         @DisplayName("Should register device with valid platform")
         void shouldRegisterDeviceWithValidPlatform() {
             when(rbacService.getCurrentUser()).thenReturn(Optional.of(testUser));
-            DeviceResponse mockResponse = new DeviceResponse(UUID.randomUUID(), "keyId123", "ANDROID", "ECDSA-P256");
+            DeviceResponse mockResponse = new DeviceResponse(
+                    UUID.randomUUID(), "Test Device", DevicePlatform.ANDROID,
+                    "fingerprint123", List.of("STEP_UP"), true, Instant.now(), Instant.now());
             when(stepUpAuthUseCase.registerStepUpDevice(eq(userId), eq(tenantId), any())).thenReturn(mockResponse);
 
             BiometricDeviceRequest request = new BiometricDeviceRequest("keyId123", "android", "jwkData");
@@ -84,7 +90,7 @@ class AuthBiometricControllerTest {
 
             assertThat(response.getStatusCode().value()).isEqualTo(201);
             assertThat(response.getBody()).isNotNull();
-            assertThat(response.getBody().keyId()).isEqualTo("keyId123");
+            assertThat(response.getBody().deviceName()).isEqualTo("Test Device");
         }
 
         @Test
@@ -120,7 +126,7 @@ class AuthBiometricControllerTest {
         @DisplayName("Should create challenge for authenticated user")
         void shouldCreateChallenge() {
             when(rbacService.getCurrentUser()).thenReturn(Optional.of(testUser));
-            StepUpChallengeResponse mockResponse = new StepUpChallengeResponse("challenge-nonce-123");
+            StepUpChallengeResponse mockResponse = new StepUpChallengeResponse("challenge-nonce-123", 300L);
             when(stepUpAuthUseCase.requestChallenge(eq(userId), any())).thenReturn(mockResponse);
 
             ResponseEntity<Map<String, Object>> response = controller.createChallenge();
@@ -148,7 +154,7 @@ class AuthBiometricControllerTest {
         @DisplayName("Should verify signature successfully")
         void shouldVerifySignature() {
             when(rbacService.getCurrentUser()).thenReturn(Optional.of(testUser));
-            StepUpVerifyResponse mockResponse = new StepUpVerifyResponse(true, "step-up-token-123");
+            StepUpVerifyResponse mockResponse = new StepUpVerifyResponse(true, "step-up-token-123", 3600L);
             when(stepUpAuthUseCase.verifyChallenge(eq(userId), any())).thenReturn(mockResponse);
 
             BiometricVerifyRequest request = new BiometricVerifyRequest("challenge-1", "keyId-1", "sig-base64");
