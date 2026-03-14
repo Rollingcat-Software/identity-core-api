@@ -6,6 +6,17 @@
 -- $2a$10$nYHr0UVExd8a1AzvhZGXuuPlwoseNcDrLXctPbe7OpVsbHlKCVDpS
 
 -- ============================================================================
+-- 0. Ensure tenant schema has required columns (added after V1 in production)
+-- ============================================================================
+
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS slug VARCHAR(100) UNIQUE;
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS description TEXT;
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE';
+
+CREATE INDEX IF NOT EXISTS idx_tenants_slug ON tenants (slug) WHERE slug IS NOT NULL AND deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_tenants_status ON tenants (status) WHERE deleted_at IS NULL;
+
+-- ============================================================================
 -- 1. New Tenants
 -- ============================================================================
 
