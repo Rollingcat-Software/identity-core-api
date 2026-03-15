@@ -49,16 +49,20 @@ public class LogoutUserService implements LogoutUserUseCase {
 
             // Blacklist the access token JTI so it cannot be reused until expiry
             if (command.getAccessToken() != null) {
-                try {
-                    String jti = jwtService.extractJti(command.getAccessToken());
-                    long remainingMs = jwtService.extractExpiration(command.getAccessToken()).getTime() - System.currentTimeMillis();
-                    if (jti != null && remainingMs > 0) {
-                        cachePort.put("blacklist:" + jti, "1", Duration.ofMillis(remainingMs));
-                        log.debug("Access token JTI {} blacklisted (TTL {}ms)", jti, remainingMs);
-                    }
-                } catch (Exception e) {
-                    log.warn("Could not blacklist access token: {}", e.getMessage());
+                String jti = jwtService.extractJti(command.getAccessToken());
+                if (jti == null) {
+                    log.error("Access token has no JTI claim — cannot blacklist");
+                    throw new IllegalStateException("Access token missing JTI claim, cannot guarantee revocation");
                 }
+                long remainingMs = jwtService.extractExpiration(command.getAccessToken()).getTime() - System.currentTimeMillis();
+                if (remainingMs > 0) {
+                    cachePort.put("blacklist:" + jti, "1", Duration.ofMillis(remainingMs));
+                    log.info("Access token JTI {} blacklisted (TTL {}ms)", jti, remainingMs);
+                } else {
+                    log.debug("Access token already expired, no need to blacklist");
+                }
+            } else {
+                log.warn("Logout without access token — token cannot be blacklisted");
             }
 
             log.info("Logout successful for user: {}", email);
