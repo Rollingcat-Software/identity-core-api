@@ -1,4 +1,38 @@
-# Identity Core API - Roadmap
+# Identity Core API — Roadmap
+
+> Last updated: 2026-03-15
+
+## Deployment Status
+
+**Deployed at:** https://auth.rollingcatsoftware.com
+**Stack:** Java 21 / Spring Boot 3.2
+**Server:** Hetzner VPS (Docker + Traefik + Let's Encrypt)
+**Health:** UP (biometric service UNKNOWN — not yet deployed)
+
+### What's Working
+
+- [x] Spring Boot API deployed and serving HTTPS
+- [x] PostgreSQL database connected
+- [x] Health endpoint at `/actuator/health`
+- [x] Spring Security configured (root `/` returns 403 by design)
+
+### Deployment Remaining
+
+- [ ] Deploy biometric-processor microservice
+- [ ] Enable real email OTP delivery (replace mock sender)
+- [ ] Enable real SMS OTP delivery
+- [ ] Connect web-app frontend to auth API
+- [ ] Sentry error tracking
+- [ ] CI/CD pipeline (GitHub Actions)
+- [ ] Automated database backups
+
+### Known Behaviors
+
+- `auth.rollingcatsoftware.com/` returns 403 — Spring Security blocks unauthenticated root. Use `/actuator/health`.
+- Biometric health shows UNKNOWN until biometric-processor is deployed. Does not affect overall UP status.
+- `favicon.ico` requests return 401/403 — APIs don't serve favicons.
+
+---
 
 ## Auth Method Integration Roadmap
 
