@@ -1,0 +1,40 @@
+name: Deploy to Hetzner VPS
+
+on:
+  push:
+    branches: [master, main]
+    paths:
+      - 'src/**'
+      - 'Dockerfile*'
+      - 'docker-compose.prod.yml'
+      - 'build.gradle*'
+      - 'settings.gradle*'
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-identity
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Deploy Identity Core API
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            set -e
+            cd /root/projects/fivucsas/identity-core-api
+            git pull origin master
+            cd /root/projects
+            ./infra/deploy.sh build identity
+            ./infra/deploy.sh restart identity
+            # Health check
+            sleep 15
+            curl -sf https://auth.rollingcatsoftware.com/actuator/health || exit 1
+            echo "Identity Core API deployed successfully"
