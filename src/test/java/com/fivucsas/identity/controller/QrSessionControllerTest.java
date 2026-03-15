@@ -7,6 +7,7 @@ import com.fivucsas.identity.entity.Tenant;
 import com.fivucsas.identity.entity.TenantStatus;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.entity.UserStatus;
+import com.fivucsas.identity.infrastructure.qrcode.QrCodeService;
 import com.fivucsas.identity.infrastructure.qrcode.QrSessionService;
 import com.fivucsas.identity.security.RbacAuthorizationService;
 import org.junit.jupiter.api.BeforeEach;
@@ -31,11 +32,12 @@ import static org.mockito.Mockito.when;
 @DisplayName("QrSessionController Tests")
 class QrSessionControllerTest {
 
+    @Mock private QrCodeService qrCodeService;
     @Mock private QrSessionService qrSessionService;
     @Mock private RbacAuthorizationService rbacService;
 
     @InjectMocks
-    private QrSessionController controller;
+    private QrController controller;
 
     private UUID userId;
     private User testUser;

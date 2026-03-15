@@ -9,8 +9,8 @@ import com.fivucsas.identity.domain.exception.*;
 import com.fivucsas.identity.entity.Permission;
 import com.fivucsas.identity.entity.Role;
 import com.fivucsas.identity.entity.Tenant;
-import com.fivucsas.identity.repository.PermissionRepository;
-import com.fivucsas.identity.repository.RoleRepository;
+import com.fivucsas.identity.application.port.output.PermissionRepositoryPort;
+import com.fivucsas.identity.application.port.output.RoleRepositoryPort;
 import com.fivucsas.identity.domain.repository.TenantRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -31,8 +31,8 @@ import java.util.stream.Collectors;
 @Slf4j
 public class ManageRoleService implements ManageRoleUseCase {
 
-    private final RoleRepository roleRepository;
-    private final PermissionRepository permissionRepository;
+    private final RoleRepositoryPort roleRepository;
+    private final PermissionRepositoryPort permissionRepository;
     private final TenantRepository tenantRepository;
 
     @Override

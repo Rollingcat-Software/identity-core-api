@@ -5,7 +5,7 @@ import com.fivucsas.identity.entity.AuthFlowStep;
 import com.fivucsas.identity.entity.AuthSession;
 import com.fivucsas.identity.entity.WebAuthnCredential;
 import com.fivucsas.identity.infrastructure.webauthn.WebAuthnService;
-import com.fivucsas.identity.repository.WebAuthnCredentialRepository;
+import com.fivucsas.identity.application.port.output.WebAuthnCredentialRepositoryPort;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -20,7 +20,7 @@ import java.util.Set;
 public class HardwareKeyAuthHandler implements AuthMethodHandler {
 
     private final WebAuthnService webAuthnService;
-    private final WebAuthnCredentialRepository credentialRepository;
+    private final WebAuthnCredentialRepositoryPort credentialRepository;
 
     @Override
     public AuthMethodType getMethodType() {

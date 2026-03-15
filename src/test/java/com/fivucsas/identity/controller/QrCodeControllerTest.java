@@ -1,6 +1,8 @@
 package com.fivucsas.identity.controller;
 
 import com.fivucsas.identity.infrastructure.qrcode.QrCodeService;
+import com.fivucsas.identity.infrastructure.qrcode.QrSessionService;
+import com.fivucsas.identity.security.RbacAuthorizationService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -21,9 +23,11 @@ import static org.mockito.Mockito.when;
 class QrCodeControllerTest {
 
     @Mock private QrCodeService qrCodeService;
+    @Mock private QrSessionService qrSessionService;
+    @Mock private RbacAuthorizationService rbacService;
 
     @InjectMocks
-    private QrCodeController qrCodeController;
+    private QrController qrCodeController;
 
     @Test
     @DisplayName("Should generate QR token for user")

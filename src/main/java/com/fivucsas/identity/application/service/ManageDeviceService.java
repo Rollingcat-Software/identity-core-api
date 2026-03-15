@@ -7,8 +7,8 @@ import com.fivucsas.identity.entity.Tenant;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.entity.UserDevice;
 import com.fivucsas.identity.domain.repository.TenantRepository;
-import com.fivucsas.identity.repository.UserDeviceRepository;
-import com.fivucsas.identity.repository.UserRepository;
+import com.fivucsas.identity.application.port.output.UserDeviceRepositoryPort;
+import com.fivucsas.identity.domain.repository.UserRepository;
 import jakarta.persistence.EntityNotFoundException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -22,7 +22,7 @@ import java.util.UUID;
 @Transactional(readOnly = true)
 public class ManageDeviceService implements ManageDeviceUseCase {
 
-    private final UserDeviceRepository userDeviceRepository;
+    private final UserDeviceRepositoryPort userDeviceRepository;
     private final UserRepository userRepository;
     private final TenantRepository tenantRepository;
 

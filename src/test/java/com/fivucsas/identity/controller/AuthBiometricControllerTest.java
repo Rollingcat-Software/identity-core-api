@@ -5,7 +5,10 @@ import com.fivucsas.identity.application.dto.command.BiometricVerifyRequest;
 import com.fivucsas.identity.application.dto.response.DeviceResponse;
 import com.fivucsas.identity.application.dto.response.StepUpChallengeResponse;
 import com.fivucsas.identity.application.dto.response.StepUpVerifyResponse;
+import com.fivucsas.identity.application.port.input.EnrollBiometricUseCase;
 import com.fivucsas.identity.application.port.input.StepUpAuthUseCase;
+import com.fivucsas.identity.application.port.input.VerifyBiometricUseCase;
+import com.fivucsas.identity.application.port.output.BiometricServicePort;
 import com.fivucsas.identity.domain.exception.UnauthorizedException;
 import com.fivucsas.identity.entity.Tenant;
 import com.fivucsas.identity.entity.TenantStatus;
@@ -40,11 +43,14 @@ import static org.mockito.Mockito.when;
 @DisplayName("AuthBiometricController Tests")
 class AuthBiometricControllerTest {
 
+    @Mock private EnrollBiometricUseCase enrollBiometricUseCase;
+    @Mock private VerifyBiometricUseCase verifyBiometricUseCase;
+    @Mock private BiometricServicePort biometricServicePort;
     @Mock private StepUpAuthUseCase stepUpAuthUseCase;
     @Mock private RbacAuthorizationService rbacService;
 
     @InjectMocks
-    private AuthBiometricController controller;
+    private BiometricController controller;
 
     private UUID userId;
     private UUID tenantId;
@@ -86,7 +92,7 @@ class AuthBiometricControllerTest {
             when(stepUpAuthUseCase.registerStepUpDevice(eq(userId), eq(tenantId), any())).thenReturn(mockResponse);
 
             BiometricDeviceRequest request = new BiometricDeviceRequest("keyId123", "android", "jwkData");
-            ResponseEntity<DeviceResponse> response = controller.registerDevice(request);
+            ResponseEntity<DeviceResponse> response = controller.registerAuthDevice(request);
 
             assertThat(response.getStatusCode().value()).isEqualTo(201);
             assertThat(response.getBody()).isNotNull();
@@ -100,7 +106,7 @@ class AuthBiometricControllerTest {
 
             BiometricDeviceRequest request = new BiometricDeviceRequest("keyId123", "invalid_platform", "jwkData");
 
-            assertThatThrownBy(() -> controller.registerDevice(request))
+            assertThatThrownBy(() -> controller.registerAuthDevice(request))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("Invalid platform")
                     .hasMessageContaining("invalid_platform");
@@ -113,7 +119,7 @@ class AuthBiometricControllerTest {
 
             BiometricDeviceRequest request = new BiometricDeviceRequest("keyId123", "android", "jwkData");
 
-            assertThatThrownBy(() -> controller.registerDevice(request))
+            assertThatThrownBy(() -> controller.registerAuthDevice(request))
                     .isInstanceOf(UnauthorizedException.class);
         }
     }
@@ -129,7 +135,7 @@ class AuthBiometricControllerTest {
             StepUpChallengeResponse mockResponse = new StepUpChallengeResponse("challenge-nonce-123", 300L);
             when(stepUpAuthUseCase.requestChallenge(eq(userId), any())).thenReturn(mockResponse);
 
-            ResponseEntity<Map<String, Object>> response = controller.createChallenge();
+            ResponseEntity<Map<String, Object>> response = controller.createAuthChallenge();
 
             assertThat(response.getStatusCode().value()).isEqualTo(200);
             assertThat(response.getBody()).containsEntry("challengeId", "challenge-nonce-123");
@@ -141,7 +147,7 @@ class AuthBiometricControllerTest {
         void shouldThrowWhenNotAuthenticated() {
             when(rbacService.getCurrentUser()).thenReturn(Optional.empty());
 
-            assertThatThrownBy(() -> controller.createChallenge())
+            assertThatThrownBy(() -> controller.createAuthChallenge())
                     .isInstanceOf(UnauthorizedException.class);
         }
     }
@@ -158,7 +164,7 @@ class AuthBiometricControllerTest {
             when(stepUpAuthUseCase.verifyChallenge(eq(userId), any())).thenReturn(mockResponse);
 
             BiometricVerifyRequest request = new BiometricVerifyRequest("challenge-1", "keyId-1", "sig-base64");
-            ResponseEntity<Map<String, Object>> response = controller.verifySignature(request);
+            ResponseEntity<Map<String, Object>> response = controller.verifyAuthSignature(request);
 
             assertThat(response.getStatusCode().value()).isEqualTo(200);
             assertThat(response.getBody()).containsEntry("verified", true);
@@ -172,7 +178,7 @@ class AuthBiometricControllerTest {
 
             BiometricVerifyRequest request = new BiometricVerifyRequest("challenge-1", "keyId-1", "sig-base64");
 
-            assertThatThrownBy(() -> controller.verifySignature(request))
+            assertThatThrownBy(() -> controller.verifyAuthSignature(request))
                     .isInstanceOf(UnauthorizedException.class);
         }
     }

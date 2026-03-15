@@ -1,6 +1,9 @@
 package com.fivucsas.identity.controller;
 
+import com.fivucsas.identity.application.dto.response.StatisticsResponse;
+import com.fivucsas.identity.application.port.input.GetStatisticsUseCase;
 import com.fivucsas.identity.dto.AuditLogDto;
+import com.fivucsas.identity.dto.StatisticsDto;
 import com.fivucsas.identity.entity.AuditLog;
 import com.fivucsas.identity.repository.AuditLogRepository;
 import io.swagger.v3.oas.annotations.Operation;
@@ -19,16 +22,21 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
+/**
+ * REST controller for audit logs and statistics.
+ *
+ * Merges: AuditLogController + StatisticsController
+ */
 @RestController
-@RequestMapping("/api/v1/audit-logs")
 @RequiredArgsConstructor
 @Slf4j
-@Tag(name = "Audit Logs", description = "Audit log endpoints")
+@Tag(name = "Audit Logs", description = "Audit log and statistics endpoints")
 public class AuditLogController {
 
     private final AuditLogRepository auditLogRepository;
+    private final GetStatisticsUseCase getStatisticsUseCase;
 
-    @GetMapping
+    @GetMapping("/api/v1/audit-logs")
     @Operation(summary = "Get audit logs with pagination")
     @PreAuthorize("hasPermission(null, 'audit', 'read')")
     public ResponseEntity<Map<String, Object>> getAuditLogs(
@@ -60,7 +68,7 @@ public class AuditLogController {
         return ResponseEntity.ok(response);
     }
 
-    @GetMapping("/action-types")
+    @GetMapping("/api/v1/audit-logs/action-types")
     @Operation(summary = "Get available audit log action types")
     @PreAuthorize("hasPermission(null, 'audit', 'read')")
     public ResponseEntity<List<String>> getActionTypes() {
@@ -82,7 +90,7 @@ public class AuditLogController {
         ));
     }
 
-    @GetMapping("/{id}")
+    @GetMapping("/api/v1/audit-logs/{id}")
     @Operation(summary = "Get audit log by ID")
     @PreAuthorize("hasPermission(null, 'audit', 'read')")
     public ResponseEntity<AuditLogDto> getAuditLogById(@PathVariable String id) {
@@ -92,6 +100,39 @@ public class AuditLogController {
                 .orElseThrow(() -> new com.fivucsas.identity.exception.ResourceNotFoundException("AuditLog not found: " + id));
 
         return ResponseEntity.ok(mapToDto(auditLog));
+    }
+
+    // --- Statistics endpoint merged from StatisticsController ---
+
+    @GetMapping("/api/v1/statistics")
+    @Operation(summary = "Get system statistics")
+    @PreAuthorize("hasAuthority('analytics:view')")
+    public ResponseEntity<StatisticsDto> getStatistics() {
+        log.info("GET /api/v1/statistics - Get system statistics");
+
+        StatisticsResponse response = getStatisticsUseCase.execute();
+
+        double avgVerifications = response.getTotalUsers() > 0
+            ? (double) response.getTotalVerifications() / response.getTotalUsers()
+            : 0.0;
+
+        StatisticsDto dto = StatisticsDto.builder()
+            .totalUsers(response.getTotalUsers())
+            .activeUsers(response.getActiveUsers())
+            .inactiveUsers(response.getInactiveUsers())
+            .suspendedUsers(response.getSuspendedUsers())
+            .biometricEnrolledUsers(response.getBiometricEnrolledUsers())
+            .totalVerifications(response.getTotalVerifications())
+            .averageVerificationsPerUser(avgVerifications)
+            .totalTenants(response.getTotalTenants())
+            .pendingEnrollments(response.getPendingEnrollments())
+            .successfulEnrollments(response.getSuccessfulEnrollments())
+            .failedEnrollments(response.getFailedEnrollments())
+            .authSuccessRate(response.getAuthSuccessRate())
+            .verificationSuccessRate(response.getVerificationSuccessRate())
+            .build();
+
+        return ResponseEntity.ok(dto);
     }
 
     private AuditLogDto mapToDto(AuditLog auditLog) {

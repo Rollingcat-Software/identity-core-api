@@ -5,8 +5,8 @@ import com.fivucsas.identity.entity.UserStatus;
 import com.fivucsas.identity.infrastructure.email.EmailService;
 import com.fivucsas.identity.infrastructure.otp.OtpService;
 import com.fivucsas.identity.infrastructure.sms.SmsService;
+import com.fivucsas.identity.domain.exception.UserNotFoundException;
 import com.fivucsas.identity.repository.UserRepository;
-import jakarta.persistence.EntityNotFoundException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -79,7 +79,7 @@ class OtpControllerTest {
             when(userRepository.findById(userId)).thenReturn(Optional.empty());
 
             assertThatThrownBy(() -> otpController.sendEmailOtp(userId))
-                    .isInstanceOf(EntityNotFoundException.class);
+                    .isInstanceOf(UserNotFoundException.class);
         }
 
         @Test

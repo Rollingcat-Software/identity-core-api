@@ -5,8 +5,8 @@ import com.fivucsas.identity.entity.BiometricData;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.entity.UserEnrollment;
 import com.fivucsas.identity.exception.ResourceNotFoundException;
-import com.fivucsas.identity.repository.BiometricDataRepository;
-import com.fivucsas.identity.repository.UserEnrollmentRepository;
+import com.fivucsas.identity.domain.repository.BiometricDataRepository;
+import com.fivucsas.identity.application.port.output.UserEnrollmentRepositoryPort;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -28,7 +28,7 @@ import java.util.UUID;
 public class EnrollmentQueryService {
 
     private final BiometricDataRepository biometricDataRepository;
-    private final UserEnrollmentRepository userEnrollmentRepository;
+    private final UserEnrollmentRepositoryPort userEnrollmentRepository;
 
     public List<EnrollmentDto> getAllEnrollments() {
         List<EnrollmentDto> enrollments = userEnrollmentRepository.findAll().stream()
@@ -68,7 +68,7 @@ public class EnrollmentQueryService {
         if (user != null) {
             user.unenrollBiometric();
         }
-        biometricDataRepository.delete(data);
+        biometricDataRepository.deleteRecord(data);
         log.info("BiometricData enrollment deleted: {}", id);
     }
 

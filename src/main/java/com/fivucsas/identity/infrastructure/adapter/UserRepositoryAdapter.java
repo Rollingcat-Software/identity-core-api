@@ -3,8 +3,10 @@ package com.fivucsas.identity.infrastructure.adapter;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.entity.UserStatus;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Repository;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -73,6 +75,11 @@ public class UserRepositoryAdapter implements com.fivucsas.identity.domain.repos
     }
 
     @Override
+    public List<User> findAll(int page, int size) {
+        return jpaRepository.findAll(PageRequest.of(page, size)).getContent();
+    }
+
+    @Override
     public long count() {
         return jpaRepository.count();
     }
@@ -90,5 +97,10 @@ public class UserRepositoryAdapter implements com.fivucsas.identity.domain.repos
     @Override
     public Optional<User> findByEmailVerificationToken(String token) {
         return jpaRepository.findByEmailVerificationToken(token);
+    }
+
+    @Override
+    public List<User> findExpiredGuests(Instant now) {
+        return jpaRepository.findExpiredGuests(now);
     }
 }

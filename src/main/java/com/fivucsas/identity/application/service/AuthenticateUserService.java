@@ -8,7 +8,7 @@ import com.fivucsas.identity.application.port.output.AuditLogPort;
 import com.fivucsas.identity.application.port.output.PasswordEncoderPort;
 import com.fivucsas.identity.application.port.output.TokenGenerationPort;
 import com.fivucsas.identity.domain.exception.InvalidCredentialsException;
-import com.fivucsas.identity.repository.UserRepository;
+import com.fivucsas.identity.domain.repository.UserRepository;
 import com.fivucsas.identity.entity.RefreshToken;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.service.RefreshTokenService;
@@ -27,7 +27,7 @@ import org.springframework.transaction.annotation.Transactional;
 @Slf4j
 public class AuthenticateUserService implements AuthenticateUserUseCase {
 
-    private final com.fivucsas.identity.repository.UserRepository userRepository;
+    private final UserRepository userRepository;
     private final PasswordEncoderPort passwordEncoder;
     private final TokenGenerationPort tokenGenerator;
     private final RefreshTokenService refreshTokenService;

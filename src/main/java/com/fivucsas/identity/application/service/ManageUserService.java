@@ -7,26 +7,30 @@ import com.fivucsas.identity.application.dto.query.GetUserByIdQuery;
 import com.fivucsas.identity.application.dto.query.SearchUsersQuery;
 import com.fivucsas.identity.application.dto.response.UserResponse;
 import com.fivucsas.identity.application.port.input.ManageUserUseCase;
+import com.fivucsas.identity.application.port.output.AuditLogQueryPort;
 import com.fivucsas.identity.application.port.output.PasswordEncoderPort;
 import com.fivucsas.identity.domain.exception.DuplicateEmailException;
 import com.fivucsas.identity.domain.exception.TenantNotFoundException;
 import com.fivucsas.identity.domain.exception.RoleNotFoundException;
 import com.fivucsas.identity.domain.exception.UserNotFoundException;
 import com.fivucsas.identity.domain.model.user.*;
-import com.fivucsas.identity.repository.UserRepository;
+import com.fivucsas.identity.domain.repository.UserRepository;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.entity.Tenant;
 import com.fivucsas.identity.entity.Role;
 import com.fivucsas.identity.entity.UserRole;
 import com.fivucsas.identity.entity.UserStatus;
 import com.fivucsas.identity.domain.repository.TenantRepository;
-import com.fivucsas.identity.repository.RoleRepository;
-import com.fivucsas.identity.repository.UserRoleRepository;
+import com.fivucsas.identity.application.port.output.RoleRepositoryPort;
+import com.fivucsas.identity.application.port.output.UserRoleRepositoryPort;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import org.springframework.data.domain.PageRequest;
+
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -41,11 +45,12 @@ import java.util.stream.Collectors;
 @Slf4j
 public class ManageUserService implements ManageUserUseCase {
 
-    private final com.fivucsas.identity.repository.UserRepository userRepository;
+    private final UserRepository userRepository;
     private final PasswordEncoderPort passwordEncoder;
     private final TenantRepository tenantRepository;
-    private final RoleRepository roleRepository;
-    private final UserRoleRepository userRoleRepository;
+    private final RoleRepositoryPort roleRepository;
+    private final UserRoleRepositoryPort userRoleRepository;
+    private final AuditLogQueryPort auditLogQueryPort;
 
     @Override
     @Transactional
@@ -122,16 +127,17 @@ public class ManageUserService implements ManageUserUseCase {
         User user = userRepository.findById(uuid)
             .orElseThrow(() -> new UserNotFoundException(query.getUserId()));
 
-        return mapToUserResponse(user);
+        return enrichWithLoginInfo(mapToUserResponse(user));
     }
 
     @Override
     @Transactional(readOnly = true)
     public List<UserResponse> getAllUsers(GetAllUsersQuery query) {
-        log.info("Fetching all users");
+        log.info("Fetching all users (page={}, size={})", query.getPage(), query.getSize());
 
-        return userRepository.findAll().stream()
+        return userRepository.findAll(query.getPage(), query.getSize()).stream()
             .map(this::mapToUserResponse)
+            .map(this::enrichWithLoginInfo)
             .collect(Collectors.toList());
     }
 
@@ -142,7 +148,14 @@ public class ManageUserService implements ManageUserUseCase {
 
         return userRepository.searchUsers(query.getSearchQuery()).stream()
             .map(this::mapToUserResponse)
+            .map(this::enrichWithLoginInfo)
             .collect(Collectors.toList());
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public long countAllUsers() {
+        return userRepository.count();
     }
 
     @Override
@@ -199,5 +212,34 @@ public class ManageUserService implements ManageUserUseCase {
 
     private UserResponse mapToUserResponse(User user) {
         return com.fivucsas.identity.application.mapper.UserResponseMapper.toResponse(user);
+    }
+
+    private UserResponse enrichWithLoginInfo(UserResponse response) {
+        return response.toBuilder()
+            .lastLoginAt(getLastLoginAt(response.getId()))
+            .lastLoginIp(getLastLoginIp(response.getId()))
+            .build();
+    }
+
+    private Instant getLastLoginAt(String userId) {
+        try {
+            var page = auditLogQueryPort.findByUserIdAndActionOrderByCreatedAtDesc(
+                    UUID.fromString(userId), "USER_AUTHENTICATED",
+                    PageRequest.of(0, 1));
+            return page.hasContent() ? page.getContent().getFirst().getCreatedAt() : null;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private String getLastLoginIp(String userId) {
+        try {
+            var page = auditLogQueryPort.findByUserIdAndActionOrderByCreatedAtDesc(
+                    UUID.fromString(userId), "USER_AUTHENTICATED",
+                    PageRequest.of(0, 1));
+            return page.hasContent() ? page.getContent().getFirst().getIpAddress() : null;
+        } catch (Exception e) {
+            return null;
+        }
     }
 }
