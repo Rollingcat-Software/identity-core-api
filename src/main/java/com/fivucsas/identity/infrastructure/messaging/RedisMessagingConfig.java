@@ -19,6 +19,8 @@ import org.springframework.data.redis.serializer.GenericJackson2JsonRedisSeriali
 import org.springframework.data.redis.serializer.StringRedisSerializer;
 
 import jakarta.annotation.PostConstruct;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Lazy;
 
 /**
  * Redis messaging configuration for event-driven communication.
@@ -48,6 +50,15 @@ import jakarta.annotation.PostConstruct;
  */
 @Configuration
 public class RedisMessagingConfig {
+
+    // @Lazy breaks the circular dependency: @Configuration -> @PostConstruct -> @Bean methods
+    @Lazy
+    @Autowired
+    private RedisEventBus redisEventBus;
+
+    @Lazy
+    @Autowired
+    private BiometricEventListener biometricEventListener;
 
     private static final Logger logger = LoggerFactory.getLogger(RedisMessagingConfig.class);
 
@@ -228,22 +239,13 @@ public class RedisMessagingConfig {
 
         logger.info("Initializing event bus subscriptions...");
 
-        // Subscribe to biometric processor events
+        // Use Spring-managed beans (injected via @Lazy) to ensure subscriptions
+        // are registered on the same listener container that Spring manages.
         try {
-            RedisEventBus eventBus = applicationContext.getBean(RedisEventBus.class);
-            BiometricEventListener listener = applicationContext.getBean(BiometricEventListener.class);
-
-            // Subscribe to enrollment events
-            eventBus.subscribe(CHANNEL_ENROLLMENT, listener);
-
-            // Subscribe to verification events
-            eventBus.subscribe(CHANNEL_VERIFICATION, listener);
-
-            // Subscribe to liveness check events
-            eventBus.subscribe(CHANNEL_LIVENESS, listener);
-
-            // Subscribe to quality assessment events
-            eventBus.subscribe(CHANNEL_QUALITY, listener);
+            redisEventBus.subscribe(CHANNEL_ENROLLMENT, biometricEventListener);
+            redisEventBus.subscribe(CHANNEL_VERIFICATION, biometricEventListener);
+            redisEventBus.subscribe(CHANNEL_LIVENESS, biometricEventListener);
+            redisEventBus.subscribe(CHANNEL_QUALITY, biometricEventListener);
 
             logger.info("Event bus subscriptions initialized successfully");
 
