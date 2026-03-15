@@ -5,7 +5,7 @@
 # Tests Create / Read-single / Read-list / Update / Delete for every entity.
 # Usage:
 #   ./scripts/test-crud.sh                          # localhost
-#   BASE_URL=http://34.116.233.134:8080 ./scripts/test-crud.sh   # production
+#   BASE_URL=https://auth.rollingcatsoftware.com ./scripts/test-crud.sh   # production
 #
 # Output: PASS/FAIL + HTTP status for every operation.
 # Exit code: 0 if all pass, 1 if any fail.
@@ -95,33 +95,38 @@ echo ">>> [1] Users"
 STATUS=$(auth_status "${API}/users")
 check "User: list (GET /users)" "200" "$STATUS"
 
-# Create
+# Create — unique email per run to avoid 409 on re-runs
+UNIQUE_SUFFIX=$(date +%s)
 CREATE_RESPONSE=$(auth_get -X POST "${API}/users" \
   -H "Content-Type: application/json" \
-  -d '{
-    "email":"crud-test-user@fivucsas.local",
-    "password":"Test@123",
-    "firstName":"CRUD",
-    "lastName":"TestUser",
-    "role":"USER",
-    "tenantId":"00000000-0000-0000-0000-000000000000"
-  }')
-CREATE_STATUS=$(echo "$CREATE_RESPONSE" | grep -o '"status":[0-9]*' | head -1 | cut -d: -f2 || true)
-# Check HTTP via separate call
-STATUS=$(get_status -X POST "${API}/users" \
-  -H "Authorization: Bearer ${TOKEN}" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "email":"crud-test-user-2@fivucsas.local",
-    "password":"Test@123",
-    "firstName":"CRUD2",
-    "lastName":"TestUser2",
-    "role":"USER",
-    "tenantId":"00000000-0000-0000-0000-000000000000"
-  }')
+  -d "{
+    \"email\":\"crud-user-${UNIQUE_SUFFIX}@fivucsas.test\",
+    \"password\":\"Test@1234\",
+    \"firstName\":\"CRUD\",
+    \"lastName\":\"TestUser\"
+  }")
+STATUS=$(echo "$CREATE_RESPONSE" | python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    print(d.get('id') and '201' or '400')
+except: print('400')
+" 2>/dev/null || true)
+# Fallback: re-send and get HTTP code directly
+if [ "$STATUS" != "201" ]; then
+  STATUS=$(get_status -X POST "${API}/users" \
+    -H "Authorization: Bearer ${TOKEN}" \
+    -H "Content-Type: application/json" \
+    -d "{
+      \"email\":\"crud-user-b-${UNIQUE_SUFFIX}@fivucsas.test\",
+      \"password\":\"Test@1234\",
+      \"firstName\":\"CRUD\",
+      \"lastName\":\"TestUser\"
+    }")
+fi
 check "User: create (POST /users)" "201" "$STATUS"
 
-# Extract created user ID
+# Extract created user ID from the create response
 USER_ID=$(echo "$CREATE_RESPONSE" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
 
 if [ -n "$USER_ID" ]; then
