@@ -227,12 +227,12 @@ ON CONFLICT (type) DO NOTHING;
 INSERT INTO tenant_auth_methods (tenant_id, auth_method_id, is_enabled)
 SELECT t.id, am.id, true
 FROM tenants t, auth_methods am
-WHERE t.slug = 'system' AND am.type = 'PASSWORD'
+WHERE t.name = 'system' AND am.type = 'PASSWORD'
 ON CONFLICT ON CONSTRAINT uq_tenant_auth_method DO NOTHING;
 
 INSERT INTO auth_flows (tenant_id, name, description, operation_type, is_default, is_active)
 SELECT t.id, 'Default Login', 'Standard password authentication', 'APP_LOGIN', true, true
-FROM tenants t WHERE t.slug = 'system'
+FROM tenants t WHERE t.name = 'system'
 ON CONFLICT ON CONSTRAINT uq_auth_flow_name DO NOTHING;
 
 INSERT INTO auth_flow_steps (auth_flow_id, auth_method_id, step_order, is_required, timeout_seconds, max_attempts)
@@ -240,7 +240,7 @@ SELECT af.id, am.id, 1, true, 120, 5
 FROM auth_flows af
 JOIN tenants t ON af.tenant_id = t.id
 JOIN auth_methods am ON am.type = 'PASSWORD'
-WHERE t.slug = 'system' AND af.name = 'Default Login'
+WHERE t.name = 'system' AND af.name = 'Default Login'
 ON CONFLICT ON CONSTRAINT uq_flow_step_order DO NOTHING;
 
 -- Enroll existing admin user with PASSWORD

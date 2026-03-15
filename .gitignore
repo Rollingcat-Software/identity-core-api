@@ -135,3 +135,6 @@ Thumbs.db
 # Node (not used in this project)
 node_modules/
 package-lock.json
+
+# Production secrets
+.env.prod

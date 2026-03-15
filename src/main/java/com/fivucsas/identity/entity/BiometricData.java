@@ -26,8 +26,8 @@ public class BiometricData {
     @JoinColumn(name = "user_id", nullable = false)
     private User user;
 
-    @Column(columnDefinition = "TEXT", nullable = false)
-    private String embedding; // Stored as JSON array string
+    @Column(columnDefinition = "vector(512)", nullable = false)
+    private String embedding; // Stored as vector(512) in pgvector
 
     @CreationTimestamp
     @Column(nullable = false, updatable = false)

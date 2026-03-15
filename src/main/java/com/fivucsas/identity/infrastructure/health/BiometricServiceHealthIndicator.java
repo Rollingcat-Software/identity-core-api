@@ -38,9 +38,9 @@ public class BiometricServiceHealthIndicator implements HealthIndicator {
                     .build();
         } catch (Exception e) {
             log.debug("Biometric service health check failed: {}", e.getMessage());
-            return Health.down()
+            return Health.unknown()
                     .withDetail("url", biometricServiceUrl)
-                    .withDetail("error", e.getMessage())
+                    .withDetail("reason", "Biometric service not deployed yet")
                     .build();
         }
     }

@@ -5,7 +5,9 @@ import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
@@ -47,6 +49,9 @@ import jakarta.annotation.PostConstruct;
 public class RedisMessagingConfig {
 
     private static final Logger logger = LoggerFactory.getLogger(RedisMessagingConfig.class);
+
+    @Autowired
+    private ApplicationContext applicationContext;
 
     @Value("${redis.host:localhost}")
     private String redisHost;
@@ -115,6 +120,27 @@ public class RedisMessagingConfig {
         template.afterPropertiesSet();
 
         logger.info("RedisTemplate configured with String serializers");
+        return template;
+    }
+
+    /**
+     * Creates RedisTemplate for Object values, used by RedisCacheAdapter.
+     *
+     * @param connectionFactory Redis connection factory
+     * @return Configured RedisTemplate for String keys and Object values
+     */
+    @Bean
+    public RedisTemplate<String, Object> redisObjectTemplate(RedisConnectionFactory connectionFactory) {
+        RedisTemplate<String, Object> template = new RedisTemplate<>();
+        template.setConnectionFactory(connectionFactory);
+
+        StringRedisSerializer stringSerializer = new StringRedisSerializer();
+        template.setKeySerializer(stringSerializer);
+        template.setHashKeySerializer(stringSerializer);
+
+        template.afterPropertiesSet();
+
+        logger.info("RedisTemplate<String, Object> configured");
         return template;
     }
 
@@ -192,6 +218,8 @@ public class RedisMessagingConfig {
      * Initializes event bus subscriptions.
      *
      * <p>Subscribes to biometric event channels when the application starts.
+     * Uses injected beans via ApplicationContext to avoid circular references
+     * from calling @Bean methods directly in @PostConstruct.
      */
     @PostConstruct
     public void initializeEventBusSubscriptions() {
@@ -204,12 +232,8 @@ public class RedisMessagingConfig {
 
         // Subscribe to biometric processor events
         try {
-            RedisEventBus eventBus = redisEventBus(
-                    redisTemplate(redisConnectionFactory()),
-                    redisMessageListenerContainer(redisConnectionFactory()),
-                    objectMapper()
-            );
-            BiometricEventListener listener = biometricEventListener();
+            RedisEventBus eventBus = applicationContext.getBean(RedisEventBus.class);
+            BiometricEventListener listener = applicationContext.getBean(BiometricEventListener.class);
 
             // Subscribe to enrollment events
             eventBus.subscribe(CHANNEL_ENROLLMENT, listener);

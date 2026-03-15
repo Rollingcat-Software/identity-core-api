@@ -19,27 +19,35 @@ END $$;
 ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL;
 
 -- ============================================================================
--- 2. Migrate data from old columns to settings JSONB
+-- 2. Migrate data from old columns to settings JSONB (only if old columns exist)
 -- ============================================================================
 
-UPDATE user_settings
-SET settings = jsonb_build_object(
-    'notifications', jsonb_build_object(
-        'email', COALESCE(notifications_enabled, true),
-        'push', true,
-        'securityAlerts', true
-    ),
-    'security', jsonb_build_object(
-        'twoFactorEnabled', false,
-        'sessionTimeout', 30
-    ),
-    'appearance', jsonb_build_object(
-        'theme', COALESCE(LOWER(theme), 'light'),
-        'language', COALESCE(language, 'en'),
-        'density', 'comfortable'
-    )
-) || COALESCE(settings_json, '{}'::jsonb)
-WHERE settings = '{}' OR settings IS NULL;
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.columns
+               WHERE table_name = 'user_settings' AND column_name = 'notifications_enabled') THEN
+
+        UPDATE user_settings
+        SET settings = jsonb_build_object(
+            'notifications', jsonb_build_object(
+                'email', COALESCE(notifications_enabled, true),
+                'push', true,
+                'securityAlerts', true
+            ),
+            'security', jsonb_build_object(
+                'twoFactorEnabled', false,
+                'sessionTimeout', 30
+            ),
+            'appearance', jsonb_build_object(
+                'theme', COALESCE(LOWER(theme), 'light'),
+                'language', COALESCE(language, 'en'),
+                'density', 'comfortable'
+            )
+        ) || COALESCE(settings_json, '{}'::jsonb)
+        WHERE settings = '{}' OR settings IS NULL;
+
+    END IF;
+END $$;
 
 -- ============================================================================
 -- 3. Drop old columns (no longer needed)
