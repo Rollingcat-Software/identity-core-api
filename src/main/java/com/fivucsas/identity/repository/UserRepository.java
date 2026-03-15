@@ -22,7 +22,6 @@ import java.util.UUID;
 public interface UserRepository extends JpaRepository<User, UUID> {
 
     // JPA-specific query methods
-    // Domain methods inherited from domain.repository.UserRepository
 
     Optional<User> findByEmail(String email);
 
