@@ -1,5 +1,6 @@
 package com.fivucsas.identity.security;
 
+import com.fivucsas.identity.application.port.output.CachePort;
 import com.fivucsas.identity.repository.UserRepository;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -29,6 +30,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private final JwtService jwtService;
     private final UserDetailsService userDetailsService;
+    private final CachePort cachePort;
 
     @Override
     protected void doFilterInternal(
@@ -51,6 +53,14 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
             // If email extracted and user not already authenticated
             if (userEmail != null && SecurityContextHolder.getContext().getAuthentication() == null) {
+                // Check blacklist before loading user details
+                String jti = jwtService.extractJti(jwt);
+                if (jti != null && cachePort.exists("blacklist:" + jti)) {
+                    log.warn("Rejected blacklisted token (JTI: {}) for user: {}", jti, userEmail);
+                    filterChain.doFilter(request, response);
+                    return;
+                }
+
                 UserDetails userDetails = userDetailsService.loadUserByUsername(userEmail);
 
                 // Validate token

@@ -3,12 +3,16 @@ package com.fivucsas.identity.application.service;
 import com.fivucsas.identity.application.dto.command.LogoutCommand;
 import com.fivucsas.identity.application.port.input.LogoutUserUseCase;
 import com.fivucsas.identity.application.port.output.AuditLogPort;
+import com.fivucsas.identity.application.port.output.CachePort;
 import com.fivucsas.identity.entity.RefreshToken;
+import com.fivucsas.identity.security.JwtService;
 import com.fivucsas.identity.service.RefreshTokenService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
+import java.time.Duration;
 
 /**
  * Use case service for user logout.
@@ -22,6 +26,8 @@ public class LogoutUserService implements LogoutUserUseCase {
 
     private final RefreshTokenService refreshTokenService;
     private final AuditLogPort auditLogPort;
+    private final CachePort cachePort;
+    private final JwtService jwtService;
 
     @Override
     @Transactional
@@ -40,6 +46,21 @@ public class LogoutUserService implements LogoutUserUseCase {
             }
 
             refreshTokenService.revokeToken(command.getRefreshToken());
+
+            // Blacklist the access token JTI so it cannot be reused until expiry
+            if (command.getAccessToken() != null) {
+                try {
+                    String jti = jwtService.extractJti(command.getAccessToken());
+                    long remainingMs = jwtService.extractExpiration(command.getAccessToken()).getTime() - System.currentTimeMillis();
+                    if (jti != null && remainingMs > 0) {
+                        cachePort.put("blacklist:" + jti, "1", Duration.ofMillis(remainingMs));
+                        log.debug("Access token JTI {} blacklisted (TTL {}ms)", jti, remainingMs);
+                    }
+                } catch (Exception e) {
+                    log.warn("Could not blacklist access token: {}", e.getMessage());
+                }
+            }
+
             log.info("Logout successful for user: {}", email);
 
             auditLogPort.logUserLoggedOut(userId, email);

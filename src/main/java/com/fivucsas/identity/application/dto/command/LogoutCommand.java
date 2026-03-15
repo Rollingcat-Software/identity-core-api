@@ -22,4 +22,5 @@ public class LogoutCommand {
 
     private String refreshToken;
     private String currentUserEmail;
+    private String accessToken;
 }

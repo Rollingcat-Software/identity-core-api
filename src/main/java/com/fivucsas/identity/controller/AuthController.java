@@ -128,12 +128,18 @@ public class AuthController {
     @Operation(summary = "Logout and revoke refresh token", security = @SecurityRequirement(name = "bearer-jwt"))
     public ResponseEntity<Void> logout(
             @Valid @RequestBody RefreshTokenRequest request,
-            Authentication authentication) {
+            Authentication authentication,
+            HttpServletRequest httpRequest) {
         log.info("Logout request received");
+
+        String authHeader = httpRequest.getHeader("Authorization");
+        String accessToken = (authHeader != null && authHeader.startsWith("Bearer "))
+                ? authHeader.substring(7) : null;
 
         LogoutCommand command = LogoutCommand.builder()
             .refreshToken(request.getRefreshToken())
             .currentUserEmail(authentication.getName())
+            .accessToken(accessToken)
             .build();
 
         logoutUserUseCase.execute(command);
