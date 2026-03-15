@@ -1,12 +1,15 @@
 package com.fivucsas.identity.controller;
 
+import com.fivucsas.identity.application.port.input.ManageEnrollmentUseCase;
 import com.fivucsas.identity.application.port.output.BiometricServicePort;
+import com.fivucsas.identity.application.service.EnrollmentQueryService;
 import com.fivucsas.identity.domain.exception.UnauthorizedException;
 import com.fivucsas.identity.entity.Tenant;
 import com.fivucsas.identity.entity.TenantStatus;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.entity.UserStatus;
 import com.fivucsas.identity.repository.BiometricDataRepository;
+import com.fivucsas.identity.repository.UserEnrollmentRepository;
 import com.fivucsas.identity.security.RbacAuthorizationService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -32,12 +35,15 @@ import static org.mockito.Mockito.when;
 @DisplayName("UserEnrollmentFlowController Tests")
 class UserEnrollmentFlowControllerTest {
 
+    @Mock private EnrollmentQueryService enrollmentQueryService;
+    @Mock private UserEnrollmentRepository enrollmentRepository;
+    @Mock private ManageEnrollmentUseCase manageEnrollmentUseCase;
     @Mock private BiometricServicePort biometricService;
     @Mock private BiometricDataRepository biometricDataRepository;
     @Mock private RbacAuthorizationService rbacService;
 
     @InjectMocks
-    private UserEnrollmentFlowController controller;
+    private EnrollmentController controller;
 
     private UUID userId;
     private User testUser;

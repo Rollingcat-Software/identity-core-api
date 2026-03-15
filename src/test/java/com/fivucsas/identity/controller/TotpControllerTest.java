@@ -1,10 +1,13 @@
 package com.fivucsas.identity.controller;
 
+import com.fivucsas.identity.domain.exception.UserNotFoundException;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.entity.UserStatus;
+import com.fivucsas.identity.infrastructure.email.EmailService;
+import com.fivucsas.identity.infrastructure.otp.OtpService;
+import com.fivucsas.identity.infrastructure.sms.SmsService;
 import com.fivucsas.identity.infrastructure.totp.TotpService;
 import com.fivucsas.identity.repository.UserRepository;
-import jakarta.persistence.EntityNotFoundException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -32,13 +35,16 @@ import static org.mockito.Mockito.*;
 @DisplayName("TotpController Tests")
 class TotpControllerTest {
 
+    @Mock private OtpService otpService;
+    @Mock private EmailService emailService;
+    @Mock private SmsService smsService;
     @Mock private TotpService totpService;
     @Mock private UserRepository userRepository;
     @Mock private StringRedisTemplate redisTemplate;
     @Mock private ValueOperations<String, String> valueOps;
 
     @InjectMocks
-    private TotpController totpController;
+    private OtpController totpController;
 
     private UUID userId;
     private User testUser;
@@ -83,7 +89,7 @@ class TotpControllerTest {
             when(userRepository.findById(userId)).thenReturn(Optional.empty());
 
             assertThatThrownBy(() -> totpController.setupTotp(userId))
-                    .isInstanceOf(EntityNotFoundException.class);
+                    .isInstanceOf(UserNotFoundException.class);
         }
     }
 

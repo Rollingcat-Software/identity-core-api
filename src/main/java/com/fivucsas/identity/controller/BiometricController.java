@@ -1,42 +1,61 @@
 package com.fivucsas.identity.controller;
 
+import com.fivucsas.identity.application.dto.command.BiometricDeviceRequest;
+import com.fivucsas.identity.application.dto.command.BiometricVerifyRequest;
 import com.fivucsas.identity.application.dto.command.EnrollBiometricCommand;
+import com.fivucsas.identity.application.dto.command.RegisterStepUpDeviceRequest;
+import com.fivucsas.identity.application.dto.command.StepUpChallengeRequest;
+import com.fivucsas.identity.application.dto.command.StepUpVerifyRequest;
 import com.fivucsas.identity.application.dto.command.VerifyBiometricCommand;
 import com.fivucsas.identity.application.dto.response.BiometricResponse;
+import com.fivucsas.identity.application.dto.response.DeviceResponse;
+import com.fivucsas.identity.application.dto.response.StepUpChallengeResponse;
+import com.fivucsas.identity.application.dto.response.StepUpVerifyResponse;
 import com.fivucsas.identity.application.port.input.EnrollBiometricUseCase;
+import com.fivucsas.identity.application.port.input.StepUpAuthUseCase;
 import com.fivucsas.identity.application.port.input.VerifyBiometricUseCase;
 import com.fivucsas.identity.application.port.output.BiometricServicePort;
+import com.fivucsas.identity.domain.exception.UnauthorizedException;
+import com.fivucsas.identity.domain.model.auth.DevicePlatform;
 import com.fivucsas.identity.dto.BiometricVerificationResponse;
+import com.fivucsas.identity.entity.User;
+import com.fivucsas.identity.security.RbacAuthorizationService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 
 /**
  * REST controller for biometric endpoints.
  *
- * Refactored to use Hexagonal Architecture input ports (use cases).
+ * Includes merged endpoints from AuthBiometricController (/api/v1/auth/biometric/*).
+ * Uses full path on each method to support two different base paths.
  */
 @RestController
-@RequestMapping("/api/v1/biometric")
 @RequiredArgsConstructor
 @Slf4j
-@Tag(name = "Biometric", description = "Biometric enrollment and verification endpoints")
+@Tag(name = "Biometric", description = "Biometric enrollment, verification and device-bound step-up endpoints")
 public class BiometricController {
 
     private final EnrollBiometricUseCase enrollBiometricUseCase;
     private final VerifyBiometricUseCase verifyBiometricUseCase;
     private final BiometricServicePort biometricServicePort;
+    private final StepUpAuthUseCase stepUpAuthUseCase;
+    private final RbacAuthorizationService rbacService;
 
-    @PostMapping(value = "/enroll/{userId}", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @PostMapping(value = "/api/v1/biometric/enroll/{userId}", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @Operation(summary = "Enroll user's face biometric data")
     @PreAuthorize("hasAuthority('biometric:enroll') or @userSecurityService.isCurrentUser(#userId)")
     public ResponseEntity<BiometricVerificationResponse> enrollFace(
@@ -55,7 +74,7 @@ public class BiometricController {
         return ResponseEntity.ok(mapToVerificationResponse(response));
     }
 
-    @PostMapping(value = "/verify/{userId}", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @PostMapping(value = "/api/v1/biometric/verify/{userId}", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @Operation(summary = "Verify user's face against enrolled biometric data")
     @PreAuthorize("hasAuthority('biometric:verify') or @userSecurityService.isCurrentUser(#userId)")
     public ResponseEntity<BiometricVerificationResponse> verifyFace(
@@ -74,7 +93,7 @@ public class BiometricController {
         return ResponseEntity.ok(mapToVerificationResponse(response));
     }
 
-    @PostMapping("/fingerprint/enroll/{userId}")
+    @PostMapping("/api/v1/biometric/fingerprint/enroll/{userId}")
     @Operation(summary = "Enroll user's fingerprint biometric data")
     @PreAuthorize("hasAuthority('biometric:enroll') or @userSecurityService.isCurrentUser(#userId)")
     public ResponseEntity<BiometricVerificationResponse> enrollFingerprint(
@@ -102,7 +121,7 @@ public class BiometricController {
             .build());
     }
 
-    @PostMapping("/fingerprint/verify/{userId}")
+    @PostMapping("/api/v1/biometric/fingerprint/verify/{userId}")
     @Operation(summary = "Verify user's fingerprint against enrolled biometric data")
     @PreAuthorize("hasAuthority('biometric:verify') or @userSecurityService.isCurrentUser(#userId)")
     public ResponseEntity<BiometricVerificationResponse> verifyFingerprint(
@@ -130,7 +149,7 @@ public class BiometricController {
             .build());
     }
 
-    @PostMapping("/voice/enroll/{userId}")
+    @PostMapping("/api/v1/biometric/voice/enroll/{userId}")
     @Operation(summary = "Enroll user's voice biometric data")
     @PreAuthorize("hasAuthority('biometric:enroll') or @userSecurityService.isCurrentUser(#userId)")
     public ResponseEntity<BiometricVerificationResponse> enrollVoice(
@@ -158,7 +177,7 @@ public class BiometricController {
             .build());
     }
 
-    @PostMapping("/voice/verify/{userId}")
+    @PostMapping("/api/v1/biometric/voice/verify/{userId}")
     @Operation(summary = "Verify user's voice against enrolled biometric data")
     @PreAuthorize("hasAuthority('biometric:verify') or @userSecurityService.isCurrentUser(#userId)")
     public ResponseEntity<BiometricVerificationResponse> verifyVoice(
@@ -186,7 +205,7 @@ public class BiometricController {
             .build());
     }
 
-    @DeleteMapping("/face/{userId}")
+    @DeleteMapping("/api/v1/biometric/face/{userId}")
     @Operation(summary = "Delete user's enrolled face biometric data")
     @PreAuthorize("hasAuthority('biometric:delete') or @userSecurityService.isCurrentUser(#userId)")
     public ResponseEntity<BiometricVerificationResponse> deleteFace(@PathVariable UUID userId) {
@@ -203,7 +222,7 @@ public class BiometricController {
             .build());
     }
 
-    @DeleteMapping("/fingerprint/{userId}")
+    @DeleteMapping("/api/v1/biometric/fingerprint/{userId}")
     @Operation(summary = "Delete user's enrolled fingerprint biometric data")
     @PreAuthorize("hasAuthority('biometric:delete') or @userSecurityService.isCurrentUser(#userId)")
     public ResponseEntity<BiometricVerificationResponse> deleteFingerprint(@PathVariable UUID userId) {
@@ -220,7 +239,7 @@ public class BiometricController {
             .build());
     }
 
-    @DeleteMapping("/voice/{userId}")
+    @DeleteMapping("/api/v1/biometric/voice/{userId}")
     @Operation(summary = "Delete user's enrolled voice biometric data")
     @PreAuthorize("hasAuthority('biometric:delete') or @userSecurityService.isCurrentUser(#userId)")
     public ResponseEntity<BiometricVerificationResponse> deleteVoice(@PathVariable UUID userId) {
@@ -235,6 +254,73 @@ public class BiometricController {
             .confidence(0.0)
             .message(success ? "Voice data deleted successfully" : String.valueOf(result.get("message")))
             .build());
+    }
+
+    // --- Auth Biometric (device-bound step-up) endpoints merged from AuthBiometricController ---
+
+    @PostMapping("/api/v1/auth/biometric/devices")
+    @Operation(summary = "Register a biometric device for step-up authentication")
+    public ResponseEntity<DeviceResponse> registerAuthDevice(@Valid @RequestBody BiometricDeviceRequest request) {
+        User currentUser = rbacService.getCurrentUser()
+                .orElseThrow(() -> new UnauthorizedException());
+
+        DevicePlatform devicePlatform;
+        try {
+            devicePlatform = DevicePlatform.valueOf(request.platform().toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException(
+                    "Invalid platform: '" + request.platform() + "'. Allowed values: WEB, ANDROID, IOS, DESKTOP");
+        }
+
+        RegisterStepUpDeviceRequest stepUpRequest = new RegisterStepUpDeviceRequest(
+                request.keyId(),
+                devicePlatform,
+                request.publicKeyJwk(),
+                "ECDSA-P256",
+                null,
+                List.of("biometric")
+        );
+
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(stepUpAuthUseCase.registerStepUpDevice(
+                        currentUser.getId(), currentUser.getTenant().getId(), stepUpRequest));
+    }
+
+    @PostMapping("/api/v1/auth/biometric/challenge")
+    @Operation(summary = "Request a challenge nonce for biometric verification")
+    public ResponseEntity<Map<String, Object>> createAuthChallenge() {
+        User currentUser = rbacService.getCurrentUser()
+                .orElseThrow(() -> new UnauthorizedException());
+
+        StepUpChallengeRequest challengeRequest = new StepUpChallengeRequest("default");
+        StepUpChallengeResponse response = stepUpAuthUseCase.requestChallenge(
+                currentUser.getId(), challengeRequest);
+
+        return ResponseEntity.ok(Map.of(
+                "challengeId", response.challenge(),
+                "nonce", response.challenge()
+        ));
+    }
+
+    @PostMapping("/api/v1/auth/biometric/verify")
+    @Operation(summary = "Verify a signed biometric challenge")
+    public ResponseEntity<Map<String, Object>> verifyAuthSignature(@Valid @RequestBody BiometricVerifyRequest request) {
+        User currentUser = rbacService.getCurrentUser()
+                .orElseThrow(() -> new UnauthorizedException());
+
+        StepUpVerifyRequest verifyRequest = new StepUpVerifyRequest(
+                request.keyId(),
+                request.challengeId(),
+                request.signatureBase64()
+        );
+
+        StepUpVerifyResponse response = stepUpAuthUseCase.verifyChallenge(
+                currentUser.getId(), verifyRequest);
+
+        return ResponseEntity.ok(Map.of(
+                "stepUpToken", response.accessToken() != null ? response.accessToken() : "",
+                "verified", response.verified()
+        ));
     }
 
     private BiometricVerificationResponse mapToVerificationResponse(BiometricResponse response) {

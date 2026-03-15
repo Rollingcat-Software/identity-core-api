@@ -7,7 +7,7 @@ import com.fivucsas.identity.domain.exception.ResourceNotFoundException;
 import com.fivucsas.identity.domain.exception.UserNotFoundException;
 import com.fivucsas.identity.domain.repository.UserRepository;
 import com.fivucsas.identity.entity.User;
-import com.fivucsas.identity.repository.RefreshTokenRepository;
+import com.fivucsas.identity.domain.repository.RefreshTokenRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;

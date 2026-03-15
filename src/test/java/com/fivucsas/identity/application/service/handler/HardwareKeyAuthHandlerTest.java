@@ -6,7 +6,7 @@ import com.fivucsas.identity.entity.AuthSession;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.entity.WebAuthnCredential;
 import com.fivucsas.identity.infrastructure.webauthn.WebAuthnService;
-import com.fivucsas.identity.repository.WebAuthnCredentialRepository;
+import com.fivucsas.identity.application.port.output.WebAuthnCredentialRepositoryPort;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -24,7 +24,7 @@ import static org.mockito.Mockito.*;
 class HardwareKeyAuthHandlerTest {
 
     @Mock private WebAuthnService webAuthnService;
-    @Mock private WebAuthnCredentialRepository credentialRepository;
+    @Mock private WebAuthnCredentialRepositoryPort credentialRepository;
     @Mock private AuthSession session;
     @Mock private AuthFlowStep step;
 

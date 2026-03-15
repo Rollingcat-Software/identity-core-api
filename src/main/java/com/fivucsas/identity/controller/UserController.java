@@ -1,22 +1,30 @@
 package com.fivucsas.identity.controller;
 
+import com.fivucsas.identity.application.dto.command.ChangePasswordCommand;
 import com.fivucsas.identity.application.dto.command.CreateUserCommand;
 import com.fivucsas.identity.application.dto.command.UpdateUserCommand;
 import com.fivucsas.identity.application.dto.query.GetAllUsersQuery;
 import com.fivucsas.identity.application.dto.query.GetUserByIdQuery;
 import com.fivucsas.identity.application.dto.query.SearchUsersQuery;
 import com.fivucsas.identity.application.dto.response.UserResponse;
+import com.fivucsas.identity.application.port.input.ChangePasswordUseCase;
 import com.fivucsas.identity.application.port.input.ManageUserUseCase;
-import com.fivucsas.identity.domain.exception.InvalidCredentialsException;
-import com.fivucsas.identity.domain.exception.UserNotFoundException;
-import com.fivucsas.identity.repository.AuditLogRepository;
-import com.fivucsas.identity.repository.PasswordHistoryRepository;
-import com.fivucsas.identity.repository.UserRepository;
+import com.fivucsas.identity.application.service.GuestLifecycleService;
+import com.fivucsas.identity.domain.exception.UnauthorizedException;
+import com.fivucsas.identity.dto.AcceptInvitationRequest;
 import com.fivucsas.identity.dto.ChangePasswordRequest;
 import com.fivucsas.identity.dto.CreateUserRequest;
+import com.fivucsas.identity.dto.ExtendGuestAccessRequest;
+import com.fivucsas.identity.dto.GuestInvitationResponse;
+import com.fivucsas.identity.dto.InviteGuestRequest;
 import com.fivucsas.identity.dto.UpdateUserRequest;
-import com.fivucsas.identity.entity.PasswordHistory;
+import com.fivucsas.identity.entity.GuestInvitation;
+import com.fivucsas.identity.entity.InvitationStatus;
 import com.fivucsas.identity.entity.User;
+import com.fivucsas.identity.entity.UserSettings;
+import com.fivucsas.identity.repository.GuestInvitationRepository;
+import com.fivucsas.identity.repository.UserSettingsRepository;
+import com.fivucsas.identity.security.RbacAuthorizationService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -25,7 +33,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
-import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.Instant;
@@ -38,24 +45,41 @@ import java.util.stream.Collectors;
 /**
  * REST controller for user management endpoints.
  *
- * Refactored to use Hexagonal Architecture input ports (use cases).
+ * Merges: UserController + UserSettingsController + GuestController
  */
 @RestController
-@RequestMapping("/api/v1/users")
 @RequiredArgsConstructor
 @Slf4j
-@Tag(name = "User Management", description = "User CRUD operations")
+@Tag(name = "User Management", description = "User CRUD, settings and guest management operations")
 public class UserController {
 
-    private static final int PASSWORD_HISTORY_LIMIT = 5;
+    private static final Map<String, Object> DEFAULT_SETTINGS = Map.of(
+            "notifications", Map.of(
+                    "email", true,
+                    "push", true,
+                    "securityAlerts", true
+            ),
+            "security", Map.of(
+                    "twoFactorEnabled", false,
+                    "sessionTimeout", 30
+            ),
+            "appearance", Map.of(
+                    "theme", "light",
+                    "language", "en",
+                    "density", "comfortable"
+            )
+    );
 
     private final ManageUserUseCase manageUserUseCase;
-    private final UserRepository userRepository;
-    private final PasswordEncoder passwordEncoder;
-    private final PasswordHistoryRepository passwordHistoryRepository;
-    private final AuditLogRepository auditLogRepository;
+    private final ChangePasswordUseCase changePasswordUseCase;
+    private final UserSettingsRepository userSettingsRepository;
+    private final GuestLifecycleService guestLifecycleService;
+    private final GuestInvitationRepository invitationRepository;
+    private final RbacAuthorizationService rbacService;
 
-    @GetMapping
+    // --- User CRUD endpoints ---
+
+    @GetMapping("/api/v1/users")
     @Operation(summary = "Get all users")
     @PreAuthorize("@rbac.hasPermission('user:read')")
     public ResponseEntity<Map<String, Object>> getAllUsers(
@@ -63,18 +87,14 @@ public class UserController {
             @RequestParam(defaultValue = "20") int size) {
         log.info("GET /api/v1/users - Get all users (page={}, size={})", page, size);
 
-        List<UserResponse> responses = manageUserUseCase.getAllUsers(new GetAllUsersQuery());
+        GetAllUsersQuery query = GetAllUsersQuery.builder()
+            .page(page)
+            .size(size)
+            .build();
 
-        List<UserResponse> allUsers = responses.stream()
-            .map(this::enrichWithLoginInfo)
-            .collect(Collectors.toList());
-
-        int totalElements = allUsers.size();
+        List<UserResponse> pagedUsers = manageUserUseCase.getAllUsers(query);
+        long totalElements = manageUserUseCase.countAllUsers();
         int totalPages = (int) Math.ceil((double) totalElements / size);
-        int fromIndex = Math.min(page * size, totalElements);
-        int toIndex = Math.min(fromIndex + size, totalElements);
-
-        List<UserResponse> pagedUsers = allUsers.subList(fromIndex, toIndex);
 
         Map<String, Object> response = new HashMap<>();
         response.put("content", pagedUsers);
@@ -86,7 +106,7 @@ public class UserController {
         return ResponseEntity.ok(response);
     }
 
-    @GetMapping("/{id}")
+    @GetMapping("/api/v1/users/{id}")
     @Operation(summary = "Get user by ID")
     @PreAuthorize("@rbac.hasPermission('user:read') or @userSecurityService.isCurrentUser(#id)")
     public ResponseEntity<UserResponse> getUserById(@PathVariable String id) {
@@ -96,12 +116,10 @@ public class UserController {
             .userId(id)
             .build();
 
-        UserResponse response = manageUserUseCase.getUserById(query);
-
-        return ResponseEntity.ok(enrichWithLoginInfo(response));
+        return ResponseEntity.ok(manageUserUseCase.getUserById(query));
     }
 
-    @PostMapping
+    @PostMapping("/api/v1/users")
     @Operation(summary = "Create new user")
     @PreAuthorize("@rbac.hasPermission('user:create')")
     public ResponseEntity<UserResponse> createUser(@Valid @RequestBody CreateUserRequest request) {
@@ -119,12 +137,10 @@ public class UserController {
             .tenantId(request.getTenantId())
             .build();
 
-        UserResponse response = manageUserUseCase.createUser(command);
-
-        return ResponseEntity.status(HttpStatus.CREATED).body(response);
+        return ResponseEntity.status(HttpStatus.CREATED).body(manageUserUseCase.createUser(command));
     }
 
-    @PutMapping("/{id}")
+    @PutMapping("/api/v1/users/{id}")
     @Operation(summary = "Update user")
     @PreAuthorize("@rbac.hasPermission('user:update') or @userSecurityService.isCurrentUser(#id)")
     public ResponseEntity<UserResponse> updateUser(
@@ -140,23 +156,19 @@ public class UserController {
             .address(request.getAddress())
             .build();
 
-        UserResponse response = manageUserUseCase.updateUser(command);
-
-        return ResponseEntity.ok(response);
+        return ResponseEntity.ok(manageUserUseCase.updateUser(command));
     }
 
-    @DeleteMapping("/{id}")
+    @DeleteMapping("/api/v1/users/{id}")
     @Operation(summary = "Delete user")
     @PreAuthorize("@rbac.hasPermission('user:delete')")
     public ResponseEntity<Void> deleteUser(@PathVariable String id) {
         log.info("DELETE /api/v1/users/{} - Delete user", id);
-
         manageUserUseCase.deleteUser(id);
-
         return ResponseEntity.noContent().build();
     }
 
-    @PostMapping("/{id}/change-password")
+    @PostMapping("/api/v1/users/{id}/change-password")
     @Operation(summary = "Change user password")
     @PreAuthorize("hasAuthority('user:update') or @userSecurityService.isCurrentUser(#id)")
     public ResponseEntity<Void> changePassword(
@@ -164,37 +176,16 @@ public class UserController {
             @Valid @RequestBody ChangePasswordRequest request) {
         log.info("POST /api/v1/users/{}/change-password", id);
 
-        java.util.UUID uuid = java.util.UUID.fromString(id);
-        User user = userRepository.findById(uuid)
-                .orElseThrow(() -> new UserNotFoundException(id));
-
-        if (!passwordEncoder.matches(request.getCurrentPassword(), user.getPasswordHash())) {
-            throw new InvalidCredentialsException();
-        }
-
-        // Check password history to prevent reuse
-        var recentPasswords = passwordHistoryRepository.findRecentByUserId(
-                uuid, org.springframework.data.domain.PageRequest.of(0, PASSWORD_HISTORY_LIMIT));
-        for (PasswordHistory ph : recentPasswords) {
-            if (passwordEncoder.matches(request.getNewPassword(), ph.getPasswordHash())) {
-                throw new IllegalArgumentException(
-                        "New password must not match any of the last " + PASSWORD_HISTORY_LIMIT + " passwords");
-            }
-        }
-
-        // Save current password to history before changing
-        passwordHistoryRepository.save(PasswordHistory.builder()
-                .userId(uuid)
-                .passwordHash(user.getPasswordHash())
+        changePasswordUseCase.execute(ChangePasswordCommand.builder()
+                .userId(id)
+                .currentPassword(request.getCurrentPassword())
+                .newPassword(request.getNewPassword())
                 .build());
-
-        user.updatePassword(request.getNewPassword(), passwordEncoder);
-        userRepository.save(user);
 
         return ResponseEntity.ok().build();
     }
 
-    @GetMapping("/search")
+    @GetMapping("/api/v1/users/search")
     @Operation(summary = "Search users")
     @PreAuthorize("@rbac.hasPermission('user:read')")
     public ResponseEntity<List<UserResponse>> searchUsers(@RequestParam String query) {
@@ -204,41 +195,235 @@ public class UserController {
             .searchQuery(query)
             .build();
 
-        List<UserResponse> responses = manageUserUseCase.searchUsers(searchQuery);
-
-        List<UserResponse> users = responses.stream()
-            .map(this::enrichWithLoginInfo)
-            .collect(Collectors.toList());
-
-        return ResponseEntity.ok(users);
+        return ResponseEntity.ok(manageUserUseCase.searchUsers(searchQuery));
     }
 
-    private UserResponse enrichWithLoginInfo(UserResponse response) {
-        return response.toBuilder()
-            .lastLoginAt(getLastLoginAt(response.getId()))
-            .lastLoginIp(getLastLoginIp(response.getId()))
-            .build();
+    // --- User Settings endpoints (merged from UserSettingsController) ---
+
+    @GetMapping("/api/v1/users/{userId}/settings")
+    @Operation(summary = "Get user settings")
+    @PreAuthorize("hasPermission(#userId, 'user_settings', 'read') or @userSecurityService.isCurrentUser(#userId)")
+    public ResponseEntity<Map<String, Object>> getUserSettings(@PathVariable String userId) {
+        log.info("GET /api/v1/users/{}/settings", userId);
+
+        UUID uuid = UUID.fromString(userId);
+        return userSettingsRepository.findByUserId(uuid)
+                .map(settings -> ResponseEntity.ok(settings.getSettings()))
+                .orElseGet(() -> ResponseEntity.ok(new HashMap<>(DEFAULT_SETTINGS)));
     }
 
-    private Instant getLastLoginAt(String userId) {
-        try {
-            var page = auditLogRepository.findByUserIdAndActionOrderByCreatedAtDesc(
-                    UUID.fromString(userId), "USER_AUTHENTICATED",
-                    org.springframework.data.domain.PageRequest.of(0, 1));
-            return page.hasContent() ? page.getContent().getFirst().getCreatedAt() : null;
-        } catch (Exception e) {
-            return null;
+    @PutMapping("/api/v1/users/{userId}/settings")
+    @Operation(summary = "Update user settings")
+    @PreAuthorize("hasPermission(#userId, 'user_settings', 'write') or @userSecurityService.isCurrentUser(#userId)")
+    public ResponseEntity<Map<String, Object>> updateUserSettings(
+            @PathVariable String userId,
+            @RequestBody Map<String, Object> newSettings) {
+        log.info("PUT /api/v1/users/{}/settings", userId);
+
+        UUID uuid = UUID.fromString(userId);
+        UserSettings settings = userSettingsRepository.findByUserId(uuid)
+                .orElseGet(() -> UserSettings.builder()
+                        .userId(uuid)
+                        .settings(new HashMap<>(DEFAULT_SETTINGS))
+                        .build());
+
+        Map<String, Object> merged = new HashMap<>(settings.getSettings());
+        merged.putAll(newSettings);
+        settings.setSettings(merged);
+        userSettingsRepository.save(settings);
+
+        return ResponseEntity.ok(settings.getSettings());
+    }
+
+    @GetMapping("/api/v1/users/{userId}/settings/notifications")
+    @Operation(summary = "Get notification settings")
+    @PreAuthorize("hasPermission(#userId, 'user_settings', 'read') or @userSecurityService.isCurrentUser(#userId)")
+    public ResponseEntity<Object> getNotificationSettings(@PathVariable String userId) {
+        return getSettingsSection(userId, "notifications");
+    }
+
+    @PutMapping("/api/v1/users/{userId}/settings/notifications")
+    @Operation(summary = "Update notification settings")
+    @PreAuthorize("hasPermission(#userId, 'user_settings', 'write') or @userSecurityService.isCurrentUser(#userId)")
+    public ResponseEntity<Object> updateNotificationSettings(
+            @PathVariable String userId,
+            @RequestBody Map<String, Object> notificationSettings) {
+        return updateSettingsSection(userId, "notifications", notificationSettings);
+    }
+
+    @GetMapping("/api/v1/users/{userId}/settings/security")
+    @Operation(summary = "Get security settings")
+    @PreAuthorize("hasPermission(#userId, 'user_settings', 'read') or @userSecurityService.isCurrentUser(#userId)")
+    public ResponseEntity<Object> getSecuritySettings(@PathVariable String userId) {
+        return getSettingsSection(userId, "security");
+    }
+
+    @PutMapping("/api/v1/users/{userId}/settings/security")
+    @Operation(summary = "Update security settings")
+    @PreAuthorize("hasPermission(#userId, 'user_settings', 'write') or @userSecurityService.isCurrentUser(#userId)")
+    public ResponseEntity<Object> updateSecuritySettings(
+            @PathVariable String userId,
+            @RequestBody Map<String, Object> securitySettings) {
+        return updateSettingsSection(userId, "security", securitySettings);
+    }
+
+    @GetMapping("/api/v1/users/{userId}/settings/appearance")
+    @Operation(summary = "Get appearance settings")
+    @PreAuthorize("hasPermission(#userId, 'user_settings', 'read') or @userSecurityService.isCurrentUser(#userId)")
+    public ResponseEntity<Object> getAppearanceSettings(@PathVariable String userId) {
+        return getSettingsSection(userId, "appearance");
+    }
+
+    @PutMapping("/api/v1/users/{userId}/settings/appearance")
+    @Operation(summary = "Update appearance settings")
+    @PreAuthorize("hasPermission(#userId, 'user_settings', 'write') or @userSecurityService.isCurrentUser(#userId)")
+    public ResponseEntity<Object> updateAppearanceSettings(
+            @PathVariable String userId,
+            @RequestBody Map<String, Object> appearanceSettings) {
+        return updateSettingsSection(userId, "appearance", appearanceSettings);
+    }
+
+    // --- Guest endpoints (merged from GuestController) ---
+
+    @PostMapping("/api/v1/guests/invite")
+    @Operation(summary = "Invite a guest user")
+    @PreAuthorize("@rbac.hasPermission('guest:invite')")
+    public ResponseEntity<GuestInvitationResponse> inviteGuest(
+            @Valid @RequestBody InviteGuestRequest request) {
+
+        User currentUser = rbacService.getCurrentUser()
+                .orElseThrow(() -> new UnauthorizedException());
+
+        log.info("POST /api/v1/guests/invite - Inviting guest {} by {}",
+                request.getEmail(), currentUser.getEmail());
+
+        GuestInvitation invitation = guestLifecycleService.createInvitation(
+                currentUser.getTenant(),
+                request.getEmail(),
+                currentUser,
+                request.getAccessDurationHours(),
+                request.getMessage()
+        );
+
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(GuestInvitationResponse.from(invitation));
+    }
+
+    @PostMapping("/api/v1/guests/accept")
+    @Operation(summary = "Accept a guest invitation")
+    public ResponseEntity<Void> acceptInvitation(
+            @Valid @RequestBody AcceptInvitationRequest request) {
+
+        log.info("POST /api/v1/guests/accept - Accepting invitation");
+
+        guestLifecycleService.acceptInvitation(
+                request.getToken(),
+                request.getFirstName(),
+                request.getLastName(),
+                request.getPassword()
+        );
+
+        return ResponseEntity.status(HttpStatus.CREATED).build();
+    }
+
+    @GetMapping("/api/v1/guests")
+    @Operation(summary = "List guest invitations for current tenant")
+    @PreAuthorize("@rbac.hasPermission('guest:read')")
+    public ResponseEntity<List<GuestInvitationResponse>> listInvitations(
+            @RequestParam(required = false) String status) {
+
+        User currentUser = rbacService.getCurrentUser()
+                .orElseThrow(() -> new UnauthorizedException());
+
+        UUID tenantId = currentUser.getTenant().getId();
+
+        List<GuestInvitation> invitations;
+        if (status != null && !status.isEmpty()) {
+            invitations = invitationRepository.findByTenantIdAndStatus(
+                    tenantId,
+                    InvitationStatus.valueOf(status.toUpperCase(java.util.Locale.ROOT))
+            );
+        } else {
+            invitations = invitationRepository.findByTenantIdOrderByCreatedAtDesc(tenantId);
         }
+
+        return ResponseEntity.ok(invitations.stream()
+                .map(GuestInvitationResponse::from)
+                .collect(Collectors.toList()));
     }
 
-    private String getLastLoginIp(String userId) {
-        try {
-            var page = auditLogRepository.findByUserIdAndActionOrderByCreatedAtDesc(
-                    UUID.fromString(userId), "USER_AUTHENTICATED",
-                    org.springframework.data.domain.PageRequest.of(0, 1));
-            return page.hasContent() ? page.getContent().getFirst().getIpAddress() : null;
-        } catch (Exception e) {
-            return null;
-        }
+    @GetMapping("/api/v1/guests/count")
+    @Operation(summary = "Count active guests in tenant")
+    @PreAuthorize("@rbac.hasPermission('guest:read')")
+    public ResponseEntity<Long> countActiveGuests() {
+        User currentUser = rbacService.getCurrentUser()
+                .orElseThrow(() -> new UnauthorizedException());
+
+        long count = invitationRepository.countActiveGuestsInTenant(
+                currentUser.getTenant().getId(), Instant.now());
+
+        return ResponseEntity.ok(count);
+    }
+
+    @PostMapping("/api/v1/guests/{guestUserId}/revoke")
+    @Operation(summary = "Revoke guest access")
+    @PreAuthorize("@rbac.hasPermission('guest:revoke')")
+    public ResponseEntity<Void> revokeGuestAccess(@PathVariable UUID guestUserId) {
+        User currentUser = rbacService.getCurrentUser()
+                .orElseThrow(() -> new UnauthorizedException());
+
+        log.info("POST /api/v1/guests/{}/revoke - Revoking access by {}",
+                guestUserId, currentUser.getEmail());
+
+        guestLifecycleService.revokeGuestAccess(guestUserId, currentUser);
+
+        return ResponseEntity.noContent().build();
+    }
+
+    @PostMapping("/api/v1/guests/{guestUserId}/extend")
+    @Operation(summary = "Extend guest access duration")
+    @PreAuthorize("@rbac.hasPermission('guest:extend')")
+    public ResponseEntity<Void> extendGuestAccess(
+            @PathVariable UUID guestUserId,
+            @Valid @RequestBody ExtendGuestAccessRequest request) {
+
+        User currentUser = rbacService.getCurrentUser()
+                .orElseThrow(() -> new UnauthorizedException());
+
+        log.info("POST /api/v1/guests/{}/extend - Extending access by {} hours by {}",
+                guestUserId, request.getAdditionalHours(), currentUser.getEmail());
+
+        guestLifecycleService.extendGuestAccess(guestUserId, request.getAdditionalHours(), currentUser);
+
+        return ResponseEntity.ok().build();
+    }
+
+    // --- Private helpers ---
+
+    private ResponseEntity<Object> getSettingsSection(String userId, String section) {
+        UUID uuid = UUID.fromString(userId);
+        Map<String, Object> allSettings = userSettingsRepository.findByUserId(uuid)
+                .map(UserSettings::getSettings)
+                .orElse(DEFAULT_SETTINGS);
+
+        Object sectionSettings = allSettings.getOrDefault(section, DEFAULT_SETTINGS.get(section));
+        return ResponseEntity.ok(sectionSettings);
+    }
+
+    @SuppressWarnings("unchecked")
+    private ResponseEntity<Object> updateSettingsSection(String userId, String section, Map<String, Object> sectionSettings) {
+        UUID uuid = UUID.fromString(userId);
+        UserSettings settings = userSettingsRepository.findByUserId(uuid)
+                .orElseGet(() -> UserSettings.builder()
+                        .userId(uuid)
+                        .settings(new HashMap<>(DEFAULT_SETTINGS))
+                        .build());
+
+        Map<String, Object> allSettings = new HashMap<>(settings.getSettings());
+        allSettings.put(section, sectionSettings);
+        settings.setSettings(allSettings);
+        userSettingsRepository.save(settings);
+
+        return ResponseEntity.ok(sectionSettings);
     }
 }

@@ -10,9 +10,13 @@ import com.fivucsas.identity.application.port.output.TokenGenerationPort;
 import com.fivucsas.identity.application.service.handler.AuthMethodHandler;
 import com.fivucsas.identity.application.service.handler.StepResult;
 import com.fivucsas.identity.domain.model.auth.*;
+import com.fivucsas.identity.application.port.output.AuthFlowRepositoryPort;
+import com.fivucsas.identity.application.port.output.AuthFlowStepRepositoryPort;
+import com.fivucsas.identity.application.port.output.AuthSessionRepositoryPort;
+import com.fivucsas.identity.application.port.output.AuthSessionStepRepositoryPort;
 import com.fivucsas.identity.domain.repository.TenantRepository;
+import com.fivucsas.identity.domain.repository.UserRepository;
 import com.fivucsas.identity.entity.*;
-import com.fivucsas.identity.repository.*;
 import com.fivucsas.identity.service.RefreshTokenService;
 import jakarta.persistence.EntityNotFoundException;
 import lombok.RequiredArgsConstructor;
@@ -33,10 +37,10 @@ import java.util.UUID;
 @Transactional
 public class ExecuteAuthSessionService implements ExecuteAuthSessionUseCase {
 
-    private final AuthSessionRepository authSessionRepository;
-    private final AuthSessionStepRepository authSessionStepRepository;
-    private final AuthFlowRepository authFlowRepository;
-    private final AuthFlowStepRepository authFlowStepRepository;
+    private final AuthSessionRepositoryPort authSessionRepository;
+    private final AuthSessionStepRepositoryPort authSessionStepRepository;
+    private final AuthFlowRepositoryPort authFlowRepository;
+    private final AuthFlowStepRepositoryPort authFlowStepRepository;
     private final TenantRepository tenantRepository;
     private final UserRepository userRepository;
     private final AuthMethodHandlerRegistry handlerRegistry;

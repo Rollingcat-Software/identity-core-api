@@ -19,8 +19,11 @@ import com.fivucsas.identity.infrastructure.email.EmailService;
 import com.fivucsas.identity.infrastructure.otp.OtpService;
 import com.fivucsas.identity.infrastructure.sms.SmsService;
 import com.fivucsas.identity.repository.UserRepository;
+import com.fivucsas.identity.application.port.output.CachePort;
 import com.fivucsas.identity.security.JwtAuthenticationFilter;
 import com.fivucsas.identity.security.RateLimitService;
+import org.springframework.data.redis.connection.RedisConnectionFactory;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -114,6 +117,15 @@ class AuthControllerTest {
 
     @MockBean
     private PasswordEncoder passwordEncoder;
+
+    @MockBean
+    private CachePort cachePort;
+
+    @MockBean
+    private RedisConnectionFactory redisConnectionFactory;
+
+    @MockBean
+    private StringRedisTemplate stringRedisTemplate;
 
     // Test Data
     private static final String TEST_EMAIL = "test@fivucsas.com";

@@ -1,16 +1,16 @@
 package com.fivucsas.identity.application.service;
 
 import com.fivucsas.identity.application.dto.command.CreateAuthFlowCommand;
+import com.fivucsas.identity.application.port.output.AuthFlowRepositoryPort;
+import com.fivucsas.identity.application.port.output.AuthFlowStepRepositoryPort;
+import com.fivucsas.identity.application.port.output.AuthMethodRepositoryPort;
+import com.fivucsas.identity.application.port.output.TenantAuthMethodRepositoryPort;
 import com.fivucsas.identity.domain.model.auth.AuthMethodType;
 import com.fivucsas.identity.domain.model.auth.OperationType;
 import com.fivucsas.identity.domain.repository.TenantRepository;
 import com.fivucsas.identity.entity.AuthFlow;
 import com.fivucsas.identity.entity.AuthMethod;
 import com.fivucsas.identity.entity.Tenant;
-import com.fivucsas.identity.repository.AuthFlowRepository;
-import com.fivucsas.identity.repository.AuthFlowStepRepository;
-import com.fivucsas.identity.repository.AuthMethodRepository;
-import com.fivucsas.identity.repository.TenantAuthMethodRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -30,11 +30,11 @@ import static org.mockito.Mockito.*;
 @ExtendWith(MockitoExtension.class)
 class ManageAuthFlowServiceTest {
 
-    @Mock private AuthFlowRepository authFlowRepository;
-    @Mock private AuthFlowStepRepository authFlowStepRepository;
-    @Mock private AuthMethodRepository authMethodRepository;
+    @Mock private AuthFlowRepositoryPort authFlowRepository;
+    @Mock private AuthFlowStepRepositoryPort authFlowStepRepository;
+    @Mock private AuthMethodRepositoryPort authMethodRepository;
     @Mock private TenantRepository tenantRepository;
-    @Mock private TenantAuthMethodRepository tenantAuthMethodRepository;
+    @Mock private TenantAuthMethodRepositoryPort tenantAuthMethodRepository;
 
     @InjectMocks
     private ManageAuthFlowService service;

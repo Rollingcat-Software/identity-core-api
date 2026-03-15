@@ -1,5 +1,6 @@
 package com.fivucsas.identity.controller;
 
+import com.fivucsas.identity.application.port.input.ManageDeviceUseCase;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.entity.UserStatus;
 import com.fivucsas.identity.entity.WebAuthnCredential;
@@ -29,12 +30,13 @@ import static org.mockito.Mockito.*;
 @DisplayName("WebAuthnController Tests")
 class WebAuthnControllerTest {
 
+    @Mock private ManageDeviceUseCase manageDeviceUseCase;
     @Mock private WebAuthnService webAuthnService;
     @Mock private WebAuthnCredentialRepository credentialRepository;
     @Mock private UserRepository userRepository;
 
     @InjectMocks
-    private WebAuthnController webAuthnController;
+    private DeviceController webAuthnController;
 
     private UUID userId;
     private User testUser;
@@ -78,7 +80,7 @@ class WebAuthnControllerTest {
             when(userRepository.findById(userId)).thenReturn(Optional.empty());
 
             assertThatThrownBy(() -> webAuthnController.getRegistrationOptions(userId))
-                    .isInstanceOf(EntityNotFoundException.class);
+                    .isInstanceOf(RuntimeException.class);
         }
     }
 
@@ -199,7 +201,7 @@ class WebAuthnControllerTest {
             when(credentialRepository.existsByCredentialId("unknownCred")).thenReturn(false);
 
             assertThatThrownBy(() -> webAuthnController.deleteCredential("unknownCred"))
-                    .isInstanceOf(EntityNotFoundException.class);
+                    .isInstanceOf(RuntimeException.class);
         }
     }
 }

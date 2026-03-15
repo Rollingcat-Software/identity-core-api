@@ -13,8 +13,8 @@ import com.fivucsas.identity.entity.Tenant;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.entity.UserDevice;
 import com.fivucsas.identity.infrastructure.stepup.StepUpChallengeService;
-import com.fivucsas.identity.repository.UserDeviceRepository;
-import com.fivucsas.identity.repository.UserRepository;
+import com.fivucsas.identity.application.port.output.UserDeviceRepositoryPort;
+import com.fivucsas.identity.domain.repository.UserRepository;
 import jakarta.persistence.EntityNotFoundException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -34,7 +34,7 @@ import static org.mockito.Mockito.*;
 @ExtendWith(MockitoExtension.class)
 class StepUpAuthServiceTest {
 
-    @Mock private UserDeviceRepository userDeviceRepository;
+    @Mock private UserDeviceRepositoryPort userDeviceRepository;
     @Mock private UserRepository userRepository;
     @Mock private TenantRepository tenantRepository;
     @Mock private StepUpChallengeService stepUpChallengeService;

@@ -8,7 +8,7 @@ import com.fivucsas.identity.domain.exception.UserNotFoundException;
 import com.fivucsas.identity.domain.repository.UserRepository;
 import com.fivucsas.identity.entity.AuditLog;
 import com.fivucsas.identity.entity.User;
-import com.fivucsas.identity.repository.AuditLogRepository;
+import com.fivucsas.identity.application.port.output.AuditLogQueryPort;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
@@ -29,7 +29,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class GetUserActivityLogService implements GetUserActivityLogUseCase {
 
     private final UserRepository userRepository;
-    private final AuditLogRepository auditLogRepository;
+    private final AuditLogQueryPort auditLogRepository;
 
     @Override
     @Transactional(readOnly = true)

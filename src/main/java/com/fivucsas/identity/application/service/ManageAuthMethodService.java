@@ -8,8 +8,8 @@ import com.fivucsas.identity.entity.AuthMethod;
 import com.fivucsas.identity.entity.TenantAuthMethod;
 import com.fivucsas.identity.entity.Tenant;
 import com.fivucsas.identity.domain.repository.TenantRepository;
-import com.fivucsas.identity.repository.AuthMethodRepository;
-import com.fivucsas.identity.repository.TenantAuthMethodRepository;
+import com.fivucsas.identity.application.port.output.AuthMethodRepositoryPort;
+import com.fivucsas.identity.application.port.output.TenantAuthMethodRepositoryPort;
 import jakarta.persistence.EntityNotFoundException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -23,8 +23,8 @@ import java.util.UUID;
 @Transactional(readOnly = true)
 public class ManageAuthMethodService implements ManageAuthMethodUseCase {
 
-    private final AuthMethodRepository authMethodRepository;
-    private final TenantAuthMethodRepository tenantAuthMethodRepository;
+    private final AuthMethodRepositoryPort authMethodRepository;
+    private final TenantAuthMethodRepositoryPort tenantAuthMethodRepository;
     private final TenantRepository tenantRepository;
 
     @Override

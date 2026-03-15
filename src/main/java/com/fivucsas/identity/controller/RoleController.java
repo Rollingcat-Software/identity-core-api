@@ -2,10 +2,16 @@ package com.fivucsas.identity.controller;
 
 import com.fivucsas.identity.application.dto.command.*;
 import com.fivucsas.identity.application.dto.query.*;
+import com.fivucsas.identity.application.dto.response.PermissionResponse;
 import com.fivucsas.identity.application.dto.response.RoleResponse;
+import com.fivucsas.identity.application.dto.response.UserRoleResponse;
+import com.fivucsas.identity.application.port.input.ManagePermissionUseCase;
 import com.fivucsas.identity.application.port.input.ManageRoleUseCase;
+import com.fivucsas.identity.application.port.input.ManageUserRoleUseCase;
+import com.fivucsas.identity.dto.AssignRoleRequest;
 import com.fivucsas.identity.dto.CreateRoleRequest;
 import com.fivucsas.identity.dto.UpdateRoleRequest;
+import com.fivucsas.identity.security.UserSecurityService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -24,15 +30,17 @@ import java.util.List;
  * All endpoints require appropriate RBAC permissions.
  */
 @RestController
-@RequestMapping("/api/v1/roles")
 @RequiredArgsConstructor
 @Slf4j
 @Tag(name = "Role Management", description = "Role CRUD and permission assignment operations")
 public class RoleController {
 
     private final ManageRoleUseCase manageRoleUseCase;
+    private final ManageUserRoleUseCase manageUserRoleUseCase;
+    private final ManagePermissionUseCase managePermissionUseCase;
+    private final UserSecurityService userSecurityService;
 
-    @GetMapping
+    @GetMapping("/api/v1/roles")
     @Operation(summary = "Get all roles")
     @PreAuthorize("@rbac.hasPermission('role:read')")
     public ResponseEntity<List<RoleResponse>> getAllRoles(
@@ -48,7 +56,7 @@ public class RoleController {
         return ResponseEntity.ok(roles);
     }
 
-    @GetMapping("/{id}")
+    @GetMapping("/api/v1/roles/{id}")
     @Operation(summary = "Get role by ID")
     @PreAuthorize("@rbac.hasPermission('role:read')")
     public ResponseEntity<RoleResponse> getRoleById(@PathVariable String id) {
@@ -63,7 +71,7 @@ public class RoleController {
         return ResponseEntity.ok(role);
     }
 
-    @GetMapping("/tenant/{tenantId}")
+    @GetMapping("/api/v1/roles/tenant/{tenantId}")
     @Operation(summary = "Get roles by tenant")
     @PreAuthorize("@rbac.hasPermission('role:read')")
     public ResponseEntity<List<RoleResponse>> getRolesByTenant(@PathVariable String tenantId) {
@@ -78,7 +86,7 @@ public class RoleController {
         return ResponseEntity.ok(roles);
     }
 
-    @PostMapping
+    @PostMapping("/api/v1/roles")
     @Operation(summary = "Create new role")
     @PreAuthorize("@rbac.hasPermission('role:create')")
     public ResponseEntity<RoleResponse> createRole(@Valid @RequestBody CreateRoleRequest request) {
@@ -97,7 +105,7 @@ public class RoleController {
         return ResponseEntity.status(HttpStatus.CREATED).body(role);
     }
 
-    @PutMapping("/{id}")
+    @PutMapping("/api/v1/roles/{id}")
     @Operation(summary = "Update role")
     @PreAuthorize("@rbac.hasPermission('role:update')")
     public ResponseEntity<RoleResponse> updateRole(
@@ -117,7 +125,7 @@ public class RoleController {
         return ResponseEntity.ok(role);
     }
 
-    @DeleteMapping("/{id}")
+    @DeleteMapping("/api/v1/roles/{id}")
     @Operation(summary = "Delete role (soft delete)")
     @PreAuthorize("@rbac.hasPermission('role:delete')")
     public ResponseEntity<Void> deleteRole(@PathVariable String id) {
@@ -128,7 +136,7 @@ public class RoleController {
         return ResponseEntity.noContent().build();
     }
 
-    @PostMapping("/{roleId}/permissions/{permissionId}")
+    @PostMapping("/api/v1/roles/{roleId}/permissions/{permissionId}")
     @Operation(summary = "Assign permission to role")
     @PreAuthorize("@rbac.hasPermission('role:update')")
     public ResponseEntity<Void> assignPermission(
@@ -146,7 +154,7 @@ public class RoleController {
         return ResponseEntity.ok().build();
     }
 
-    @DeleteMapping("/{roleId}/permissions/{permissionId}")
+    @DeleteMapping("/api/v1/roles/{roleId}/permissions/{permissionId}")
     @Operation(summary = "Revoke permission from role")
     @PreAuthorize("@rbac.hasPermission('role:update')")
     public ResponseEntity<Void> revokePermission(
@@ -162,5 +170,105 @@ public class RoleController {
         manageRoleUseCase.revokePermissionFromRole(command);
 
         return ResponseEntity.noContent().build();
+    }
+
+    // --- User-Role endpoints merged from UserRoleController ---
+
+    @GetMapping("/api/v1/users/{userId}/roles")
+    @Operation(summary = "Get all roles for a user")
+    @PreAuthorize("@rbac.hasPermission('user_role:read') or @userSecurityService.isCurrentUser(#userId)")
+    public ResponseEntity<List<UserRoleResponse>> getUserRoles(@PathVariable String userId) {
+        log.info("GET /api/v1/users/{}/roles - Get user roles", userId);
+
+        GetUserRolesQuery query = GetUserRolesQuery.builder()
+                .userId(userId)
+                .build();
+
+        return ResponseEntity.ok(manageUserRoleUseCase.getUserRoles(query));
+    }
+
+    @PostMapping("/api/v1/users/{userId}/roles/{roleId}")
+    @Operation(summary = "Assign a role to a user")
+    @PreAuthorize("@rbac.hasPermission('user_role:assign')")
+    public ResponseEntity<Void> assignRole(
+            @PathVariable String userId,
+            @PathVariable String roleId,
+            @Valid @RequestBody(required = false) AssignRoleRequest request) {
+        log.info("POST /api/v1/users/{}/roles/{} - Assign role", userId, roleId);
+
+        String currentUserId = userSecurityService.getCurrentUserId();
+
+        AssignRoleToUserCommand command = AssignRoleToUserCommand.builder()
+                .userId(userId)
+                .roleId(roleId)
+                .assignedBy(currentUserId)
+                .expiresAt(request != null ? request.getExpiresAt() : null)
+                .build();
+
+        manageUserRoleUseCase.assignRoleToUser(command);
+
+        return ResponseEntity.status(HttpStatus.CREATED).build();
+    }
+
+    @DeleteMapping("/api/v1/users/{userId}/roles/{roleId}")
+    @Operation(summary = "Revoke a role from a user")
+    @PreAuthorize("@rbac.hasPermission('user_role:revoke')")
+    public ResponseEntity<Void> revokeRole(
+            @PathVariable String userId,
+            @PathVariable String roleId) {
+        log.info("DELETE /api/v1/users/{}/roles/{} - Revoke role", userId, roleId);
+
+        RevokeRoleFromUserCommand command = RevokeRoleFromUserCommand.builder()
+                .userId(userId)
+                .roleId(roleId)
+                .build();
+
+        manageUserRoleUseCase.revokeRoleFromUser(command);
+
+        return ResponseEntity.noContent().build();
+    }
+
+    @GetMapping("/api/v1/users/{userId}/roles/all/{roleId}")
+    @Operation(summary = "Get all users with a specific role")
+    @PreAuthorize("@rbac.hasPermission('user_role:read')")
+    public ResponseEntity<List<UserRoleResponse>> getRoleUsers(@PathVariable String roleId) {
+        log.info("GET /api/v1/users/*/roles/all/{} - Get role users", roleId);
+
+        GetRoleUsersQuery query = GetRoleUsersQuery.builder()
+                .roleId(roleId)
+                .build();
+
+        return ResponseEntity.ok(manageUserRoleUseCase.getRoleUsers(query));
+    }
+
+    // --- Permission endpoints merged from PermissionController ---
+
+    @GetMapping("/api/v1/permissions")
+    @Operation(summary = "Get all permissions")
+    @PreAuthorize("@rbac.hasPermission('permission:read')")
+    public ResponseEntity<List<PermissionResponse>> getAllPermissions() {
+        log.info("GET /api/v1/permissions - Get all permissions");
+        return ResponseEntity.ok(managePermissionUseCase.getAllPermissions());
+    }
+
+    @GetMapping("/api/v1/permissions/{id}")
+    @Operation(summary = "Get permission by ID")
+    @PreAuthorize("@rbac.hasPermission('permission:read')")
+    public ResponseEntity<PermissionResponse> getPermissionById(@PathVariable String id) {
+        log.info("GET /api/v1/permissions/{} - Get permission by ID", id);
+
+        GetPermissionByIdQuery query = GetPermissionByIdQuery.builder()
+                .permissionId(id)
+                .build();
+
+        return ResponseEntity.ok(managePermissionUseCase.getPermissionById(query));
+    }
+
+    @GetMapping("/api/v1/permissions/resource/{resource}")
+    @Operation(summary = "Get permissions by resource")
+    @PreAuthorize("@rbac.hasPermission('permission:read')")
+    public ResponseEntity<List<PermissionResponse>> getPermissionsByResource(@PathVariable String resource) {
+        log.info("GET /api/v1/permissions/resource/{} - Get permissions by resource", resource);
+        return ResponseEntity.ok(managePermissionUseCase.getPermissionsByResource(resource));
     }
 }

@@ -24,4 +24,9 @@ public interface BiometricDataRepository extends
     Optional<BiometricData> findByUserId(UUID userId);
 
     void deleteByUser(User user);
+
+    @Override
+    default void deleteRecord(BiometricData data) {
+        delete(data);
+    }
 }

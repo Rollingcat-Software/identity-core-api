@@ -5,7 +5,7 @@ import com.fivucsas.identity.application.dto.response.PermissionResponse;
 import com.fivucsas.identity.application.port.input.ManagePermissionUseCase;
 import com.fivucsas.identity.domain.exception.PermissionNotFoundException;
 import com.fivucsas.identity.entity.Permission;
-import com.fivucsas.identity.repository.PermissionRepository;
+import com.fivucsas.identity.application.port.output.PermissionRepositoryPort;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -28,7 +28,7 @@ import java.util.stream.Collectors;
 @Slf4j
 public class ManagePermissionService implements ManagePermissionUseCase {
 
-    private final PermissionRepository permissionRepository;
+    private final PermissionRepositoryPort permissionRepository;
 
     @Override
     @Transactional(readOnly = true)

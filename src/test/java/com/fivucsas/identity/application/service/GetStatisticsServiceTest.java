@@ -2,8 +2,8 @@ package com.fivucsas.identity.application.service;
 
 import com.fivucsas.identity.application.dto.response.StatisticsResponse;
 import com.fivucsas.identity.domain.repository.TenantRepository;
+import com.fivucsas.identity.domain.repository.UserRepository;
 import com.fivucsas.identity.repository.AuditLogRepository;
-import com.fivucsas.identity.repository.UserRepository;
 import com.fivucsas.identity.entity.UserStatus;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;

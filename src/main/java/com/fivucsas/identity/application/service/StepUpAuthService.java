@@ -13,8 +13,8 @@ import com.fivucsas.identity.entity.Tenant;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.entity.UserDevice;
 import com.fivucsas.identity.infrastructure.stepup.StepUpChallengeService;
-import com.fivucsas.identity.repository.UserDeviceRepository;
-import com.fivucsas.identity.repository.UserRepository;
+import com.fivucsas.identity.application.port.output.UserDeviceRepositoryPort;
+import com.fivucsas.identity.domain.repository.UserRepository;
 import jakarta.persistence.EntityNotFoundException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -30,7 +30,7 @@ import java.util.UUID;
 @Slf4j
 public class StepUpAuthService implements StepUpAuthUseCase {
 
-    private final UserDeviceRepository userDeviceRepository;
+    private final UserDeviceRepositoryPort userDeviceRepository;
     private final UserRepository userRepository;
     private final TenantRepository tenantRepository;
     private final StepUpChallengeService stepUpChallengeService;

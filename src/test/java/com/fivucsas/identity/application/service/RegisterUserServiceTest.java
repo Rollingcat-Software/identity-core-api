@@ -11,7 +11,7 @@ import com.fivucsas.identity.domain.exception.InvalidEmailException;
 import com.fivucsas.identity.infrastructure.email.EmailService;
 import com.fivucsas.identity.infrastructure.otp.OtpService;
 import com.fivucsas.identity.domain.repository.TenantRepository;
-import com.fivucsas.identity.repository.UserRepository;
+import com.fivucsas.identity.domain.repository.UserRepository;
 import com.fivucsas.identity.entity.RefreshToken;
 import com.fivucsas.identity.entity.Tenant;
 import com.fivucsas.identity.entity.TenantStatus;

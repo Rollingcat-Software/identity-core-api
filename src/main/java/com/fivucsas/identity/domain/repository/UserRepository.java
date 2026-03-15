@@ -4,6 +4,7 @@ import com.fivucsas.identity.domain.model.user.Email;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.entity.UserStatus;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -97,6 +98,14 @@ public interface UserRepository {
     List<User> findAll();
 
     /**
+     * Finds users with pagination.
+     * @param page zero-based page index
+     * @param size number of items per page
+     * @return list of users for the given page
+     */
+    List<User> findAll(int page, int size);
+
+    /**
      * Counts all users.
      * @return total count of users
      */
@@ -111,4 +120,11 @@ public interface UserRepository {
     Optional<User> findByPasswordResetToken(String token);
 
     Optional<User> findByEmailVerificationToken(String token);
+
+    /**
+     * Finds users whose guest access has expired.
+     * @param now current time
+     * @return list of expired guest users
+     */
+    List<User> findExpiredGuests(Instant now);
 }

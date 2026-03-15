@@ -72,4 +72,11 @@ public interface ManageUserUseCase {
      * @throws com.fivucsas.identity.domain.exception.UserNotFoundException if user doesn't exist
      */
     void deleteUser(String userId);
+
+    /**
+     * Counts all users in the system.
+     *
+     * @return total number of users
+     */
+    long countAllUsers();
 }

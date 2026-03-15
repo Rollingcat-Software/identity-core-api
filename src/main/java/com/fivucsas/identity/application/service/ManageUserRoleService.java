@@ -9,12 +9,12 @@ import com.fivucsas.identity.application.port.input.ManageUserRoleUseCase;
 import com.fivucsas.identity.domain.exception.DuplicateRoleAssignmentException;
 import com.fivucsas.identity.domain.exception.RoleNotFoundException;
 import com.fivucsas.identity.domain.exception.UserNotFoundException;
-import com.fivucsas.identity.repository.UserRepository;
+import com.fivucsas.identity.domain.repository.UserRepository;
 import com.fivucsas.identity.entity.Role;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.entity.UserRole;
-import com.fivucsas.identity.repository.RoleRepository;
-import com.fivucsas.identity.repository.UserRoleRepository;
+import com.fivucsas.identity.application.port.output.RoleRepositoryPort;
+import com.fivucsas.identity.application.port.output.UserRoleRepositoryPort;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -36,8 +36,8 @@ import java.util.stream.Collectors;
 public class ManageUserRoleService implements ManageUserRoleUseCase {
 
     private final UserRepository userRepository;
-    private final RoleRepository roleRepository;
-    private final UserRoleRepository userRoleRepository;
+    private final RoleRepositoryPort roleRepository;
+    private final UserRoleRepositoryPort userRoleRepository;
 
     @Override
     @Transactional

@@ -1,11 +1,11 @@
 package com.fivucsas.identity.application.service;
 
 import com.fivucsas.identity.entity.*;
-import com.fivucsas.identity.repository.GuestInvitationRepository;
-import com.fivucsas.identity.repository.UserRepository;
-import com.fivucsas.identity.repository.UserRoleRepository;
-import com.fivucsas.identity.repository.RoleRepository;
-import com.fivucsas.identity.repository.RefreshTokenRepository;
+import com.fivucsas.identity.application.port.output.GuestInvitationRepositoryPort;
+import com.fivucsas.identity.domain.repository.UserRepository;
+import com.fivucsas.identity.application.port.output.UserRoleRepositoryPort;
+import com.fivucsas.identity.application.port.output.RoleRepositoryPort;
+import com.fivucsas.identity.domain.repository.RefreshTokenRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -37,10 +37,10 @@ import java.util.UUID;
 @Slf4j
 public class GuestLifecycleService {
 
-    private final GuestInvitationRepository invitationRepository;
+    private final GuestInvitationRepositoryPort invitationRepository;
     private final UserRepository userRepository;
-    private final UserRoleRepository userRoleRepository;
-    private final RoleRepository roleRepository;
+    private final UserRoleRepositoryPort userRoleRepository;
+    private final RoleRepositoryPort roleRepository;
     private final RefreshTokenRepository refreshTokenRepository;
     private final PasswordEncoder passwordEncoder;
 

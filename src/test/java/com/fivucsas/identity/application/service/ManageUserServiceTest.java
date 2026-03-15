@@ -9,7 +9,7 @@ import com.fivucsas.identity.application.dto.response.UserResponse;
 import com.fivucsas.identity.application.port.output.PasswordEncoderPort;
 import com.fivucsas.identity.domain.exception.DuplicateEmailException;
 import com.fivucsas.identity.domain.exception.UserNotFoundException;
-import com.fivucsas.identity.repository.UserRepository;
+import com.fivucsas.identity.domain.repository.UserRepository;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.entity.UserStatus;
 import org.junit.jupiter.api.BeforeEach;
@@ -269,7 +269,7 @@ class ManageUserServiceTest {
                 .updatedAt(Instant.now())
                 .build();
 
-            when(userRepository.findAll()).thenReturn(Arrays.asList(existingUser, user2));
+            when(userRepository.findAll(0, 20)).thenReturn(Arrays.asList(existingUser, user2));
 
             // When
             List<UserResponse> responses = manageUserService.getAllUsers(new GetAllUsersQuery());
@@ -279,14 +279,14 @@ class ManageUserServiceTest {
             assertThat(responses.get(0).getEmail()).isEqualTo("test@example.com");
             assertThat(responses.get(1).getEmail()).isEqualTo("user2@example.com");
 
-            verify(userRepository).findAll();
+            verify(userRepository).findAll(0, 20);
         }
 
         @Test
         @DisplayName("Should return empty list when no users")
         void shouldReturnEmptyListWhenNoUsers() {
             // Given
-            when(userRepository.findAll()).thenReturn(Collections.emptyList());
+            when(userRepository.findAll(0, 20)).thenReturn(Collections.emptyList());
 
             // When
             List<UserResponse> responses = manageUserService.getAllUsers(new GetAllUsersQuery());

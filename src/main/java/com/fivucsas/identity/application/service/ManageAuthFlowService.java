@@ -6,9 +6,12 @@ import com.fivucsas.identity.application.dto.response.AuthFlowResponse;
 import com.fivucsas.identity.application.port.input.ManageAuthFlowUseCase;
 import com.fivucsas.identity.domain.model.auth.AuthMethodType;
 import com.fivucsas.identity.domain.model.auth.OperationType;
+import com.fivucsas.identity.application.port.output.AuthFlowRepositoryPort;
+import com.fivucsas.identity.application.port.output.AuthFlowStepRepositoryPort;
+import com.fivucsas.identity.application.port.output.AuthMethodRepositoryPort;
 import com.fivucsas.identity.domain.repository.TenantRepository;
 import com.fivucsas.identity.entity.*;
-import com.fivucsas.identity.repository.*;
+import com.fivucsas.identity.application.port.output.TenantAuthMethodRepositoryPort;
 import jakarta.persistence.EntityNotFoundException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -36,11 +39,11 @@ public class ManageAuthFlowService implements ManageAuthFlowUseCase {
             "VOICE"
     );
 
-    private final AuthFlowRepository authFlowRepository;
-    private final AuthFlowStepRepository authFlowStepRepository;
-    private final AuthMethodRepository authMethodRepository;
+    private final AuthFlowRepositoryPort authFlowRepository;
+    private final AuthFlowStepRepositoryPort authFlowStepRepository;
+    private final AuthMethodRepositoryPort authMethodRepository;
     private final TenantRepository tenantRepository;
-    private final TenantAuthMethodRepository tenantAuthMethodRepository;
+    private final TenantAuthMethodRepositoryPort tenantAuthMethodRepository;
 
     @Override
     public List<AuthFlowResponse> listFlows(UUID tenantId, OperationType operationType) {
