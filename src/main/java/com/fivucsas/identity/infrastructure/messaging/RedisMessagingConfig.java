@@ -18,9 +18,10 @@ import org.springframework.data.redis.listener.RedisMessageListenerContainer;
 import org.springframework.data.redis.serializer.GenericJackson2JsonRedisSerializer;
 import org.springframework.data.redis.serializer.StringRedisSerializer;
 
-import jakarta.annotation.PostConstruct;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Lazy;
+import org.springframework.context.event.ContextRefreshedEvent;
+import org.springframework.context.event.EventListener;
 
 /**
  * Redis messaging configuration for event-driven communication.
@@ -230,7 +231,7 @@ public class RedisMessagingConfig {
      * Uses injected beans via ApplicationContext to avoid circular references
      * from calling @Bean methods directly in @PostConstruct.
      */
-    @PostConstruct
+    @EventListener(ContextRefreshedEvent.class)
     public void initializeEventBusSubscriptions() {
         if (!eventBusEnabled) {
             logger.warn("Event bus is disabled in configuration");

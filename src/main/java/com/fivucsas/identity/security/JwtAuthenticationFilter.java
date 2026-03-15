@@ -55,7 +55,12 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             if (userEmail != null && SecurityContextHolder.getContext().getAuthentication() == null) {
                 // Check blacklist before loading user details
                 String jti = jwtService.extractJti(jwt);
-                if (jti != null && cachePort.exists("blacklist:" + jti)) {
+                if (jti == null) {
+                    log.warn("Rejected token without JTI claim for user: {}", userEmail);
+                    filterChain.doFilter(request, response);
+                    return;
+                }
+                if (cachePort.exists("blacklist:" + jti)) {
                     log.warn("Rejected blacklisted token (JTI: {}) for user: {}", jti, userEmail);
                     filterChain.doFilter(request, response);
                     return;

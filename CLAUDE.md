@@ -39,12 +39,23 @@ All handlers in `application/service/handler/`:
 2. **FingerprintAuthHandler** - calls BiometricServicePort.verifyFingerprint() which hits a stub in biometric-processor that always fails
 3. **VoiceAuthHandler** - calls BiometricServicePort.verifyVoice() which hits a stub in biometric-processor that always fails
 
+### Connected integrations (March 2026):
+- TotpController connected to frontend TotpEnrollment (setup, verify, status, disable)
+- QrCodeController connected to frontend QrCodeStep (generate, invalidate, auto-refresh)
+- GuestController connected to frontend GuestsPage (invite, extend, revoke, list)
+- Forgot/Reset password endpoints connected to frontend pages
+
 ### Missing integrations:
 - WebAuthnController has registration endpoints but web-app has no enrollment UI
-- TotpController not connected to frontend TotpEnrollment component
-- QrCodeController not connected to frontend QrCodeStep
 - EnrollmentManagementController per-user endpoints unused by frontend
 - UserController.getAllUsers() uses in-memory pagination (fetches all, then slices) - works but inefficient for large datasets
+
+### Security hardening (March 2026):
+- JWT blacklist: fail-closed on null JTI (JwtAuthenticationFilter rejects tokens without JTI)
+- Logout: throws IllegalStateException if access token has no JTI claim
+- Redis event bus: uses @EventListener(ContextRefreshedEvent) instead of @PostConstruct
+- CORS: docker-compose.prod.yml includes ica-fivucsas subdomain
+- Flyway: production config with baseline-on-migrate
 
 ### Cross-repo dependencies:
 - Communicates with **biometric-processor** (Python/FastAPI on port 8001) via BiometricServiceAdapter
