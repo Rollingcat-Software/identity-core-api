@@ -20,49 +20,40 @@ CREATE INDEX IF NOT EXISTS idx_tenants_status ON tenants (status) WHERE deleted_
 -- 1. New Tenants
 -- ============================================================================
 
-INSERT INTO tenants (id, name, slug, domain, display_name, description, subscription_plan, is_active, max_users, max_biometric_enrollments, contact_email, contact_phone, status)
+INSERT INTO tenants (id, name, domain, display_name, subscription_plan, is_active, max_users, max_biometric_enrollments, contact_email, contact_phone)
 VALUES
     ('11111111-1111-1111-1111-111111111111',
      'Marmara University',
-     'marmara-uni',
      'marmara.edu.tr',
      'Marmara University',
-     'Marmara University Computer Engineering Department',
      'ENTERPRISE',
      TRUE,
      500,
      2000,
      'it@marmara.edu.tr',
-     '+902162421500',
-     'ACTIVE'),
+     '+902162421500'),
 
     ('22222222-2222-2222-2222-222222222222',
      'TechCorp Istanbul',
-     'techcorp-ist',
      'techcorp.com.tr',
      'TechCorp Istanbul',
-     'Technology company based in Istanbul',
      'PREMIUM',
      TRUE,
      200,
      1000,
      'admin@techcorp.com.tr',
-     '+902121234567',
-     'ACTIVE'),
+     '+902121234567'),
 
     ('33333333-3333-3333-3333-333333333333',
      'Anatolia Medical Center',
-     'anatolia-med',
      'anatoliamed.com.tr',
      'Anatolia Medical Center',
-     'Healthcare provider in central Anatolia',
      'BASIC',
      TRUE,
      50,
      250,
      'security@anatoliamed.com.tr',
-     '+903121234567',
-     'ACTIVE')
+     '+903121234567')
 ON CONFLICT (id) DO NOTHING;
 
 -- ============================================================================

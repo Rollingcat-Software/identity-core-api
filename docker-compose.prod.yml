@@ -1,0 +1,74 @@
+services:
+  identity-core-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: identity-core-api
+    restart: unless-stopped
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      SERVER_PORT: 8080
+      DATABASE_URL: jdbc:postgresql://shared-postgres:5432/identity_core
+      DATABASE_USERNAME: postgres
+      DATABASE_PASSWORD: ${POSTGRES_PASSWORD}
+      REDIS_HOST: shared-redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      REDIS_DATABASE: 0
+      REDIS_TIMEOUT: 5000
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_ACCESS_TOKEN_EXPIRATION: 3600000
+      JWT_REFRESH_TOKEN_EXPIRATION: 604800000
+      JWT_ISSUER: rollingcat-identity-core
+      JWT_AUDIENCE: rollingcat-clients
+      CORS_ALLOWED_ORIGINS: https://mizan.rollingcatsoftware.com,https://sarnic.rollingcatsoftware.com,https://muhabbet.rollingcatsoftware.com
+      CORS_ALLOWED_METHODS: GET,POST,PUT,DELETE,OPTIONS,PATCH
+      CORS_ALLOWED_HEADERS: "*"
+      CORS_MAX_AGE: 3600
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      ENCRYPTION_ALGORITHM: AES/GCM/NoPadding
+      RATE_LIMIT_ENABLED: "true"
+      RATE_LIMIT_LOGIN_PER_MINUTE: 5
+      RATE_LIMIT_API_PER_MINUTE: 100
+      MULTITENANCY_ENABLED: "true"
+      MULTITENANCY_ISOLATION_LEVEL: ROW_LEVEL
+      MULTITENANCY_DEFAULT_TENANT: system
+      MULTITENANCY_TENANT_HEADER: X-Tenant-ID
+      LOGGING_LEVEL_ROOT: WARN
+      LOGGING_LEVEL_APP: INFO
+      LOGGING_LEVEL_SECURITY: WARN
+      LOGGING_LEVEL_SQL: WARN
+      MANAGEMENT_ENDPOINTS_ENABLED: "true"
+      MANAGEMENT_HEALTH_SHOW_DETAILS: authorized
+      FEATURE_EMAIL_VERIFICATION_ENABLED: "true"
+      FEATURE_PHONE_VERIFICATION_ENABLED: "false"
+      FEATURE_TWO_FACTOR_AUTH_ENABLED: "false"
+      FEATURE_SOCIAL_LOGIN_ENABLED: "false"
+    networks:
+      - backend
+      - proxy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/actuator/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 3
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.identity-api.rule=Host(`auth.rollingcatsoftware.com`)"
+      - "traefik.http.routers.identity-api.entrypoints=websecure"
+      - "traefik.http.routers.identity-api.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.identity-api.middlewares=secure-headers@file"
+      - "traefik.http.services.identity-api.loadbalancer.server.port=8080"
+    deploy:
+      resources:
+        limits:
+          memory: 768M
+
+networks:
+  backend:
+    name: backend
+    external: true
+  proxy:
+    name: proxy
+    external: true

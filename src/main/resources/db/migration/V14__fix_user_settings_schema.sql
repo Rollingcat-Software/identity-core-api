@@ -19,7 +19,7 @@ END $$;
 ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL;
 
 -- ============================================================================
--- 2. Migrate data from old columns to settings JSONB
+-- 2. Migrate data from old columns to settings JSONB (only if old columns exist)
 -- ============================================================================
 
 -- Conditionally migrate: old columns may not exist in fresh databases
