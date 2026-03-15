@@ -13,6 +13,7 @@ import org.springframework.data.redis.connection.RedisStandaloneConfiguration;
 import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.listener.RedisMessageListenerContainer;
+import org.springframework.data.redis.serializer.GenericJackson2JsonRedisSerializer;
 import org.springframework.data.redis.serializer.StringRedisSerializer;
 
 import jakarta.annotation.PostConstruct;
@@ -115,6 +116,24 @@ public class RedisMessagingConfig {
         template.afterPropertiesSet();
 
         logger.info("RedisTemplate configured with String serializers");
+        return template;
+    }
+
+    /**
+     * Creates RedisTemplate for Object values (used by CachePort adapter).
+     *
+     * @param connectionFactory Redis connection factory
+     * @return Configured RedisTemplate with JSON serialization for values
+     */
+    @Bean
+    public RedisTemplate<String, Object> redisObjectTemplate(RedisConnectionFactory connectionFactory) {
+        RedisTemplate<String, Object> template = new RedisTemplate<>();
+        template.setConnectionFactory(connectionFactory);
+        template.setKeySerializer(new StringRedisSerializer());
+        template.setValueSerializer(new GenericJackson2JsonRedisSerializer());
+        template.setHashKeySerializer(new StringRedisSerializer());
+        template.setHashValueSerializer(new GenericJackson2JsonRedisSerializer());
+        template.afterPropertiesSet();
         return template;
     }
 
