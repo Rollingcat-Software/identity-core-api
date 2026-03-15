@@ -78,7 +78,7 @@ public class GuestInvitation {
     @Builder.Default
     private int extensionCount = 0;
 
-    @Column(columnDefinition = "JSONB DEFAULT '{}'")
+    @Column(columnDefinition = "jsonb")
     private String metadata;
 
     // Lifecycle timestamps
