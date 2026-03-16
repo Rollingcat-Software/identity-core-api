@@ -2,17 +2,24 @@
 
 ## Project Overview
 
-Java 21 / Spring Boot 3.2+ backend API for the FIVUCSAS biometric identity platform.
+Java 21 / Spring Boot **4.0.2** backend API for the FIVUCSAS biometric identity platform.
 Hexagonal Architecture with Ports and Adapters pattern.
+Production URL: https://auth.rollingcatsoftware.com
 
 ## Build & Test
 
 ```bash
-./gradlew clean build          # Build
-./gradlew bootRun              # Run (dev)
-./gradlew test                 # Run tests
-./gradlew test jacocoTestReport # Coverage
+# Local (Maven — gradle not used in this project)
+mvn clean package -DskipTests
+mvn spring-boot:run -Dspring-boot.run.profiles=dev
+
+# Production (Docker — Maven is NOT installed on VPS)
+cd /opt/projects/fivucsas/identity-core-api
+docker compose -f docker-compose.prod.yml --env-file .env.prod build --no-cache identity-core-api
+docker compose -f docker-compose.prod.yml --env-file .env.prod up -d identity-core-api
 ```
+
+⚠️ **Always use `--env-file .env.prod`** when running docker compose on VPS or all env vars will be blank (blank POSTGRES_PASSWORD, JWT_SECRET, MAIL_*, etc.).
 
 Runs on port 8080. Swagger UI at `/swagger-ui.html`.
 
@@ -60,5 +67,17 @@ All handlers in `application/service/handler/`:
 ### Cross-repo dependencies:
 - Communicates with **biometric-processor** (Python/FastAPI on port 8001) via BiometricServiceAdapter
 - Consumed by **web-app** (React frontend on port 3000) via REST API
+
+### Critical fixes applied (2026-03-16):
+- **Spring Boot 4.x `@AutoConfigureMockMvc`** import path changed to `org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc` (NOT the 3.x path `org.springframework.boot.test.autoconfigure.web.servlet`)
+- **`AuditLogAdapter.logUserRegistered()`** — changed from `REQUIRES_NEW` to `REQUIRED` propagation. `REQUIRES_NEW` opens an isolated transaction that cannot see the uncommitted user row, causing `audit_logs.user_id` FK violation on every registration.
+- **`MinioMediaStorageAdapter`** `@PostConstruct` — wrapped bucket existence check in try-catch so Spring context loads without MinIO available in test env
+- **Flyway V14** — added `DROP INDEX IF EXISTS idx_messages_expires_at` before recreating (V6 already created it on fresh DBs)
+- **SMTP mail** — Spring Boot only auto-configures `JavaMailSender` via `spring.mail.host`, NOT custom `mail.host`. Use `SPRING_MAIL_*` env vars in `docker-compose.prod.yml`
+
+### Email OTP (production, 2026-03-16):
+- SMTP: `smtp.hostinger.com:587` with STARTTLS
+- Sender: `info@ica-fivucsas.rollingcatsoftware.com`
+- Credentials stored in `.env.prod` as `MAIL_*` + `SPRING_MAIL_*`
 
 See TODO.md for full integration audit (49 items).
