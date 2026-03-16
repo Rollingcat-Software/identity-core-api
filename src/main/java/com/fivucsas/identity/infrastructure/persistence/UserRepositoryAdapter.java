@@ -5,6 +5,7 @@ import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.entity.UserStatus;
 import org.springframework.stereotype.Component;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -94,5 +95,10 @@ public class UserRepositoryAdapter implements UserRepository {
     @Override
     public Optional<User> findByEmailVerificationToken(String token) {
         return jpaUserRepository.findByEmailVerificationToken(token);
+    }
+
+    @Override
+    public List<User> findExpiredGuests(Instant cutoff) {
+        return jpaUserRepository.findExpiredGuests(cutoff);
     }
 }
