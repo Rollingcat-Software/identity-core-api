@@ -3,6 +3,7 @@ package com.fivucsas.identity.infrastructure.email;
 import com.fivucsas.identity.application.port.output.EmailServicePort;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 /**
@@ -13,6 +14,7 @@ import org.springframework.stereotype.Component;
  * as no-ops until a full email provider (e.g. SendGrid, AWS SES) is integrated.
  */
 @Component
+@ConditionalOnProperty(name = "mail.enabled", havingValue = "true")
 @RequiredArgsConstructor
 @Slf4j
 public class EmailServicePortAdapter implements EmailServicePort {
