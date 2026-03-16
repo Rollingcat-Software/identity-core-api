@@ -31,9 +31,9 @@ jobs:
           command_timeout: 6m
           script: |
             set -e
-            cd /root/projects/fivucsas/identity-core-api
+            cd /opt/projects/fivucsas/identity-core-api
             git pull origin master || git pull origin main
-            cd /root/projects
+            cd /opt/projects
             ./infra/deploy.sh build identity
             ./infra/deploy.sh restart identity
             # Health check with retries (Spring Boot startup ~30s)
