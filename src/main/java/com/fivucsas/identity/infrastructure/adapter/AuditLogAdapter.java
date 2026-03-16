@@ -32,7 +32,7 @@ public class AuditLogAdapter implements AuditLogPort {
     private final AuditLogRepository auditLogRepository;
 
     @Override
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    @Transactional(propagation = Propagation.REQUIRED)
     public void logUserRegistered(String userId, String email, String ipAddress) {
         log.info("AUDIT: User registered - userId={}, email={}, ip={}", userId, email, ipAddress);
         saveAuditLog("USER_CREATED", "USER", userId, true, ipAddress,
