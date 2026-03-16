@@ -6,9 +6,14 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.MultipartBodyBuilder;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.util.MultiValueMap;
+import org.springframework.web.client.HttpClientErrorException;
+import org.springframework.web.client.HttpServerErrorException;
+import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
+import org.springframework.web.client.RestClientException;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.util.Map;
@@ -34,16 +39,26 @@ public class BiometricServiceAdapter implements BiometricServicePort {
     public BiometricServiceAdapter(
             RestClient.Builder restClientBuilder,
             @Value("${biometric.service.url}") String biometricServiceUrl,
-            @Value("${biometric.service.api-key:}") String apiKey) {
+            @Value("${biometric.service.api-key:}") String apiKey,
+            @Value("${biometric.service.connect-timeout-ms:5000}") int connectTimeout,
+            @Value("${biometric.service.read-timeout-ms:30000}") int readTimeout) {
 
         this.biometricServiceUrl = biometricServiceUrl;
 
-        RestClient.Builder builder = restClientBuilder.baseUrl(biometricServiceUrl);
+        SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
+        requestFactory.setConnectTimeout(connectTimeout);
+        requestFactory.setReadTimeout(readTimeout);
+
+        RestClient.Builder builder = restClientBuilder
+                .baseUrl(biometricServiceUrl)
+                .requestFactory(requestFactory);
         if (apiKey != null && !apiKey.isBlank()) {
             builder = builder.defaultHeader("X-API-Key", apiKey);
             log.info("BiometricServiceAdapter configured with API key authentication");
         }
         this.restClient = builder.build();
+        log.info("BiometricServiceAdapter configured with connectTimeout={}ms, readTimeout={}ms",
+                connectTimeout, readTimeout);
     }
 
     @Override
@@ -58,9 +73,18 @@ public class BiometricServiceAdapter implements BiometricServicePort {
             Map<String, Object> response = postMultipart("/enroll", bodyBuilder.build());
             log.info("Biometric enrollment response received for user: {}", userId);
             return response;
-        } catch (Exception e) {
-            log.error("Error calling biometric service for enrollment: {}", e.getMessage());
-            return errorResponse("Biometric service unavailable: " + e.getMessage());
+        } catch (HttpClientErrorException e) {
+            log.warn("Biometric service client error for enrollment: {} {}", e.getStatusCode(), e.getMessage());
+            return errorResponse("Enrollment rejected: " + e.getResponseBodyAsString());
+        } catch (HttpServerErrorException e) {
+            log.error("Biometric service server error for enrollment: {} {}", e.getStatusCode(), e.getMessage());
+            return errorResponse("Biometric service error, please retry");
+        } catch (ResourceAccessException e) {
+            log.error("Biometric service unreachable for enrollment: {}", e.getMessage());
+            return errorResponse("Biometric service unavailable");
+        } catch (RestClientException e) {
+            log.error("Biometric service communication error for enrollment: {}", e.getMessage());
+            return errorResponse("Biometric service communication error");
         }
     }
 
@@ -76,9 +100,18 @@ public class BiometricServiceAdapter implements BiometricServicePort {
             Map<String, Object> response = postMultipart("/verify", bodyBuilder.build());
             log.info("Biometric verification response received for user: {}", userId);
             return response;
-        } catch (Exception e) {
-            log.error("Error calling biometric service for verification: {}", e.getMessage());
-            return errorResponse("Biometric service unavailable: " + e.getMessage());
+        } catch (HttpClientErrorException e) {
+            log.warn("Biometric service client error for verification: {} {}", e.getStatusCode(), e.getMessage());
+            return errorResponse("Verification rejected: " + e.getResponseBodyAsString());
+        } catch (HttpServerErrorException e) {
+            log.error("Biometric service server error for verification: {} {}", e.getStatusCode(), e.getMessage());
+            return errorResponse("Biometric service error, please retry");
+        } catch (ResourceAccessException e) {
+            log.error("Biometric service unreachable for verification: {}", e.getMessage());
+            return errorResponse("Biometric service unavailable");
+        } catch (RestClientException e) {
+            log.error("Biometric service communication error for verification: {}", e.getMessage());
+            return errorResponse("Biometric service communication error");
         }
     }
 
@@ -91,9 +124,12 @@ public class BiometricServiceAdapter implements BiometricServicePort {
                     Map.of("user_id", userId.toString(), "fingerprint_data", fingerprintData));
             log.info("Fingerprint enrollment response received for user: {}", userId);
             return response;
-        } catch (Exception e) {
-            log.error("Error calling biometric service for fingerprint enrollment: {}", e.getMessage());
-            return errorResponse("Fingerprint enrollment service unavailable: " + e.getMessage());
+        } catch (ResourceAccessException e) {
+            log.error("Biometric service unreachable for fingerprint enrollment: {}", e.getMessage());
+            return errorResponse("Fingerprint enrollment service unavailable");
+        } catch (RestClientException e) {
+            log.error("Biometric service error for fingerprint enrollment: {}", e.getMessage());
+            return errorResponse("Fingerprint enrollment service error");
         }
     }
 
@@ -106,9 +142,12 @@ public class BiometricServiceAdapter implements BiometricServicePort {
                     Map.of("user_id", userId.toString(), "fingerprint_data", fingerprintData));
             log.info("Fingerprint verification response received for user: {}", userId);
             return response;
-        } catch (Exception e) {
-            log.error("Error calling biometric service for fingerprint verification: {}", e.getMessage());
-            return errorResponse("Fingerprint verification service unavailable: " + e.getMessage());
+        } catch (ResourceAccessException e) {
+            log.error("Biometric service unreachable for fingerprint verification: {}", e.getMessage());
+            return errorResponse("Fingerprint verification service unavailable");
+        } catch (RestClientException e) {
+            log.error("Biometric service error for fingerprint verification: {}", e.getMessage());
+            return errorResponse("Fingerprint verification service error");
         }
     }
 
@@ -121,9 +160,12 @@ public class BiometricServiceAdapter implements BiometricServicePort {
                     Map.of("user_id", userId.toString(), "voice_data", voiceData));
             log.info("Voice enrollment response received for user: {}", userId);
             return response;
-        } catch (Exception e) {
-            log.error("Error calling biometric service for voice enrollment: {}", e.getMessage());
-            return errorResponse("Voice enrollment service unavailable: " + e.getMessage());
+        } catch (ResourceAccessException e) {
+            log.error("Biometric service unreachable for voice enrollment: {}", e.getMessage());
+            return errorResponse("Voice enrollment service unavailable");
+        } catch (RestClientException e) {
+            log.error("Biometric service error for voice enrollment: {}", e.getMessage());
+            return errorResponse("Voice enrollment service error");
         }
     }
 
@@ -136,9 +178,12 @@ public class BiometricServiceAdapter implements BiometricServicePort {
                     Map.of("user_id", userId.toString(), "voice_data", voiceData));
             log.info("Voice verification response received for user: {}", userId);
             return response;
-        } catch (Exception e) {
-            log.error("Error calling biometric service for voice verification: {}", e.getMessage());
-            return errorResponse("Voice verification service unavailable: " + e.getMessage());
+        } catch (ResourceAccessException e) {
+            log.error("Biometric service unreachable for voice verification: {}", e.getMessage());
+            return errorResponse("Voice verification service unavailable");
+        } catch (RestClientException e) {
+            log.error("Biometric service error for voice verification: {}", e.getMessage());
+            return errorResponse("Voice verification service error");
         }
     }
 
@@ -147,9 +192,12 @@ public class BiometricServiceAdapter implements BiometricServicePort {
         log.info("Calling biometric service to delete face data for user: {}", userId);
         try {
             return deleteResource("/enroll/" + userId);
-        } catch (Exception e) {
-            log.error("Error calling biometric service for face deletion: {}", e.getMessage());
-            return errorResponse("Face deletion service unavailable: " + e.getMessage());
+        } catch (ResourceAccessException e) {
+            log.error("Biometric service unreachable for face deletion: {}", e.getMessage());
+            return errorResponse("Face deletion service unavailable");
+        } catch (RestClientException e) {
+            log.error("Biometric service error for face deletion: {}", e.getMessage());
+            return errorResponse("Face deletion service error");
         }
     }
 
@@ -158,9 +206,12 @@ public class BiometricServiceAdapter implements BiometricServicePort {
         log.info("Calling biometric service to delete fingerprint data for user: {}", userId);
         try {
             return deleteResource("/fingerprint/" + userId);
-        } catch (Exception e) {
-            log.error("Error calling biometric service for fingerprint deletion: {}", e.getMessage());
-            return errorResponse("Fingerprint deletion service unavailable: " + e.getMessage());
+        } catch (ResourceAccessException e) {
+            log.error("Biometric service unreachable for fingerprint deletion: {}", e.getMessage());
+            return errorResponse("Fingerprint deletion service unavailable");
+        } catch (RestClientException e) {
+            log.error("Biometric service error for fingerprint deletion: {}", e.getMessage());
+            return errorResponse("Fingerprint deletion service error");
         }
     }
 
@@ -169,9 +220,12 @@ public class BiometricServiceAdapter implements BiometricServicePort {
         log.info("Calling biometric service to delete voice data for user: {}", userId);
         try {
             return deleteResource("/voice/" + userId);
-        } catch (Exception e) {
-            log.error("Error calling biometric service for voice deletion: {}", e.getMessage());
-            return errorResponse("Voice deletion service unavailable: " + e.getMessage());
+        } catch (ResourceAccessException e) {
+            log.error("Biometric service unreachable for voice deletion: {}", e.getMessage());
+            return errorResponse("Voice deletion service unavailable");
+        } catch (RestClientException e) {
+            log.error("Biometric service error for voice deletion: {}", e.getMessage());
+            return errorResponse("Voice deletion service error");
         }
     }
 
@@ -190,29 +244,39 @@ public class BiometricServiceAdapter implements BiometricServicePort {
                     .body(requestBody)
                     .retrieve()
                     .body(MAP_TYPE);
-        } catch (Exception e) {
-            log.error("Error calling biometric service for liveness puzzle: {}", e.getMessage());
-            return errorResponse("Liveness puzzle service unavailable: " + e.getMessage());
+        } catch (ResourceAccessException e) {
+            log.error("Biometric service unreachable for liveness puzzle: {}", e.getMessage());
+            return errorResponse("Liveness puzzle service unavailable");
+        } catch (RestClientException e) {
+            log.error("Biometric service error for liveness puzzle: {}", e.getMessage());
+            return errorResponse("Liveness puzzle service error");
         }
     }
 
     @Override
     public Map<String, Object> verifyLivenessPuzzle(String puzzleId, java.util.List<MultipartFile> frames) {
-        log.info("Calling biometric service to verify liveness puzzle: {}", puzzleId);
+        log.info("Calling biometric service to verify liveness puzzle: {} with {} frames", puzzleId, frames.size());
         try {
-            Map<String, Object> requestBody = new java.util.HashMap<>();
-            requestBody.put("puzzle_id", puzzleId);
-            requestBody.put("results", java.util.List.of());
+            MultipartBodyBuilder bodyBuilder = new MultipartBodyBuilder();
+            bodyBuilder.part("puzzle_id", puzzleId);
+            for (int i = 0; i < frames.size(); i++) {
+                bodyBuilder.part("frames", frames.get(i).getResource())
+                        .contentType(MediaType.IMAGE_JPEG)
+                        .filename("frame_" + i + ".jpg");
+            }
 
             return restClient.post()
                     .uri("/liveness/verify")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .body(requestBody)
+                    .contentType(MediaType.MULTIPART_FORM_DATA)
+                    .body(bodyBuilder.build())
                     .retrieve()
                     .body(MAP_TYPE);
-        } catch (Exception e) {
-            log.error("Error calling biometric service for liveness verification: {}", e.getMessage());
-            return errorResponse("Liveness verification service unavailable: " + e.getMessage());
+        } catch (ResourceAccessException e) {
+            log.error("Biometric service unreachable for liveness verification: {}", e.getMessage());
+            return errorResponse("Liveness verification service unavailable");
+        } catch (RestClientException e) {
+            log.error("Biometric service error for liveness verification: {}", e.getMessage());
+            return errorResponse("Liveness verification service error");
         }
     }
 
