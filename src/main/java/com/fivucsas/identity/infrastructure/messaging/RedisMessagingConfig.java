@@ -243,10 +243,20 @@ public class RedisMessagingConfig {
         // Use Spring-managed beans (injected via @Lazy) to ensure subscriptions
         // are registered on the same listener container that Spring manages.
         try {
-            redisEventBus.subscribe(CHANNEL_ENROLLMENT, biometricEventListener);
-            redisEventBus.subscribe(CHANNEL_VERIFICATION, biometricEventListener);
-            redisEventBus.subscribe(CHANNEL_LIVENESS, biometricEventListener);
-            redisEventBus.subscribe(CHANNEL_QUALITY, biometricEventListener);
+            RedisEventBus eventBus = applicationContext.getBean(RedisEventBus.class);
+            BiometricEventListener listener = applicationContext.getBean(BiometricEventListener.class);
+
+            // Subscribe to enrollment events
+            eventBus.subscribe(CHANNEL_ENROLLMENT, listener);
+
+            // Subscribe to verification events
+            eventBus.subscribe(CHANNEL_VERIFICATION, listener);
+
+            // Subscribe to liveness check events
+            eventBus.subscribe(CHANNEL_LIVENESS, listener);
+
+            // Subscribe to quality assessment events
+            eventBus.subscribe(CHANNEL_QUALITY, listener);
 
             logger.info("Event bus subscriptions initialized successfully");
 
