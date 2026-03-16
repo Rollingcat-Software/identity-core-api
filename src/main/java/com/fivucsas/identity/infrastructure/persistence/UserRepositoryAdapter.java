@@ -9,6 +9,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import org.springframework.data.domain.PageRequest;
 
 /**
  * Adapter that bridges the domain UserRepository interface
@@ -75,6 +76,11 @@ public class UserRepositoryAdapter implements UserRepository {
     @Override
     public List<User> findAll() {
         return jpaUserRepository.findAll();
+    }
+
+    @Override
+    public List<User> findAll(int page, int size) {
+        return jpaUserRepository.findAll(PageRequest.of(page, size)).getContent();
     }
 
     @Override
