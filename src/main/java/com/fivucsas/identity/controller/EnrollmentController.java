@@ -93,13 +93,13 @@ public class EnrollmentController {
     // --- /api/v1/users/{userId}/enrollments endpoints (from EnrollmentManagementController) ---
 
     @GetMapping("/api/v1/users/{userId}/enrollments")
-    @PreAuthorize("hasPermission(#userId, 'User', 'enrollment:read')")
+    @PreAuthorize("hasPermission(#userId, 'User', 'enrollment:read') or @userSecurityService.isCurrentUser(#userId)")
     public ResponseEntity<List<EnrollmentResponse>> getUserEnrollments(@PathVariable UUID userId) {
         return ResponseEntity.ok(manageEnrollmentUseCase.getUserEnrollments(userId));
     }
 
     @PostMapping("/api/v1/users/{userId}/enrollments")
-    @PreAuthorize("hasPermission(#userId, 'User', 'enrollment:create')")
+    @PreAuthorize("hasPermission(#userId, 'User', 'enrollment:create') or @userSecurityService.isCurrentUser(#userId)")
     public ResponseEntity<EnrollmentResponse> startEnrollment(
             @PathVariable UUID userId,
             @RequestParam UUID tenantId,
@@ -109,7 +109,7 @@ public class EnrollmentController {
     }
 
     @DeleteMapping("/api/v1/users/{userId}/enrollments/{methodType}")
-    @PreAuthorize("hasPermission(#userId, 'User', 'enrollment:delete')")
+    @PreAuthorize("hasPermission(#userId, 'User', 'enrollment:delete') or @userSecurityService.isCurrentUser(#userId)")
     public ResponseEntity<Void> revokeEnrollment(
             @PathVariable UUID userId,
             @PathVariable AuthMethodType methodType) {
