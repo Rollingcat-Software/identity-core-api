@@ -16,6 +16,7 @@ import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -226,6 +227,26 @@ public class BiometricServiceAdapter implements BiometricServicePort {
         } catch (RestClientException e) {
             log.error("Biometric service error for voice deletion: {}", e.getMessage());
             return errorResponse("Voice deletion service error");
+        }
+    }
+
+    @Override
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> enrollFaceMulti(UUID userId, List<MultipartFile> images) {
+        log.info("Calling biometric service for multi-image enrollment: userId={}, images={}", userId, images.size());
+        try {
+            MultipartBodyBuilder bodyBuilder = new MultipartBodyBuilder();
+            bodyBuilder.part("user_id", userId.toString());
+            for (MultipartFile img : images) {
+                bodyBuilder.part("files", img.getResource()).contentType(MediaType.IMAGE_JPEG);
+            }
+            return postMultipart("/enroll/multi", bodyBuilder.build());
+        } catch (HttpClientErrorException e) {
+            return errorResponse("Multi-enrollment rejected: " + e.getResponseBodyAsString());
+        } catch (ResourceAccessException e) {
+            return errorResponse("Biometric service unavailable");
+        } catch (RestClientException e) {
+            return errorResponse("Biometric service error");
         }
     }
 

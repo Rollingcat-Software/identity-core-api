@@ -110,6 +110,8 @@ public interface BiometricServicePort {
      */
     Map<String, Object> searchFace(MultipartFile faceImage);
 
+    Map<String, Object> enrollFaceMulti(UUID userId, List<MultipartFile> images);
+
     Map<String, Object> searchVoice(String voiceData);
 
     /**
