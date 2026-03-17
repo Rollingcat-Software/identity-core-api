@@ -74,6 +74,18 @@ public class BiometricController {
         return ResponseEntity.ok(mapToVerificationResponse(response));
     }
 
+    @PostMapping(value = "/api/v1/biometric/enroll/multi/{userId}", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @Operation(summary = "Multi-image face enrollment (2-5 images for stronger template)")
+    @PreAuthorize("hasAuthority('biometric:enroll') or @userSecurityService.isCurrentUser(#userId)")
+    public ResponseEntity<Map<String, Object>> enrollFaceMulti(
+            @PathVariable UUID userId,
+            @RequestParam("files") List<MultipartFile> files) {
+
+        log.info("Multi-image face enrollment for user: {}, images: {}", userId, files.size());
+        Map<String, Object> result = biometricServicePort.enrollFaceMulti(userId, files);
+        return ResponseEntity.ok(result);
+    }
+
     @PostMapping(value = "/api/v1/biometric/verify/{userId}", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @Operation(summary = "Verify user's face against enrolled biometric data")
     @PreAuthorize("hasAuthority('biometric:verify') or @userSecurityService.isCurrentUser(#userId)")
