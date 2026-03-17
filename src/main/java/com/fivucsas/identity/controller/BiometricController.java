@@ -265,6 +265,19 @@ public class BiometricController {
         return ResponseEntity.ok(result);
     }
 
+    @PostMapping("/api/v1/biometric/voice/search")
+    @Operation(summary = "Search for a speaker in enrolled database (1:N voice identification)")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<Map<String, Object>> searchVoice(@RequestBody Map<String, String> body) {
+        log.info("Voice search request");
+        String voiceData = body.get("voiceData");
+        if (voiceData == null || voiceData.isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "voiceData is required"));
+        }
+        Map<String, Object> result = biometricServicePort.searchVoice(voiceData);
+        return ResponseEntity.ok(result);
+    }
+
     // --- Auth Biometric (device-bound step-up) endpoints merged from AuthBiometricController ---
 
     @PostMapping("/api/v1/auth/biometric/devices")
