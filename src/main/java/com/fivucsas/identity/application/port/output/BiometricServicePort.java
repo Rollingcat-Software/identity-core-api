@@ -103,6 +103,14 @@ public interface BiometricServicePort {
     Map<String, Object> deleteVoice(UUID userId);
 
     /**
+     * Searches for a face in the enrolled database (1:N identification).
+     *
+     * @param faceImage the face image to search
+     * @return Map containing search results with matched user IDs and distances
+     */
+    Map<String, Object> searchFace(MultipartFile faceImage);
+
+    /**
      * Generates a liveness puzzle challenge from the biometric processor.
      *
      * @param userId optional user identifier
