@@ -251,6 +251,21 @@ public class BiometricServiceAdapter implements BiometricServicePort {
     }
 
     @Override
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> searchVoice(String voiceData) {
+        log.info("Calling biometric service to search voice");
+        try {
+            return postJson("/voice/search", Map.of("voice_data", voiceData));
+        } catch (ResourceAccessException e) {
+            log.error("Biometric service unreachable for voice search: {}", e.getMessage());
+            return errorResponse("Voice search service unavailable");
+        } catch (RestClientException e) {
+            log.error("Biometric service error for voice search: {}", e.getMessage());
+            return errorResponse("Voice search service error");
+        }
+    }
+
+    @Override
     public Map<String, Object> generateLivenessPuzzle(String userId, String difficulty) {
         log.info("Calling biometric service to generate liveness puzzle for user: {}", userId);
         try {

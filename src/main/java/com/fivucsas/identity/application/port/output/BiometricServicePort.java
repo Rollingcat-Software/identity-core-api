@@ -110,6 +110,8 @@ public interface BiometricServicePort {
      */
     Map<String, Object> searchFace(MultipartFile faceImage);
 
+    Map<String, Object> searchVoice(String voiceData);
+
     /**
      * Generates a liveness puzzle challenge from the biometric processor.
      *
