@@ -113,6 +113,14 @@ public interface BiometricServicePort {
     Map<String, Object> searchVoice(String voiceData);
 
     /**
+     * Detects card type from an image (Turkish ID, passport, driver's license, etc.).
+     *
+     * @param image the card image file
+     * @return Map containing detection result (detected, class_id, class_name, confidence)
+     */
+    Map<String, Object> detectCardType(MultipartFile image);
+
+    /**
      * Generates a liveness puzzle challenge from the biometric processor.
      *
      * @param userId optional user identifier
