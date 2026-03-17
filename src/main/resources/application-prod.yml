@@ -5,6 +5,11 @@ spring:
   application:
     name: identity-core-api
 
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 15MB
+
   # PostgreSQL Database (Production)
   # IMPORTANT: Configure these via environment variables
   datasource:
