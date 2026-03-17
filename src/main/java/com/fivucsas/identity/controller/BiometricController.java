@@ -256,6 +256,15 @@ public class BiometricController {
             .build());
     }
 
+    @PostMapping(value = "/api/v1/biometric/search", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @Operation(summary = "Search for a face in enrolled database (1:N identification)")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<Map<String, Object>> searchFace(@RequestParam("file") MultipartFile image) {
+        log.info("Face search request");
+        Map<String, Object> result = biometricServicePort.searchFace(image);
+        return ResponseEntity.ok(result);
+    }
+
     // --- Auth Biometric (device-bound step-up) endpoints merged from AuthBiometricController ---
 
     @PostMapping("/api/v1/auth/biometric/devices")

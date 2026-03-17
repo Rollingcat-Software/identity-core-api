@@ -230,6 +230,27 @@ public class BiometricServiceAdapter implements BiometricServicePort {
     }
 
     @Override
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> searchFace(MultipartFile faceImage) {
+        log.info("Calling biometric service to search face");
+        try {
+            MultipartBodyBuilder bodyBuilder = new MultipartBodyBuilder();
+            bodyBuilder.part("file", faceImage.getResource()).contentType(MediaType.IMAGE_JPEG);
+
+            return postMultipart("/search", bodyBuilder.build());
+        } catch (HttpClientErrorException e) {
+            log.warn("Biometric service client error for search: {} {}", e.getStatusCode(), e.getMessage());
+            return errorResponse("Search rejected: " + e.getResponseBodyAsString());
+        } catch (ResourceAccessException e) {
+            log.error("Biometric service unreachable for search: {}", e.getMessage());
+            return errorResponse("Search service unavailable");
+        } catch (RestClientException e) {
+            log.error("Biometric service error for search: {}", e.getMessage());
+            return errorResponse("Search service error");
+        }
+    }
+
+    @Override
     public Map<String, Object> generateLivenessPuzzle(String userId, String difficulty) {
         log.info("Calling biometric service to generate liveness puzzle for user: {}", userId);
         try {
