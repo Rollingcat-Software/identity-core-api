@@ -47,13 +47,16 @@ public class VerifyBiometricService implements VerifyBiometricUseCase {
         // Call external biometric service
         Map<String, Object> response = biometricService.verifyFace(userId, command.getFaceImage());
 
-        Boolean success = (Boolean) response.get("success");
+        // biometric-processor returns "verified" (boolean) and "confidence" (double)
+        Boolean verified = response.get("verified") != null
+            ? (Boolean) response.get("verified")
+            : (Boolean) response.get("success");
         String message = (String) response.get("message");
         Double confidence = response.get("confidence") != null
             ? ((Number) response.get("confidence")).doubleValue()
             : null;
 
-        if (!Boolean.TRUE.equals(success)) {
+        if (!Boolean.TRUE.equals(verified)) {
             throw new BiometricVerificationException("Face verification failed: " + message);
         }
 
