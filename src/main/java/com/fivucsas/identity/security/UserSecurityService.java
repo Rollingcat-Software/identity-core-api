@@ -1,5 +1,6 @@
 package com.fivucsas.identity.security;
 
+import com.fivucsas.identity.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.core.Authentication;
@@ -23,6 +24,8 @@ import java.util.UUID;
 @RequiredArgsConstructor
 @Slf4j
 public class UserSecurityService {
+
+    private final UserRepository userRepository;
 
     /**
      * Checks if the given userId matches the currently authenticated user.
@@ -141,12 +144,24 @@ public class UserSecurityService {
      * Supports UserDetails implementations and String principals.
      */
     private String extractUserId(Object principal) {
+        String identifier = null;
         if (principal instanceof org.springframework.security.core.userdetails.UserDetails) {
-            return ((org.springframework.security.core.userdetails.UserDetails) principal).getUsername();
+            identifier = ((org.springframework.security.core.userdetails.UserDetails) principal).getUsername();
         } else if (principal instanceof String) {
-            return (String) principal;
+            identifier = (String) principal;
         }
-        return null;
+        if (identifier == null) return null;
+
+        // If identifier is already a UUID, return it
+        try {
+            UUID.fromString(identifier);
+            return identifier;
+        } catch (IllegalArgumentException ignored) {}
+
+        // Otherwise it's an email — look up the user's UUID
+        return userRepository.findByEmail(identifier)
+                .map(user -> user.getId().toString())
+                .orElse(null);
     }
 
     /**
