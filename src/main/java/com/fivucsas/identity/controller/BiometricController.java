@@ -280,7 +280,7 @@ public class BiometricController {
 
     @PostMapping(value = "/api/v1/biometric/card-detect", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @Operation(summary = "Detect card type from image (Turkish ID, passport, driver's license, etc.)")
-    @PreAuthorize("permitAll()")
+    @PreAuthorize("isAuthenticated()")
     public ResponseEntity<Map<String, Object>> detectCardType(@RequestParam("file") MultipartFile image) {
         log.info("Card type detection request");
         Map<String, Object> result = biometricServicePort.detectCardType(image);
