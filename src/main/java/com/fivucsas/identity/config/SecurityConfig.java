@@ -47,7 +47,7 @@ public class SecurityConfig {
     @Value("${spring.profiles.active:dev}")
     private String activeProfile;
 
-    @Value("${app.security.expose-docs:true}")
+    @Value("${app.security.expose-docs:false}")
     private boolean exposeDocs;
 
     /**
@@ -77,9 +77,13 @@ public class SecurityConfig {
                                 "/api/v1/auth/reset-password"
                         ).permitAll()
 
-                        // Auth session endpoints must be public (multi-step auth before JWT)
-                        .requestMatchers("/api/v1/auth/sessions", "/api/v1/auth/sessions/**")
-                        .permitAll()
+                        // Auth session endpoints: start, get status, and complete step are public
+                        // (multi-step auth before JWT), but skip/cancel require authentication
+                        .requestMatchers(HttpMethod.POST, "/api/v1/auth/sessions").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/v1/auth/sessions/*").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/v1/auth/sessions/*/steps/*").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/v1/auth/sessions/*/steps/*/skip").authenticated()
+                        .requestMatchers(HttpMethod.POST, "/api/v1/auth/sessions/*/cancel").authenticated()
 
                         // QR session creation and polling must be public (unauthenticated clients)
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/qr/session").permitAll()
@@ -169,7 +173,7 @@ public class SecurityConfig {
 
     @Bean
     public PasswordEncoder passwordEncoder() {
-        return new BCryptPasswordEncoder();
+        return new BCryptPasswordEncoder(12);
     }
 
     @Bean

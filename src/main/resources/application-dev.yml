@@ -82,6 +82,11 @@ server:
     include-binding-errors: always
     include-stacktrace: always  # Development only
 
+# Security (Development)
+app:
+  security:
+    expose-docs: true
+
 # CORS Configuration (Development)
 cors:
   allowed-origins: http://localhost:5173,http://localhost:3000,http://localhost:4200

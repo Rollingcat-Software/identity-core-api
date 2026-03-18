@@ -4,11 +4,13 @@ import io.github.bucket4j.Bandwidth;
 import io.github.bucket4j.Bucket;
 import io.github.bucket4j.Refill;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Rate limiting service using Bucket4j token bucket algorithm.
@@ -25,6 +27,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * - Per-IP and per-user rate limiting
  * - Automatic token refill
  * - Thread-safe concurrent access
+ * - Size-bounded maps with periodic TTL-based eviction
  *
  * @author FIVUCSAS Team
  * @since 1.0.0
@@ -33,12 +36,18 @@ import java.util.concurrent.ConcurrentHashMap;
 @Slf4j
 public class RateLimitService {
 
-    // Separate buckets for different endpoints
-    private final Map<String, Bucket> loginBuckets = new ConcurrentHashMap<>();
-    private final Map<String, Bucket> registerBuckets = new ConcurrentHashMap<>();
-    private final Map<String, Bucket> passwordResetBuckets = new ConcurrentHashMap<>();
-    private final Map<String, Bucket> biometricBuckets = new ConcurrentHashMap<>();
-    private final Map<String, Bucket> apiBuckets = new ConcurrentHashMap<>();
+    /**
+     * Maximum number of entries per bucket map to prevent unbounded memory growth.
+     * After this limit, oldest entries are evicted.
+     */
+    private static final int MAX_ENTRIES_PER_MAP = 10_000;
+
+    // Separate buckets for different endpoints (with creation timestamps for eviction)
+    private final ConcurrentHashMap<String, TimedBucket> loginBuckets = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, TimedBucket> registerBuckets = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, TimedBucket> passwordResetBuckets = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, TimedBucket> biometricBuckets = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, TimedBucket> apiBuckets = new ConcurrentHashMap<>();
 
     /**
      * Checks if a login attempt is allowed for the given identifier (usually IP address).
@@ -47,7 +56,7 @@ public class RateLimitService {
      * @return true if attempt is allowed, false if rate limit exceeded
      */
     public boolean allowLoginAttempt(String identifier) {
-        Bucket bucket = loginBuckets.computeIfAbsent(identifier, k -> createLoginBucket());
+        Bucket bucket = getOrCreateBucket(loginBuckets, identifier, this::createLoginBucket, Duration.ofMinutes(15));
         boolean allowed = bucket.tryConsume(1);
 
         if (!allowed) {
@@ -64,7 +73,7 @@ public class RateLimitService {
      * @return true if attempt is allowed, false if rate limit exceeded
      */
     public boolean allowRegistrationAttempt(String identifier) {
-        Bucket bucket = registerBuckets.computeIfAbsent(identifier, k -> createRegistrationBucket());
+        Bucket bucket = getOrCreateBucket(registerBuckets, identifier, this::createRegistrationBucket, Duration.ofHours(1));
         boolean allowed = bucket.tryConsume(1);
 
         if (!allowed) {
@@ -81,7 +90,7 @@ public class RateLimitService {
      * @return true if attempt is allowed, false if rate limit exceeded
      */
     public boolean allowPasswordResetAttempt(String identifier) {
-        Bucket bucket = passwordResetBuckets.computeIfAbsent(identifier, k -> createPasswordResetBucket());
+        Bucket bucket = getOrCreateBucket(passwordResetBuckets, identifier, this::createPasswordResetBucket, Duration.ofHours(1));
         boolean allowed = bucket.tryConsume(1);
 
         if (!allowed) {
@@ -98,7 +107,7 @@ public class RateLimitService {
      * @return true if attempt is allowed, false if rate limit exceeded
      */
     public boolean allowBiometricVerification(String userId) {
-        Bucket bucket = biometricBuckets.computeIfAbsent(userId, k -> createBiometricBucket());
+        Bucket bucket = getOrCreateBucket(biometricBuckets, userId, this::createBiometricBucket, Duration.ofMinutes(1));
         boolean allowed = bucket.tryConsume(1);
 
         if (!allowed) {
@@ -115,7 +124,7 @@ public class RateLimitService {
      * @return true if call is allowed, false if rate limit exceeded
      */
     public boolean allowApiCall(String userId) {
-        Bucket bucket = apiBuckets.computeIfAbsent(userId, k -> createApiBucket());
+        Bucket bucket = getOrCreateBucket(apiBuckets, userId, this::createApiBucket, Duration.ofMinutes(1));
         boolean allowed = bucket.tryConsume(1);
 
         if (!allowed) {
@@ -133,12 +142,12 @@ public class RateLimitService {
      * @return seconds until next attempt is allowed
      */
     public long getSecondsUntilRefill(String identifier, RateLimitType bucketType) {
-        Bucket bucket = getBucket(identifier, bucketType);
-        if (bucket == null) {
-            return 0;
-        }
+        ConcurrentHashMap<String, TimedBucket> bucketMap = getBucketMap(bucketType);
+        if (bucketMap == null) return 0;
+        TimedBucket timedBucket = bucketMap.get(identifier);
+        if (timedBucket == null) return 0;
 
-        return bucket.estimateAbilityToConsume(1).getNanosToWaitForRefill() / 1_000_000_000;
+        return timedBucket.bucket.estimateAbilityToConsume(1).getNanosToWaitForRefill() / 1_000_000_000;
     }
 
     /**
@@ -148,14 +157,62 @@ public class RateLimitService {
      * @param bucketType type of rate limit bucket
      */
     public void resetRateLimit(String identifier, RateLimitType bucketType) {
-        Map<String, Bucket> bucketMap = getBucketMap(bucketType);
+        ConcurrentHashMap<String, TimedBucket> bucketMap = getBucketMap(bucketType);
         if (bucketMap != null) {
             bucketMap.remove(identifier);
             log.info("Rate limit reset for identifier: {} (type: {})", identifier, bucketType);
         }
     }
 
+    /**
+     * Periodic cleanup of expired bucket entries to prevent memory leaks.
+     * Runs every 5 minutes.
+     */
+    @Scheduled(fixedRate = 300_000)
+    public void cleanupExpiredBuckets() {
+        long now = System.currentTimeMillis();
+        int cleaned = 0;
+        cleaned += evictExpired(loginBuckets, now, Duration.ofMinutes(15).toMillis());
+        cleaned += evictExpired(registerBuckets, now, Duration.ofHours(1).toMillis());
+        cleaned += evictExpired(passwordResetBuckets, now, Duration.ofHours(1).toMillis());
+        cleaned += evictExpired(biometricBuckets, now, Duration.ofMinutes(1).toMillis());
+        cleaned += evictExpired(apiBuckets, now, Duration.ofMinutes(1).toMillis());
+        if (cleaned > 0) {
+            log.debug("Evicted {} expired rate limit bucket entries", cleaned);
+        }
+    }
+
     // Private helper methods
+
+    private Bucket getOrCreateBucket(ConcurrentHashMap<String, TimedBucket> map,
+                                      String identifier,
+                                      java.util.function.Supplier<Bucket> bucketFactory,
+                                      Duration ttl) {
+        // Enforce size limit
+        if (map.size() >= MAX_ENTRIES_PER_MAP && !map.containsKey(identifier)) {
+            // Evict expired entries first
+            long now = System.currentTimeMillis();
+            map.entrySet().removeIf(e -> now - e.getValue().createdAt > ttl.toMillis() * 2);
+
+            // If still over limit after cleanup, evict oldest 10%
+            if (map.size() >= MAX_ENTRIES_PER_MAP) {
+                long cutoff = now - ttl.toMillis();
+                map.entrySet().removeIf(e -> e.getValue().createdAt < cutoff);
+                log.warn("Rate limit map at capacity ({}), evicted expired entries", MAX_ENTRIES_PER_MAP);
+            }
+        }
+
+        TimedBucket timedBucket = map.computeIfAbsent(identifier,
+                k -> new TimedBucket(bucketFactory.get(), System.currentTimeMillis()));
+        return timedBucket.bucket;
+    }
+
+    private int evictExpired(ConcurrentHashMap<String, TimedBucket> map, long now, long ttlMs) {
+        int before = map.size();
+        // Evict entries that are 2x older than their TTL (generous, ensures refill happened)
+        map.entrySet().removeIf(e -> now - e.getValue().createdAt > ttlMs * 2);
+        return before - map.size();
+    }
 
     private Bucket createLoginBucket() {
         // 5 attempts per 15 minutes
@@ -197,12 +254,7 @@ public class RateLimitService {
             .build();
     }
 
-    private Bucket getBucket(String identifier, RateLimitType bucketType) {
-        Map<String, Bucket> bucketMap = getBucketMap(bucketType);
-        return bucketMap != null ? bucketMap.get(identifier) : null;
-    }
-
-    private Map<String, Bucket> getBucketMap(RateLimitType bucketType) {
+    private ConcurrentHashMap<String, TimedBucket> getBucketMap(RateLimitType bucketType) {
         return switch (bucketType) {
             case LOGIN -> loginBuckets;
             case REGISTRATION -> registerBuckets;
@@ -211,6 +263,11 @@ public class RateLimitService {
             case API -> apiBuckets;
         };
     }
+
+    /**
+     * Wrapper to track bucket creation time for eviction.
+     */
+    private record TimedBucket(Bucket bucket, long createdAt) {}
 
     /**
      * Rate limit bucket types.

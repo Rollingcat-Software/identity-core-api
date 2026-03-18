@@ -42,11 +42,23 @@ public interface CachePort {
 
     /**
      * Checks if a key exists in cache.
+     * Returns false on cache errors (fail-open behavior).
      *
      * @param key the cache key
      * @return true if key exists
      */
     boolean exists(String key);
+
+    /**
+     * Checks if a key exists in cache with fail-closed behavior.
+     * Throws RuntimeException if cache is unavailable.
+     * Use for security-critical checks (e.g., token blacklist).
+     *
+     * @param key the cache key
+     * @return true if key exists
+     * @throws CacheUnavailableException if cache is unreachable
+     */
+    boolean existsFailClosed(String key);
 
     /**
      * Clears all entries from cache.
