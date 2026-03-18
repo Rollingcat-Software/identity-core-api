@@ -151,7 +151,7 @@ public class RoleController {
 
         manageRoleUseCase.assignPermissionToRole(command);
 
-        return ResponseEntity.ok().build();
+        return ResponseEntity.noContent().build();
     }
 
     @DeleteMapping("/api/v1/roles/{roleId}/permissions/{permissionId}")

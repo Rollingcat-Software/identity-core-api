@@ -5,6 +5,7 @@ import com.fivucsas.identity.application.dto.command.UpdateAuthFlowCommand;
 import com.fivucsas.identity.application.dto.response.AuthFlowResponse;
 import com.fivucsas.identity.application.port.input.ManageAuthFlowUseCase;
 import com.fivucsas.identity.domain.model.auth.OperationType;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -41,7 +42,7 @@ public class AuthFlowController {
     @PreAuthorize("hasPermission(#tenantId, 'Tenant', 'auth_flow:create')")
     public ResponseEntity<AuthFlowResponse> createFlow(
             @PathVariable UUID tenantId,
-            @RequestBody CreateAuthFlowCommand command) {
+            @Valid @RequestBody CreateAuthFlowCommand command) {
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(manageAuthFlowUseCase.createFlow(tenantId, command));
     }
@@ -51,7 +52,7 @@ public class AuthFlowController {
     public ResponseEntity<AuthFlowResponse> updateFlow(
             @PathVariable UUID tenantId,
             @PathVariable UUID flowId,
-            @RequestBody UpdateAuthFlowCommand command) {
+            @Valid @RequestBody UpdateAuthFlowCommand command) {
         return ResponseEntity.ok(manageAuthFlowUseCase.updateFlow(tenantId, flowId, command));
     }
 

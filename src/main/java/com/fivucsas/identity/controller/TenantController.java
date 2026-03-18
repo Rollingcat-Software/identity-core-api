@@ -5,6 +5,10 @@ import com.fivucsas.identity.application.dto.command.UpdateTenantCommand;
 import com.fivucsas.identity.application.dto.response.TenantResponse;
 import com.fivucsas.identity.application.port.input.ManageTenantUseCase;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Email;
+import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
@@ -138,28 +142,60 @@ public class TenantController {
 
     @lombok.Data
     public static class CreateTenantRequest {
+        @NotBlank(message = "Tenant name is required")
+        @Size(min = 2, max = 100, message = "Tenant name must be between 2 and 100 characters")
         private String name;
+
+        @NotBlank(message = "Tenant slug is required")
+        @Size(min = 2, max = 50, message = "Tenant slug must be between 2 and 50 characters")
         private String slug;
+
+        @Size(max = 500, message = "Description must not exceed 500 characters")
         private String description;
+
+        @Email(message = "Contact email must be valid")
         private String contactEmail;
+
         private String contactPhone;
+
+        @Min(value = 1, message = "Max users must be at least 1")
         private Integer maxUsers;
+
         private Boolean biometricEnabled;
+
+        @Min(value = 1, message = "Session timeout must be at least 1 minute")
         private Integer sessionTimeoutMinutes;
+
+        @Min(value = 1, message = "Refresh token validity must be at least 1 day")
         private Integer refreshTokenValidityDays;
+
         private Boolean mfaRequired;
     }
 
     @lombok.Data
     public static class UpdateTenantRequest {
+        @Size(min = 2, max = 100, message = "Tenant name must be between 2 and 100 characters")
         private String name;
+
+        @Size(max = 500, message = "Description must not exceed 500 characters")
         private String description;
+
+        @Email(message = "Contact email must be valid")
         private String contactEmail;
+
         private String contactPhone;
+
+        @Min(value = 1, message = "Max users must be at least 1")
         private Integer maxUsers;
+
         private Boolean biometricEnabled;
+
+        @Min(value = 1, message = "Session timeout must be at least 1 minute")
         private Integer sessionTimeoutMinutes;
+
+        @Min(value = 1, message = "Refresh token validity must be at least 1 day")
         private Integer refreshTokenValidityDays;
+
         private Boolean mfaRequired;
     }
 }
