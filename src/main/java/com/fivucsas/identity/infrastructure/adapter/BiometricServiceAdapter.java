@@ -237,8 +237,12 @@ public class BiometricServiceAdapter implements BiometricServicePort {
         try {
             MultipartBodyBuilder bodyBuilder = new MultipartBodyBuilder();
             bodyBuilder.part("user_id", userId.toString());
-            for (MultipartFile img : images) {
-                bodyBuilder.part("files", img.getResource()).contentType(MediaType.IMAGE_JPEG);
+            for (int i = 0; i < images.size(); i++) {
+                MultipartFile img = images.get(i);
+                String filename = img.getOriginalFilename() != null ? img.getOriginalFilename() : "face_" + i + ".jpg";
+                bodyBuilder.part("files", img.getResource())
+                        .contentType(MediaType.IMAGE_JPEG)
+                        .filename(filename);
             }
             return postMultipart("/enroll/multi", bodyBuilder.build());
         } catch (HttpClientErrorException e) {
