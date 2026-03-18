@@ -76,7 +76,7 @@ public class UserRepositoryAdapter implements com.fivucsas.identity.domain.repos
 
     @Override
     public List<User> findAll(int page, int size) {
-        return jpaRepository.findAll(PageRequest.of(page, size)).getContent();
+        return jpaRepository.findAllWithRoles(PageRequest.of(page, size)).getContent();
     }
 
     @Override

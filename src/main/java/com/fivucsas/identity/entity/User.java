@@ -145,10 +145,10 @@ public class User {
     @Builder.Default
     private boolean phoneVerified = false;
 
-    @Transient
+    @Column(name = "two_factor_secret", length = 512)
     private String twoFactorSecret;
 
-    @Transient
+    @Column(name = "two_factor_backup_codes", length = 1024)
     private String twoFactorBackupCodes;
 
     @Column(name = "is_biometric_enrolled")
@@ -625,6 +625,26 @@ public class User {
         return true;
     }
 
+    /**
+     * Increments the failed login attempt counter.
+     */
+    public void incrementFailedLoginAttempts() {
+        this.failedLoginAttempts++;
+    }
+
+    /**
+     * Locks the account for the specified duration.
+     *
+     * @param duration how long to lock the account
+     */
+    public void lockAccount(java.time.Duration duration) {
+        this.isLocked = true;
+        this.lockedUntil = Instant.now().plus(duration);
+    }
+
+    /**
+     * Resets failed login attempts and unlocks the account.
+     */
     public void resetFailedLoginAttempts() {
         this.failedLoginAttempts = 0;
         this.isLocked = false;

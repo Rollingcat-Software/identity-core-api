@@ -191,6 +191,7 @@ public class AuthController {
 
     @PostMapping("/reset-password")
     @Operation(summary = "Reset password using the code from email")
+    @org.springframework.transaction.annotation.Transactional
     public ResponseEntity<Map<String, String>> resetPassword(
             @RequestBody Map<String, String> request) {
         String email = request.get("email");
@@ -202,13 +203,23 @@ public class AuthController {
             return ResponseEntity.badRequest().body(Map.of("message", "email, code, and newPassword are required"));
         }
 
-        if (newPassword.length() < 8) {
-            return ResponseEntity.badRequest().body(Map.of("message", "Password must be at least 8 characters"));
+        // Password complexity validation
+        String passwordError = validatePasswordComplexity(newPassword);
+        if (passwordError != null) {
+            return ResponseEntity.badRequest().body(Map.of("message", passwordError));
         }
 
         User user = userRepository.findByEmail(email).orElse(null);
         if (user == null) {
             return ResponseEntity.badRequest().body(Map.of("message", "Invalid email or reset code"));
+        }
+
+        // Check account status before allowing password reset (SEC-06)
+        if (!user.isActive()) {
+            return ResponseEntity.badRequest().body(Map.of("message", "Account is not active. Password reset is not allowed."));
+        }
+        if (user.isLocked()) {
+            return ResponseEntity.badRequest().body(Map.of("message", "Account is locked. Password reset is not allowed."));
         }
 
         String otpKey = "password-reset:" + user.getId();
@@ -221,6 +232,29 @@ public class AuthController {
         log.info("Password successfully reset for user: {}", user.getId());
 
         return ResponseEntity.ok(Map.of("message", "Password has been reset successfully"));
+    }
+
+    /**
+     * Validates password complexity requirements.
+     * Returns error message if invalid, null if valid.
+     */
+    private String validatePasswordComplexity(String password) {
+        if (password.length() < 8) {
+            return "Password must be at least 8 characters";
+        }
+        if (!password.matches(".*[A-Z].*")) {
+            return "Password must contain at least one uppercase letter";
+        }
+        if (!password.matches(".*[a-z].*")) {
+            return "Password must contain at least one lowercase letter";
+        }
+        if (!password.matches(".*\\d.*")) {
+            return "Password must contain at least one digit";
+        }
+        if (!password.matches(".*[!@#$%^&*()_+\\-=\\[\\]{};':\"\\\\|,.<>/?].*")) {
+            return "Password must contain at least one special character";
+        }
+        return null;
     }
 
     @PostMapping("/send-email-verification")

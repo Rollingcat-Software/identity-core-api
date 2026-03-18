@@ -43,7 +43,7 @@ public class RefreshTokenService implements com.fivucsas.identity.application.po
         return refreshTokenRepository.save(refreshToken);
     }
 
-    @Transactional(readOnly = true)
+    @Transactional
     public RefreshToken verifyExpiration(RefreshToken token) {
         if (token.isExpired()) {
             refreshTokenRepository.delete(token);

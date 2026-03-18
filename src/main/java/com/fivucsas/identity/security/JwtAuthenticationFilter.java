@@ -53,15 +53,22 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
             // If email extracted and user not already authenticated
             if (userEmail != null && SecurityContextHolder.getContext().getAuthentication() == null) {
-                // Check blacklist before loading user details
+                // Check blacklist before loading user details (fail-closed: reject if Redis unavailable)
                 String jti = jwtService.extractJti(jwt);
                 if (jti == null) {
                     log.warn("Rejected token without JTI claim for user: {}", userEmail);
                     filterChain.doFilter(request, response);
                     return;
                 }
-                if (cachePort.exists("blacklist:" + jti)) {
-                    log.warn("Rejected blacklisted token (JTI: {}) for user: {}", jti, userEmail);
+                try {
+                    if (cachePort.existsFailClosed("blacklist:" + jti)) {
+                        log.warn("Rejected blacklisted token (JTI: {}) for user: {}", jti, userEmail);
+                        filterChain.doFilter(request, response);
+                        return;
+                    }
+                } catch (com.fivucsas.identity.domain.exception.CacheUnavailableException e) {
+                    log.error("Redis unavailable for blacklist check — rejecting token (fail-closed) for user: {}", userEmail);
+                    SecurityContextHolder.clearContext();
                     filterChain.doFilter(request, response);
                     return;
                 }

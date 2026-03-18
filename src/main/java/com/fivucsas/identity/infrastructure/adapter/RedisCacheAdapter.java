@@ -1,8 +1,10 @@
 package com.fivucsas.identity.infrastructure.adapter;
 
 import com.fivucsas.identity.application.port.output.CachePort;
+import com.fivucsas.identity.domain.exception.CacheUnavailableException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.redis.core.RedisCallback;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Component;
 
@@ -75,9 +77,24 @@ public class RedisCacheAdapter implements CachePort {
     }
 
     @Override
+    public boolean existsFailClosed(String key) {
+        try {
+            Boolean exists = redisTemplate.hasKey(key);
+            return Boolean.TRUE.equals(exists);
+        } catch (Exception e) {
+            log.error("Cache unavailable for fail-closed check on key: {}", key, e);
+            throw new CacheUnavailableException(
+                    "Redis unavailable for security-critical check on key: " + key, e);
+        }
+    }
+
+    @Override
     public void clear() {
         try {
-            redisTemplate.getConnectionFactory().getConnection().flushDb();
+            redisTemplate.execute((RedisCallback<Void>) connection -> {
+                connection.serverCommands().flushDb();
+                return null;
+            });
             log.warn("Cleared all cache entries");
         } catch (Exception e) {
             log.error("Failed to clear cache", e);
