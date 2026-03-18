@@ -3,15 +3,22 @@ package com.fivucsas.identity.application.service.handler;
 import com.fivucsas.identity.domain.model.auth.AuthMethodType;
 import com.fivucsas.identity.entity.AuthFlowStep;
 import com.fivucsas.identity.entity.AuthSession;
+import com.fivucsas.identity.entity.NfcCard;
+import com.fivucsas.identity.repository.NfcCardRepository;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 @Component
+@RequiredArgsConstructor
 @Slf4j
 public class NfcDocumentAuthHandler implements AuthMethodHandler {
+
+    private final NfcCardRepository nfcCardRepository;
 
     @Override
     public AuthMethodType getMethodType() {
@@ -20,34 +27,45 @@ public class NfcDocumentAuthHandler implements AuthMethodHandler {
 
     @Override
     public StepResult validate(AuthSession session, AuthFlowStep step, Map<String, Object> data) {
-        String nfcData = (String) data.get("nfcData");
+        String cardSerial = (String) data.get("nfcData");
 
-        if (nfcData == null || nfcData.isEmpty()) {
+        if (cardSerial == null || cardSerial.isBlank()) {
             return StepResult.failure(
-                    "NFC document scanning requires physical NFC hardware. " +
-                    "This authentication method is only available on mobile devices with NFC readers.");
+                    "NFC card serial is required. " +
+                    "Tap your enrolled NFC card on the device reader.");
         }
 
         if (session.getUser() == null) {
             return StepResult.failure("User must be identified before NFC document verification");
         }
 
-        // NFC document verification requires physical NFC reader hardware integration.
-        // In production, this would:
-        // 1. Read NFC chip data from the ID document (MRTD/ICAO standard)
-        // 2. Verify BAC/PACE authentication
-        // 3. Validate document certificate chain
-        // 4. Extract and verify biometric data from EF.DG2
-        // 5. Compare against stored document hashes
-        //
-        // See TODO.md AUTH-1 and ROADMAP.md Phase 1 for implementation plans.
-        // This method should NOT be configured as a required step until hardware integration is complete.
-        log.warn("NFC document authentication attempted for session: {} - hardware integration pending. " +
-                "This auth method should not be configured as a required step.", session.getId());
-        return StepResult.failure(
-                "NFC document verification is not yet available. " +
-                "This method requires a mobile device with NFC reader hardware. " +
-                "Please contact your administrator to use an alternative authentication method.");
+        // Look up the card by serial number (only active cards)
+        Optional<NfcCard> cardOpt = nfcCardRepository.findByCardSerialAndIsActiveTrue(cardSerial);
+
+        if (cardOpt.isEmpty()) {
+            log.warn("NFC card not found or inactive: serial={} session={}", cardSerial, session.getId());
+            return StepResult.failure("NFC card is not enrolled or has been deactivated");
+        }
+
+        NfcCard card = cardOpt.get();
+
+        // Verify the card belongs to the session user
+        if (!card.getUser().getId().equals(session.getUser().getId())) {
+            log.warn("NFC card user mismatch: cardUser={} sessionUser={} session={}",
+                    card.getUser().getId(), session.getUser().getId(), session.getId());
+            return StepResult.failure("NFC card does not belong to this user");
+        }
+
+        // Mark the card as used
+        card.markUsed();
+        nfcCardRepository.save(card);
+
+        log.info("NFC document authentication successful: serial={} user={} session={}",
+                cardSerial, session.getUser().getId(), session.getId());
+        return StepResult.success(Map.of(
+                "verified", "true",
+                "cardType", card.getCardType()
+        ));
     }
 
     @Override
