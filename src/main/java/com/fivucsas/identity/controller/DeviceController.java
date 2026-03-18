@@ -12,6 +12,7 @@ import com.fivucsas.identity.repository.UserRepository;
 import com.fivucsas.identity.repository.WebAuthnCredentialRepository;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -50,7 +51,7 @@ public class DeviceController {
         if (tenantId != null) {
             return ResponseEntity.ok(manageDeviceUseCase.listTenantDevices(tenantId));
         }
-        return ResponseEntity.badRequest().build();
+        throw new IllegalArgumentException("Either 'userId' or 'tenantId' query parameter is required.");
     }
 
     @PostMapping("/api/v1/devices")
@@ -58,7 +59,7 @@ public class DeviceController {
     public ResponseEntity<DeviceResponse> registerDevice(
             @RequestParam UUID userId,
             @RequestParam UUID tenantId,
-            @RequestBody RegisterDeviceCommand command) {
+            @Valid @RequestBody RegisterDeviceCommand command) {
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(manageDeviceUseCase.registerDevice(userId, tenantId, command));
     }

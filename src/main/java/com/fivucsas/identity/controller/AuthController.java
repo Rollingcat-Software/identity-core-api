@@ -12,6 +12,7 @@ import com.fivucsas.identity.dto.AuthResponse;
 import com.fivucsas.identity.dto.LoginRequest;
 import com.fivucsas.identity.dto.RefreshTokenRequest;
 import com.fivucsas.identity.dto.RegisterRequest;
+import com.fivucsas.identity.dto.ErrorResponse;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.infrastructure.email.EmailService;
 import com.fivucsas.identity.infrastructure.otp.OtpService;
@@ -26,6 +27,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -84,7 +86,7 @@ public class AuthController {
 
         AuthenticationResponse response = registerUserUseCase.execute(command);
 
-        return ResponseEntity.ok(mapToAuthResponse(response));
+        return ResponseEntity.status(HttpStatus.CREATED).body(mapToAuthResponse(response));
     }
 
     @PostMapping("/login")
@@ -144,7 +146,7 @@ public class AuthController {
 
         logoutUserUseCase.execute(command);
 
-        return ResponseEntity.ok().build();
+        return ResponseEntity.noContent().build();
     }
 
     @GetMapping("/me")
@@ -163,19 +165,21 @@ public class AuthController {
 
     @PostMapping("/forgot-password")
     @Operation(summary = "Request a password reset code via email")
-    public ResponseEntity<Map<String, String>> forgotPassword(
+    public ResponseEntity<?> forgotPassword(
             @RequestBody Map<String, String> request,
             HttpServletRequest httpRequest) {
         String email = request.get("email");
         log.info("Forgot password request for email: {}", email);
 
         if (email == null || email.isBlank()) {
-            return ResponseEntity.badRequest().body(Map.of("message", "Email is required"));
+            return ResponseEntity.badRequest().body(ErrorResponse.of(
+                    400, "Validation Failed", "Email is required", httpRequest.getRequestURI()));
         }
 
         String clientIp = getClientIP(httpRequest);
         if (!rateLimitService.allowPasswordResetAttempt(clientIp)) {
-            return ResponseEntity.status(429).body(Map.of("message", "Too many password reset requests. Please try again later."));
+            return ResponseEntity.status(429).body(ErrorResponse.of(
+                    429, "Rate Limit Exceeded", "Too many password reset requests. Please try again later.", httpRequest.getRequestURI()));
         }
 
         // Always return success to prevent email enumeration
@@ -192,39 +196,46 @@ public class AuthController {
     @PostMapping("/reset-password")
     @Operation(summary = "Reset password using the code from email")
     @org.springframework.transaction.annotation.Transactional
-    public ResponseEntity<Map<String, String>> resetPassword(
-            @RequestBody Map<String, String> request) {
+    public ResponseEntity<?> resetPassword(
+            @RequestBody Map<String, String> request,
+            HttpServletRequest httpRequest) {
         String email = request.get("email");
         String code = request.get("code");
         String newPassword = request.get("newPassword");
         log.info("Reset password request for email: {}", email);
 
         if (email == null || code == null || newPassword == null) {
-            return ResponseEntity.badRequest().body(Map.of("message", "email, code, and newPassword are required"));
+            return ResponseEntity.badRequest().body(ErrorResponse.of(
+                    400, "Validation Failed", "email, code, and newPassword are required", httpRequest.getRequestURI()));
         }
 
         // Password complexity validation
         String passwordError = validatePasswordComplexity(newPassword);
         if (passwordError != null) {
-            return ResponseEntity.badRequest().body(Map.of("message", passwordError));
+            return ResponseEntity.badRequest().body(ErrorResponse.of(
+                    400, "Validation Failed", passwordError, httpRequest.getRequestURI()));
         }
 
         User user = userRepository.findByEmail(email).orElse(null);
         if (user == null) {
-            return ResponseEntity.badRequest().body(Map.of("message", "Invalid email or reset code"));
+            return ResponseEntity.badRequest().body(ErrorResponse.of(
+                    400, "Bad Request", "Invalid email or reset code", httpRequest.getRequestURI()));
         }
 
         // Check account status before allowing password reset (SEC-06)
         if (!user.isActive()) {
-            return ResponseEntity.badRequest().body(Map.of("message", "Account is not active. Password reset is not allowed."));
+            return ResponseEntity.badRequest().body(ErrorResponse.of(
+                    400, "Bad Request", "Account is not active. Password reset is not allowed.", httpRequest.getRequestURI()));
         }
         if (user.isLocked()) {
-            return ResponseEntity.badRequest().body(Map.of("message", "Account is locked. Password reset is not allowed."));
+            return ResponseEntity.badRequest().body(ErrorResponse.of(
+                    400, "Bad Request", "Account is locked. Password reset is not allowed.", httpRequest.getRequestURI()));
         }
 
         String otpKey = "password-reset:" + user.getId();
         if (!otpService.validate(otpKey, code)) {
-            return ResponseEntity.badRequest().body(Map.of("message", "Invalid or expired reset code"));
+            return ResponseEntity.badRequest().body(ErrorResponse.of(
+                    400, "Bad Request", "Invalid or expired reset code", httpRequest.getRequestURI()));
         }
 
         user.updatePassword(newPassword, passwordEncoder);

@@ -137,7 +137,18 @@ public class SecurityConfig {
                         .authenticationEntryPoint((request, response, authException) -> {
                             response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
                             response.setContentType("application/json");
-                            response.getWriter().write("{\"status\":401,\"error\":\"Unauthorized\",\"message\":\"Authentication required\"}");
+                            String path = request.getRequestURI();
+                            String timestamp = java.time.Instant.now().toString();
+                            response.getWriter().write(
+                                    "{\"timestamp\":\"" + timestamp + "\",\"status\":401,\"error\":\"Unauthorized\",\"message\":\"Authentication required\",\"path\":\"" + path + "\",\"errors\":null}");
+                        })
+                        .accessDeniedHandler((request, response, accessDeniedException) -> {
+                            response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+                            response.setContentType("application/json");
+                            String path = request.getRequestURI();
+                            String timestamp = java.time.Instant.now().toString();
+                            response.getWriter().write(
+                                    "{\"timestamp\":\"" + timestamp + "\",\"status\":403,\"error\":\"Access Denied\",\"message\":\"You don't have permission to access this resource.\",\"path\":\"" + path + "\",\"errors\":null}");
                         })
                 )
                 .sessionManagement(session -> session

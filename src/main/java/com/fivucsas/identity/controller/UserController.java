@@ -182,7 +182,7 @@ public class UserController {
                 .newPassword(request.getNewPassword())
                 .build());
 
-        return ResponseEntity.ok().build();
+        return ResponseEntity.noContent().build();
     }
 
     @GetMapping("/api/v1/users/search")
@@ -395,7 +395,7 @@ public class UserController {
 
         guestLifecycleService.extendGuestAccess(guestUserId, request.getAdditionalHours(), currentUser);
 
-        return ResponseEntity.ok().build();
+        return ResponseEntity.noContent().build();
     }
 
     // --- Private helpers ---

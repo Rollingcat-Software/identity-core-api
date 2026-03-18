@@ -6,13 +6,19 @@ import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.validation.FieldError;
+import org.springframework.web.HttpMediaTypeNotSupportedException;
+import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
 
 import java.util.List;
 import java.util.stream.Collectors;
@@ -299,19 +305,120 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(error);
     }
 
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<ErrorResponse> handleHttpMessageNotReadable(
+            HttpMessageNotReadableException ex,
+            HttpServletRequest request) {
+        log.warn("Malformed request body: {}", ex.getMessage());
+
+        ErrorResponse error = ErrorResponse.of(
+                HttpStatus.BAD_REQUEST.value(),
+                "Bad Request",
+                "Malformed JSON request body.",
+                request.getRequestURI()
+        );
+
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(error);
+    }
+
+    @ExceptionHandler(HttpMediaTypeNotSupportedException.class)
+    public ResponseEntity<ErrorResponse> handleMediaTypeNotSupported(
+            HttpMediaTypeNotSupportedException ex,
+            HttpServletRequest request) {
+        log.warn("Unsupported media type: {}", ex.getContentType());
+
+        String message = "Content type '" + ex.getContentType() + "' is not supported. Expected 'application/json'.";
+
+        ErrorResponse error = ErrorResponse.of(
+                HttpStatus.UNSUPPORTED_MEDIA_TYPE.value(),
+                "Unsupported Media Type",
+                message,
+                request.getRequestURI()
+        );
+
+        return ResponseEntity.status(HttpStatus.UNSUPPORTED_MEDIA_TYPE).body(error);
+    }
+
+    @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
+    public ResponseEntity<ErrorResponse> handleMethodNotAllowed(
+            HttpRequestMethodNotSupportedException ex,
+            HttpServletRequest request) {
+        log.warn("Method not allowed: {} {}", ex.getMethod(), request.getRequestURI());
+
+        ErrorResponse error = ErrorResponse.of(
+                HttpStatus.METHOD_NOT_ALLOWED.value(),
+                "Method Not Allowed",
+                "HTTP method '" + ex.getMethod() + "' is not supported for this endpoint.",
+                request.getRequestURI()
+        );
+
+        return ResponseEntity.status(HttpStatus.METHOD_NOT_ALLOWED).body(error);
+    }
+
+    @ExceptionHandler(MissingServletRequestParameterException.class)
+    public ResponseEntity<ErrorResponse> handleMissingParameter(
+            MissingServletRequestParameterException ex,
+            HttpServletRequest request) {
+        log.warn("Missing request parameter: {}", ex.getParameterName());
+
+        ErrorResponse error = ErrorResponse.of(
+                HttpStatus.BAD_REQUEST.value(),
+                "Bad Request",
+                "Required parameter '" + ex.getParameterName() + "' is missing.",
+                request.getRequestURI()
+        );
+
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(error);
+    }
+
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public ResponseEntity<ErrorResponse> handleTypeMismatch(
+            MethodArgumentTypeMismatchException ex,
+            HttpServletRequest request) {
+        log.warn("Type mismatch for parameter '{}': {}", ex.getName(), ex.getMessage());
+
+        String message = "Parameter '" + ex.getName() + "' must be of type " +
+                (ex.getRequiredType() != null ? ex.getRequiredType().getSimpleName() : "unknown") + ".";
+
+        ErrorResponse error = ErrorResponse.of(
+                HttpStatus.BAD_REQUEST.value(),
+                "Bad Request",
+                message,
+                request.getRequestURI()
+        );
+
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(error);
+    }
+
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    public ResponseEntity<ErrorResponse> handleMaxUploadSizeExceeded(
+            MaxUploadSizeExceededException ex,
+            HttpServletRequest request) {
+        log.warn("File upload size exceeded: {}", ex.getMessage());
+
+        ErrorResponse error = ErrorResponse.of(
+                HttpStatus.PAYLOAD_TOO_LARGE.value(),
+                "Payload Too Large",
+                "Uploaded file exceeds the maximum allowed size.",
+                request.getRequestURI()
+        );
+
+        return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE).body(error);
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ErrorResponse> handleGenericException(
             Exception ex,
             HttpServletRequest request) {
         log.error("Unexpected error occurred", ex);
-        
+
         ErrorResponse error = ErrorResponse.of(
                 HttpStatus.INTERNAL_SERVER_ERROR.value(),
                 "Internal Server Error",
                 "An unexpected error occurred. Please try again later.",
                 request.getRequestURI()
         );
-        
+
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(error);
     }
 }

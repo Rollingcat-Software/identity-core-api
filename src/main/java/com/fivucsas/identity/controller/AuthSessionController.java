@@ -121,7 +121,7 @@ public class AuthSessionController {
 
         revokeSessionUseCase.execute(command);
 
-        return ResponseEntity.ok().build();
+        return ResponseEntity.noContent().build();
     }
 
     @DeleteMapping("/api/v1/sessions/all")
@@ -144,7 +144,7 @@ public class AuthSessionController {
 
         revokeAllSessionsUseCase.execute(command);
 
-        return ResponseEntity.ok().build();
+        return ResponseEntity.noContent().build();
     }
 
     // --- Private helpers ---
