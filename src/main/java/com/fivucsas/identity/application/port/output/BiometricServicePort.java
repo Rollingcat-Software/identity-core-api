@@ -21,6 +21,13 @@ import java.util.UUID;
 public interface BiometricServicePort {
 
     /**
+     * Checks the health of the biometric processor service.
+     *
+     * @return Map containing health status data (status, version, model, detector)
+     */
+    Map<String, Object> checkHealth();
+
+    /**
      * Enrolls a user's face in the biometric system.
      *
      * @param userId the user ID
