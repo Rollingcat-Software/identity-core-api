@@ -102,7 +102,14 @@ public class AuditLogController {
         return ResponseEntity.ok(mapToDto(auditLog));
     }
 
-    // --- Statistics endpoint merged from StatisticsController ---
+    // --- Statistics endpoints merged from StatisticsController ---
+
+    @GetMapping("/api/v1/statistics/dashboard")
+    @Operation(summary = "Get dashboard statistics (alias)")
+    @PreAuthorize("hasAuthority('analytics:view')")
+    public ResponseEntity<StatisticsDto> getDashboardStatistics() {
+        return getStatistics();
+    }
 
     @GetMapping("/api/v1/statistics")
     @Operation(summary = "Get system statistics")
