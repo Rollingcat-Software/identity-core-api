@@ -83,7 +83,7 @@ public interface UserRepository extends JpaRepository<User, UUID> {
      * Find all users with roles eagerly fetched (avoids N+1 query).
      * Uses EntityGraph to JOIN FETCH userRoles and their associated roles.
      */
-    @EntityGraph(attributePaths = {"userRoles", "userRoles.role", "userRoles.role.rolePermissions", "userRoles.role.rolePermissions.permission"})
+    @EntityGraph(attributePaths = {"userRoles", "userRoles.role", "userRoles.role.permissions"})
     @Query("SELECT u FROM User u")
     Page<User> findAllWithRoles(Pageable pageable);
 }
