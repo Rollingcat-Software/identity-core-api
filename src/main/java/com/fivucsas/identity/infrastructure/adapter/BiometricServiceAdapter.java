@@ -63,6 +63,25 @@ public class BiometricServiceAdapter implements BiometricServicePort {
     }
 
     @Override
+    public Map<String, Object> checkHealth() {
+        log.debug("Checking biometric service health");
+        try {
+            Map<String, Object> response = restClient.get()
+                    .uri("/health")
+                    .retrieve()
+                    .body(MAP_TYPE);
+            log.debug("Biometric service health check response: {}", response);
+            return response;
+        } catch (ResourceAccessException e) {
+            log.error("Biometric service unreachable for health check: {}", e.getMessage());
+            return errorResponse("Biometric service unavailable");
+        } catch (RestClientException e) {
+            log.error("Biometric service error for health check: {}", e.getMessage());
+            return errorResponse("Biometric service health check failed");
+        }
+    }
+
+    @Override
     @SuppressWarnings("unchecked")
     public Map<String, Object> enrollFace(UUID userId, MultipartFile faceImage) {
         log.info("Calling biometric service to enroll face for user: {}", userId);

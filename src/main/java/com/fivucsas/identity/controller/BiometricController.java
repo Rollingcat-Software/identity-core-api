@@ -55,6 +55,20 @@ public class BiometricController {
     private final StepUpAuthUseCase stepUpAuthUseCase;
     private final RbacAuthorizationService rbacService;
 
+    @GetMapping("/api/v1/biometric/health")
+    @Operation(summary = "Check biometric processor health via proxy")
+    public ResponseEntity<Map<String, Object>> biometricHealth() {
+        log.info("Biometric health check request (proxy)");
+        try {
+            Map<String, Object> result = biometricServicePort.checkHealth();
+            return ResponseEntity.ok(result);
+        } catch (Exception e) {
+            log.error("Biometric health check failed: {}", e.getMessage());
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                    .body(Map.of("status", "unhealthy", "error", e.getMessage()));
+        }
+    }
+
     @PostMapping(value = "/api/v1/biometric/enroll/{userId}", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @Operation(summary = "Enroll user's face biometric data")
     @PreAuthorize("hasAuthority('biometric:enroll') or @userSecurityService.isCurrentUser(#userId)")

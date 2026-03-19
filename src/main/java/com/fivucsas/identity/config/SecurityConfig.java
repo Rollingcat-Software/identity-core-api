@@ -109,6 +109,9 @@ public class SecurityConfig {
                                 "/api-docs"
                         ).access((authentication, context) ->
                                 new org.springframework.security.authorization.AuthorizationDecision(exposeDocs && !isProductionProfile()))
+                        // Biometric health proxy: public so monitoring tools can reach it
+                        .requestMatchers(HttpMethod.GET, "/api/v1/biometric/health").permitAll()
+
                         // Actuator: health is public, others require auth in prod
                         .requestMatchers("/actuator/health").permitAll()
                         .requestMatchers("/actuator/**").access((authentication, context) ->
