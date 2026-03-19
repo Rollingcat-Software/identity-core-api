@@ -80,10 +80,11 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
             throw new InvalidCredentialsException();
         }
 
-        // Successful login — reset failed attempts
+        // Successful login — reset failed attempts and record login metadata
         if (user.getFailedLoginAttempts() > 0) {
             user.resetFailedLoginAttempts();
         }
+        user.recordLogin(command.getIpAddress());
 
         log.info("User logged in successfully: {}", user.getId());
         auditLogPort.logUserAuthenticated(user.getId().toString(), user.getEmail(), command.getIpAddress());

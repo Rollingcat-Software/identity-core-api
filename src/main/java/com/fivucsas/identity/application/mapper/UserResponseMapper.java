@@ -35,6 +35,8 @@ public final class UserResponseMapper {
                 .enrolledAt(user.getEnrolledAt())
                 .lastVerifiedAt(user.getLastVerifiedAt())
                 .verificationCount(user.getVerificationCount())
+                .lastLoginAt(user.getLastLoginAt())
+                .lastLoginIp(user.getLastLoginIp())
                 .createdAt(user.getCreatedAt())
                 .updatedAt(user.getUpdatedAt())
                 .build();

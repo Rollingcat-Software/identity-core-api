@@ -651,6 +651,16 @@ public class User {
         this.lockedUntil = null;
     }
 
+    /**
+     * Records a successful login, updating the last login timestamp and IP address.
+     *
+     * @param ipAddress the client IP address from the login request
+     */
+    public void recordLogin(String ipAddress) {
+        this.lastLoginAt = Instant.now();
+        this.lastLoginIp = ipAddress;
+    }
+
     // ========== Email Verification Methods ==========
 
     public String generateEmailVerificationToken() {
