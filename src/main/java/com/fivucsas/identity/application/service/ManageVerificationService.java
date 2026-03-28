@@ -148,6 +148,9 @@ public class ManageVerificationService {
             if (handlerResult.passed()) {
                 String resultJson = serializeResultData(handlerResult.resultData());
                 stepResult.markCompleted(handlerResult.confidence(), resultJson);
+            } else if ("PENDING_REVIEW".equals(handlerResult.errorMessage())) {
+                String resultJson = serializeResultData(handlerResult.resultData());
+                stepResult.markPendingReview(resultJson);
             } else {
                 stepResult.markFailed(handlerResult.errorMessage());
             }
@@ -242,6 +245,60 @@ public class ManageVerificationService {
         log.info("Verification session {} completed. User {} marked as identity verified at level {}",
                 sessionId, user.getId(), level);
         return VerificationSessionResponse.from(session);
+    }
+
+    /**
+     * Admin review of a verification step (e.g., video interview).
+     * Updates the step from PENDING_REVIEW to COMPLETED or FAILED.
+     * If all steps pass after review, auto-completes the session.
+     *
+     * @param sessionId  the verification session ID
+     * @param stepNumber the step number to review
+     * @param approved   true to approve, false to reject
+     * @param notes      optional reviewer notes
+     * @return updated step result
+     */
+    @Transactional
+    public VerificationStepResultResponse reviewStep(UUID sessionId, int stepNumber, boolean approved, String notes) {
+        VerificationSession session = sessionRepository.findById(sessionId)
+                .orElseThrow(() -> new EntityNotFoundException("Verification session not found: " + sessionId));
+
+        VerificationStepResult stepResult = stepResultRepository
+                .findBySessionIdAndStepNumber(sessionId, stepNumber)
+                .orElseThrow(() -> new EntityNotFoundException(
+                        "Step result not found for session " + sessionId + " step " + stepNumber));
+
+        if (stepResult.getStatus() != VerificationStepStatus.PENDING_REVIEW) {
+            throw new IllegalStateException(
+                    "Step " + stepNumber + " is not in PENDING_REVIEW state (current: " + stepResult.getStatus() + ")");
+        }
+
+        // Build updated result data with review info
+        Map<String, Object> existingData = parseInputData(stepResult.getResultData());
+        existingData.put("review_approved", approved);
+        existingData.put("review_notes", notes);
+        existingData.put("reviewed_at", Instant.now().toString());
+
+        if (approved) {
+            stepResult.markCompleted(null, serializeResultData(existingData));
+            log.info("Admin approved step {} for session {}", stepNumber, sessionId);
+        } else {
+            stepResult.markFailed(notes != null ? notes : "Rejected by admin");
+            log.info("Admin rejected step {} for session {}: {}", stepNumber, sessionId, notes);
+        }
+
+        VerificationStepResult saved = stepResultRepository.save(stepResult);
+
+        // Check if session can now auto-complete or should fail
+        if (approved) {
+            tryAutoCompleteSession(session);
+        } else {
+            session.markFailed();
+            sessionRepository.save(session);
+            log.info("Session {} marked as FAILED after admin rejection of step {}", sessionId, stepNumber);
+        }
+
+        return VerificationStepResultResponse.from(saved);
     }
 
     /**

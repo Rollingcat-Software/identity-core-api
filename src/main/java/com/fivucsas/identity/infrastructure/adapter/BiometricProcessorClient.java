@@ -123,6 +123,53 @@ public class BiometricProcessorClient {
     }
 
     /**
+     * Upload a video interview recording for manual review.
+     * Biometric-processor expects multipart file upload (video/webm or video/mp4).
+     *
+     * @param videoBase64 base64-encoded video data
+     * @param mimeType    MIME type of the video (video/webm or video/mp4)
+     * @return response with stored filename and status
+     */
+    public Map<String, Object> videoInterviewUpload(String videoBase64, String mimeType) {
+        log.info("Calling biometric-processor /verification/video-interview");
+        try {
+            String extension = "video/mp4".equals(mimeType) ? "mp4" : "webm";
+            byte[] videoBytes = Base64.getDecoder().decode(stripDataUriPrefix(videoBase64));
+            ByteArrayResource resource = new ByteArrayResource(videoBytes) {
+                @Override
+                public String getFilename() {
+                    return "interview." + extension;
+                }
+            };
+
+            MultiValueMap<String, Object> body = new LinkedMultiValueMap<>();
+            body.add("file", resource);
+
+            return restClient.post()
+                    .uri("/verification/video-interview")
+                    .contentType(MediaType.MULTIPART_FORM_DATA)
+                    .body(body)
+                    .retrieve()
+                    .body(MAP_TYPE);
+        } catch (HttpClientErrorException e) {
+            log.warn("Biometric processor client error for video-interview: {} {}", e.getStatusCode(), e.getMessage());
+            return errorResponse("Biometric processor rejected request: " + e.getResponseBodyAsString());
+        } catch (HttpServerErrorException e) {
+            log.error("Biometric processor server error for video-interview: {} {}", e.getStatusCode(), e.getMessage());
+            return errorResponse("Biometric processor error, please retry");
+        } catch (ResourceAccessException e) {
+            log.error("Biometric processor unreachable for video-interview: {}", e.getMessage());
+            return errorResponse("Biometric processor unavailable");
+        } catch (RestClientException e) {
+            log.error("Biometric processor communication error for video-interview: {}", e.getMessage());
+            return errorResponse("Biometric processor communication error");
+        } catch (IllegalArgumentException e) {
+            log.warn("Invalid base64 data for video-interview: {}", e.getMessage());
+            return errorResponse("Invalid base64 video data");
+        }
+    }
+
+    /**
      * Post a base64 image as a multipart file upload.
      * Decodes the base64 string and sends it as a file part.
      */

@@ -5,5 +5,6 @@ public enum VerificationStepStatus {
     IN_PROGRESS,
     COMPLETED,
     FAILED,
-    SKIPPED
+    SKIPPED,
+    PENDING_REVIEW
 }

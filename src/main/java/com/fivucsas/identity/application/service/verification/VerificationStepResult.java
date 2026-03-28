@@ -26,4 +26,11 @@ public record VerificationStepResult(
     public static VerificationStepResult failure(String errorMessage, Map<String, Object> resultData) {
         return new VerificationStepResult(false, null, resultData, errorMessage);
     }
+
+    /**
+     * Creates a result that requires manual admin review before the step can pass or fail.
+     */
+    public static VerificationStepResult pendingReview(Map<String, Object> resultData) {
+        return new VerificationStepResult(false, null, resultData, "PENDING_REVIEW");
+    }
 }

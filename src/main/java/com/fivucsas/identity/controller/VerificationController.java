@@ -1,6 +1,7 @@
 package com.fivucsas.identity.controller;
 
 import com.fivucsas.identity.application.dto.command.CreateVerificationSessionCommand;
+import com.fivucsas.identity.application.dto.command.ReviewVerificationStepCommand;
 import com.fivucsas.identity.application.dto.command.SubmitVerificationStepCommand;
 import com.fivucsas.identity.application.dto.response.IndustryTemplateResponse;
 import com.fivucsas.identity.application.dto.response.VerificationSessionResponse;
@@ -11,6 +12,7 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -56,5 +58,15 @@ public class VerificationController {
     @GetMapping("/results/{userId}")
     public ResponseEntity<VerificationStatusResponse> getUserVerificationStatus(@PathVariable UUID userId) {
         return ResponseEntity.ok(verificationService.getUserVerificationStatus(userId));
+    }
+
+    @PostMapping("/sessions/{id}/steps/{stepNumber}/review")
+    @PreAuthorize("hasAnyAuthority('ROLE_SUPER_ADMIN', 'ROLE_ADMIN', 'ROLE_TENANT_ADMIN')")
+    public ResponseEntity<VerificationStepResultResponse> reviewStep(
+            @PathVariable UUID id,
+            @PathVariable int stepNumber,
+            @Valid @RequestBody ReviewVerificationStepCommand command) {
+        return ResponseEntity.ok(
+                verificationService.reviewStep(id, stepNumber, command.approved(), command.notes()));
     }
 }

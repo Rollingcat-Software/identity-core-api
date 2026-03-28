@@ -76,6 +76,11 @@ public class VerificationStepResult {
         this.completedAt = Instant.now();
     }
 
+    public void markPendingReview(String resultData) {
+        this.status = VerificationStepStatus.PENDING_REVIEW;
+        this.resultData = resultData != null ? resultData : "{}";
+    }
+
     public void skip() {
         this.status = VerificationStepStatus.SKIPPED;
         this.completedAt = Instant.now();
