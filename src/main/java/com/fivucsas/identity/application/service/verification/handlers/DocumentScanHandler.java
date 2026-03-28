@@ -37,18 +37,28 @@ public class DocumentScanHandler implements VerificationStepHandler {
         try {
             Map<String, Object> response = processorClient.documentScan(image);
 
+            // Check for client-side error responses from BiometricProcessorClient
             if (Boolean.FALSE.equals(response.get("success"))) {
                 String error = (String) response.getOrDefault("error", "Document scan failed");
                 return VerificationStepResult.failure(error);
             }
 
-            String documentType = (String) response.getOrDefault("document_type", "UNKNOWN");
+            // Biometric-processor returns: detected, card_type, confidence, bounding_box
+            boolean detected = Boolean.TRUE.equals(response.get("detected"));
+            if (!detected) {
+                return VerificationStepResult.failure("No document detected in the image");
+            }
+
+            String documentType = (String) response.getOrDefault("card_type", "UNKNOWN");
             Double confidence = parseDouble(response.get("confidence"));
 
             Map<String, Object> resultData = new HashMap<>();
             resultData.put("document_type", documentType);
             resultData.put("confidence", confidence);
             resultData.put("session_id", session.getId().toString());
+            if (response.containsKey("cropped_document_image_base64")) {
+                resultData.put("cropped_image", response.get("cropped_document_image_base64"));
+            }
 
             log.info("Document scan completed for session {}: type={}, confidence={}",
                     session.getId(), documentType, confidence);

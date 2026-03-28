@@ -46,7 +46,11 @@ public class LivenessCheckHandler implements VerificationStepHandler {
                 return VerificationStepResult.failure(error);
             }
 
-            Double livenessScore = parseDouble(response.get("liveness_score"));
+            // Biometric-processor returns: is_live, confidence, method
+            Double livenessScore = parseDouble(response.get("confidence"));
+            if (livenessScore == null) {
+                livenessScore = parseDouble(response.get("liveness_score"));
+            }
             boolean isLive = Boolean.TRUE.equals(response.get("is_live"));
 
             // Fall back to threshold comparison if no explicit is_live flag

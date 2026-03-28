@@ -10,9 +10,11 @@ import org.hibernate.Filter;
 import org.hibernate.Session;
 import org.springframework.stereotype.Component;
 
+import java.util.UUID;
+
 /**
  * Aspect that automatically enables the Hibernate tenant filter
- * for all repository method calls.
+ * and PostgreSQL RLS session variable for all repository method calls.
  */
 @Aspect
 @Component
@@ -24,17 +26,27 @@ public class TenantFilterAspect {
 
     /**
      * Before any repository method execution, enable the tenant filter
-     * if a tenant context is available.
+     * and set the RLS session variable if a tenant context is available.
      */
     @Before("execution(* com.fivucsas.identity.repository.*.*(..))")
     public void enableTenantFilter(JoinPoint joinPoint) {
         if (TenantContext.hasTenant()) {
+            UUID tenantId = TenantContext.requireCurrentTenant();
             Session session = entityManager.unwrap(Session.class);
             Filter filter = session.enableFilter("tenantFilter");
-            filter.setParameter("tenantId", TenantContext.requireCurrentTenant());
+            filter.setParameter("tenantId", tenantId);
 
-            log.trace("Tenant filter enabled for tenant: {} on method: {}",
-                    TenantContext.getCurrentTenant(),
+            // Set PostgreSQL session variable for Row-Level Security (RLS).
+            // SET LOCAL scopes the variable to the current transaction.
+            session.doWork(connection -> {
+                try (var stmt = connection.createStatement()) {
+                    stmt.execute("SET LOCAL app.current_tenant_id = '"
+                            + tenantId.toString() + "'");
+                }
+            });
+
+            log.trace("Tenant filter + RLS enabled for tenant: {} on method: {}",
+                    tenantId,
                     joinPoint.getSignature().getName());
         }
     }

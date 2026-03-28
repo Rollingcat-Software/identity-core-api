@@ -46,16 +46,22 @@ public class FaceMatchHandler implements VerificationStepHandler {
         try {
             Map<String, Object> response = processorClient.faceMatch(liveFace, documentFace);
 
+            // Check for client-side error responses from BiometricProcessorClient
             if (Boolean.FALSE.equals(response.get("success"))) {
                 String error = (String) response.getOrDefault("error", "Face match failed");
                 return VerificationStepResult.failure(error);
             }
 
-            Double matchScore = parseDouble(response.get("match_score"));
-            boolean matched = matchScore != null && matchScore >= matchThreshold;
+            // Biometric-processor returns: match, confidence, similarity, distance, threshold
+            // Use "similarity" as the match score (0..1, higher = more similar)
+            Double matchScore = parseDouble(response.get("similarity"));
+            if (matchScore == null) {
+                matchScore = parseDouble(response.get("confidence"));
+            }
+            boolean matched = Boolean.TRUE.equals(response.get("match"));
 
-            // Also check if processor returned explicit verified flag
-            if (Boolean.TRUE.equals(response.get("verified"))) {
+            // Fallback: also check score against our threshold
+            if (!matched && matchScore != null && matchScore >= matchThreshold) {
                 matched = true;
             }
 
@@ -63,6 +69,7 @@ public class FaceMatchHandler implements VerificationStepHandler {
             resultData.put("match_score", matchScore);
             resultData.put("threshold", matchThreshold);
             resultData.put("matched", matched);
+            resultData.put("distance", parseDouble(response.get("distance")));
 
             if (matched) {
                 log.info("Face match passed for session {}: score={}", session.getId(), matchScore);

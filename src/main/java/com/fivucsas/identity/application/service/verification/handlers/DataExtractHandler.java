@@ -48,13 +48,21 @@ public class DataExtractHandler implements VerificationStepHandler {
                 return VerificationStepResult.failure(error);
             }
 
-            // Extract fields from response
-            String holderName = (String) response.getOrDefault("holder_name", "");
-            String documentNumber = (String) response.getOrDefault("document_number", "");
+            // Biometric-processor returns: document_type, extracted_data{name, surname, id_number, ...}, confidence, method
+            // The personal data fields are nested inside "extracted_data"
+            @SuppressWarnings("unchecked")
+            Map<String, Object> extractedData = response.get("extracted_data") instanceof Map
+                    ? (Map<String, Object>) response.get("extracted_data")
+                    : response;
+
+            String holderName = (String) extractedData.getOrDefault("name",
+                    extractedData.getOrDefault("holder_name", ""));
+            String documentNumber = (String) extractedData.getOrDefault("id_number",
+                    extractedData.getOrDefault("document_number", ""));
             String documentType = (String) response.getOrDefault("document_type", "ID_CARD");
-            String nationality = (String) response.getOrDefault("nationality", "");
-            String dobStr = (String) response.getOrDefault("date_of_birth", "");
-            String expiryStr = (String) response.getOrDefault("expiry_date", "");
+            String nationality = (String) extractedData.getOrDefault("nationality", "");
+            String dobStr = (String) extractedData.getOrDefault("date_of_birth", "");
+            String expiryStr = (String) extractedData.getOrDefault("expiry_date", "");
 
             // Store extracted data as VerificationDocument
             VerificationDocument.VerificationDocumentBuilder docBuilder = VerificationDocument.builder()
