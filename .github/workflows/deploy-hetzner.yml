@@ -7,8 +7,7 @@ on:
       - 'src/**'
       - 'Dockerfile*'
       - 'docker-compose.prod.yml'
-      - 'build.gradle*'
-      - 'settings.gradle*'
+      - 'pom.xml'
   workflow_dispatch:
 
 concurrency:
@@ -19,7 +18,6 @@ jobs:
   deploy:
     name: Deploy Identity Core API
     runs-on: [self-hosted, linux, x64]
-    environment: production
     steps:
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1
