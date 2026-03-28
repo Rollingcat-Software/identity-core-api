@@ -25,7 +25,7 @@ Runs on port 8080. Swagger UI at `/swagger-ui.html`.
 
 ## Key Directories
 
-- `src/main/java/com/fivucsas/identity/controller/` - REST controllers (23 controllers)
+- `src/main/java/com/fivucsas/identity/controller/` - REST controllers (25 controllers, incl. OAuth2Controller, OpenIDConfigController)
 - `src/main/java/com/fivucsas/identity/application/service/handler/` - Auth method handlers
 - `src/main/java/com/fivucsas/identity/application/port/output/` - Output ports (BiometricServicePort)
 - `src/main/java/com/fivucsas/identity/infrastructure/` - Adapters (BiometricServiceAdapter, WebAuthn)
@@ -79,6 +79,9 @@ All handlers in `application/service/handler/`:
 ### Session 2026-03-28 fixes:
 - **FingerprintAuthHandler rewrite** — Removed BiometricServicePort dependency (stub). Now uses WebAuthnService + WebAuthnCredentialRepositoryPort for WebAuthn platform authenticator assertions. Supports challenge generation with `authenticatorAttachment: "platform"`. Tests rewritten (10 test cases).
 - **Docker image rebuilt and deployed** — identity-core-api container rebuilt with FingerprintAuthHandler fix, running healthy on Hetzner VPS.
+- **OAuth 2.0 endpoints** — OAuth2Controller (POST /oauth2/authorize, POST /oauth2/token, GET /oauth2/userinfo), OpenIDConfigController (GET /.well-known/openid-configuration).
+- **V24 migration** — `oauth2_clients` table for OAuth 2.0 client registration.
+- **OAuth2Service** — Authorization code grant flow, token exchange, client validation.
 
 ### Critical fixes applied (2026-03-16):
 - **`@AutoConfigureMockMvc`** import path: `org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc` (Spring Boot 3.x path)
