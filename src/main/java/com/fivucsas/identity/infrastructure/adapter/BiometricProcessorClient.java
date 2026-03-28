@@ -62,8 +62,8 @@ public class BiometricProcessorClient {
      * @return response with document_type, confidence, etc.
      */
     public Map<String, Object> documentScan(String imageBase64) {
-        log.info("Calling biometric-processor /api/v1/verification/document-scan");
-        return postMultipartFile("/api/v1/verification/document-scan", "file", imageBase64);
+        log.info("Calling biometric-processor /verification/document-scan");
+        return postMultipartFile("/verification/document-scan", "file", imageBase64);
     }
 
     /**
@@ -74,10 +74,10 @@ public class BiometricProcessorClient {
      * @return response with extracted fields (name, dob, document_number, etc.)
      */
     public Map<String, Object> dataExtract(String imageBase64) {
-        log.info("Calling biometric-processor /api/v1/verification/data-extract");
+        log.info("Calling biometric-processor /verification/data-extract");
         MultiValueMap<String, String> formData = new LinkedMultiValueMap<>();
         formData.add("image_base64", imageBase64);
-        return postFormData("/api/v1/verification/data-extract", formData);
+        return postFormData("/verification/data-extract", formData);
     }
 
     /**
@@ -88,10 +88,10 @@ public class BiometricProcessorClient {
      * @return response with extracted fields
      */
     public Map<String, Object> dataExtractMrz(String mrzText) {
-        log.info("Calling biometric-processor /api/v1/verification/data-extract (MRZ)");
+        log.info("Calling biometric-processor /verification/data-extract (MRZ)");
         MultiValueMap<String, String> formData = new LinkedMultiValueMap<>();
         formData.add("mrz_text", mrzText);
-        return postFormData("/api/v1/verification/data-extract", formData);
+        return postFormData("/verification/data-extract", formData);
     }
 
     /**
@@ -103,11 +103,11 @@ public class BiometricProcessorClient {
      * @return response with match score and verified flag
      */
     public Map<String, Object> faceMatch(String liveFaceBase64, String docFaceBase64) {
-        log.info("Calling biometric-processor /api/v1/verification/face-match");
+        log.info("Calling biometric-processor /verification/face-match");
         MultiValueMap<String, String> formData = new LinkedMultiValueMap<>();
         formData.add("live_face_image", liveFaceBase64);
         formData.add("document_face_image", docFaceBase64);
-        return postFormData("/api/v1/verification/face-match", formData);
+        return postFormData("/verification/face-match", formData);
     }
 
     /**
@@ -118,8 +118,8 @@ public class BiometricProcessorClient {
      * @return response with liveness_score and is_live flag
      */
     public Map<String, Object> livenessCheck(String imageBase64) {
-        log.info("Calling biometric-processor /api/v1/verification/liveness-check");
-        return postMultipartFile("/api/v1/verification/liveness-check", "file", imageBase64);
+        log.info("Calling biometric-processor /verification/liveness-check");
+        return postMultipartFile("/verification/liveness-check", "file", imageBase64);
     }
 
     /**
