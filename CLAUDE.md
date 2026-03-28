@@ -83,6 +83,28 @@ All handlers in `application/service/handler/`:
 - **V24 migration** — `oauth2_clients` table for OAuth 2.0 client registration.
 - **OAuth2Service** — Authorization code grant flow, token exchange, client validation.
 
+### Verification Pipeline (Phase 8, 2026-03-28):
+- **V26 migration** — verification_sessions, verification_step_results, verification_documents tables
+- **V28 migration** — video_interview step with admin review queue
+- **VerificationController** — CRUD for verification flows and sessions
+- **ManageVerificationService** — orchestration engine with 9 step handlers
+- **Step handlers**: DOCUMENT_SCAN, DATA_EXTRACT, NFC_CHIP_READ, FACE_MATCH, LIVENESS_CHECK, ADDRESS_PROOF, WATCHLIST_CHECK, AGE_VERIFICATION, VIDEO_INTERVIEW
+- **5 industry templates**: Banking KYC, Healthcare, Education, Government, Fintech
+- **BiometricProcessorClient** — HTTP client for document scan, MRZ, OCR, face match
+- **FlowType enum** — verification flow type definitions
+- **Test results**: Health 17/17, CRUD 33/33, RBAC 40/40, Verification 13/13 = 103 API tests total
+
+### Flyway Migrations (V1-V28):
+- V1-V15: Core schema (tenants, users, roles, permissions, audit_logs, sample data)
+- V16: Auth methods, auth flows, auth flow steps, auth sessions, auth session steps
+- V17: User devices with public_key for step-up authentication
+- V18-V23: Various fixes and enhancements
+- V24: oauth2_clients table for OAuth 2.0
+- V25: User enrollments
+- V26: Verification sessions, step results, documents
+- V27: Verification flow seed data (5 industry templates)
+- V28: Video interview step
+
 ### Critical fixes applied (2026-03-16):
 - **`@AutoConfigureMockMvc`** import path: `org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc` (Spring Boot 3.x path)
 - **`AuditLogAdapter.logUserRegistered()`** — changed from `REQUIRES_NEW` to `REQUIRED` propagation. `REQUIRES_NEW` opens an isolated transaction that cannot see the uncommitted user row, causing `audit_logs.user_id` FK violation on every registration.
