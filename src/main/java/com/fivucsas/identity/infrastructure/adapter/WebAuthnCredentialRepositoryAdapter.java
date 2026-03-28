@@ -6,7 +6,9 @@ import com.fivucsas.identity.repository.WebAuthnCredentialRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Repository;
 
+import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
 @Repository
 @RequiredArgsConstructor
@@ -17,6 +19,21 @@ public class WebAuthnCredentialRepositoryAdapter implements WebAuthnCredentialRe
     @Override
     public Optional<WebAuthnCredential> findByCredentialId(String credentialId) {
         return jpaRepository.findByCredentialId(credentialId);
+    }
+
+    @Override
+    public List<WebAuthnCredential> findAllByUserId(UUID userId) {
+        return jpaRepository.findAllByUserId(userId);
+    }
+
+    @Override
+    public boolean existsByCredentialId(String credentialId) {
+        return jpaRepository.existsByCredentialId(credentialId);
+    }
+
+    @Override
+    public void deleteByCredentialId(String credentialId) {
+        jpaRepository.deleteByCredentialId(credentialId);
     }
 
     @Override

@@ -1,9 +1,9 @@
 package com.fivucsas.identity.controller;
 
+import com.fivucsas.identity.application.port.output.OAuth2ClientRepositoryPort;
 import com.fivucsas.identity.entity.OAuth2Client;
 import com.fivucsas.identity.entity.Tenant;
 import com.fivucsas.identity.entity.User;
-import com.fivucsas.identity.repository.OAuth2ClientRepository;
 import com.fivucsas.identity.security.RbacAuthorizationService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
@@ -38,7 +38,7 @@ import java.util.stream.Collectors;
 @SecurityRequirement(name = "bearer-jwt")
 public class OAuth2ClientController {
 
-    private final OAuth2ClientRepository clientRepository;
+    private final OAuth2ClientRepositoryPort clientRepository;
     private final RbacAuthorizationService rbacService;
     private final PasswordEncoder passwordEncoder;
 

@@ -17,7 +17,7 @@ import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.infrastructure.email.EmailService;
 import com.fivucsas.identity.infrastructure.otp.OtpService;
 import com.fivucsas.identity.infrastructure.sms.SmsService;
-import com.fivucsas.identity.repository.UserRepository;
+import com.fivucsas.identity.domain.repository.UserRepository;
 import com.fivucsas.identity.domain.exception.UserNotFoundException;
 import com.fivucsas.identity.security.RateLimitService;
 import io.swagger.v3.oas.annotations.Operation;

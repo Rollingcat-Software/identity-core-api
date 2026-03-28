@@ -9,6 +9,8 @@ import com.fivucsas.identity.application.dto.query.SearchUsersQuery;
 import com.fivucsas.identity.application.dto.response.UserResponse;
 import com.fivucsas.identity.application.port.input.ChangePasswordUseCase;
 import com.fivucsas.identity.application.port.input.ManageUserUseCase;
+import com.fivucsas.identity.application.port.output.GuestInvitationRepositoryPort;
+import com.fivucsas.identity.application.port.output.UserSettingsRepositoryPort;
 import com.fivucsas.identity.application.service.GuestLifecycleService;
 import com.fivucsas.identity.domain.exception.UnauthorizedException;
 import com.fivucsas.identity.dto.AcceptInvitationRequest;
@@ -22,8 +24,6 @@ import com.fivucsas.identity.entity.GuestInvitation;
 import com.fivucsas.identity.entity.InvitationStatus;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.entity.UserSettings;
-import com.fivucsas.identity.repository.GuestInvitationRepository;
-import com.fivucsas.identity.repository.UserSettingsRepository;
 import com.fivucsas.identity.security.RbacAuthorizationService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -72,9 +72,9 @@ public class UserController {
 
     private final ManageUserUseCase manageUserUseCase;
     private final ChangePasswordUseCase changePasswordUseCase;
-    private final UserSettingsRepository userSettingsRepository;
+    private final UserSettingsRepositoryPort userSettingsRepository;
     private final GuestLifecycleService guestLifecycleService;
-    private final GuestInvitationRepository invitationRepository;
+    private final GuestInvitationRepositoryPort invitationRepository;
     private final RbacAuthorizationService rbacService;
 
     // --- User CRUD endpoints ---

@@ -1,10 +1,10 @@
 package com.fivucsas.identity.controller;
 
+import com.fivucsas.identity.application.port.output.NfcCardRepositoryPort;
+import com.fivucsas.identity.domain.repository.UserRepository;
 import com.fivucsas.identity.entity.NfcCard;
 import com.fivucsas.identity.entity.Tenant;
 import com.fivucsas.identity.entity.User;
-import com.fivucsas.identity.repository.NfcCardRepository;
-import com.fivucsas.identity.repository.UserRepository;
 import com.fivucsas.identity.security.RbacAuthorizationService;
 import com.fivucsas.identity.domain.exception.UnauthorizedException;
 import io.swagger.v3.oas.annotations.Operation;
@@ -26,7 +26,7 @@ import java.util.*;
 @Tag(name = "NFC Card Enrollment", description = "NFC card registration and verification endpoints")
 public class NfcController {
 
-    private final NfcCardRepository nfcCardRepository;
+    private final NfcCardRepositoryPort nfcCardRepository;
     private final UserRepository userRepository;
     private final RbacAuthorizationService rbacService;
 

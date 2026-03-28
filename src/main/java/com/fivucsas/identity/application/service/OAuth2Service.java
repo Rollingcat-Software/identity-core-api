@@ -1,9 +1,9 @@
 package com.fivucsas.identity.application.service;
 
+import com.fivucsas.identity.application.port.output.OAuth2ClientRepositoryPort;
+import com.fivucsas.identity.domain.repository.UserRepository;
 import com.fivucsas.identity.entity.OAuth2Client;
 import com.fivucsas.identity.entity.User;
-import com.fivucsas.identity.repository.OAuth2ClientRepository;
-import com.fivucsas.identity.repository.UserRepository;
 import com.fivucsas.identity.security.JwtService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -28,7 +28,7 @@ import java.util.*;
 @Slf4j
 public class OAuth2Service {
 
-    private final OAuth2ClientRepository clientRepository;
+    private final OAuth2ClientRepositoryPort clientRepository;
     private final UserRepository userRepository;
     private final JwtService jwtService;
     private final StringRedisTemplate redisTemplate;

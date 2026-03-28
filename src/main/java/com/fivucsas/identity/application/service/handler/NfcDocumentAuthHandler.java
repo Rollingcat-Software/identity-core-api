@@ -3,8 +3,8 @@ package com.fivucsas.identity.application.service.handler;
 import com.fivucsas.identity.domain.model.auth.AuthMethodType;
 import com.fivucsas.identity.entity.AuthFlowStep;
 import com.fivucsas.identity.entity.AuthSession;
+import com.fivucsas.identity.application.port.output.NfcCardRepositoryPort;
 import com.fivucsas.identity.entity.NfcCard;
-import com.fivucsas.identity.repository.NfcCardRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -18,7 +18,7 @@ import java.util.Set;
 @Slf4j
 public class NfcDocumentAuthHandler implements AuthMethodHandler {
 
-    private final NfcCardRepository nfcCardRepository;
+    private final NfcCardRepositoryPort nfcCardRepository;
 
     @Override
     public AuthMethodType getMethodType() {

@@ -5,11 +5,11 @@ import com.fivucsas.identity.application.dto.response.DeviceResponse;
 import com.fivucsas.identity.application.port.input.ManageDeviceUseCase;
 import com.fivucsas.identity.domain.exception.ResourceNotFoundException;
 import com.fivucsas.identity.domain.exception.UserNotFoundException;
+import com.fivucsas.identity.application.port.output.WebAuthnCredentialRepositoryPort;
+import com.fivucsas.identity.domain.repository.UserRepository;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.entity.WebAuthnCredential;
 import com.fivucsas.identity.infrastructure.webauthn.WebAuthnService;
-import com.fivucsas.identity.repository.UserRepository;
-import com.fivucsas.identity.repository.WebAuthnCredentialRepository;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -35,7 +35,7 @@ public class DeviceController {
 
     private final ManageDeviceUseCase manageDeviceUseCase;
     private final WebAuthnService webAuthnService;
-    private final WebAuthnCredentialRepository credentialRepository;
+    private final WebAuthnCredentialRepositoryPort credentialRepository;
     private final UserRepository userRepository;
 
     // --- /api/v1/devices endpoints ---
