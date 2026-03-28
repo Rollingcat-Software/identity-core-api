@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Java 21 / Spring Boot **4.0.2** backend API for the FIVUCSAS biometric identity platform.
+Java 21 / Spring Boot **3.2.0** backend API for the FIVUCSAS biometric identity platform.
 Hexagonal Architecture with Ports and Adapters pattern.
 Production URL: https://auth.rollingcatsoftware.com
 
@@ -69,7 +69,7 @@ All handlers in `application/service/handler/`:
 - Consumed by **web-app** (React frontend on port 3000) via REST API
 
 ### Critical fixes applied (2026-03-16):
-- **Spring Boot 4.x `@AutoConfigureMockMvc`** import path changed to `org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc` (NOT the 3.x path `org.springframework.boot.test.autoconfigure.web.servlet`)
+- **`@AutoConfigureMockMvc`** import path: `org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc` (Spring Boot 3.x path)
 - **`AuditLogAdapter.logUserRegistered()`** — changed from `REQUIRES_NEW` to `REQUIRED` propagation. `REQUIRES_NEW` opens an isolated transaction that cannot see the uncommitted user row, causing `audit_logs.user_id` FK violation on every registration.
 - **`MinioMediaStorageAdapter`** `@PostConstruct` — wrapped bucket existence check in try-catch so Spring context loads without MinIO available in test env
 - **Flyway V14** — added `DROP INDEX IF EXISTS idx_messages_expires_at` before recreating (V6 already created it on fresh DBs)
