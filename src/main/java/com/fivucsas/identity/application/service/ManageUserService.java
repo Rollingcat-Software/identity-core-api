@@ -94,14 +94,13 @@ public class ManageUserService implements ManageUserUseCase {
         // Handle role assignment
         if (command.getRole() != null && !command.getRole().isEmpty()) {
             try {
-                Role role = null;
+                Role role;
                 if (tenant != null) {
-                    // Look for tenant-specific role first
+                    // Look for role within the user's tenant
                     role = roleRepository.findByTenantIdAndNameAndDeletedAtIsNull(tenant.getId(), command.getRole())
-                        .orElse(null);
-                }
-                // Fall back to system role if no tenant-specific role found
-                if (role == null) {
+                        .orElseThrow(() -> new RoleNotFoundException(command.getRole()));
+                } else {
+                    // No tenant context — look up globally (only safe for unique system roles)
                     role = roleRepository.findByNameAndDeletedAtIsNull(command.getRole())
                         .orElseThrow(() -> new RoleNotFoundException(command.getRole()));
                 }
