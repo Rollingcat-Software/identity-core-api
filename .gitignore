@@ -138,3 +138,4 @@ package-lock.json
 
 # Production secrets
 .env.prod
+.env.gcp
