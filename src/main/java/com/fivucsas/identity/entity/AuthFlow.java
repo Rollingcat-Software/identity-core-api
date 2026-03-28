@@ -1,5 +1,6 @@
 package com.fivucsas.identity.entity;
 
+import com.fivucsas.identity.domain.model.auth.FlowType;
 import com.fivucsas.identity.domain.model.auth.OperationType;
 import jakarta.persistence.*;
 import lombok.*;
@@ -32,6 +33,14 @@ public class AuthFlow {
 
     @Column(columnDefinition = "TEXT")
     private String description;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "flow_type", nullable = false, length = 30)
+    @Builder.Default
+    private FlowType flowType = FlowType.AUTHENTICATION;
+
+    @Column(name = "industry_template", length = 50)
+    private String industryTemplate;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "operation_type", nullable = false, length = 30)

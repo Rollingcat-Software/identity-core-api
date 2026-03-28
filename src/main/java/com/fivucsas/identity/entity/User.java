@@ -1,5 +1,6 @@
 package com.fivucsas.identity.entity;
 
+import com.fivucsas.identity.domain.model.auth.VerificationLevel;
 import com.fivucsas.identity.domain.model.tenant.TenantId;
 import com.fivucsas.identity.domain.model.user.*;
 import jakarta.persistence.*;
@@ -150,6 +151,18 @@ public class User {
 
     @Column(name = "two_factor_backup_codes", length = 1024)
     private String twoFactorBackupCodes;
+
+    @Column(name = "identity_verified")
+    @Builder.Default
+    private boolean identityVerified = false;
+
+    @Column(name = "identity_verified_at")
+    private Instant identityVerifiedAt;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "verification_level", length = 20)
+    @Builder.Default
+    private VerificationLevel verificationLevel = VerificationLevel.NONE;
 
     @Column(name = "is_biometric_enrolled")
     @Builder.Default
@@ -682,6 +695,17 @@ public class User {
         this.emailVerificationToken = null;
         this.emailVerificationSentAt = null;
         return true;
+    }
+
+    // ========== Identity Verification Methods ==========
+
+    /**
+     * Marks user's identity as verified at the given level.
+     */
+    public void markIdentityVerified(VerificationLevel level) {
+        this.identityVerified = true;
+        this.identityVerifiedAt = Instant.now();
+        this.verificationLevel = level;
     }
 
     // ========== 2FA Methods ==========
