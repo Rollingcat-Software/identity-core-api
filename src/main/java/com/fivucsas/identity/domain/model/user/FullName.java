@@ -61,8 +61,8 @@ public final class FullName {
             );
         }
 
-        // Allow letters, spaces, hyphens, and apostrophes (for names like O'Brien, Mary-Jane)
-        if (!trimmed.matches("^[a-zA-ZàáâäãåąčćęèéêëėįìíîïłńòóôöõøùúûüųūÿýżźñçčšžÀÁÂÄÃÅĄĆČĖĘÈÉÊËÌÍÎÏĮŁŃÒÓÔÖÕØÙÚÛÜŲŪŸÝŻŹÑßÇŒÆČŠŽ∂ð ,.'-]+$")) {
+        // Allow Unicode letters (supports Turkish, Arabic, etc.), spaces, hyphens, apostrophes
+        if (!trimmed.matches("^[\\p{L} ,.'-]+$")) {
             throw new IllegalArgumentException(
                 fieldName + " contains invalid characters. Only letters, spaces, hyphens, and apostrophes are allowed."
             );
