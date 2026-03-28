@@ -1,7 +1,7 @@
 package com.fivucsas.identity.domain.repository;
 
-import com.fivucsas.identity.entity.Tenant;
-import com.fivucsas.identity.entity.TenantStatus;
+import com.fivucsas.identity.domain.model.tenant.Tenant;
+import com.fivucsas.identity.domain.model.tenant.TenantStatus;
 
 import java.util.List;
 import java.util.Optional;
@@ -11,8 +11,8 @@ import java.util.UUID;
  * Domain repository interface for Tenant aggregate.
  * Following Hexagonal Architecture - this is an output port.
  *
- * Defines the contract for tenant persistence operations.
- * Implementation provided by infrastructure layer.
+ * Returns domain models (not JPA entities).
+ * Implementation provided by infrastructure layer (TenantRepositoryAdapter).
  */
 public interface TenantRepository {
 
@@ -57,9 +57,9 @@ public interface TenantRepository {
     boolean existsByName(String name);
 
     /**
-     * Deletes a tenant.
+     * Deletes a tenant by ID.
      */
-    void delete(Tenant tenant);
+    void deleteById(UUID id);
 
     /**
      * Counts total tenants.

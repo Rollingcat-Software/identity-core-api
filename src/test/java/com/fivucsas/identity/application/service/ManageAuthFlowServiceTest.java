@@ -7,7 +7,7 @@ import com.fivucsas.identity.application.port.output.AuthMethodRepositoryPort;
 import com.fivucsas.identity.application.port.output.TenantAuthMethodRepositoryPort;
 import com.fivucsas.identity.domain.model.auth.AuthMethodType;
 import com.fivucsas.identity.domain.model.auth.OperationType;
-import com.fivucsas.identity.domain.repository.TenantRepository;
+import com.fivucsas.identity.repository.JpaTenantRepository;
 import com.fivucsas.identity.entity.AuthFlow;
 import com.fivucsas.identity.entity.AuthMethod;
 import com.fivucsas.identity.entity.Tenant;
@@ -33,7 +33,7 @@ class ManageAuthFlowServiceTest {
     @Mock private AuthFlowRepositoryPort authFlowRepository;
     @Mock private AuthFlowStepRepositoryPort authFlowStepRepository;
     @Mock private AuthMethodRepositoryPort authMethodRepository;
-    @Mock private TenantRepository tenantRepository;
+    @Mock private JpaTenantRepository tenantRepository;
     @Mock private TenantAuthMethodRepositoryPort tenantAuthMethodRepository;
 
     @InjectMocks

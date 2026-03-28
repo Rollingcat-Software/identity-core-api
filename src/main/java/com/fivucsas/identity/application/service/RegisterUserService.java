@@ -11,7 +11,7 @@ import com.fivucsas.identity.domain.exception.DuplicateEmailException;
 import com.fivucsas.identity.domain.model.user.Email;
 import com.fivucsas.identity.domain.model.user.FullName;
 import com.fivucsas.identity.domain.model.user.HashedPassword;
-import com.fivucsas.identity.domain.repository.TenantRepository;
+import com.fivucsas.identity.repository.JpaTenantRepository;
 import com.fivucsas.identity.domain.repository.UserRepository;
 import com.fivucsas.identity.entity.RefreshToken;
 import com.fivucsas.identity.entity.Tenant;
@@ -42,7 +42,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class RegisterUserService implements RegisterUserUseCase {
 
     private final com.fivucsas.identity.domain.repository.UserRepository userRepository;
-    private final TenantRepository tenantRepository;
+    private final JpaTenantRepository tenantRepository;
     private final PasswordEncoderPort passwordEncoder;
     private final TokenGenerationPort tokenGenerator;
     private final RefreshTokenService refreshTokenService;

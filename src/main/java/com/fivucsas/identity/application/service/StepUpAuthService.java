@@ -8,7 +8,7 @@ import com.fivucsas.identity.application.dto.response.StepUpChallengeResponse;
 import com.fivucsas.identity.application.dto.response.StepUpVerifyResponse;
 import com.fivucsas.identity.application.port.input.StepUpAuthUseCase;
 import com.fivucsas.identity.application.port.output.TokenGenerationPort;
-import com.fivucsas.identity.domain.repository.TenantRepository;
+import com.fivucsas.identity.repository.JpaTenantRepository;
 import com.fivucsas.identity.entity.Tenant;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.entity.UserDevice;
@@ -32,7 +32,7 @@ public class StepUpAuthService implements StepUpAuthUseCase {
 
     private final UserDeviceRepositoryPort userDeviceRepository;
     private final UserRepository userRepository;
-    private final TenantRepository tenantRepository;
+    private final JpaTenantRepository tenantRepository;
     private final StepUpChallengeService stepUpChallengeService;
     private final TokenGenerationPort tokenGenerationPort;
 

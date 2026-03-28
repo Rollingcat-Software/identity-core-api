@@ -14,7 +14,7 @@ import com.fivucsas.identity.application.port.output.AuthFlowRepositoryPort;
 import com.fivucsas.identity.application.port.output.AuthFlowStepRepositoryPort;
 import com.fivucsas.identity.application.port.output.AuthSessionRepositoryPort;
 import com.fivucsas.identity.application.port.output.AuthSessionStepRepositoryPort;
-import com.fivucsas.identity.domain.repository.TenantRepository;
+import com.fivucsas.identity.repository.JpaTenantRepository;
 import com.fivucsas.identity.domain.repository.UserRepository;
 import com.fivucsas.identity.entity.*;
 import com.fivucsas.identity.service.RefreshTokenService;
@@ -41,7 +41,7 @@ public class ExecuteAuthSessionService implements ExecuteAuthSessionUseCase {
     private final AuthSessionStepRepositoryPort authSessionStepRepository;
     private final AuthFlowRepositoryPort authFlowRepository;
     private final AuthFlowStepRepositoryPort authFlowStepRepository;
-    private final TenantRepository tenantRepository;
+    private final JpaTenantRepository tenantRepository;
     private final UserRepository userRepository;
     private final AuthMethodHandlerRegistry handlerRegistry;
     private final TokenGenerationPort tokenGenerator;

@@ -7,7 +7,7 @@ import com.fivucsas.identity.domain.model.auth.AuthMethodType;
 import com.fivucsas.identity.entity.AuthMethod;
 import com.fivucsas.identity.entity.TenantAuthMethod;
 import com.fivucsas.identity.entity.Tenant;
-import com.fivucsas.identity.domain.repository.TenantRepository;
+import com.fivucsas.identity.repository.JpaTenantRepository;
 import com.fivucsas.identity.application.port.output.AuthMethodRepositoryPort;
 import com.fivucsas.identity.application.port.output.TenantAuthMethodRepositoryPort;
 import jakarta.persistence.EntityNotFoundException;
@@ -25,7 +25,7 @@ public class ManageAuthMethodService implements ManageAuthMethodUseCase {
 
     private final AuthMethodRepositoryPort authMethodRepository;
     private final TenantAuthMethodRepositoryPort tenantAuthMethodRepository;
-    private final TenantRepository tenantRepository;
+    private final JpaTenantRepository tenantRepository;
 
     @Override
     public List<AuthMethodResponse> listAllMethods() {

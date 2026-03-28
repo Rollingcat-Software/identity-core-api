@@ -1,7 +1,7 @@
 package com.fivucsas.identity.infrastructure.multitenancy;
 
+import com.fivucsas.identity.domain.model.tenant.Tenant;
 import com.fivucsas.identity.domain.repository.TenantRepository;
-import com.fivucsas.identity.entity.Tenant;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;

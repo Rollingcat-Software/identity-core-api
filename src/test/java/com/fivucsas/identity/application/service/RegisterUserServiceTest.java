@@ -10,7 +10,7 @@ import com.fivucsas.identity.domain.exception.DuplicateEmailException;
 import com.fivucsas.identity.domain.exception.InvalidEmailException;
 import com.fivucsas.identity.infrastructure.email.EmailService;
 import com.fivucsas.identity.infrastructure.otp.OtpService;
-import com.fivucsas.identity.domain.repository.TenantRepository;
+import com.fivucsas.identity.repository.JpaTenantRepository;
 import com.fivucsas.identity.domain.repository.UserRepository;
 import com.fivucsas.identity.entity.RefreshToken;
 import com.fivucsas.identity.entity.Tenant;
@@ -53,7 +53,7 @@ class RegisterUserServiceTest {
     private UserRepository userRepository;
 
     @Mock
-    private TenantRepository tenantRepository;
+    private JpaTenantRepository tenantRepository;
 
     @Mock
     private PasswordEncoderPort passwordEncoder;

@@ -20,7 +20,7 @@ import com.fivucsas.identity.entity.Tenant;
 import com.fivucsas.identity.entity.Role;
 import com.fivucsas.identity.entity.UserRole;
 import com.fivucsas.identity.entity.UserStatus;
-import com.fivucsas.identity.domain.repository.TenantRepository;
+import com.fivucsas.identity.repository.JpaTenantRepository;
 import com.fivucsas.identity.application.port.output.RoleRepositoryPort;
 import com.fivucsas.identity.application.port.output.UserRoleRepositoryPort;
 import lombok.RequiredArgsConstructor;
@@ -47,7 +47,7 @@ public class ManageUserService implements ManageUserUseCase {
 
     private final UserRepository userRepository;
     private final PasswordEncoderPort passwordEncoder;
-    private final TenantRepository tenantRepository;
+    private final JpaTenantRepository tenantRepository;
     private final RoleRepositoryPort roleRepository;
     private final UserRoleRepositoryPort userRoleRepository;
     private final AuditLogQueryPort auditLogQueryPort;

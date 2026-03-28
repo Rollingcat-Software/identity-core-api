@@ -9,7 +9,7 @@ import com.fivucsas.identity.domain.model.auth.OperationType;
 import com.fivucsas.identity.application.port.output.AuthFlowRepositoryPort;
 import com.fivucsas.identity.application.port.output.AuthFlowStepRepositoryPort;
 import com.fivucsas.identity.application.port.output.AuthMethodRepositoryPort;
-import com.fivucsas.identity.domain.repository.TenantRepository;
+import com.fivucsas.identity.repository.JpaTenantRepository;
 import com.fivucsas.identity.entity.*;
 import com.fivucsas.identity.application.port.output.TenantAuthMethodRepositoryPort;
 import jakarta.persistence.EntityNotFoundException;
@@ -42,7 +42,7 @@ public class ManageAuthFlowService implements ManageAuthFlowUseCase {
     private final AuthFlowRepositoryPort authFlowRepository;
     private final AuthFlowStepRepositoryPort authFlowStepRepository;
     private final AuthMethodRepositoryPort authMethodRepository;
-    private final TenantRepository tenantRepository;
+    private final JpaTenantRepository tenantRepository;
     private final TenantAuthMethodRepositoryPort tenantAuthMethodRepository;
 
     @Override

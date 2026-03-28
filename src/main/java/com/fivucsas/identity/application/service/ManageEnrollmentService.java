@@ -7,7 +7,7 @@ import com.fivucsas.identity.domain.model.auth.AuthMethodType;
 import com.fivucsas.identity.entity.Tenant;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.entity.UserEnrollment;
-import com.fivucsas.identity.domain.repository.TenantRepository;
+import com.fivucsas.identity.repository.JpaTenantRepository;
 import com.fivucsas.identity.application.port.output.UserEnrollmentRepositoryPort;
 import com.fivucsas.identity.domain.repository.UserRepository;
 import jakarta.persistence.EntityNotFoundException;
@@ -31,7 +31,7 @@ public class ManageEnrollmentService implements ManageEnrollmentUseCase {
 
     private final UserEnrollmentRepositoryPort userEnrollmentRepository;
     private final UserRepository userRepository;
-    private final TenantRepository tenantRepository;
+    private final JpaTenantRepository tenantRepository;
     private final BiometricServicePort biometricServicePort;
 
     @Override

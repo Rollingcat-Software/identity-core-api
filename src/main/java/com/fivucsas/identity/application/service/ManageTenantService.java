@@ -6,10 +6,9 @@ import com.fivucsas.identity.application.dto.response.TenantResponse;
 import com.fivucsas.identity.application.port.input.ManageTenantUseCase;
 import com.fivucsas.identity.domain.exception.DuplicateTenantException;
 import com.fivucsas.identity.domain.exception.TenantNotFoundException;
+import com.fivucsas.identity.domain.model.tenant.Tenant;
 import com.fivucsas.identity.domain.model.tenant.TenantConfiguration;
 import com.fivucsas.identity.domain.repository.TenantRepository;
-import com.fivucsas.identity.entity.Tenant;
-import com.fivucsas.identity.entity.TenantStatus;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -21,6 +20,7 @@ import java.util.stream.Collectors;
 
 /**
  * Use case service for tenant management.
+ * Uses pure domain models - no JPA entity references.
  *
  * Implements the ManageTenantUseCase input port.
  */
@@ -45,20 +45,24 @@ public class ManageTenantService implements ManageTenantUseCase {
             throw new DuplicateTenantException("slug", command.getSlug());
         }
 
-        // Build tenant entity
-        Tenant tenant = Tenant.builder()
-            .name(command.getName())
-            .slug(command.getSlug().toLowerCase())
-            .description(command.getDescription())
-            .contactEmail(command.getContactEmail())
-            .contactPhone(command.getContactPhone())
-            .status(TenantStatus.PENDING)
-            .maxUsers(command.getMaxUsers() != null ? command.getMaxUsers() : 100)
-            .biometricEnabled(command.getBiometricEnabled() != null ? command.getBiometricEnabled() : true)
-            .sessionTimeoutMinutes(command.getSessionTimeoutMinutes() != null ? command.getSessionTimeoutMinutes() : 30)
-            .refreshTokenValidityDays(command.getRefreshTokenValidityDays() != null ? command.getRefreshTokenValidityDays() : 7)
-            .mfaRequired(command.getMfaRequired() != null ? command.getMfaRequired() : false)
-            .build();
+        // Build tenant using domain factory method
+        Tenant tenant = Tenant.create(
+            command.getName(),
+            command.getSlug().toLowerCase(),
+            command.getDescription(),
+            command.getContactEmail(),
+            command.getContactPhone()
+        );
+
+        // Apply custom configuration if provided
+        TenantConfiguration config = TenantConfiguration.of(
+            command.getMaxUsers() != null ? command.getMaxUsers() : 100,
+            command.getBiometricEnabled() != null ? command.getBiometricEnabled() : true,
+            command.getSessionTimeoutMinutes() != null ? command.getSessionTimeoutMinutes() : 30,
+            command.getRefreshTokenValidityDays() != null ? command.getRefreshTokenValidityDays() : 7,
+            command.getMfaRequired() != null ? command.getMfaRequired() : false
+        );
+        tenant.updateConfiguration(config);
 
         tenant = tenantRepository.save(tenant);
         log.info("Tenant created successfully: {}", tenant.getId());
@@ -172,10 +176,10 @@ public class ManageTenantService implements ManageTenantUseCase {
         log.info("Deleting tenant: {}", tenantId);
 
         UUID uuid = UUID.fromString(tenantId);
-        Tenant tenant = tenantRepository.findById(uuid)
+        tenantRepository.findById(uuid)
             .orElseThrow(() -> new TenantNotFoundException(tenantId));
 
-        tenantRepository.delete(tenant);
+        tenantRepository.deleteById(uuid);
         log.info("Tenant deleted successfully: {}", tenantId);
     }
 

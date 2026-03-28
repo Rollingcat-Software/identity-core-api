@@ -6,7 +6,7 @@ import com.fivucsas.identity.application.port.input.ManageDeviceUseCase;
 import com.fivucsas.identity.entity.Tenant;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.entity.UserDevice;
-import com.fivucsas.identity.domain.repository.TenantRepository;
+import com.fivucsas.identity.repository.JpaTenantRepository;
 import com.fivucsas.identity.application.port.output.UserDeviceRepositoryPort;
 import com.fivucsas.identity.domain.repository.UserRepository;
 import jakarta.persistence.EntityNotFoundException;
@@ -24,7 +24,7 @@ public class ManageDeviceService implements ManageDeviceUseCase {
 
     private final UserDeviceRepositoryPort userDeviceRepository;
     private final UserRepository userRepository;
-    private final TenantRepository tenantRepository;
+    private final JpaTenantRepository tenantRepository;
 
     @Override
     @Transactional

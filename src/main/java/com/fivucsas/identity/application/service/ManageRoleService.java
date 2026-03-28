@@ -11,7 +11,7 @@ import com.fivucsas.identity.entity.Role;
 import com.fivucsas.identity.entity.Tenant;
 import com.fivucsas.identity.application.port.output.PermissionRepositoryPort;
 import com.fivucsas.identity.application.port.output.RoleRepositoryPort;
-import com.fivucsas.identity.domain.repository.TenantRepository;
+import com.fivucsas.identity.repository.JpaTenantRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -33,7 +33,7 @@ public class ManageRoleService implements ManageRoleUseCase {
 
     private final RoleRepositoryPort roleRepository;
     private final PermissionRepositoryPort permissionRepository;
-    private final TenantRepository tenantRepository;
+    private final JpaTenantRepository tenantRepository;
 
     @Override
     @Transactional

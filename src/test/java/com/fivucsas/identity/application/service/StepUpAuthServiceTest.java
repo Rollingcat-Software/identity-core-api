@@ -8,7 +8,7 @@ import com.fivucsas.identity.application.dto.response.StepUpChallengeResponse;
 import com.fivucsas.identity.application.dto.response.StepUpVerifyResponse;
 import com.fivucsas.identity.application.port.output.TokenGenerationPort;
 import com.fivucsas.identity.domain.model.auth.DevicePlatform;
-import com.fivucsas.identity.domain.repository.TenantRepository;
+import com.fivucsas.identity.repository.JpaTenantRepository;
 import com.fivucsas.identity.entity.Tenant;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.entity.UserDevice;
@@ -36,7 +36,7 @@ class StepUpAuthServiceTest {
 
     @Mock private UserDeviceRepositoryPort userDeviceRepository;
     @Mock private UserRepository userRepository;
-    @Mock private TenantRepository tenantRepository;
+    @Mock private JpaTenantRepository tenantRepository;
     @Mock private StepUpChallengeService stepUpChallengeService;
     @Mock private TokenGenerationPort tokenGenerationPort;
 

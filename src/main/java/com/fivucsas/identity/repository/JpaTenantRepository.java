@@ -10,20 +10,12 @@ import java.util.Optional;
 import java.util.UUID;
 
 /**
- * JPA Repository for Tenant entity.
- *
- * Extends both:
- * - JpaRepository: Provides JPA/Spring Data features
- * - TenantRepository (domain): Implements domain repository contract
- *
- * Following Dependency Inversion Principle:
- * - Infrastructure (this) implements domain interface
- * - Services depend on domain interface, not this
+ * Spring Data JPA Repository for Tenant entity.
+ * Pure infrastructure concern - no domain interfaces.
+ * The TenantRepositoryAdapter bridges this to the domain layer.
  */
 @Repository
-public interface JpaTenantRepository extends
-        JpaRepository<Tenant, UUID>,
-        com.fivucsas.identity.domain.repository.TenantRepository {
+public interface JpaTenantRepository extends JpaRepository<Tenant, UUID> {
 
     Optional<Tenant> findBySlug(String slug);
 
