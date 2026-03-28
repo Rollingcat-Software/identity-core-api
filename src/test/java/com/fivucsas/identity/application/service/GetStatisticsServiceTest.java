@@ -1,10 +1,10 @@
 package com.fivucsas.identity.application.service;
 
 import com.fivucsas.identity.application.dto.response.StatisticsResponse;
+import com.fivucsas.identity.domain.model.user.UserStatus;
 import com.fivucsas.identity.domain.repository.TenantRepository;
-import com.fivucsas.identity.domain.repository.UserRepository;
-import com.fivucsas.identity.repository.AuditLogRepository;
-import com.fivucsas.identity.entity.UserStatus;
+import com.fivucsas.identity.application.port.output.AuditLogQueryPort;
+import com.fivucsas.identity.domain.repository.UserDomainRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -25,13 +25,13 @@ import static org.mockito.Mockito.*;
 class GetStatisticsServiceTest {
 
     @Mock
-    private UserRepository userRepository;
+    private UserDomainRepository userRepository;
 
     @Mock
     private TenantRepository tenantRepository;
 
     @Mock
-    private AuditLogRepository auditLogRepository;
+    private AuditLogQueryPort auditLogRepository;
 
     @InjectMocks
     private GetStatisticsService getStatisticsService;

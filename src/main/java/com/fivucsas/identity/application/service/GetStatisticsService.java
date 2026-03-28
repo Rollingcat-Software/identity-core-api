@@ -2,9 +2,9 @@ package com.fivucsas.identity.application.service;
 
 import com.fivucsas.identity.application.dto.response.StatisticsResponse;
 import com.fivucsas.identity.application.port.input.GetStatisticsUseCase;
+import com.fivucsas.identity.domain.model.user.UserStatus;
 import com.fivucsas.identity.domain.repository.TenantRepository;
-import com.fivucsas.identity.domain.repository.UserRepository;
-import com.fivucsas.identity.entity.UserStatus;
+import com.fivucsas.identity.domain.repository.UserDomainRepository;
 import com.fivucsas.identity.application.port.output.AuditLogQueryPort;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -22,7 +22,7 @@ import org.springframework.transaction.annotation.Transactional;
 @Slf4j
 public class GetStatisticsService implements GetStatisticsUseCase {
 
-    private final UserRepository userRepository;
+    private final UserDomainRepository userRepository;
     private final TenantRepository tenantRepository;
     private final AuditLogQueryPort auditLogRepository;
 

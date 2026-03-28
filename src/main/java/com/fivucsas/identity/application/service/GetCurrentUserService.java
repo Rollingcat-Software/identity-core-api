@@ -2,10 +2,11 @@ package com.fivucsas.identity.application.service;
 
 import com.fivucsas.identity.application.dto.query.GetUserByEmailQuery;
 import com.fivucsas.identity.application.dto.response.UserResponse;
+import com.fivucsas.identity.application.mapper.UserResponseMapper;
 import com.fivucsas.identity.application.port.input.GetCurrentUserUseCase;
 import com.fivucsas.identity.domain.exception.UserNotFoundException;
-import com.fivucsas.identity.domain.repository.UserRepository;
-import com.fivucsas.identity.entity.User;
+import com.fivucsas.identity.domain.model.user.User;
+import com.fivucsas.identity.domain.repository.UserDomainRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -15,13 +16,14 @@ import org.springframework.transaction.annotation.Transactional;
  * Use case service for getting current authenticated user.
  *
  * Implements the GetCurrentUserUseCase input port.
+ * Uses pure domain model (domain.model.user.User) via UserDomainRepository.
  */
 @Service
 @RequiredArgsConstructor
 @Slf4j
 public class GetCurrentUserService implements GetCurrentUserUseCase {
 
-    private final UserRepository userRepository;
+    private final UserDomainRepository userRepository;
 
     @Override
     @Transactional(readOnly = true)
@@ -31,6 +33,6 @@ public class GetCurrentUserService implements GetCurrentUserUseCase {
         User user = userRepository.findByEmail(query.getEmail())
             .orElseThrow(() -> new UserNotFoundException(query.getEmail()));
 
-        return com.fivucsas.identity.application.mapper.UserResponseMapper.toResponse(user);
+        return UserResponseMapper.fromDomain(user);
     }
 }

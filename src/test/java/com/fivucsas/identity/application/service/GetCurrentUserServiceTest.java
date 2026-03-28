@@ -3,9 +3,9 @@ package com.fivucsas.identity.application.service;
 import com.fivucsas.identity.application.dto.query.GetUserByEmailQuery;
 import com.fivucsas.identity.application.dto.response.UserResponse;
 import com.fivucsas.identity.domain.exception.UserNotFoundException;
-import com.fivucsas.identity.domain.repository.UserRepository;
-import com.fivucsas.identity.entity.User;
-import com.fivucsas.identity.entity.UserStatus;
+import com.fivucsas.identity.domain.model.user.User;
+import com.fivucsas.identity.domain.model.user.UserStatus;
+import com.fivucsas.identity.domain.repository.UserDomainRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -17,7 +17,6 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.Instant;
 import java.time.Duration;
-import java.time.LocalDateTime;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -33,7 +32,7 @@ class GetCurrentUserServiceTest {
     private static final String VALID_BCRYPT_HASH = "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy";
 
     @Mock
-    private UserRepository userRepository;
+    private UserDomainRepository userRepository;
 
     @InjectMocks
     private GetCurrentUserService getCurrentUserService;
@@ -43,8 +42,9 @@ class GetCurrentUserServiceTest {
 
     @BeforeEach
     void setUp() {
-        existingUser = User.builder()
+        existingUser = User.reconstitute()
             .id(UUID.randomUUID())
+            .tenantId(UUID.randomUUID())
             .email("test@example.com")
             .passwordHash(VALID_BCRYPT_HASH)
             .firstName("John")
@@ -157,8 +157,9 @@ class GetCurrentUserServiceTest {
         @DisplayName("Should handle user with null optional fields")
         void shouldHandleUserWithNullOptionalFields() {
             // Given
-            User userWithNulls = User.builder()
+            User userWithNulls = User.reconstitute()
                 .id(UUID.randomUUID())
+                .tenantId(UUID.randomUUID())
                 .email("test@example.com")
                 .passwordHash(VALID_BCRYPT_HASH)
                 .firstName("John")
@@ -193,8 +194,9 @@ class GetCurrentUserServiceTest {
         @DisplayName("Should handle different user statuses")
         void shouldHandleDifferentUserStatuses() {
             // Given
-            User suspendedUser = User.builder()
+            User suspendedUser = User.reconstitute()
                 .id(UUID.randomUUID())
+                .tenantId(UUID.randomUUID())
                 .email("test@example.com")
                 .passwordHash(VALID_BCRYPT_HASH)
                 .firstName("John")
