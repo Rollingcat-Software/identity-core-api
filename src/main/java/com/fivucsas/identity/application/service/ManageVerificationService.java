@@ -2,6 +2,8 @@ package com.fivucsas.identity.application.service;
 
 import com.fivucsas.identity.application.dto.command.SubmitVerificationStepCommand;
 import com.fivucsas.identity.application.dto.response.*;
+import com.fivucsas.identity.application.service.verification.VerificationStepHandlerRegistry;
+import com.fivucsas.identity.application.service.verification.VerificationStepHandler;
 import com.fivucsas.identity.domain.model.auth.FlowType;
 import com.fivucsas.identity.domain.model.auth.VerificationLevel;
 import com.fivucsas.identity.domain.model.auth.VerificationSessionStatus;
@@ -13,6 +15,8 @@ import com.fivucsas.identity.repository.VerificationStepResultRepository;
 import com.fivucsas.identity.repository.AuthFlowRepository;
 import com.fivucsas.identity.repository.UserRepository;
 import com.fivucsas.identity.repository.JpaTenantRepository;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.persistence.EntityNotFoundException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -21,7 +25,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @Service
@@ -69,6 +75,8 @@ public class ManageVerificationService {
     private final AuthFlowRepository authFlowRepository;
     private final UserRepository userRepository;
     private final JpaTenantRepository tenantRepository;
+    private final VerificationStepHandlerRegistry handlerRegistry;
+    private final ObjectMapper objectMapper;
 
     @Transactional
     public VerificationSessionResponse createSession(UUID userId, UUID tenantId, UUID flowId) {
@@ -127,9 +135,24 @@ public class ManageVerificationService {
 
         stepResult.markInProgress();
 
+        // If client sent an explicit error, mark failed directly
         if (command.errorMessage() != null) {
             stepResult.markFailed(command.errorMessage());
+        } else if (handlerRegistry.hasHandler(command.stepType())) {
+            // Execute the registered step handler
+            VerificationStepHandler handler = handlerRegistry.getHandler(command.stepType());
+            Map<String, Object> inputData = parseInputData(command.resultData());
+            com.fivucsas.identity.application.service.verification.VerificationStepResult handlerResult =
+                    handler.execute(session, stepNumber, inputData);
+
+            if (handlerResult.passed()) {
+                String resultJson = serializeResultData(handlerResult.resultData());
+                stepResult.markCompleted(handlerResult.confidence(), resultJson);
+            } else {
+                stepResult.markFailed(handlerResult.errorMessage());
+            }
         } else {
+            // Fallback: no handler registered, use raw command data
             stepResult.markCompleted(command.confidence(), command.resultData());
         }
 
@@ -139,6 +162,11 @@ public class ManageVerificationService {
         if (stepNumber > session.getCurrentStepNumber()) {
             session.advanceStep();
             sessionRepository.save(session);
+        }
+
+        // Auto-complete: if current step passed, check if all flow steps are done
+        if (saved.getStatus() == VerificationStepStatus.COMPLETED) {
+            tryAutoCompleteSession(session);
         }
 
         log.info("Submitted step result for session {} step {} type {} status {}",
@@ -214,6 +242,66 @@ public class ManageVerificationService {
         log.info("Verification session {} completed. User {} marked as identity verified at level {}",
                 sessionId, user.getId(), level);
         return VerificationSessionResponse.from(session);
+    }
+
+    /**
+     * Checks if all steps in the session's flow are completed and auto-completes the session.
+     */
+    private void tryAutoCompleteSession(VerificationSession session) {
+        AuthFlow flow = session.getFlow();
+        int totalSteps = flow.getStepCount();
+        if (totalSteps == 0) return;
+
+        List<VerificationStepResult> results =
+                stepResultRepository.findAllBySessionIdOrderByStepNumberAsc(session.getId());
+
+        long completedOrSkipped = results.stream()
+                .filter(r -> r.getStatus() == VerificationStepStatus.COMPLETED
+                        || r.getStatus() == VerificationStepStatus.SKIPPED)
+                .count();
+
+        boolean anyFailed = results.stream()
+                .anyMatch(r -> r.getStatus() == VerificationStepStatus.FAILED);
+
+        if (anyFailed) {
+            session.markFailed();
+            sessionRepository.save(session);
+            log.info("Session {} auto-failed due to failed step", session.getId());
+        } else if (completedOrSkipped >= totalSteps) {
+            session.markCompleted();
+            sessionRepository.save(session);
+
+            User user = session.getUser();
+            VerificationLevel level = determineVerificationLevel(results);
+            user.markIdentityVerified(level);
+            userRepository.save(user);
+            log.info("Session {} auto-completed. User {} verified at level {}",
+                    session.getId(), user.getId(), level);
+        }
+    }
+
+    private Map<String, Object> parseInputData(String resultData) {
+        if (resultData == null || resultData.isBlank()) {
+            return new HashMap<>();
+        }
+        try {
+            return objectMapper.readValue(resultData, new TypeReference<>() {});
+        } catch (Exception e) {
+            log.warn("Could not parse input data as JSON: {}", e.getMessage());
+            Map<String, Object> map = new HashMap<>();
+            map.put("raw", resultData);
+            return map;
+        }
+    }
+
+    private String serializeResultData(Map<String, Object> data) {
+        if (data == null || data.isEmpty()) return "{}";
+        try {
+            return objectMapper.writeValueAsString(data);
+        } catch (Exception e) {
+            log.warn("Could not serialize result data: {}", e.getMessage());
+            return "{}";
+        }
     }
 
     private VerificationLevel determineVerificationLevel(List<VerificationStepResult> results) {
