@@ -77,6 +77,14 @@ public class SecurityConfig {
                                 "/api/v1/auth/reset-password"
                         ).permitAll()
 
+                        // OAuth 2.0 / OIDC public endpoints
+                        .requestMatchers(
+                                "/api/v1/oauth2/authorize",
+                                "/api/v1/oauth2/token",
+                                "/.well-known/openid-configuration",
+                                "/.well-known/jwks.json"
+                        ).permitAll()
+
                         // Auth session endpoints: start, get status, and complete step are public
                         // (multi-step auth before JWT), but skip/cancel require authentication
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/sessions").permitAll()

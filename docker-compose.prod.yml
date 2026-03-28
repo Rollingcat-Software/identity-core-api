@@ -71,12 +71,13 @@ services:
       - "traefik.http.routers.identity-api.rule=Host(`auth.rollingcatsoftware.com`)"
       - "traefik.http.routers.identity-api.entrypoints=websecure"
       - "traefik.http.routers.identity-api.tls.certresolver=letsencrypt"
-      - "traefik.http.routers.identity-api.middlewares=secure-headers@file"
+      - "traefik.http.routers.identity-api.middlewares=secure-headers@file,rate-limit@file"
       - "traefik.http.services.identity-api.loadbalancer.server.port=8080"
     deploy:
       resources:
         limits:
           memory: 768M
+          pids: 512
 
 networks:
   backend:
