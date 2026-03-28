@@ -29,6 +29,8 @@ Runs on port 8080. Swagger UI at `/swagger-ui.html`.
 - `src/main/java/com/fivucsas/identity/application/service/handler/` - Auth method handlers
 - `src/main/java/com/fivucsas/identity/application/port/output/` - Output ports (BiometricServicePort)
 - `src/main/java/com/fivucsas/identity/infrastructure/` - Adapters (BiometricServiceAdapter, WebAuthn)
+- `src/main/java/com/fivucsas/identity/infrastructure/adapter/BiometricServiceAdapter.java` - HTTP client for biometric-processor (face, voice)
+- `src/main/java/com/fivucsas/identity/infrastructure/webauthn/` - WebAuthn service (fingerprint, hardware key)
 - `src/main/java/com/fivucsas/identity/entity/` - JPA entities
 - `src/main/java/com/fivucsas/identity/repository/` - Spring Data repositories
 
@@ -41,10 +43,17 @@ All handlers in `application/service/handler/`:
 
 ## Known Issues (March 2026)
 
-### BROKEN auth methods at runtime:
-1. **NfcDocumentAuthHandler** - hardcoded to always return failure (line 37-41)
-2. **FingerprintAuthHandler** - calls BiometricServicePort.verifyFingerprint() which hits a stub in biometric-processor that always fails
-3. **VoiceAuthHandler** - calls BiometricServicePort.verifyVoice() which hits a stub in biometric-processor that always fails
+### Auth handler status (2026-03-28):
+1. **PasswordAuthHandler** — WORKING
+2. **EmailOtpAuthHandler** — WORKING (SMTP via Hostinger)
+3. **SmsOtpAuthHandler** — WORKING (NoOpSmsService, Twilio ready for activation)
+4. **TotpAuthHandler** — WORKING
+5. **QrCodeAuthHandler** — WORKING
+6. **FaceAuthHandler** — WORKING (calls biometric-processor DeepFace)
+7. **FingerprintAuthHandler** — WORKING (WebAuthn assertion via WebAuthnService, 2026-03-28 fix)
+8. **VoiceAuthHandler** — WORKING (calls biometric-processor Resemblyzer)
+9. **HardwareKeyAuthHandler** — WORKING (WebAuthn cross-platform)
+10. **NfcDocumentAuthHandler** — WORKING (backend logic complete, needs mobile client)
 
 ### Connected integrations (March 2026):
 - TotpController connected to frontend TotpEnrollment (setup, verify, status, disable)
@@ -53,7 +62,6 @@ All handlers in `application/service/handler/`:
 - Forgot/Reset password endpoints connected to frontend pages
 
 ### Missing integrations:
-- WebAuthnController has registration endpoints but web-app has no enrollment UI
 - EnrollmentManagementController per-user endpoints unused by frontend
 - UserController.getAllUsers() uses in-memory pagination (fetches all, then slices) - works but inefficient for large datasets
 
@@ -67,6 +75,10 @@ All handlers in `application/service/handler/`:
 ### Cross-repo dependencies:
 - Communicates with **biometric-processor** (Python/FastAPI on port 8001) via BiometricServiceAdapter
 - Consumed by **web-app** (React frontend on port 3000) via REST API
+
+### Session 2026-03-28 fixes:
+- **FingerprintAuthHandler rewrite** — Removed BiometricServicePort dependency (stub). Now uses WebAuthnService + WebAuthnCredentialRepositoryPort for WebAuthn platform authenticator assertions. Supports challenge generation with `authenticatorAttachment: "platform"`. Tests rewritten (10 test cases).
+- **Docker image rebuilt and deployed** — identity-core-api container rebuilt with FingerprintAuthHandler fix, running healthy on Hetzner VPS.
 
 ### Critical fixes applied (2026-03-16):
 - **`@AutoConfigureMockMvc`** import path: `org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc` (Spring Boot 3.x path)
