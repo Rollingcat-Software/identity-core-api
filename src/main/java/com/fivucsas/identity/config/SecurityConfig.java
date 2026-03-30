@@ -170,7 +170,7 @@ public class SecurityConfig {
 
         // Only disable frame options for H2 console in non-prod profiles
         if (!isProductionProfile()) {
-            http.headers(headers -> headers.frameOptions().disable());
+            http.headers(headers -> headers.frameOptions(fo -> fo.disable()));
         }
 
         return http.build();

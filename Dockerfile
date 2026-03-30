@@ -1,10 +1,10 @@
 # FIVUCSAS Identity Core API - Dockerfile
-# Multi-stage build for Spring Boot 3.2 with Java 21
+# Multi-stage build for Spring Boot 3.4 with Java 21
 
 # =============================================================================
 # Stage 1: Build
 # =============================================================================
-FROM maven:3.9.6-eclipse-temurin-21-alpine AS builder
+FROM maven:3.9.9-eclipse-temurin-21-alpine AS builder
 
 WORKDIR /app
 
