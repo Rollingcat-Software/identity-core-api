@@ -23,34 +23,41 @@ public class EmailServicePortAdapter implements EmailServicePort {
 
     @Override
     public void sendRegistrationEmail(String toEmail, String name, String verificationToken) {
-        log.info("Sending registration email to: {} (name: {})", toEmail, name);
+        log.info("Sending registration email to domain: {}", maskEmail(toEmail));
         emailService.sendOtp(toEmail, verificationToken);
     }
 
     @Override
     public void sendPasswordResetEmail(String toEmail, String name, String resetToken) {
-        log.info("Sending password reset email to: {} (name: {})", toEmail, name);
+        log.info("Sending password reset email to domain: {}", maskEmail(toEmail));
         emailService.sendOtp(toEmail, resetToken);
     }
 
     @Override
     public void sendSecurityAlert(String toEmail, String name, String alertMessage) {
-        log.info("Security alert for {}: {}", toEmail, alertMessage);
+        log.info("Security alert for domain {}: {}", maskEmail(toEmail), alertMessage);
     }
 
     @Override
     public void send2FACode(String toEmail, String name, String code) {
-        log.info("Sending 2FA code to: {}", toEmail);
+        log.info("Sending 2FA code to domain: {}", maskEmail(toEmail));
         emailService.sendOtp(toEmail, code);
     }
 
     @Override
     public void sendBiometricEnrollmentNotification(String toEmail, String name, boolean success) {
-        log.info("Biometric enrollment notification for {}: success={}", toEmail, success);
+        log.info("Biometric enrollment notification for domain {}: success={}", maskEmail(toEmail), success);
     }
 
     @Override
     public void sendAccountDeactivationNotification(String toEmail, String name, String reason) {
-        log.info("Account deactivation notification for {}: reason={}", toEmail, reason);
+        log.info("Account deactivation notification for domain {}: reason={}", maskEmail(toEmail), reason);
+    }
+
+    private String maskEmail(String email) {
+        if (email == null || !email.contains("@")) {
+            return "***";
+        }
+        return "***@" + email.substring(email.indexOf('@') + 1);
     }
 }

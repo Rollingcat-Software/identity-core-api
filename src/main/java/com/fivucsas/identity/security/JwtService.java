@@ -61,7 +61,7 @@ public class JwtService implements TokenGenerationPort {
                 .subject(email)
                 .issuedAt(new Date(System.currentTimeMillis()))
                 .expiration(new Date(System.currentTimeMillis() + expiration))
-                .signWith(getSignInKey())
+                .signWith(getSignInKey(), Jwts.SIG.HS512)
                 .compact();
         // SECURITY: Never log the actual token - it's a bearer credential
         log.debug("Generated JWT token for user: {}", email);

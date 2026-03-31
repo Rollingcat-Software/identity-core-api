@@ -5,6 +5,8 @@ services:
       dockerfile: Dockerfile
     container_name: identity-core-api
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
     environment:
       SPRING_PROFILES_ACTIVE: prod
       SERVER_PORT: 8080
@@ -23,7 +25,7 @@ services:
       JWT_AUDIENCE: rollingcat-clients
       CORS_ALLOWED_ORIGINS: https://auth.rollingcatsoftware.com,https://ica-fivucsas.rollingcatsoftware.com,https://mizan.rollingcatsoftware.com,https://sarnic.rollingcatsoftware.com,https://muhabbet.rollingcatsoftware.com
       CORS_ALLOWED_METHODS: GET,POST,PUT,DELETE,OPTIONS,PATCH
-      CORS_ALLOWED_HEADERS: "*"
+      CORS_ALLOWED_HEADERS: Authorization,Content-Type,X-Tenant-ID,X-Request-ID,Accept
       CORS_MAX_AGE: 3600
       ENCRYPTION_KEY: ${ENCRYPTION_KEY}
       ENCRYPTION_ALGORITHM: AES/GCM/NoPadding

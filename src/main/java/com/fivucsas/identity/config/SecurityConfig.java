@@ -177,7 +177,9 @@ public class SecurityConfig {
     }
 
     private boolean isProductionProfile() {
-        return "prod".equalsIgnoreCase(activeProfile) || "production".equalsIgnoreCase(activeProfile);
+        return "prod".equalsIgnoreCase(activeProfile)
+                || "production".equalsIgnoreCase(activeProfile)
+                || "docker".equalsIgnoreCase(activeProfile);
     }
 
     @Bean

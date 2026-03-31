@@ -14,7 +14,7 @@ COPY pom.xml .
 # Copy source code
 COPY src ./src
 
-# Build the application
+# Build the application (dependency resolution + compile in one step)
 RUN mvn clean package -Dmaven.test.skip=true -B
 
 # =============================================================================

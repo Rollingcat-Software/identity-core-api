@@ -30,7 +30,7 @@ spring:
     locations: classpath:db/migration
     baseline-on-migrate: true
     baseline-version: 0
-    validate-on-migrate: false
+    validate-on-migrate: true
 
   # H2 Console (DISABLED in production for security)
   h2:

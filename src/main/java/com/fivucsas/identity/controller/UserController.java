@@ -28,11 +28,14 @@ import com.fivucsas.identity.security.RbacAuthorizationService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.Instant;
@@ -49,6 +52,7 @@ import java.util.stream.Collectors;
  */
 @RestController
 @RequiredArgsConstructor
+@Validated
 @Slf4j
 @Tag(name = "User Management", description = "User CRUD, settings and guest management operations")
 public class UserController {
@@ -83,8 +87,8 @@ public class UserController {
     @Operation(summary = "Get all users")
     @PreAuthorize("@rbac.hasPermission('user:read')")
     public ResponseEntity<Map<String, Object>> getAllUsers(
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size) {
+            @RequestParam(defaultValue = "0") @Min(0) int page,
+            @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size) {
         log.info("GET /api/v1/users - Get all users (page={}, size={})", page, size);
 
         GetAllUsersQuery query = GetAllUsersQuery.builder()

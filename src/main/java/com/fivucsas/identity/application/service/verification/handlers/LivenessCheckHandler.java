@@ -38,6 +38,21 @@ public class LivenessCheckHandler implements VerificationStepHandler {
             return VerificationStepResult.failure("Face image is required for liveness check");
         }
 
+        // Extract and validate client-side liveness score if provided
+        Double clientScore = parseDouble(data.get("clientScore"));
+        if (clientScore != null) {
+            log.info("Liveness client score for session {}: {}", session.getId(), clientScore);
+            if (clientScore < 0.5) {
+                log.warn("Liveness rejected for session {}: client score {} < 0.5 threshold",
+                        session.getId(), clientScore);
+                Map<String, Object> rejectData = new HashMap<>();
+                rejectData.put("client_score", clientScore);
+                rejectData.put("rejection_reason", "client_score_too_low");
+                return VerificationStepResult.failure(
+                        "Liveness challenge not completed sufficiently", rejectData);
+            }
+        }
+
         try {
             Map<String, Object> response = processorClient.livenessCheck(image);
 
@@ -62,12 +77,17 @@ public class LivenessCheckHandler implements VerificationStepHandler {
             resultData.put("liveness_score", livenessScore);
             resultData.put("is_live", isLive);
             resultData.put("threshold", livenessThreshold);
+            if (clientScore != null) {
+                resultData.put("client_score", clientScore);
+            }
 
             if (isLive) {
-                log.info("Liveness check passed for session {}: score={}", session.getId(), livenessScore);
+                log.info("Liveness check passed for session {}: serverScore={}, clientScore={}",
+                        session.getId(), livenessScore, clientScore);
                 return VerificationStepResult.success(livenessScore, resultData);
             } else {
-                log.warn("Liveness check failed for session {}: score={}", session.getId(), livenessScore);
+                log.warn("Liveness check failed for session {}: serverScore={}, clientScore={}",
+                        session.getId(), livenessScore, clientScore);
                 return VerificationStepResult.failure("Liveness check failed — possible spoof detected", resultData);
             }
         } catch (Exception e) {

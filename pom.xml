@@ -7,7 +7,7 @@
     <parent>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-starter-parent</artifactId>
-        <version>3.4.5</version>
+        <version>3.4.7</version>
         <relativePath/>
     </parent>
 
@@ -24,7 +24,32 @@
         <bucket4j.version>8.10.1</bucket4j.version>
         <totp.version>1.7.1</totp.version>
         <testcontainers.version>1.20.4</testcontainers.version>
+
+        <!-- Security CVE overrides (2026-03-31) -->
+        <spring-security.version>6.4.13</spring-security.version>
+        <spring-framework.version>6.2.17</spring-framework.version>
+        <tomcat.version>10.1.53</tomcat.version>
+        <netty.version>4.1.132.Final</netty.version>
+        <commons-io.version>2.21.0</commons-io.version>
     </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <!-- Pin Jackson BOM to prevent SNAPSHOT resolution from transitive deps -->
+            <dependency>
+                <groupId>com.fasterxml.jackson</groupId>
+                <artifactId>jackson-bom</artifactId>
+                <version>2.18.4.1</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>commons-io</groupId>
+                <artifactId>commons-io</artifactId>
+                <version>${commons-io.version}</version>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
 
     <dependencies>
         <!-- Spring Boot Starters -->
@@ -85,6 +110,18 @@
             <groupId>com.yubico</groupId>
             <artifactId>webauthn-server-core</artifactId>
             <version>2.5.2</version>
+            <exclusions>
+                <!-- Exclude transitive Jackson to avoid SNAPSHOT resolution issues -->
+                <exclusion>
+                    <groupId>com.fasterxml.jackson.dataformat</groupId>
+                    <artifactId>jackson-dataformat-cbor</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <!-- Provide CBOR explicitly at managed version -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.dataformat</groupId>
+            <artifactId>jackson-dataformat-cbor</artifactId>
         </dependency>
 
         <!-- Metrics and Monitoring -->
