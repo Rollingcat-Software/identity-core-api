@@ -85,6 +85,12 @@ public class SecurityConfig {
                                 "/.well-known/jwks.json"
                         ).permitAll()
 
+                        // WebAuthn authentication endpoints (pre-login, no JWT yet)
+                        .requestMatchers(
+                                "/api/v1/webauthn/authenticate-options",
+                                "/api/v1/webauthn/authenticate"
+                        ).permitAll()
+
                         // Auth session endpoints: start, get status, and complete step are public
                         // (multi-step auth before JWT), but skip/cancel require authentication
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/sessions").permitAll()

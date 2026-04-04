@@ -14,12 +14,16 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -31,6 +35,7 @@ import java.util.UUID;
  */
 @RestController
 @RequiredArgsConstructor
+@Slf4j
 @Tag(name = "Devices", description = "Device and WebAuthn/FIDO2 credential management")
 public class DeviceController {
 
@@ -206,5 +211,235 @@ public class DeviceController {
 
         credentialRepository.deleteByCredentialId(credentialId);
         return ResponseEntity.noContent().build();
+    }
+
+    // --- Standalone WebAuthn registration/authentication endpoints ---
+    // These follow the standard WebAuthn ceremony flow for frontend navigator.credentials API
+
+    @PostMapping("/api/v1/webauthn/register-options")
+    @Operation(summary = "Generate WebAuthn registration options for the currently authenticated user")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<Map<String, Object>> registerOptions(@RequestBody(required = false) Map<String, Object> body) {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        String email = auth.getName();
+        User user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new UserNotFoundException(email));
+
+        UUID sessionId = UUID.randomUUID();
+        String challenge = webAuthnService.generateChallenge(sessionId);
+
+        List<String> existingCredentialIds = credentialRepository.findAllByUserId(user.getId()).stream()
+                .map(WebAuthnCredential::getCredentialId)
+                .toList();
+
+        String deviceName = body != null ? (String) body.get("deviceName") : null;
+
+        Map<String, Object> options = new LinkedHashMap<>();
+        options.put("sessionId", sessionId.toString());
+        options.put("challenge", challenge);
+        options.put("rpId", webAuthnService.getRpId());
+        options.put("rpName", "Fivucsas Identity");
+        options.put("userId", user.getId().toString());
+        options.put("userName", user.getEmail());
+        options.put("userDisplayName", user.getFirstName() + " " + user.getLastName());
+        options.put("excludeCredentials", existingCredentialIds);
+        options.put("attestation", "direct");
+        options.put("authenticatorSelection", Map.of(
+                "requireResidentKey", false,
+                "userVerification", "preferred"
+        ));
+        options.put("timeout", 60000);
+        if (deviceName != null) {
+            options.put("deviceName", deviceName);
+        }
+
+        log.info("WebAuthn registration options generated for user: {}", user.getEmail());
+        return ResponseEntity.ok(options);
+    }
+
+    @PostMapping("/api/v1/webauthn/register")
+    @Operation(summary = "Complete WebAuthn registration: validate attestation and store credential")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<Map<String, Object>> register(@RequestBody Map<String, Object> request) {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        String email = auth.getName();
+        User user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new UserNotFoundException(email));
+
+        UUID sessionId = UUID.fromString((String) request.get("sessionId"));
+        String credentialId = (String) request.get("credentialId");
+        String publicKey = (String) request.get("publicKey");
+        String publicKeyAlgorithm = (String) request.getOrDefault("publicKeyAlgorithm", "ES256");
+        String attestationFormat = (String) request.get("attestationFormat");
+        String transports = (String) request.get("transports");
+        String deviceName = (String) request.get("deviceName");
+        String clientDataJson = (String) request.get("clientDataJSON");
+
+        if (credentialId == null || credentialId.isEmpty() || publicKey == null || publicKey.isEmpty()) {
+            return ResponseEntity.badRequest().body(Map.of(
+                    "success", false,
+                    "message", "credentialId and publicKey are required"
+            ));
+        }
+
+        boolean challengeValid = webAuthnService.validateRegistrationChallenge(sessionId, clientDataJson);
+        if (!challengeValid) {
+            return ResponseEntity.badRequest().body(Map.of(
+                    "success", false,
+                    "message", "Invalid or expired registration challenge"
+            ));
+        }
+
+        if (credentialRepository.existsByCredentialId(credentialId)) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of(
+                    "success", false,
+                    "message", "Credential already registered"
+            ));
+        }
+
+        WebAuthnCredential credential = WebAuthnCredential.builder()
+                .user(user)
+                .credentialId(credentialId)
+                .publicKey(publicKey)
+                .publicKeyAlgorithm(publicKeyAlgorithm)
+                .attestationFormat(attestationFormat)
+                .transports(transports)
+                .deviceName(deviceName)
+                .build();
+
+        WebAuthnCredential saved = credentialRepository.save(credential);
+
+        log.info("WebAuthn credential registered for user: {}, credentialId: {}", user.getEmail(), credentialId);
+        return ResponseEntity.status(HttpStatus.CREATED).body(Map.of(
+                "success", true,
+                "message", "Credential registered successfully",
+                "credentialId", credentialId,
+                "id", saved.getId().toString()
+        ));
+    }
+
+    @PostMapping("/api/v1/webauthn/authenticate-options")
+    @Operation(summary = "Generate WebAuthn authentication options (challenge) for navigator.credentials.get()")
+    public ResponseEntity<Map<String, Object>> authenticateOptions(@RequestBody Map<String, Object> request) {
+        String email = (String) request.get("email");
+        if (email == null || email.isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of(
+                    "success", false,
+                    "message", "email is required"
+            ));
+        }
+
+        User user = userRepository.findByEmail(email).orElse(null);
+        if (user == null) {
+            // Return generic error to avoid user enumeration
+            return ResponseEntity.badRequest().body(Map.of(
+                    "success", false,
+                    "message", "No WebAuthn credentials available"
+            ));
+        }
+
+        List<WebAuthnCredential> credentials = credentialRepository.findAllByUserId(user.getId());
+        if (credentials.isEmpty()) {
+            return ResponseEntity.badRequest().body(Map.of(
+                    "success", false,
+                    "message", "No WebAuthn credentials available"
+            ));
+        }
+
+        UUID sessionId = UUID.randomUUID();
+        String challenge = webAuthnService.generateChallenge(sessionId);
+
+        List<Map<String, Object>> allowCredentials = credentials.stream()
+                .map(c -> {
+                    Map<String, Object> cred = new LinkedHashMap<>();
+                    cred.put("id", c.getCredentialId());
+                    cred.put("type", "public-key");
+                    if (c.getTransports() != null && !c.getTransports().isEmpty()) {
+                        cred.put("transports", List.of(c.getTransports().split(",")));
+                    }
+                    return cred;
+                })
+                .toList();
+
+        Map<String, Object> options = new LinkedHashMap<>();
+        options.put("sessionId", sessionId.toString());
+        options.put("challenge", challenge);
+        options.put("rpId", webAuthnService.getRpId());
+        options.put("allowCredentials", allowCredentials);
+        options.put("userVerification", "preferred");
+        options.put("timeout", 60000);
+
+        log.info("WebAuthn authenticate options generated for email: {}, {} credential(s)", email, credentials.size());
+        return ResponseEntity.ok(options);
+    }
+
+    @PostMapping("/api/v1/webauthn/authenticate")
+    @Operation(summary = "Verify WebAuthn authentication assertion from navigator.credentials.get()")
+    public ResponseEntity<Map<String, Object>> authenticate(@RequestBody Map<String, Object> request) {
+        String sessionIdStr = (String) request.get("sessionId");
+        String credentialId = (String) request.get("credentialId");
+        String authenticatorData = (String) request.get("authenticatorData");
+        String clientDataJson = (String) request.get("clientDataJSON");
+        String signature = (String) request.get("signature");
+
+        if (sessionIdStr == null || credentialId == null || authenticatorData == null
+                || clientDataJson == null || signature == null) {
+            return ResponseEntity.badRequest().body(Map.of(
+                    "success", false,
+                    "message", "sessionId, credentialId, authenticatorData, clientDataJSON, and signature are required"
+            ));
+        }
+
+        UUID sessionId;
+        try {
+            sessionId = UUID.fromString(sessionIdStr);
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of(
+                    "success", false,
+                    "message", "Invalid sessionId format"
+            ));
+        }
+
+        // Look up the stored credential
+        WebAuthnCredential credential = credentialRepository.findByCredentialId(credentialId).orElse(null);
+        if (credential == null) {
+            log.warn("WebAuthn authenticate: credential not found: {}", credentialId);
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of(
+                    "success", false,
+                    "message", "Authentication failed"
+            ));
+        }
+
+        // Verify the assertion cryptographically
+        boolean valid = webAuthnService.verifyAssertion(
+                sessionId, credentialId, authenticatorData, clientDataJson,
+                signature, credential.getPublicKey());
+
+        if (!valid) {
+            log.warn("WebAuthn authenticate: assertion verification failed for credential: {}", credentialId);
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of(
+                    "success", false,
+                    "message", "Authentication failed"
+            ));
+        }
+
+        // Update sign count to detect cloned authenticators
+        long newSignCount = webAuthnService.extractSignCount(authenticatorData);
+        if (newSignCount > 0 && newSignCount > credential.getSignCount()) {
+            credential.updateSignCount(newSignCount);
+            credentialRepository.save(credential);
+        }
+
+        User user = credential.getUser();
+        log.info("WebAuthn authentication successful for user: {}, credential: {}", user.getEmail(), credentialId);
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("success", true);
+        result.put("message", "Authentication successful");
+        result.put("userId", user.getId().toString());
+        result.put("email", user.getEmail());
+        result.put("credentialId", credentialId);
+
+        return ResponseEntity.ok(result);
     }
 }
