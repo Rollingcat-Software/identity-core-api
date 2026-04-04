@@ -5,7 +5,10 @@ import com.fivucsas.identity.application.port.input.GetStatisticsUseCase;
 import com.fivucsas.identity.dto.AuditLogDto;
 import com.fivucsas.identity.dto.StatisticsDto;
 import com.fivucsas.identity.entity.AuditLog;
+import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.repository.AuditLogRepository;
+import com.fivucsas.identity.security.RbacAuthorizationService;
+import com.fivucsas.identity.domain.exception.UnauthorizedException;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
@@ -35,6 +38,7 @@ public class AuditLogController {
 
     private final AuditLogRepository auditLogRepository;
     private final GetStatisticsUseCase getStatisticsUseCase;
+    private final RbacAuthorizationService rbacService;
 
     @GetMapping("/api/v1/audit-logs")
     @Operation(summary = "Get audit logs with pagination")
@@ -57,6 +61,32 @@ public class AuditLogController {
         } else {
             auditLogs = auditLogRepository.findAll(pageRequest);
         }
+
+        Map<String, Object> response = new HashMap<>();
+        response.put("content", auditLogs.getContent().stream().map(this::mapToDto).toList());
+        response.put("totalElements", auditLogs.getTotalElements());
+        response.put("totalPages", auditLogs.getTotalPages());
+        response.put("page", auditLogs.getNumber());
+        response.put("size", auditLogs.getSize());
+
+        return ResponseEntity.ok(response);
+    }
+
+    /**
+     * User-accessible endpoint — returns only the current user's own activity logs.
+     */
+    @GetMapping("/api/v1/my/activity")
+    @Operation(summary = "Get current user's own activity logs")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<Map<String, Object>> getMyActivity(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+
+        User currentUser = rbacService.getCurrentUser()
+                .orElseThrow(UnauthorizedException::new);
+
+        PageRequest pageRequest = PageRequest.of(page, Math.min(size, 50), Sort.by(Sort.Direction.DESC, "createdAt"));
+        Page<AuditLog> auditLogs = auditLogRepository.findByUserIdOrderByCreatedAtDesc(currentUser.getId(), pageRequest);
 
         Map<String, Object> response = new HashMap<>();
         response.put("content", auditLogs.getContent().stream().map(this::mapToDto).toList());
