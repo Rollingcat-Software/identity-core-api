@@ -17,6 +17,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -179,9 +180,22 @@ public class DeviceController {
         return ResponseEntity.ok(credentials);
     }
 
+    @DeleteMapping("/api/v1/webauthn/credentials/by-id/{id}")
+    @Operation(summary = "Delete a WebAuthn credential by database ID")
+    @PreAuthorize("isAuthenticated()")
+    @Transactional
+    public ResponseEntity<Void> deleteCredentialById(@PathVariable UUID id) {
+        if (!credentialRepository.existsById(id)) {
+            throw new ResourceNotFoundException("Credential", id.toString());
+        }
+        credentialRepository.deleteById(id);
+        return ResponseEntity.noContent().build();
+    }
+
     @DeleteMapping("/api/v1/webauthn/credentials/{credentialId}")
     @Operation(summary = "Delete a WebAuthn credential")
     @PreAuthorize("isAuthenticated()")
+    @Transactional
     public ResponseEntity<Void> deleteCredential(@PathVariable String credentialId) {
         if (!credentialRepository.existsByCredentialId(credentialId)) {
             throw new ResourceNotFoundException("Credential", credentialId);

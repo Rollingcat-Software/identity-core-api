@@ -19,5 +19,9 @@ public interface WebAuthnCredentialRepositoryPort {
 
     void deleteByCredentialId(String credentialId);
 
+    boolean existsById(UUID id);
+
+    void deleteById(UUID id);
+
     WebAuthnCredential save(WebAuthnCredential credential);
 }

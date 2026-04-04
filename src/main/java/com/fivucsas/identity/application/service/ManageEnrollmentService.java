@@ -29,6 +29,9 @@ public class ManageEnrollmentService implements ManageEnrollmentUseCase {
     private static final Set<AuthMethodType> BIOMETRIC_TYPES = Set.of(
             AuthMethodType.FACE, AuthMethodType.FINGERPRINT, AuthMethodType.VOICE);
 
+    private static final Set<AuthMethodType> ASYNC_ENROLLMENT_TYPES = Set.of(
+            AuthMethodType.FACE, AuthMethodType.VOICE);
+
     private final UserEnrollmentRepositoryPort userEnrollmentRepository;
     private final UserRepository userRepository;
     private final JpaTenantRepository tenantRepository;
@@ -58,7 +61,11 @@ public class ManageEnrollmentService implements ManageEnrollmentUseCase {
                             .build();
                 });
 
-        enrollment.startEnrollment();
+        if (ASYNC_ENROLLMENT_TYPES.contains(methodType)) {
+            enrollment.startEnrollment();
+        } else {
+            enrollment.completeEnrollment("{}");
+        }
         return EnrollmentResponse.from(userEnrollmentRepository.save(enrollment));
     }
 

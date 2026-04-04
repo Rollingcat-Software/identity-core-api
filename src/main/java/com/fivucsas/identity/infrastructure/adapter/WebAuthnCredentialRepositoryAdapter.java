@@ -37,6 +37,16 @@ public class WebAuthnCredentialRepositoryAdapter implements WebAuthnCredentialRe
     }
 
     @Override
+    public boolean existsById(UUID id) {
+        return jpaRepository.existsById(id);
+    }
+
+    @Override
+    public void deleteById(UUID id) {
+        jpaRepository.deleteById(id);
+    }
+
+    @Override
     public WebAuthnCredential save(WebAuthnCredential credential) {
         return jpaRepository.save(credential);
     }

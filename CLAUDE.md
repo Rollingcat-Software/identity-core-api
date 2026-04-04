@@ -76,6 +76,12 @@ All handlers in `application/service/handler/`:
 - Communicates with **biometric-processor** (Python/FastAPI on port 8001) via BiometricServiceAdapter
 - Consumed by **web-app** (React frontend on port 3000) via REST API
 
+### Enrollment fixes (2026-04-04):
+- ✅ **Auto-complete enrollment**: `ManageEnrollmentService.startEnrollment()` now immediately sets ENROLLED for non-async methods (all except FACE/VOICE). New `ASYNC_ENROLLMENT_TYPES` constant.
+- ✅ **Complete endpoint**: `PUT /api/v1/users/{userId}/enrollments/{methodType}/complete` for frontend to mark biometric enrollments as done
+- ✅ **WebAuthn delete by UUID**: `DELETE /api/v1/webauthn/credentials/by-id/{id}` endpoint avoids base64url path variable issues. @Transactional added.
+- ✅ **WebAuthnCredentialRepositoryPort**: Added `existsById(UUID)` and `deleteById(UUID)` methods
+
 ### Session 2026-03-28 fixes:
 - **FingerprintAuthHandler rewrite** — Removed BiometricServicePort dependency (stub). Now uses WebAuthnService + WebAuthnCredentialRepositoryPort for WebAuthn platform authenticator assertions. Supports challenge generation with `authenticatorAttachment: "platform"`. Tests rewritten (10 test cases).
 - **Docker image rebuilt and deployed** — identity-core-api container rebuilt with FingerprintAuthHandler fix, running healthy on Hetzner VPS.
