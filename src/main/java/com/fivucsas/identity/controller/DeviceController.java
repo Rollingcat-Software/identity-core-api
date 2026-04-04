@@ -168,13 +168,16 @@ public class DeviceController {
     @PreAuthorize("hasAuthority('webauthn:read') or @userSecurityService.isCurrentUser(#userId)")
     public ResponseEntity<List<Map<String, Object>>> listCredentials(@PathVariable UUID userId) {
         List<Map<String, Object>> credentials = credentialRepository.findAllByUserId(userId).stream()
-                .map(c -> Map.<String, Object>of(
-                        "id", c.getId().toString(),
-                        "credentialId", c.getCredentialId(),
-                        "deviceName", c.getDeviceName() != null ? c.getDeviceName() : "Unknown device",
-                        "createdAt", c.getCreatedAt().toString(),
-                        "lastUsedAt", c.getLastUsedAt() != null ? c.getLastUsedAt().toString() : "Never"
-                ))
+                .map(c -> {
+                    var map = new java.util.LinkedHashMap<String, Object>();
+                    map.put("id", c.getId().toString());
+                    map.put("credentialId", c.getCredentialId());
+                    map.put("deviceName", c.getDeviceName() != null ? c.getDeviceName() : "Unknown device");
+                    map.put("transports", c.getTransports() != null ? c.getTransports() : "");
+                    map.put("createdAt", c.getCreatedAt().toString());
+                    map.put("lastUsedAt", c.getLastUsedAt() != null ? c.getLastUsedAt().toString() : "Never");
+                    return (Map<String, Object>) map;
+                })
                 .toList();
 
         return ResponseEntity.ok(credentials);
