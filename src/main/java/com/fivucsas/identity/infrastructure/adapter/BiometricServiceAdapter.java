@@ -358,18 +358,24 @@ public class BiometricServiceAdapter implements BiometricServicePort {
     public Map<String, Object> verifyLivenessPuzzle(String puzzleId, java.util.List<MultipartFile> frames) {
         log.info("Calling biometric service to verify liveness puzzle: {} with {} frames", puzzleId, frames.size());
         try {
-            MultipartBodyBuilder bodyBuilder = new MultipartBodyBuilder();
-            bodyBuilder.part("puzzle_id", puzzleId);
-            for (int i = 0; i < frames.size(); i++) {
-                bodyBuilder.part("frames", frames.get(i).getResource())
-                        .contentType(MediaType.IMAGE_JPEG)
-                        .filename("frame_" + i + ".jpg");
+            // Convert frames to base64 for spot_frames field
+            java.util.List<String> spotFrames = new java.util.ArrayList<>();
+            for (MultipartFile frame : frames) {
+                if (frame != null && !frame.isEmpty()) {
+                    spotFrames.add(java.util.Base64.getEncoder().encodeToString(frame.getBytes()));
+                }
             }
+
+            // Build JSON body matching VerifyPuzzleRequest schema
+            Map<String, Object> requestBody = new java.util.HashMap<>();
+            requestBody.put("puzzle_id", puzzleId);
+            requestBody.put("results", java.util.Collections.emptyList());
+            requestBody.put("spot_frames", spotFrames);
 
             return restClient.post()
                     .uri("/liveness/verify")
-                    .contentType(MediaType.MULTIPART_FORM_DATA)
-                    .body(bodyBuilder.build())
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(requestBody)
                     .retrieve()
                     .body(MAP_TYPE);
         } catch (ResourceAccessException e) {
@@ -378,6 +384,9 @@ public class BiometricServiceAdapter implements BiometricServicePort {
         } catch (RestClientException e) {
             log.error("Biometric service error for liveness verification: {}", e.getMessage());
             return errorResponse("Liveness verification service error");
+        } catch (java.io.IOException e) {
+            log.error("Failed to read frame data for liveness verification: {}", e.getMessage());
+            return errorResponse("Liveness verification frame read error");
         }
     }
 

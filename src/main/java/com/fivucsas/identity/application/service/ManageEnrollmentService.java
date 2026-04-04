@@ -29,8 +29,8 @@ public class ManageEnrollmentService implements ManageEnrollmentUseCase {
     private static final Set<AuthMethodType> BIOMETRIC_TYPES = Set.of(
             AuthMethodType.FACE, AuthMethodType.FINGERPRINT, AuthMethodType.VOICE);
 
-    private static final Set<AuthMethodType> ASYNC_ENROLLMENT_TYPES = Set.of(
-            AuthMethodType.FACE, AuthMethodType.VOICE);
+    // All enrollment types auto-complete — the frontend only calls startEnrollment
+    // AFTER the biometric service confirms success (face enrolled, voice enrolled, etc.)
 
     private final UserEnrollmentRepositoryPort userEnrollmentRepository;
     private final UserRepository userRepository;
@@ -61,11 +61,7 @@ public class ManageEnrollmentService implements ManageEnrollmentUseCase {
                             .build();
                 });
 
-        if (ASYNC_ENROLLMENT_TYPES.contains(methodType)) {
-            enrollment.startEnrollment();
-        } else {
-            enrollment.completeEnrollment("{}");
-        }
+        enrollment.completeEnrollment("{}");
         return EnrollmentResponse.from(userEnrollmentRepository.save(enrollment));
     }
 
