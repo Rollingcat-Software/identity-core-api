@@ -108,9 +108,9 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
         }
 
         if (oauthClientName != null) {
-            auditLogPort.logUserAuthenticated(user.getId().toString(), user.getEmail(), command.getIpAddress(), oauthClientName);
+            auditLogPort.logUserAuthenticated(user.getId().toString(), user.getEmail(), command.getIpAddress(), command.getUserAgent(), oauthClientName);
         } else {
-            auditLogPort.logUserAuthenticated(user.getId().toString(), user.getEmail(), command.getIpAddress());
+            auditLogPort.logUserAuthenticated(user.getId().toString(), user.getEmail(), command.getIpAddress(), command.getUserAgent());
         }
         eventPublisher.publishUserAuthenticated(user.getId().toString(), user.getEmail());
 

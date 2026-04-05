@@ -41,18 +41,18 @@ public class AuditLogAdapter implements AuditLogPort {
 
     @Override
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public void logUserAuthenticated(String userId, String email, String ipAddress) {
+    public void logUserAuthenticated(String userId, String email, String ipAddress, String userAgent) {
         log.info("AUDIT: User authenticated - userId={}, email={}, ip={}", userId, email, ipAddress);
-        saveAuditLog("USER_LOGIN", "USER", userId, true, ipAddress,
+        saveAuditLog("USER_LOGIN", "USER", userId, true, ipAddress, userAgent,
                 Map.of("email", email));
     }
 
     @Override
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public void logUserAuthenticated(String userId, String email, String ipAddress, String oauthClientName) {
+    public void logUserAuthenticated(String userId, String email, String ipAddress, String userAgent, String oauthClientName) {
         log.info("AUDIT: User authenticated via OAuth client - userId={}, email={}, ip={}, client={}",
                 userId, email, ipAddress, oauthClientName);
-        saveAuditLog("USER_LOGIN", "USER", userId, true, ipAddress,
+        saveAuditLog("USER_LOGIN", "USER", userId, true, ipAddress, userAgent,
                 Map.of("email", email, "oauthClient", oauthClientName));
     }
 
@@ -96,6 +96,11 @@ public class AuditLogAdapter implements AuditLogPort {
 
     private void saveAuditLog(String action, String resourceType, String userId,
                               boolean success, String ipAddress, Map<String, Object> metadata) {
+        saveAuditLog(action, resourceType, userId, success, ipAddress, null, metadata);
+    }
+
+    private void saveAuditLog(String action, String resourceType, String userId,
+                              boolean success, String ipAddress, String userAgent, Map<String, Object> metadata) {
         try {
             AuditLog auditLog = AuditLog.builder()
                     .action(action)
@@ -104,6 +109,7 @@ public class AuditLogAdapter implements AuditLogPort {
                     .resourceId(userId != null ? UUID.fromString(userId) : null)
                     .success(success)
                     .ipAddress(ipAddress)
+                    .userAgent(userAgent)
                     .metadata(metadata)
                     .build();
 

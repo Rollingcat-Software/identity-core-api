@@ -39,7 +39,10 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.ByteArrayInputStream;
+import java.io.InputStream;
 import java.util.Map;
 
 /**
@@ -459,7 +462,19 @@ public class AuthController {
                     if (image == null || image.isBlank()) yield false;
                     byte[] imageBytes = java.util.Base64.getDecoder().decode(
                             image.contains(",") ? image.substring(image.indexOf(",") + 1) : image);
-                    MultipartFile faceFile = new InMemoryMultipartFile("file", "face.jpg", "image/jpeg", imageBytes);
+                    final byte[] bytes = imageBytes;
+                    MultipartFile faceFile = new MultipartFile() {
+                        public String getName() { return "file"; }
+                        public String getOriginalFilename() { return "face.jpg"; }
+                        public String getContentType() { return "image/jpeg"; }
+                        public boolean isEmpty() { return bytes.length == 0; }
+                        public long getSize() { return bytes.length; }
+                        public byte[] getBytes() { return bytes; }
+                        public InputStream getInputStream() { return new ByteArrayInputStream(bytes); }
+                        public void transferTo(java.io.File dest) throws java.io.IOException {
+                            java.nio.file.Files.write(dest.toPath(), bytes);
+                        }
+                    };
                     Map<String, Object> faceResult = biometricService.verifyFace(user.getId(), faceFile);
                     yield Boolean.TRUE.equals(faceResult.get("verified"));
                 }
