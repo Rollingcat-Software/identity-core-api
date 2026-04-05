@@ -3,6 +3,7 @@ package com.fivucsas.identity.application.service;
 import com.fivucsas.identity.application.dto.command.AuthenticateUserCommand;
 import com.fivucsas.identity.application.dto.response.AuthenticationResponse;
 import com.fivucsas.identity.application.port.output.AuditLogPort;
+import com.fivucsas.identity.application.port.output.AuthFlowRepositoryPort;
 import com.fivucsas.identity.application.port.output.EventPublisherPort;
 import com.fivucsas.identity.application.port.output.PasswordEncoderPort;
 import com.fivucsas.identity.application.port.output.TokenGenerationPort;
@@ -57,6 +58,9 @@ class AuthenticateUserServiceTest {
 
     @Mock
     private EventPublisherPort eventPublisher;
+
+    @Mock
+    private AuthFlowRepositoryPort authFlowRepository;
 
     @InjectMocks
     private AuthenticateUserService authenticateUserService;
