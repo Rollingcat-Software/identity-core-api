@@ -364,6 +364,48 @@ public class AuthController {
         return ResponseEntity.ok(Map.of("success", true, "message", "Phone number verified successfully"));
     }
 
+    private static final String TWO_FA_OTP_PREFIX = "2fa-login:";
+
+    @PostMapping("/2fa/send")
+    @Operation(summary = "Send 2FA verification code to user's email", security = @SecurityRequirement(name = "bearer-jwt"))
+    public ResponseEntity<Map<String, String>> send2FACode(Authentication authentication) {
+        User user = userRepository.findByEmail(authentication.getName())
+                .orElseThrow(() -> new UserNotFoundException(authentication.getName()));
+
+        String code = otpService.generate(TWO_FA_OTP_PREFIX + user.getId());
+        emailService.sendOtp(user.getEmail(), code);
+        log.info("2FA login code sent to: {}", user.getEmail());
+
+        // Mask email for display
+        String email = user.getEmail();
+        String maskedEmail = email.substring(0, Math.min(3, email.indexOf('@'))) + "***" + email.substring(email.indexOf('@'));
+
+        return ResponseEntity.ok(Map.of("message", "Verification code sent", "email", maskedEmail));
+    }
+
+    @PostMapping("/2fa/verify")
+    @Operation(summary = "Verify 2FA code to complete login", security = @SecurityRequirement(name = "bearer-jwt"))
+    public ResponseEntity<Map<String, Object>> verify2FACode(
+            @RequestBody Map<String, String> request,
+            Authentication authentication) {
+        String code = request.get("code");
+        if (code == null || code.isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("success", false, "message", "code is required"));
+        }
+
+        User user = userRepository.findByEmail(authentication.getName())
+                .orElseThrow(() -> new UserNotFoundException(authentication.getName()));
+
+        boolean valid = otpService.validate(TWO_FA_OTP_PREFIX + user.getId(), code);
+        if (!valid) {
+            log.warn("Invalid 2FA code for user: {}", user.getId());
+            return ResponseEntity.ok(Map.of("success", false, "message", "Invalid or expired verification code"));
+        }
+
+        log.info("2FA verified for user: {}", user.getId());
+        return ResponseEntity.ok(Map.of("success", true, "message", "Two-factor authentication successful"));
+    }
+
     @GetMapping("/health")
     @Operation(summary = "Health check")
     public ResponseEntity<String> health() {
