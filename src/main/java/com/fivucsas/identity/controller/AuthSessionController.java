@@ -29,8 +29,8 @@ import java.util.UUID;
 /**
  * REST controller for auth session and user session management.
  *
- * Merges: AuthSessionController (/api/v1/auth/sessions/*) + SessionController (/api/v1/sessions/*)
- * Uses full path on SessionController-derived methods to preserve original URL paths.
+ * Merges: AuthSessionController (/api/v1/auth/sessions/*) + SessionController (/api/v1/auth/sessions/my/*)
+ * User session management endpoints use the /my sub-path under the auth sessions base.
  */
 @RestController
 @RequestMapping("/api/v1/auth/sessions")
@@ -78,9 +78,9 @@ public class AuthSessionController {
         return ResponseEntity.noContent().build();
     }
 
-    // --- /api/v1/sessions endpoints (merged from SessionController) ---
+    // --- /api/v1/auth/sessions/my endpoints (user session management) ---
 
-    @GetMapping("/api/v1/sessions")
+    @GetMapping("/my")
     @Operation(
         summary = "Get all active sessions",
         description = "Returns list of active sessions for the authenticated user",
@@ -101,7 +101,7 @@ public class AuthSessionController {
         return ResponseEntity.ok(sessions);
     }
 
-    @DeleteMapping("/api/v1/sessions/{sessionId}")
+    @DeleteMapping("/my/{sessionId}")
     @Operation(
         summary = "Revoke a specific session",
         description = "Revokes a specific session by ID (logs out that device)",
@@ -124,7 +124,7 @@ public class AuthSessionController {
         return ResponseEntity.noContent().build();
     }
 
-    @DeleteMapping("/api/v1/sessions/all")
+    @DeleteMapping("/my/all")
     @Operation(
         summary = "Revoke all other sessions",
         description = "Revokes all sessions except the current one (logout from all other devices)",

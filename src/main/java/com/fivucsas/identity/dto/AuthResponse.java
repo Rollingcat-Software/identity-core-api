@@ -17,6 +17,8 @@ public class AuthResponse {
     private String tokenType;
     private Long expiresIn;
     private UserResponse user;
+    @Builder.Default
+    private boolean twoFactorRequired = false;
 
     public static AuthResponse of(String accessToken, String refreshToken, Long expiresIn, UserResponse user) {
         return AuthResponse.builder()
@@ -25,6 +27,17 @@ public class AuthResponse {
                 .tokenType("Bearer")
                 .expiresIn(expiresIn)
                 .user(user)
+                .build();
+    }
+
+    public static AuthResponse of(String accessToken, String refreshToken, Long expiresIn, UserResponse user, boolean twoFactorRequired) {
+        return AuthResponse.builder()
+                .accessToken(accessToken)
+                .refreshToken(refreshToken)
+                .tokenType("Bearer")
+                .expiresIn(expiresIn)
+                .user(user)
+                .twoFactorRequired(twoFactorRequired)
                 .build();
     }
 }

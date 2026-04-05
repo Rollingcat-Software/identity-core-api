@@ -22,6 +22,7 @@ public class AuthenticationResponse {
     private String refreshToken;
     private Long expiresIn;
     private UserResponse user;
+    private boolean twoFactorRequired;
 
     public static AuthenticationResponse of(String accessToken, String refreshToken, Long expiresIn, UserResponse user) {
         return AuthenticationResponse.builder()
@@ -29,6 +30,17 @@ public class AuthenticationResponse {
             .refreshToken(refreshToken)
             .expiresIn(expiresIn)
             .user(user)
+            .twoFactorRequired(false)
+            .build();
+    }
+
+    public static AuthenticationResponse of(String accessToken, String refreshToken, Long expiresIn, UserResponse user, boolean twoFactorRequired) {
+        return AuthenticationResponse.builder()
+            .accessToken(accessToken)
+            .refreshToken(refreshToken)
+            .expiresIn(expiresIn)
+            .user(user)
+            .twoFactorRequired(twoFactorRequired)
             .build();
     }
 }

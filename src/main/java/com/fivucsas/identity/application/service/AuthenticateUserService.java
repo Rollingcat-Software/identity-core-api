@@ -12,6 +12,8 @@ import com.fivucsas.identity.domain.repository.UserRepository;
 import com.fivucsas.identity.entity.RefreshToken;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.service.RefreshTokenService;
+import com.fivucsas.identity.repository.UserSettingsRepository;
+import com.fivucsas.identity.entity.UserSettings;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -19,6 +21,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Map;
 
 /**
  * Use case service for user authentication.
@@ -37,6 +40,7 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
     private final RefreshTokenService refreshTokenService;
     private final AuditLogPort auditLogPort;
     private final com.fivucsas.identity.application.port.output.EventPublisherPort eventPublisher;
+    private final UserSettingsRepository userSettingsRepository;
 
     private static final int MAX_FAILED_ATTEMPTS = 5;
     private static final Duration LOCKOUT_DURATION = Duration.ofMinutes(15);
@@ -100,8 +104,32 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
         // Save user (resets failed attempts + updates lastLoginAt if needed)
         userRepository.save(user);
 
+        // Check if user has 2FA enabled in their settings
+        boolean twoFactorRequired = false;
+        try {
+            twoFactorRequired = userSettingsRepository.findByUserId(user.getId())
+                .map(UserSettings::getSettings)
+                .map(settings -> {
+                    Object security = settings.get("security");
+                    if (security instanceof Map) {
+                        @SuppressWarnings("unchecked")
+                        Map<String, Object> secMap = (Map<String, Object>) security;
+                        Object enabled = secMap.get("twoFactorEnabled");
+                        return Boolean.TRUE.equals(enabled);
+                    }
+                    return false;
+                })
+                .orElse(false);
+        } catch (Exception e) {
+            log.warn("Failed to check 2FA settings for user {}: {}", user.getId(), e.getMessage());
+        }
+
+        if (twoFactorRequired) {
+            log.info("2FA required for user: {}", user.getId());
+        }
+
         UserResponse userResponse = com.fivucsas.identity.application.mapper.UserResponseMapper.toResponse(user);
 
-        return AuthenticationResponse.of(accessToken, refreshToken.getToken(), tokenGenerator.getExpirationMillis(), userResponse);
+        return AuthenticationResponse.of(accessToken, refreshToken.getToken(), tokenGenerator.getExpirationMillis(), userResponse, twoFactorRequired);
     }
 }

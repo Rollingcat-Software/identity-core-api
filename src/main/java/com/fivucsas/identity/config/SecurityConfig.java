@@ -91,6 +91,10 @@ public class SecurityConfig {
                                 "/api/v1/webauthn/authenticate"
                         ).permitAll()
 
+                        // User session management endpoints require authentication
+                        .requestMatchers("/api/v1/auth/sessions/my/**").authenticated()
+                        .requestMatchers("/api/v1/auth/sessions/my").authenticated()
+
                         // Auth session endpoints: start, get status, and complete step are public
                         // (multi-step auth before JWT), but skip/cancel require authentication
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/sessions").permitAll()

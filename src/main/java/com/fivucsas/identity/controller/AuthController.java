@@ -377,7 +377,8 @@ public class AuthController {
             response.getAccessToken(),
             response.getRefreshToken(),
             response.getExpiresIn(),
-            response.getUser()
+            response.getUser(),
+            response.isTwoFactorRequired()
         );
     }
 
