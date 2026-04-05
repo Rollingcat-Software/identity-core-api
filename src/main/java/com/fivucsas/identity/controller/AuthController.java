@@ -574,6 +574,19 @@ public class AuthController {
     // Mapping methods (API DTOs <-> Application DTOs)
 
     private AuthResponse mapToAuthResponse(AuthenticationResponse response) {
+        if (response.isMfaRequired() && response.getMfaSessionToken() != null) {
+            return AuthResponse.ofMfa(
+                response.getAccessToken(),
+                response.getRefreshToken(),
+                response.getExpiresIn(),
+                response.getUser(),
+                response.getMfaSessionToken(),
+                response.getTotalSteps(),
+                response.getCurrentStep(),
+                response.getTwoFactorMethod(),
+                response.getAvailableMethods()
+            );
+        }
         return AuthResponse.of(
             response.getAccessToken(),
             response.getRefreshToken(),
