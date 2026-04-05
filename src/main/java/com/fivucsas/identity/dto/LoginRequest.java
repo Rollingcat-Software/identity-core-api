@@ -16,4 +16,11 @@ public class LoginRequest {
     @NotBlank(message = "Password is required")
     @Size(max = 128, message = "Password must not exceed 128 characters")
     private String password;
+
+    /**
+     * Optional OAuth2 client ID when login originates from a widget/OAuth flow.
+     * Used for audit logging to record which application initiated the login.
+     */
+    @Size(max = 128, message = "Client ID must not exceed 128 characters")
+    private String clientId;
 }

@@ -6,6 +6,7 @@ import com.fivucsas.identity.application.mapper.UserResponseMapper;
 import com.fivucsas.identity.application.port.input.GetCurrentUserUseCase;
 import com.fivucsas.identity.domain.exception.UserNotFoundException;
 import com.fivucsas.identity.domain.model.user.User;
+import com.fivucsas.identity.domain.repository.TenantRepository;
 import com.fivucsas.identity.domain.repository.UserDomainRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -24,6 +25,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class GetCurrentUserService implements GetCurrentUserUseCase {
 
     private final UserDomainRepository userRepository;
+    private final TenantRepository tenantRepository;
 
     @Override
     @Transactional(readOnly = true)
@@ -33,6 +35,14 @@ public class GetCurrentUserService implements GetCurrentUserUseCase {
         User user = userRepository.findByEmail(query.getEmail())
             .orElseThrow(() -> new UserNotFoundException(query.getEmail()));
 
-        return UserResponseMapper.fromDomain(user);
+        // Resolve tenant name for the response
+        String tenantName = null;
+        if (user.getTenantId() != null) {
+            tenantName = tenantRepository.findById(user.getTenantId())
+                .map(com.fivucsas.identity.domain.model.tenant.Tenant::getName)
+                .orElse(null);
+        }
+
+        return UserResponseMapper.fromDomain(user, tenantName);
     }
 }

@@ -15,6 +15,8 @@ import com.fivucsas.identity.entity.AuthFlow;
 import com.fivucsas.identity.entity.RefreshToken;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.service.RefreshTokenService;
+import com.fivucsas.identity.application.port.output.OAuth2ClientRepositoryPort;
+import com.fivucsas.identity.entity.OAuth2Client;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -42,6 +44,7 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
     private final AuditLogPort auditLogPort;
     private final com.fivucsas.identity.application.port.output.EventPublisherPort eventPublisher;
     private final AuthFlowRepositoryPort authFlowRepository;
+    private final OAuth2ClientRepositoryPort oAuth2ClientRepository;
 
     private static final int MAX_FAILED_ATTEMPTS = 5;
     private static final Duration LOCKOUT_DURATION = Duration.ofMinutes(15);
@@ -92,7 +95,23 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
         user.recordLogin(command.getIpAddress());
 
         log.info("User logged in successfully: {}", user.getId());
-        auditLogPort.logUserAuthenticated(user.getId().toString(), user.getEmail(), command.getIpAddress());
+
+        // Look up OAuth client name if login came from a widget/OAuth flow
+        String oauthClientName = null;
+        if (command.getClientId() != null && !command.getClientId().isBlank()) {
+            try {
+                Optional<OAuth2Client> oauthClient = oAuth2ClientRepository.findByClientId(command.getClientId());
+                oauthClientName = oauthClient.map(OAuth2Client::getClientName).orElse(null);
+            } catch (Exception e) {
+                log.warn("Failed to look up OAuth client '{}': {}", command.getClientId(), e.getMessage());
+            }
+        }
+
+        if (oauthClientName != null) {
+            auditLogPort.logUserAuthenticated(user.getId().toString(), user.getEmail(), command.getIpAddress(), oauthClientName);
+        } else {
+            auditLogPort.logUserAuthenticated(user.getId().toString(), user.getEmail(), command.getIpAddress());
+        }
         eventPublisher.publishUserAuthenticated(user.getId().toString(), user.getEmail());
 
         String accessToken = tokenGenerator.generateAccessToken(user.getEmail());
@@ -107,23 +126,33 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
 
         // Check if tenant's default APP_LOGIN auth flow has more than 1 step (i.e. 2FA required)
         boolean twoFactorRequired = false;
+        String twoFactorMethod = null;
         try {
             Optional<AuthFlow> defaultLoginFlow = authFlowRepository
                 .findByTenantIdAndIsDefaultTrueAndIsActiveTrueAndOperationType(
                     user.getTenant().getId(), OperationType.APP_LOGIN);
-            twoFactorRequired = defaultLoginFlow
-                .map(flow -> flow.getStepCount() > 1)
-                .orElse(false);
+            if (defaultLoginFlow.isPresent()) {
+                AuthFlow flow = defaultLoginFlow.get();
+                if (flow.getStepCount() > 1) {
+                    twoFactorRequired = true;
+                    // Extract the method type from the second step (stepOrder=2)
+                    twoFactorMethod = flow.getSteps().stream()
+                        .filter(step -> step.getStepOrder() == 2)
+                        .findFirst()
+                        .map(step -> step.getAuthMethod().getType().name())
+                        .orElse("EMAIL_OTP");
+                }
+            }
         } catch (Exception e) {
             log.warn("Failed to check tenant auth flow for user {}: {}", user.getId(), e.getMessage());
         }
 
         if (twoFactorRequired) {
-            log.info("2FA required by tenant auth flow for user: {}", user.getId());
+            log.info("2FA required by tenant auth flow for user: {} (method: {})", user.getId(), twoFactorMethod);
         }
 
         UserResponse userResponse = com.fivucsas.identity.application.mapper.UserResponseMapper.toResponse(user);
 
-        return AuthenticationResponse.of(accessToken, refreshToken.getToken(), tokenGenerator.getExpirationMillis(), userResponse, twoFactorRequired);
+        return AuthenticationResponse.of(accessToken, refreshToken.getToken(), tokenGenerator.getExpirationMillis(), userResponse, twoFactorRequired, twoFactorMethod);
     }
 }

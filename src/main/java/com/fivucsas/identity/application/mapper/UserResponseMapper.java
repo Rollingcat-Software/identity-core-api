@@ -39,6 +39,7 @@ public final class UserResponseMapper {
                 .role(roleNames.isEmpty() ? "USER" : roleNames.iterator().next())
                 .roles(roleNames.isEmpty() ? java.util.Set.of("USER") : roleNames)
                 .tenantId(user.getTenant() != null ? user.getTenant().getId().toString() : null)
+                .tenantName(user.getTenant() != null ? user.getTenant().getName() : null)
                 .isBiometricEnrolled(user.isBiometricEnrolled())
                 .enrolledAt(user.getEnrolledAt())
                 .lastVerifiedAt(user.getLastVerifiedAt())
@@ -59,6 +60,13 @@ public final class UserResponseMapper {
      * - Works with domain value objects directly
      */
     public static UserResponse fromDomain(com.fivucsas.identity.domain.model.user.User user) {
+        return fromDomain(user, null);
+    }
+
+    /**
+     * Maps a pure domain User model to UserResponse DTO, with optional tenant name.
+     */
+    public static UserResponse fromDomain(com.fivucsas.identity.domain.model.user.User user, String tenantName) {
         var roleNames = user.getRoleNames();
         return UserResponse.builder()
                 .id(user.getId().toString())
@@ -74,6 +82,7 @@ public final class UserResponseMapper {
                 .role(roleNames.isEmpty() ? "USER" : roleNames.iterator().next())
                 .roles(roleNames.isEmpty() ? java.util.Set.of("USER") : roleNames)
                 .tenantId(user.getTenantId() != null ? user.getTenantId().toString() : null)
+                .tenantName(tenantName)
                 .isBiometricEnrolled(user.isBiometricEnrolled())
                 .enrolledAt(user.getEnrolledAt())
                 .lastVerifiedAt(user.getLastVerifiedAt())

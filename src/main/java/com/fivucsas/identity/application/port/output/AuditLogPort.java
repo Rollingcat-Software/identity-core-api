@@ -34,6 +34,16 @@ public interface AuditLogPort {
     void logUserAuthenticated(String userId, String email, String ipAddress);
 
     /**
+     * Logs a successful authentication with OAuth client information.
+     *
+     * @param userId the user ID
+     * @param email the user email
+     * @param ipAddress the client IP address
+     * @param oauthClientName the name of the OAuth client that initiated the login (e.g., "Marmara BYS")
+     */
+    void logUserAuthenticated(String userId, String email, String ipAddress, String oauthClientName);
+
+    /**
      * Logs a failed authentication attempt.
      *
      * @param email the attempted email

@@ -49,6 +49,15 @@ public class AuditLogAdapter implements AuditLogPort {
 
     @Override
     @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void logUserAuthenticated(String userId, String email, String ipAddress, String oauthClientName) {
+        log.info("AUDIT: User authenticated via OAuth client - userId={}, email={}, ip={}, client={}",
+                userId, email, ipAddress, oauthClientName);
+        saveAuditLog("USER_LOGIN", "USER", userId, true, ipAddress,
+                Map.of("email", email, "oauthClient", oauthClientName));
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void logAuthenticationFailed(String email, String ipAddress, String reason) {
         log.warn("AUDIT: Authentication failed - email={}, ip={}, reason={}", email, ipAddress, reason);
         saveAuditLog("FAILED_LOGIN_ATTEMPT", "USER", null, false, ipAddress,

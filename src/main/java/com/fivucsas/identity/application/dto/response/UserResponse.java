@@ -35,6 +35,7 @@ public class UserResponse {
     private String role;
     private Set<String> roles;
     private String tenantId;
+    private String tenantName;
     private boolean isBiometricEnrolled;
     private Instant enrolledAt;
     private Instant lastVerifiedAt;

@@ -23,6 +23,8 @@ public class AuthenticationResponse {
     private Long expiresIn;
     private UserResponse user;
     private boolean twoFactorRequired;
+    /** The auth method type required for the second factor (e.g. "TOTP", "FACE", "EMAIL_OTP"). Null when twoFactorRequired is false. */
+    private String twoFactorMethod;
 
     public static AuthenticationResponse of(String accessToken, String refreshToken, Long expiresIn, UserResponse user) {
         return AuthenticationResponse.builder()
@@ -31,6 +33,7 @@ public class AuthenticationResponse {
             .expiresIn(expiresIn)
             .user(user)
             .twoFactorRequired(false)
+            .twoFactorMethod(null)
             .build();
     }
 
@@ -41,6 +44,18 @@ public class AuthenticationResponse {
             .expiresIn(expiresIn)
             .user(user)
             .twoFactorRequired(twoFactorRequired)
+            .twoFactorMethod(null)
+            .build();
+    }
+
+    public static AuthenticationResponse of(String accessToken, String refreshToken, Long expiresIn, UserResponse user, boolean twoFactorRequired, String twoFactorMethod) {
+        return AuthenticationResponse.builder()
+            .accessToken(accessToken)
+            .refreshToken(refreshToken)
+            .expiresIn(expiresIn)
+            .user(user)
+            .twoFactorRequired(twoFactorRequired)
+            .twoFactorMethod(twoFactorMethod)
             .build();
     }
 }

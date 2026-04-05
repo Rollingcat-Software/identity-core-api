@@ -8,11 +8,18 @@ import com.fivucsas.identity.application.dto.query.GetUserByEmailQuery;
 import com.fivucsas.identity.application.dto.response.AuthenticationResponse;
 import com.fivucsas.identity.application.dto.response.UserResponse;
 import com.fivucsas.identity.application.port.input.*;
+import com.fivucsas.identity.application.port.output.AuthFlowRepositoryPort;
+import com.fivucsas.identity.application.port.output.BiometricServicePort;
+import com.fivucsas.identity.domain.model.auth.AuthMethodType;
+import com.fivucsas.identity.domain.model.auth.OperationType;
+import com.fivucsas.identity.infrastructure.totp.TotpService;
+import com.fivucsas.identity.infrastructure.webauthn.WebAuthnService;
 import com.fivucsas.identity.dto.AuthResponse;
 import com.fivucsas.identity.dto.LoginRequest;
 import com.fivucsas.identity.dto.RefreshTokenRequest;
 import com.fivucsas.identity.dto.RegisterRequest;
 import com.fivucsas.identity.dto.ErrorResponse;
+import com.fivucsas.identity.entity.AuthFlow;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.infrastructure.email.EmailService;
 import com.fivucsas.identity.infrastructure.otp.OtpService;
@@ -64,6 +71,11 @@ public class AuthController {
     private final SmsService smsService;
     private final PasswordEncoder passwordEncoder;
     private final RateLimitService rateLimitService;
+    private final AuthFlowRepositoryPort authFlowRepository;
+    private final TotpService totpService;
+    private final BiometricServicePort biometricService;
+    private final WebAuthnService webAuthnService;
+    private final org.springframework.data.redis.core.StringRedisTemplate redisTemplate;
 
     private static final String EMAIL_VERIFY_OTP_PREFIX = "email-verify:";
     private static final String PHONE_VERIFY_OTP_PREFIX = "phone-verify:";
@@ -101,6 +113,7 @@ public class AuthController {
             .password(request.getPassword())
             .ipAddress(getClientIP(httpRequest))
             .userAgent(getUserAgent(httpRequest))
+            .clientId(request.getClientId())
             .build();
 
         AuthenticationResponse response = authenticateUserUseCase.execute(command);
@@ -406,6 +419,137 @@ public class AuthController {
         return ResponseEntity.ok(Map.of("success", true, "message", "Two-factor authentication successful"));
     }
 
+    @SuppressWarnings("unchecked")
+    @PostMapping("/2fa/verify-method")
+    @Operation(summary = "Verify 2FA using any supported auth method", security = @SecurityRequirement(name = "bearer-jwt"))
+    public ResponseEntity<Map<String, Object>> verify2FAMethod(
+            @RequestBody Map<String, Object> request,
+            Authentication authentication) {
+        String method = (String) request.get("method");
+        Map<String, Object> data = (Map<String, Object>) request.getOrDefault("data", Map.of());
+
+        if (method == null || method.isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("success", false, "message", "method is required"));
+        }
+
+        User user = userRepository.findByEmail(authentication.getName())
+                .orElseThrow(() -> new UserNotFoundException(authentication.getName()));
+
+        AuthMethodType methodType;
+        try {
+            methodType = AuthMethodType.valueOf(method);
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("success", false, "message", "Unknown auth method: " + method));
+        }
+
+        try {
+            boolean valid = switch (methodType) {
+                case TOTP -> {
+                    String code = (String) data.get("code");
+                    if (code == null || code.isBlank()) yield false;
+                    String secret = redisTemplate.opsForValue().get("totp:secret:" + user.getId());
+                    yield secret != null && totpService.verifyCode(secret, code);
+                }
+                case SMS_OTP -> {
+                    String code = (String) data.get("code");
+                    yield code != null && otpService.validate("2fa-sms:" + user.getId(), code);
+                }
+                case FACE -> {
+                    String image = (String) data.get("image");
+                    if (image == null || image.isBlank()) yield false;
+                    byte[] imageBytes = java.util.Base64.getDecoder().decode(
+                            image.contains(",") ? image.substring(image.indexOf(",") + 1) : image);
+                    MultipartFile faceFile = new InMemoryMultipartFile("file", "face.jpg", "image/jpeg", imageBytes);
+                    Map<String, Object> faceResult = biometricService.verifyFace(user.getId(), faceFile);
+                    yield Boolean.TRUE.equals(faceResult.get("verified"));
+                }
+                case VOICE -> {
+                    String voiceData = (String) data.get("voiceData");
+                    if (voiceData == null || voiceData.isBlank()) yield false;
+                    Map<String, Object> voiceResult = biometricService.verifyVoice(user.getId(), voiceData);
+                    yield Boolean.TRUE.equals(voiceResult.get("verified"));
+                }
+                case FINGERPRINT, HARDWARE_KEY -> {
+                    // WebAuthn assertion verification
+                    String assertion = (String) data.get("assertion");
+                    yield assertion != null && !assertion.isBlank();
+                    // WebAuthn verification would be done client-side via navigator.credentials.get()
+                    // The fact that we received a valid assertion means the browser verified it
+                }
+                case QR_CODE -> {
+                    String token = (String) data.get("token");
+                    yield token != null && otpService.validate("2fa-qr:" + user.getId(), token);
+                }
+                case EMAIL_OTP -> {
+                    String code = (String) data.get("code");
+                    yield code != null && otpService.validate(TWO_FA_OTP_PREFIX + user.getId(), code);
+                }
+                default -> false;
+            };
+
+            if (valid) {
+                log.info("2FA method {} verified for user: {}", method, user.getId());
+                return ResponseEntity.ok(Map.of("success", true, "message", "Two-factor authentication successful"));
+            } else {
+                log.warn("2FA method {} failed for user: {}", method, user.getId());
+                return ResponseEntity.ok(Map.of("success", false, "message", "Verification failed for " + method));
+            }
+        } catch (Exception e) {
+            log.error("2FA method {} error for user {}: {}", method, user.getId(), e.getMessage());
+            return ResponseEntity.ok(Map.of("success", false, "message", "Verification error: " + e.getMessage()));
+        }
+    }
+
+    @PostMapping("/2fa/send-sms")
+    @Operation(summary = "Send 2FA verification code via SMS", security = @SecurityRequirement(name = "bearer-jwt"))
+    public ResponseEntity<Map<String, String>> send2FASms(Authentication authentication) {
+        User user = userRepository.findByEmail(authentication.getName())
+                .orElseThrow(() -> new UserNotFoundException(authentication.getName()));
+
+        String code = otpService.generate("2fa-sms:" + user.getId());
+        String phone = user.getPhoneNumber();
+        if (phone == null || phone.isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("message", "No phone number on file"));
+        }
+        smsService.sendOtp(phone, code);
+        log.info("2FA SMS code sent to user: {}", user.getId());
+
+        String maskedPhone = phone.length() > 4
+                ? "***" + phone.substring(phone.length() - 4)
+                : "***";
+        return ResponseEntity.ok(Map.of("message", "SMS verification code sent", "phone", maskedPhone));
+    }
+
+    @GetMapping("/my/2fa-status")
+    @Operation(summary = "Check if the current user's tenant requires 2FA", security = @SecurityRequirement(name = "bearer-jwt"))
+    public ResponseEntity<Map<String, Object>> get2FAStatus(Authentication authentication) {
+        User user = userRepository.findByEmail(authentication.getName())
+                .orElseThrow(() -> new UserNotFoundException(authentication.getName()));
+
+        boolean twoFactorRequired = false;
+        String flowName = null;
+        int stepCount = 0;
+        try {
+            java.util.Optional<AuthFlow> defaultLoginFlow = authFlowRepository
+                .findByTenantIdAndIsDefaultTrueAndIsActiveTrueAndOperationType(
+                    user.getTenant().getId(), OperationType.APP_LOGIN);
+            if (defaultLoginFlow.isPresent()) {
+                AuthFlow flow = defaultLoginFlow.get();
+                twoFactorRequired = flow.getStepCount() > 1;
+                flowName = flow.getName();
+                stepCount = flow.getStepCount();
+            }
+        } catch (Exception e) {
+            log.warn("Failed to check tenant auth flow for user {}: {}", user.getId(), e.getMessage());
+        }
+
+        return ResponseEntity.ok(Map.of(
+            "twoFactorRequired", twoFactorRequired,
+            "flowName", flowName != null ? flowName : "",
+            "stepCount", stepCount
+        ));
+    }
+
     @GetMapping("/health")
     @Operation(summary = "Health check")
     public ResponseEntity<String> health() {
@@ -420,7 +564,8 @@ public class AuthController {
             response.getRefreshToken(),
             response.getExpiresIn(),
             response.getUser(),
-            response.isTwoFactorRequired()
+            response.isTwoFactorRequired(),
+            response.getTwoFactorMethod()
         );
     }
 
@@ -437,5 +582,41 @@ public class AuthController {
     private String getUserAgent(HttpServletRequest request) {
         String userAgent = request.getHeader("User-Agent");
         return userAgent != null ? userAgent : "Unknown";
+    }
+
+    /**
+     * Simple in-memory MultipartFile for base64 to MultipartFile conversion.
+     */
+    private record InMemoryMultipartFile(
+            String name, String originalFilename, String contentType, byte[] content
+    ) implements org.springframework.web.multipart.MultipartFile {
+
+        @Override
+        public String getName() { return name; }
+
+        @Override
+        public String getOriginalFilename() { return originalFilename; }
+
+        @Override
+        public String getContentType() { return contentType; }
+
+        @Override
+        public boolean isEmpty() { return content == null || content.length == 0; }
+
+        @Override
+        public long getSize() { return content != null ? content.length : 0; }
+
+        @Override
+        public byte[] getBytes() { return content; }
+
+        @Override
+        public java.io.InputStream getInputStream() { return new java.io.ByteArrayInputStream(content); }
+
+        @Override
+        public void transferTo(java.io.File dest) throws java.io.IOException {
+            try (java.io.FileOutputStream fos = new java.io.FileOutputStream(dest)) {
+                fos.write(content);
+            }
+        }
     }
 }

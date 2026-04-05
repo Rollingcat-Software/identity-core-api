@@ -25,4 +25,9 @@ public class AuthenticateUserCommand {
     private String password;
     private String ipAddress;
     private String userAgent;
+
+    /**
+     * Optional OAuth2 client ID when login originates from a widget/OAuth flow.
+     */
+    private String clientId;
 }
