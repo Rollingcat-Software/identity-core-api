@@ -43,7 +43,7 @@ All handlers in `application/service/handler/`:
 
 ## Known Issues (March 2026)
 
-### Auth handler status (2026-03-28):
+### Auth handler status (2026-04-05, all WORKING):
 1. **PasswordAuthHandler** — WORKING
 2. **EmailOtpAuthHandler** — WORKING (SMTP via Hostinger)
 3. **SmsOtpAuthHandler** — WORKING (NoOpSmsService, Twilio ready for activation)
@@ -122,5 +122,9 @@ All handlers in `application/service/handler/`:
 - SMTP: `smtp.hostinger.com:587` with STARTTLS
 - Sender: `info@ica-fivucsas.rollingcatsoftware.com`
 - Credentials stored in `.env.prod` as `MAIL_*` + `SPRING_MAIL_*`
+
+### Session endpoints (2026-04-05):
+- Auth session list/detail endpoints consumed by web-app SessionsSection (cross-device session awareness, W16)
+- OAuth 2.0 endpoints (authorize, token, userinfo) verified working in production
 
 See TODO.md for full integration audit (49 items).
