@@ -1,51 +1,44 @@
 package com.fivucsas.identity.controller;
 
-import com.fivucsas.identity.security.JwtSecretProvider;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import io.jsonwebtoken.io.Decoders;
-import io.jsonwebtoken.security.Keys;
-
-import javax.crypto.SecretKey;
 import java.util.*;
 
 /**
  * OpenID Connect discovery and JWKS endpoints.
  *
  * Provides:
- * - /.well-known/openid-configuration — OIDC discovery document
- * - /.well-known/jwks.json — JSON Web Key Set for token verification
+ * - /.well-known/openid-configuration — OIDC discovery document (required by OIDC Discovery 1.0)
+ * - /.well-known/jwks.json — JSON Web Key Set metadata (RFC 7517)
  *
  * These endpoints allow relying parties (auth widget, third-party apps)
- * to discover the identity provider's capabilities and verify tokens.
+ * to discover the identity provider's capabilities.
  */
 @RestController
-@RequiredArgsConstructor
 @Slf4j
 @Tag(name = "OpenID Connect", description = "OIDC discovery and key endpoints")
 public class OpenIDConfigController {
-
-    private final JwtSecretProvider jwtSecretProvider;
 
     @Value("${app.base-url:https://auth.rollingcatsoftware.com}")
     private String baseUrl;
 
     /**
-     * OIDC Discovery document.
+     * OIDC Discovery document (OpenID Connect Discovery 1.0 Section 4).
      * Returns metadata about the identity provider's configuration.
+     * All required fields per spec are included.
      */
     @GetMapping("/.well-known/openid-configuration")
     @Operation(summary = "OpenID Connect discovery document")
     public ResponseEntity<Map<String, Object>> openidConfiguration() {
         Map<String, Object> config = new LinkedHashMap<>();
 
+        // Required fields (OpenID Connect Discovery 1.0 Section 3)
         config.put("issuer", baseUrl);
         config.put("authorization_endpoint", baseUrl + "/api/v1/oauth2/authorize");
         config.put("token_endpoint", baseUrl + "/api/v1/oauth2/token");
@@ -53,45 +46,51 @@ public class OpenIDConfigController {
         config.put("jwks_uri", baseUrl + "/.well-known/jwks.json");
 
         config.put("response_types_supported", List.of("code"));
+        config.put("response_modes_supported", List.of("query"));
         config.put("grant_types_supported", List.of("authorization_code"));
         config.put("subject_types_supported", List.of("public"));
-        config.put("id_token_signing_alg_values_supported", List.of("HS256"));
+        // JwtService uses Jwts.SIG.HS512 — must match actual signing algorithm
+        config.put("id_token_signing_alg_values_supported", List.of("HS512"));
         config.put("scopes_supported", List.of("openid", "profile", "email", "phone"));
-        config.put("token_endpoint_auth_methods_supported", List.of("client_secret_post"));
+        config.put("token_endpoint_auth_methods_supported", List.of("client_secret_post", "none"));
         config.put("claims_supported", List.of(
-                "sub", "iss", "aud", "exp", "iat",
+                "sub", "iss", "aud", "exp", "iat", "auth_time", "nonce",
                 "email", "email_verified",
                 "name", "given_name", "family_name",
                 "phone_number", "phone_number_verified",
                 "updated_at"
         ));
 
+        // PKCE support (RFC 7636)
+        config.put("code_challenge_methods_supported", List.of("S256", "plain"));
+
+        // Service documentation
+        config.put("service_documentation", "https://ica-fivucsas.rollingcatsoftware.com/developer-portal");
+
         return ResponseEntity.ok(config);
     }
 
     /**
-     * JSON Web Key Set endpoint.
-     * Returns the public key(s) used to verify token signatures.
+     * JSON Web Key Set endpoint (RFC 7517).
      *
-     * Since this service uses HMAC-SHA256 (symmetric key), the JWKS
-     * exposes key metadata without the actual secret value.
-     * Token verification should be done server-side via the token
-     * introspection or userinfo endpoint.
+     * Since this service uses HMAC-SHA512 (symmetric key), the JWKS
+     * exposes key metadata only — the actual secret is never exposed.
+     * For HMAC-signed tokens, relying parties should validate tokens
+     * via the UserInfo endpoint or token introspection, not via JWKS.
+     *
+     * Note: symmetric keys (kty=oct) in JWKS cannot be used by external
+     * parties for verification. This endpoint exists for discovery
+     * compliance; use /api/v1/oauth2/userinfo for token validation.
      */
     @GetMapping("/.well-known/jwks.json")
-    @Operation(summary = "JSON Web Key Set for token verification")
+    @Operation(summary = "JSON Web Key Set for token verification metadata")
     public ResponseEntity<Map<String, Object>> jwks() {
-        // For HMAC-SHA256, we expose key metadata (not the secret itself)
-        // Clients should use the userinfo endpoint for token validation
-        SecretKey key = getSignInKey();
-
         Map<String, Object> jwk = new LinkedHashMap<>();
         jwk.put("kty", "oct");
         jwk.put("use", "sig");
-        jwk.put("alg", "HS256");
+        jwk.put("alg", "HS512");
         jwk.put("kid", "fivucsas-identity-key-1");
-        // Key length in bits (do NOT expose the actual key value)
-        jwk.put("key_ops", List.of("verify"));
+        jwk.put("key_ops", List.of("sign", "verify"));
 
         Map<String, Object> jwks = new LinkedHashMap<>();
         jwks.put("keys", List.of(jwk));
@@ -99,8 +98,4 @@ public class OpenIDConfigController {
         return ResponseEntity.ok(jwks);
     }
 
-    private SecretKey getSignInKey() {
-        byte[] keyBytes = Decoders.BASE64.decode(jwtSecretProvider.getSecret());
-        return Keys.hmacShaKeyFor(keyBytes);
-    }
 }

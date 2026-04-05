@@ -15,7 +15,10 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.time.Duration;
+import java.util.Base64;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -105,13 +108,33 @@ class OAuth2ServiceTest {
         when(redisTemplate.opsForValue()).thenReturn(valueOps);
 
         // when
-        String code = service.generateAuthorizationCode("user@test.com", "client-1", "https://example.com/cb", "openid");
+        String code = service.generateAuthorizationCode(
+                "user@test.com", "client-1", "https://example.com/cb", "openid");
 
         // then
         assertThat(code).isNotBlank();
         verify(valueOps).set(
                 eq("oauth2:code:" + code),
-                eq("user@test.com|client-1|https://example.com/cb|openid"),
+                contains("user@test.com|client-1|https://example.com/cb|openid"),
+                any(Duration.class));
+    }
+
+    @Test
+    void generateAuthorizationCode_WithPkceAndNonce_ShouldStoreAllFields() {
+        // given
+        ValueOperations<String, String> valueOps = mock(ValueOperations.class);
+        when(redisTemplate.opsForValue()).thenReturn(valueOps);
+
+        // when
+        String code = service.generateAuthorizationCode(
+                "user@test.com", "client-1", "https://example.com/cb", "openid",
+                "test-nonce", "challenge123", "S256");
+
+        // then
+        assertThat(code).isNotBlank();
+        verify(valueOps).set(
+                eq("oauth2:code:" + code),
+                eq("user@test.com|client-1|https://example.com/cb|openid|test-nonce|challenge123|S256"),
                 any(Duration.class));
     }
 
@@ -120,7 +143,8 @@ class OAuth2ServiceTest {
         // given
         ValueOperations<String, String> valueOps = mock(ValueOperations.class);
         when(redisTemplate.opsForValue()).thenReturn(valueOps);
-        when(valueOps.get("oauth2:code:test-code")).thenReturn("user@test.com|client-1|https://cb.com|openid");
+        when(valueOps.get("oauth2:code:test-code"))
+                .thenReturn("user@test.com|client-1|https://cb.com|openid email|||");
 
         OAuth2Client client = mock(OAuth2Client.class);
         when(client.getClientSecret()).thenReturn("hashed-secret");
@@ -130,7 +154,9 @@ class OAuth2ServiceTest {
         User user = mock(User.class);
         Tenant tenant = mock(Tenant.class);
         UUID tenantId = UUID.randomUUID();
+        UUID userId = UUID.randomUUID();
         when(tenant.getId()).thenReturn(tenantId);
+        when(user.getId()).thenReturn(userId);
         when(user.getEmail()).thenReturn("user@test.com");
         when(user.getFullName()).thenReturn("Test User");
         when(user.getFirstName()).thenReturn("Test");
@@ -171,7 +197,8 @@ class OAuth2ServiceTest {
         // given
         ValueOperations<String, String> valueOps = mock(ValueOperations.class);
         when(redisTemplate.opsForValue()).thenReturn(valueOps);
-        when(valueOps.get("oauth2:code:code1")).thenReturn("user@test.com|client-1|https://cb.com|openid");
+        when(valueOps.get("oauth2:code:code1"))
+                .thenReturn("user@test.com|client-1|https://cb.com|openid|||");
 
         // when/then
         assertThatThrownBy(() -> service.exchangeCode("code1", "wrong-client", "https://cb.com", null))
@@ -184,12 +211,84 @@ class OAuth2ServiceTest {
         // given
         ValueOperations<String, String> valueOps = mock(ValueOperations.class);
         when(redisTemplate.opsForValue()).thenReturn(valueOps);
-        when(valueOps.get("oauth2:code:code1")).thenReturn("user@test.com|client-1|https://cb.com|openid");
+        when(valueOps.get("oauth2:code:code1"))
+                .thenReturn("user@test.com|client-1|https://cb.com|openid|||");
 
         // when/then
         assertThatThrownBy(() -> service.exchangeCode("code1", "client-1", "https://wrong.com", null))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("redirect_uri mismatch");
+    }
+
+    @Test
+    void exchangeCode_WhenPkceValid_ShouldSucceed() throws Exception {
+        // given
+        String codeVerifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        byte[] hash = digest.digest(codeVerifier.getBytes(StandardCharsets.US_ASCII));
+        String codeChallenge = Base64.getUrlEncoder().withoutPadding().encodeToString(hash);
+
+        ValueOperations<String, String> valueOps = mock(ValueOperations.class);
+        when(redisTemplate.opsForValue()).thenReturn(valueOps);
+        when(valueOps.get("oauth2:code:pkce-code"))
+                .thenReturn("user@test.com|client-1|https://cb.com|openid||" + codeChallenge + "|S256");
+
+        OAuth2Client client = mock(OAuth2Client.class);
+        when(clientRepository.findByClientIdAndActiveTrue("client-1")).thenReturn(Optional.of(client));
+
+        User user = mock(User.class);
+        Tenant tenant = mock(Tenant.class);
+        UUID userId = UUID.randomUUID();
+        when(tenant.getId()).thenReturn(UUID.randomUUID());
+        when(user.getId()).thenReturn(userId);
+        when(user.getEmail()).thenReturn("user@test.com");
+        when(user.getFullName()).thenReturn("Test User");
+        when(user.getFirstName()).thenReturn("Test");
+        when(user.getLastName()).thenReturn("User");
+        when(user.isEmailVerified()).thenReturn(true);
+        when(user.getTenant()).thenReturn(tenant);
+        when(userRepository.findByEmail("user@test.com")).thenReturn(Optional.of(user));
+
+        when(jwtService.generateToken(anyMap(), eq("user@test.com"))).thenReturn("access-jwt", "id-jwt");
+        when(jwtService.getExpirationMillis()).thenReturn(3600000L);
+
+        // when
+        Map<String, Object> result = service.exchangeCode(
+                "pkce-code", "client-1", "https://cb.com", null, codeVerifier);
+
+        // then
+        assertThat(result).containsEntry("access_token", "access-jwt");
+        verify(redisTemplate).delete("oauth2:code:pkce-code");
+    }
+
+    @Test
+    void exchangeCode_WhenPkceInvalid_ShouldThrowIllegalArgument() {
+        // given
+        ValueOperations<String, String> valueOps = mock(ValueOperations.class);
+        when(redisTemplate.opsForValue()).thenReturn(valueOps);
+        when(valueOps.get("oauth2:code:pkce-code"))
+                .thenReturn("user@test.com|client-1|https://cb.com|openid||validChallenge|S256");
+
+        // when/then
+        assertThatThrownBy(() -> service.exchangeCode(
+                "pkce-code", "client-1", "https://cb.com", null, "wrong-verifier"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Invalid code_verifier");
+    }
+
+    @Test
+    void exchangeCode_WhenPkceMissingVerifier_ShouldThrowIllegalArgument() {
+        // given
+        ValueOperations<String, String> valueOps = mock(ValueOperations.class);
+        when(redisTemplate.opsForValue()).thenReturn(valueOps);
+        when(valueOps.get("oauth2:code:pkce-code"))
+                .thenReturn("user@test.com|client-1|https://cb.com|openid||challenge|S256");
+
+        // when/then
+        assertThatThrownBy(() -> service.exchangeCode(
+                "pkce-code", "client-1", "https://cb.com", null, null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("code_verifier is required");
     }
 
     @Test

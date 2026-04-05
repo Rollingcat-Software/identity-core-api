@@ -126,7 +126,7 @@ class OAuth2ControllerTest {
         tokens.put("token_type", "Bearer");
         tokens.put("expires_in", 3600L);
         tokens.put("id_token", "id-jwt");
-        when(oAuth2Service.exchangeCode("valid-code", "test-client", "https://example.com/cb", null))
+        when(oAuth2Service.exchangeCode("valid-code", "test-client", "https://example.com/cb", null, null))
                 .thenReturn(tokens);
 
         mockMvc.perform(post("/api/v1/oauth2/token")
@@ -141,9 +141,30 @@ class OAuth2ControllerTest {
     }
 
     @Test
+    @DisplayName("POST /api/v1/oauth2/token - With PKCE code_verifier")
+    void token_WhenPkceCodeVerifier_ShouldPassToService() throws Exception {
+        Map<String, Object> tokens = new LinkedHashMap<>();
+        tokens.put("access_token", "jwt-token");
+        tokens.put("token_type", "Bearer");
+        tokens.put("expires_in", 3600L);
+        tokens.put("id_token", "id-jwt");
+        when(oAuth2Service.exchangeCode("valid-code", "test-client", "https://example.com/cb", null, "my-verifier"))
+                .thenReturn(tokens);
+
+        mockMvc.perform(post("/api/v1/oauth2/token")
+                        .param("grant_type", "authorization_code")
+                        .param("code", "valid-code")
+                        .param("redirect_uri", "https://example.com/cb")
+                        .param("client_id", "test-client")
+                        .param("code_verifier", "my-verifier"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.access_token").value("jwt-token"));
+    }
+
+    @Test
     @DisplayName("POST /api/v1/oauth2/token - Invalid code")
     void token_WhenInvalidCode_ShouldReturn400() throws Exception {
-        when(oAuth2Service.exchangeCode(anyString(), anyString(), anyString(), any()))
+        when(oAuth2Service.exchangeCode(anyString(), anyString(), anyString(), any(), any()))
                 .thenThrow(new IllegalArgumentException("Invalid or expired authorization code"));
 
         mockMvc.perform(post("/api/v1/oauth2/token")
