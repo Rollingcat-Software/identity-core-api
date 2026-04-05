@@ -1,16 +1,16 @@
 package com.fivucsas.identity.application.dto.response;
 
+import com.fivucsas.identity.dto.AvailableMfaMethod;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.util.List;
+
 /**
  * Response for authentication operations (login, register, refresh).
- *
- * Following principles:
- * - Single Responsibility: Only contains authentication response data
- * - Immutability: Use with @Builder for safer construction
+ * Supports both legacy single-method 2FA and new adaptive multi-step MFA.
  */
 @Data
 @Builder
@@ -22,10 +22,19 @@ public class AuthenticationResponse {
     private String refreshToken;
     private Long expiresIn;
     private UserResponse user;
+
+    // Legacy 2FA fields (backward compat)
     private boolean twoFactorRequired;
-    /** The auth method type required for the second factor (e.g. "TOTP", "FACE", "EMAIL_OTP"). Null when twoFactorRequired is false. */
     private String twoFactorMethod;
 
+    // Adaptive MFA fields
+    private boolean mfaRequired;
+    private String mfaSessionToken;
+    private Integer totalSteps;
+    private Integer currentStep;
+    private List<AvailableMfaMethod> availableMethods;
+
+    /** Single-factor login (no MFA) */
     public static AuthenticationResponse of(String accessToken, String refreshToken, Long expiresIn, UserResponse user) {
         return AuthenticationResponse.builder()
             .accessToken(accessToken)
@@ -33,29 +42,40 @@ public class AuthenticationResponse {
             .expiresIn(expiresIn)
             .user(user)
             .twoFactorRequired(false)
-            .twoFactorMethod(null)
+            .mfaRequired(false)
             .build();
     }
 
-    public static AuthenticationResponse of(String accessToken, String refreshToken, Long expiresIn, UserResponse user, boolean twoFactorRequired) {
+    /** Legacy: single twoFactorMethod */
+    public static AuthenticationResponse of(String accessToken, String refreshToken, Long expiresIn, UserResponse user,
+                                            boolean twoFactorRequired, String twoFactorMethod) {
         return AuthenticationResponse.builder()
             .accessToken(accessToken)
             .refreshToken(refreshToken)
             .expiresIn(expiresIn)
             .user(user)
             .twoFactorRequired(twoFactorRequired)
-            .twoFactorMethod(null)
-            .build();
-    }
-
-    public static AuthenticationResponse of(String accessToken, String refreshToken, Long expiresIn, UserResponse user, boolean twoFactorRequired, String twoFactorMethod) {
-        return AuthenticationResponse.builder()
-            .accessToken(accessToken)
-            .refreshToken(refreshToken)
-            .expiresIn(expiresIn)
-            .user(user)
-            .twoFactorRequired(twoFactorRequired)
+            .mfaRequired(twoFactorRequired)
             .twoFactorMethod(twoFactorMethod)
+            .build();
+    }
+
+    /** Adaptive MFA: multi-step with session token and available methods */
+    public static AuthenticationResponse ofMfa(String accessToken, String refreshToken, Long expiresIn, UserResponse user,
+                                               String mfaSessionToken, int totalSteps, int currentStep,
+                                               String primaryMethod, List<AvailableMfaMethod> availableMethods) {
+        return AuthenticationResponse.builder()
+            .accessToken(accessToken)
+            .refreshToken(refreshToken)
+            .expiresIn(expiresIn)
+            .user(user)
+            .twoFactorRequired(true)
+            .mfaRequired(true)
+            .twoFactorMethod(primaryMethod)
+            .mfaSessionToken(mfaSessionToken)
+            .totalSteps(totalSteps)
+            .currentStep(currentStep)
+            .availableMethods(availableMethods)
             .build();
     }
 }

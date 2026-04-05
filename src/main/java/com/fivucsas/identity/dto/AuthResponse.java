@@ -6,6 +6,8 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.util.List;
+
 @Data
 @Builder
 @NoArgsConstructor
@@ -17,11 +19,32 @@ public class AuthResponse {
     private String tokenType;
     private Long expiresIn;
     private UserResponse user;
+
+    // --- MFA fields ---
+
+    @Builder.Default
+    private boolean mfaRequired = false;
+
+    /** Backward-compat alias for mfaRequired */
     @Builder.Default
     private boolean twoFactorRequired = false;
 
-    /** The auth method type required for the second factor (e.g. "TOTP", "FACE", "EMAIL_OTP"). Null when twoFactorRequired is false. */
+    /** Primary/preferred method (backward compat for old clients) */
     private String twoFactorMethod;
+
+    /** MFA session token for step-by-step verification. Null when mfaRequired is false. */
+    private String mfaSessionToken;
+
+    /** Total number of auth steps in the flow */
+    private Integer totalSteps;
+
+    /** Current step number to complete (1-based) */
+    private Integer currentStep;
+
+    /** Available methods for the current step (for CHOICE steps). Null for single-factor. */
+    private List<AvailableMfaMethod> availableMethods;
+
+    // --- Factory methods ---
 
     public static AuthResponse of(String accessToken, String refreshToken, Long expiresIn, UserResponse user) {
         return AuthResponse.builder()
@@ -33,7 +56,9 @@ public class AuthResponse {
                 .build();
     }
 
-    public static AuthResponse of(String accessToken, String refreshToken, Long expiresIn, UserResponse user, boolean twoFactorRequired) {
+    /** Backward-compatible: single twoFactorMethod */
+    public static AuthResponse of(String accessToken, String refreshToken, Long expiresIn, UserResponse user,
+                                  boolean twoFactorRequired, String twoFactorMethod) {
         return AuthResponse.builder()
                 .accessToken(accessToken)
                 .refreshToken(refreshToken)
@@ -41,18 +66,28 @@ public class AuthResponse {
                 .expiresIn(expiresIn)
                 .user(user)
                 .twoFactorRequired(twoFactorRequired)
+                .mfaRequired(twoFactorRequired)
+                .twoFactorMethod(twoFactorMethod)
                 .build();
     }
 
-    public static AuthResponse of(String accessToken, String refreshToken, Long expiresIn, UserResponse user, boolean twoFactorRequired, String twoFactorMethod) {
+    /** New: multi-method MFA with session token */
+    public static AuthResponse ofMfa(String accessToken, String refreshToken, Long expiresIn, UserResponse user,
+                                     String mfaSessionToken, int totalSteps, int currentStep,
+                                     String primaryMethod, List<AvailableMfaMethod> availableMethods) {
         return AuthResponse.builder()
                 .accessToken(accessToken)
                 .refreshToken(refreshToken)
                 .tokenType("Bearer")
                 .expiresIn(expiresIn)
                 .user(user)
-                .twoFactorRequired(twoFactorRequired)
-                .twoFactorMethod(twoFactorMethod)
+                .mfaRequired(true)
+                .twoFactorRequired(true)
+                .twoFactorMethod(primaryMethod)
+                .mfaSessionToken(mfaSessionToken)
+                .totalSteps(totalSteps)
+                .currentStep(currentStep)
+                .availableMethods(availableMethods)
                 .build();
     }
 }

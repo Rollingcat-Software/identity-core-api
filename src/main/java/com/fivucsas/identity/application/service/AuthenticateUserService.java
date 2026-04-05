@@ -9,14 +9,17 @@ import com.fivucsas.identity.application.port.output.AuthFlowRepositoryPort;
 import com.fivucsas.identity.application.port.output.PasswordEncoderPort;
 import com.fivucsas.identity.application.port.output.TokenGenerationPort;
 import com.fivucsas.identity.domain.exception.InvalidCredentialsException;
+import com.fivucsas.identity.domain.model.auth.AuthMethodType;
 import com.fivucsas.identity.domain.model.auth.OperationType;
+import com.fivucsas.identity.domain.model.auth.StepType;
+import com.fivucsas.identity.domain.model.auth.EnrollmentStatus;
 import com.fivucsas.identity.domain.repository.UserRepository;
-import com.fivucsas.identity.entity.AuthFlow;
-import com.fivucsas.identity.entity.RefreshToken;
-import com.fivucsas.identity.entity.User;
+import com.fivucsas.identity.dto.AvailableMfaMethod;
+import com.fivucsas.identity.entity.*;
+import com.fivucsas.identity.repository.MfaSessionRepository;
+import com.fivucsas.identity.repository.UserEnrollmentRepository;
 import com.fivucsas.identity.service.RefreshTokenService;
 import com.fivucsas.identity.application.port.output.OAuth2ClientRepositoryPort;
-import com.fivucsas.identity.entity.OAuth2Client;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -24,7 +27,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
 import java.time.Instant;
-import java.util.Optional;
+import java.util.*;
+import java.util.stream.Collectors;
 
 /**
  * Use case service for user authentication.
@@ -45,9 +49,12 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
     private final com.fivucsas.identity.application.port.output.EventPublisherPort eventPublisher;
     private final AuthFlowRepositoryPort authFlowRepository;
     private final OAuth2ClientRepositoryPort oAuth2ClientRepository;
+    private final UserEnrollmentRepository userEnrollmentRepository;
+    private final MfaSessionRepository mfaSessionRepository;
 
     private static final int MAX_FAILED_ATTEMPTS = 5;
     private static final Duration LOCKOUT_DURATION = Duration.ofMinutes(15);
+    private static final Duration MFA_SESSION_TTL = Duration.ofMinutes(10);
 
     @Override
     @Transactional
@@ -124,35 +131,106 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
         // Save user (resets failed attempts + updates lastLoginAt if needed)
         userRepository.save(user);
 
-        // Check if tenant's default APP_LOGIN auth flow has more than 1 step (i.e. 2FA required)
-        boolean twoFactorRequired = false;
-        String twoFactorMethod = null;
+        UserResponse userResponse = com.fivucsas.identity.application.mapper.UserResponseMapper.toResponse(user);
+
+        // Check if tenant's default APP_LOGIN auth flow has additional steps beyond PASSWORD
         try {
             Optional<AuthFlow> defaultLoginFlow = authFlowRepository
                 .findByTenantIdAndIsDefaultTrueAndIsActiveTrueAndOperationType(
                     user.getTenant().getId(), OperationType.APP_LOGIN);
+
             if (defaultLoginFlow.isPresent()) {
                 AuthFlow flow = defaultLoginFlow.get();
-                if (flow.getStepCount() > 1) {
-                    twoFactorRequired = true;
-                    // Extract the method type from the second step (stepOrder=2)
-                    twoFactorMethod = flow.getSteps().stream()
-                        .filter(step -> step.getStepOrder() == 2)
-                        .findFirst()
-                        .map(step -> step.getAuthMethod().getType().name())
-                        .orElse("EMAIL_OTP");
+
+                // Find steps beyond step 1 (password was already verified above)
+                List<AuthFlowStep> remainingSteps = flow.getSteps().stream()
+                    .filter(step -> step.getStepOrder() > 1)
+                    .sorted(Comparator.comparingInt(AuthFlowStep::getStepOrder))
+                    .toList();
+
+                if (!remainingSteps.isEmpty()) {
+                    // MFA required — build the step chain
+                    AuthFlowStep nextStep = remainingSteps.get(0);
+                    List<AvailableMfaMethod> availableMethods = buildAvailableMethods(nextStep, user);
+
+                    // Determine primary method (user's preferred or first enrolled)
+                    String primaryMethod = pickPrimaryMethod(availableMethods, user.getPreferred2faMethod());
+
+                    // Create MFA session
+                    String sessionToken = UUID.randomUUID().toString().replace("-", "");
+                    MfaSession mfaSession = MfaSession.builder()
+                        .sessionToken(sessionToken)
+                        .userId(user.getId())
+                        .tenantId(user.getTenant().getId())
+                        .flowId(flow.getId())
+                        .currentStep(2)  // step 1 (PASSWORD) already done
+                        .totalSteps(flow.getStepCount())
+                        .stepsData("[]")
+                        .ipAddress(command.getIpAddress())
+                        .userAgent(command.getUserAgent())
+                        .expiresAt(Instant.now().plus(MFA_SESSION_TTL))
+                        .build();
+                    mfaSessionRepository.save(mfaSession);
+
+                    log.info("MFA required for user {} — {} remaining steps, next step type: {}, available methods: {}",
+                        user.getId(), remainingSteps.size(), nextStep.getStepType(), availableMethods.size());
+
+                    return AuthenticationResponse.ofMfa(
+                        accessToken, refreshToken.getToken(), tokenGenerator.getExpirationMillis(), userResponse,
+                        sessionToken, flow.getStepCount(), 2, primaryMethod, availableMethods
+                    );
                 }
             }
         } catch (Exception e) {
-            log.warn("Failed to check tenant auth flow for user {}: {}", user.getId(), e.getMessage());
+            log.warn("Failed to check tenant auth flow for user {}: {}", user.getId(), e.getMessage(), e);
         }
 
-        if (twoFactorRequired) {
-            log.info("2FA required by tenant auth flow for user: {} (method: {})", user.getId(), twoFactorMethod);
+        // No MFA required — single-factor login
+        return AuthenticationResponse.of(accessToken, refreshToken.getToken(), tokenGenerator.getExpirationMillis(), userResponse);
+    }
+
+    /**
+     * Builds the list of available MFA methods for a step, filtered by user enrollments.
+     */
+    private List<AvailableMfaMethod> buildAvailableMethods(AuthFlowStep step, User user) {
+        List<AuthMethod> methods = step.getAvailableMethods();
+
+        // Get user's active enrollments
+        Set<String> enrolledTypes = userEnrollmentRepository.findAllByUserId(user.getId()).stream()
+            .filter(e -> e.getStatus() == EnrollmentStatus.ENROLLED)
+            .map(e -> e.getAuthMethodType().name())
+            .collect(Collectors.toSet());
+
+        String preferred = user.getPreferred2faMethod();
+
+        return methods.stream()
+            .map(m -> AvailableMfaMethod.builder()
+                .methodType(m.getType().name())
+                .name(m.getName())
+                .category(m.getCategory().name())
+                .enrolled(enrolledTypes.contains(m.getType().name()) || !m.isRequiresEnrollment())
+                .preferred(m.getType().name().equals(preferred))
+                .requiresEnrollment(m.isRequiresEnrollment())
+                .build())
+            .collect(Collectors.toList());
+    }
+
+    /**
+     * Picks the primary method: user's preferred (if enrolled) → first enrolled → fallback to EMAIL_OTP.
+     */
+    private String pickPrimaryMethod(List<AvailableMfaMethod> methods, String preferred) {
+        // Try user's preferred method first
+        if (preferred != null) {
+            Optional<AvailableMfaMethod> pref = methods.stream()
+                .filter(m -> m.getMethodType().equals(preferred) && m.isEnrolled())
+                .findFirst();
+            if (pref.isPresent()) return pref.get().getMethodType();
         }
-
-        UserResponse userResponse = com.fivucsas.identity.application.mapper.UserResponseMapper.toResponse(user);
-
-        return AuthenticationResponse.of(accessToken, refreshToken.getToken(), tokenGenerator.getExpirationMillis(), userResponse, twoFactorRequired, twoFactorMethod);
+        // Fall back to first enrolled method
+        return methods.stream()
+            .filter(AvailableMfaMethod::isEnrolled)
+            .map(AvailableMfaMethod::getMethodType)
+            .findFirst()
+            .orElse("EMAIL_OTP");
     }
 }

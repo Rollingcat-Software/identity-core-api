@@ -1,10 +1,13 @@
 package com.fivucsas.identity.entity;
 
+import com.fivucsas.identity.domain.model.auth.StepType;
 import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 @Entity
@@ -29,6 +32,25 @@ public class AuthFlowStep {
 
     @Column(name = "step_order", nullable = false)
     private int stepOrder;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "step_type", nullable = false, length = 20)
+    @Builder.Default
+    private StepType stepType = StepType.SEQUENTIAL;
+
+    /**
+     * For CHOICE steps: the alternative auth methods the user can pick from.
+     * For SEQUENTIAL steps: this list is empty (only authMethod is used).
+     */
+    @ManyToMany(fetch = FetchType.EAGER)
+    @JoinTable(
+        name = "auth_flow_step_methods",
+        joinColumns = @JoinColumn(name = "step_id"),
+        inverseJoinColumns = @JoinColumn(name = "auth_method_id")
+    )
+    @OrderColumn(name = "display_order")
+    @Builder.Default
+    private List<AuthMethod> alternativeMethods = new ArrayList<>();
 
     @Column(name = "is_required", nullable = false)
     @Builder.Default
@@ -64,5 +86,21 @@ public class AuthFlowStep {
         this.timeoutSeconds = timeoutSeconds;
         this.maxAttempts = maxAttempts;
         this.allowsDelegation = allowsDelegation;
+    }
+
+    /**
+     * Returns all auth methods available for this step.
+     * For SEQUENTIAL: returns just the primary auth method.
+     * For CHOICE: returns the alternative methods list.
+     */
+    public List<AuthMethod> getAvailableMethods() {
+        if (stepType == StepType.CHOICE && alternativeMethods != null && !alternativeMethods.isEmpty()) {
+            return alternativeMethods;
+        }
+        return List.of(authMethod);
+    }
+
+    public boolean isChoice() {
+        return stepType == StepType.CHOICE;
     }
 }

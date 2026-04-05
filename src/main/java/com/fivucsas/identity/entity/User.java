@@ -142,6 +142,9 @@ public class User {
     @Column(name = "last_login_ip", length = 45)
     private String lastLoginIp;
 
+    @Column(name = "preferred_2fa_method", length = 30)
+    private String preferred2faMethod;
+
     @Column(name = "phone_verified")
     @Builder.Default
     private boolean phoneVerified = false;

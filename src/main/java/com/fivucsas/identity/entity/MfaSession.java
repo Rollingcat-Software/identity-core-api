@@ -1,0 +1,87 @@
+package com.fivucsas.identity.entity;
+
+import jakarta.persistence.*;
+import lombok.*;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
+
+import java.time.Instant;
+import java.util.UUID;
+
+/**
+ * Tracks multi-step authentication sessions.
+ * Each step verification updates steps_data. Tokens are only issued when all steps complete.
+ */
+@Entity
+@Table(name = "mfa_sessions")
+@Getter
+@Setter
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
+@AllArgsConstructor(access = AccessLevel.PRIVATE)
+@Builder
+public class MfaSession {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.UUID)
+    private UUID id;
+
+    @Column(name = "session_token", nullable = false, unique = true, length = 128)
+    private String sessionToken;
+
+    @Column(name = "user_id", nullable = false)
+    private UUID userId;
+
+    @Column(name = "tenant_id", nullable = false)
+    private UUID tenantId;
+
+    @Column(name = "flow_id", nullable = false)
+    private UUID flowId;
+
+    @Column(name = "current_step", nullable = false)
+    @Builder.Default
+    private int currentStep = 1;
+
+    @Column(name = "total_steps", nullable = false)
+    private int totalSteps;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "steps_data", columnDefinition = "jsonb", nullable = false)
+    @Builder.Default
+    private String stepsData = "[]";
+
+    @Column(name = "ip_address", length = 45)
+    private String ipAddress;
+
+    @Column(name = "user_agent", columnDefinition = "text")
+    private String userAgent;
+
+    @Column(name = "created_at", nullable = false, updatable = false)
+    @Builder.Default
+    private Instant createdAt = Instant.now();
+
+    @Column(name = "expires_at", nullable = false)
+    private Instant expiresAt;
+
+    @Column(name = "completed_at")
+    private Instant completedAt;
+
+    public boolean isExpired() {
+        return Instant.now().isAfter(expiresAt);
+    }
+
+    public boolean isCompleted() {
+        return completedAt != null;
+    }
+
+    public void advanceStep() {
+        this.currentStep++;
+    }
+
+    public void complete() {
+        this.completedAt = Instant.now();
+    }
+
+    public boolean allStepsCompleted() {
+        return currentStep > totalSteps;
+    }
+}
