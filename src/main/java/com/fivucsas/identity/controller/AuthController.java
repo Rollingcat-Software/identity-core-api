@@ -735,6 +735,43 @@ public class AuthController {
             .collect(java.util.stream.Collectors.toList());
     }
 
+    @PostMapping("/mfa/send-otp")
+    @Operation(summary = "Send OTP during MFA flow (public — no JWT, uses session token)")
+    public ResponseEntity<Map<String, String>> sendMfaOtp(@RequestBody Map<String, String> request) {
+        String sessionToken = request.get("sessionToken");
+        String method = request.getOrDefault("method", "EMAIL_OTP");
+
+        if (sessionToken == null || sessionToken.isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("message", "sessionToken is required"));
+        }
+
+        Optional<MfaSession> sessionOpt = mfaSessionRepository.findBySessionToken(sessionToken);
+        if (sessionOpt.isEmpty() || sessionOpt.get().isExpired()) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                .body(Map.of("message", "Invalid or expired MFA session"));
+        }
+
+        User user = userRepository.findById(sessionOpt.get().getUserId())
+            .orElseThrow(() -> new UserNotFoundException("User not found"));
+
+        if ("SMS_OTP".equals(method)) {
+            String phone = user.getPhoneNumber();
+            if (phone == null || phone.isBlank()) {
+                return ResponseEntity.badRequest().body(Map.of("message", "No phone number on file"));
+            }
+            String code = otpService.generate("2fa-sms:" + user.getId());
+            smsService.sendOtp(phone, code);
+            String maskedPhone = phone.length() > 4 ? "***" + phone.substring(phone.length() - 4) : "***";
+            return ResponseEntity.ok(Map.of("message", "SMS code sent", "phone", maskedPhone));
+        } else {
+            String code = otpService.generate(TWO_FA_OTP_PREFIX + user.getId());
+            emailService.sendOtp(user.getEmail(), code);
+            String email = user.getEmail();
+            String maskedEmail = email.substring(0, Math.min(3, email.indexOf('@'))) + "***" + email.substring(email.indexOf('@'));
+            return ResponseEntity.ok(Map.of("message", "Email code sent", "email", maskedEmail));
+        }
+    }
+
     @PostMapping("/2fa/send-sms")
     @Operation(summary = "Send 2FA verification code via SMS", security = @SecurityRequirement(name = "bearer-jwt"))
     public ResponseEntity<Map<String, String>> send2FASms(Authentication authentication) {
