@@ -95,6 +95,7 @@ public class AuthController {
     private final RefreshTokenService refreshTokenService;
     private final UserEnrollmentRepository userEnrollmentRepository;
     private final com.fivucsas.identity.application.port.output.NfcCardRepositoryPort nfcCardRepository;
+    private final com.fivucsas.identity.infrastructure.qrcode.QrCodeService qrCodeService;
 
     private static final String EMAIL_VERIFY_OTP_PREFIX = "email-verify:";
     private static final String PHONE_VERIFY_OTP_PREFIX = "phone-verify:";
@@ -742,6 +743,30 @@ public class AuthController {
                 .requiresEnrollment(m.isRequiresEnrollment())
                 .build())
             .collect(java.util.stream.Collectors.toList());
+    }
+
+    @PostMapping("/mfa/qr-generate")
+    @Operation(summary = "Generate QR token during MFA flow (public — no JWT, uses session token)")
+    public ResponseEntity<Map<String, Object>> generateMfaQrToken(@RequestBody Map<String, String> request) {
+        String sessionToken = request.get("sessionToken");
+        if (sessionToken == null || sessionToken.isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("message", "sessionToken is required"));
+        }
+
+        Optional<MfaSession> sessionOpt = mfaSessionRepository.findBySessionToken(sessionToken);
+        if (sessionOpt.isEmpty() || sessionOpt.get().isExpired()) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                .body(Map.of("message", "Invalid or expired MFA session"));
+        }
+
+        UUID userId = sessionOpt.get().getUserId();
+        String token = qrCodeService.generateToken(userId);
+
+        return ResponseEntity.ok(Map.of(
+            "token", token,
+            "expiresInSeconds", 300,
+            "message", "Scan the QR code with the FIVUCSAS mobile app"
+        ));
     }
 
     @PostMapping("/mfa/send-otp")

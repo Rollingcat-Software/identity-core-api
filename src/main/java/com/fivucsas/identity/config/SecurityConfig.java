@@ -80,6 +80,7 @@ public class SecurityConfig {
                         // N-step MFA flow (public — uses session token, not JWT)
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/mfa/step").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/mfa/send-otp").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/v1/auth/mfa/qr-generate").permitAll()
 
                         // OAuth 2.0 / OIDC public endpoints
                         .requestMatchers(
