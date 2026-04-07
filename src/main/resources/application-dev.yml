@@ -46,7 +46,7 @@ spring:
 # JWT Configuration (Development)
 # WARNING: In development, secret can be in config, but MUST use env var in production
 jwt:
-  secret: ***REMOVED***
+  secret: ${JWT_SECRET:change-me-dev-only-not-for-production}
   expiration: 86400000  # 24 hours
   refresh-expiration: 604800000  # 7 days
 

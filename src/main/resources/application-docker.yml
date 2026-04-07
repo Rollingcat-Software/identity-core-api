@@ -10,7 +10,7 @@ spring:
     url: jdbc:postgresql://${DB_HOST:postgres}:${DB_PORT:5432}/${DB_NAME:identity_core_db}
     driver-class-name: org.postgresql.Driver
     username: ${DB_USERNAME:postgres}
-    password: ${DB_PASSWORD:***REMOVED***}
+    password: ${DB_PASSWORD:}
     hikari:
       maximum-pool-size: 10
       minimum-idle: 5
@@ -36,7 +36,7 @@ spring:
 
 # JWT Configuration
 jwt:
-  secret: ${JWT_SECRET:***REMOVED***}
+  secret: ${JWT_SECRET:}
   expiration: 86400000
   refresh-expiration: 604800000
 
@@ -44,7 +44,7 @@ jwt:
 redis:
   host: ${REDIS_HOST:redis}
   port: ${REDIS_PORT:6379}
-  password: ${REDIS_PASSWORD:***REMOVED***}
+  password: ${REDIS_PASSWORD:}
   database: 0
   event-bus:
     enabled: true
