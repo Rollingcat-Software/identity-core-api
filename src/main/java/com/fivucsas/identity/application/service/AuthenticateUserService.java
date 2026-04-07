@@ -12,7 +12,7 @@ import com.fivucsas.identity.domain.exception.InvalidCredentialsException;
 import com.fivucsas.identity.domain.model.auth.AuthMethodType;
 import com.fivucsas.identity.domain.model.auth.OperationType;
 import com.fivucsas.identity.domain.model.auth.StepType;
-import com.fivucsas.identity.domain.model.auth.EnrollmentStatus;
+
 import com.fivucsas.identity.domain.repository.UserRepository;
 import com.fivucsas.identity.dto.AvailableMfaMethod;
 import com.fivucsas.identity.entity.*;
@@ -51,6 +51,7 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
     private final OAuth2ClientRepositoryPort oAuth2ClientRepository;
     private final UserEnrollmentRepository userEnrollmentRepository;
     private final MfaSessionRepository mfaSessionRepository;
+    private final EnrollmentHealthService enrollmentHealthService;
 
     private static final int MAX_FAILED_ATTEMPTS = 5;
     private static final Duration LOCKOUT_DURATION = Duration.ofMinutes(15);
@@ -185,16 +186,14 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
     }
 
     /**
-     * Builds the list of available MFA methods for a step, filtered by user enrollments.
+     * Builds the list of available MFA methods for a step, filtered by validated enrollments.
+     * Uses EnrollmentHealthService to verify backing data actually exists.
      */
     private List<AvailableMfaMethod> buildAvailableMethods(AuthFlowStep step, User user) {
         List<AuthMethod> methods = step.getAvailableMethods();
 
-        // Get user's active enrollments
-        Set<String> enrolledTypes = userEnrollmentRepository.findAllByUserId(user.getId()).stream()
-            .filter(e -> e.getStatus() == EnrollmentStatus.ENROLLED)
-            .map(e -> e.getAuthMethodType().name())
-            .collect(Collectors.toSet());
+        // Validate enrollments against actual backing data (auto-revokes stale ones)
+        Map<AuthMethodType, Boolean> healthStatus = enrollmentHealthService.validateEnrollments(user.getId());
 
         String preferred = user.getPreferred2faMethod();
 
@@ -204,7 +203,7 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
                 .methodType(m.getType().name())
                 .name(m.getName())
                 .category(m.getCategory().name())
-                .enrolled(enrolledTypes.contains(m.getType().name()) || !m.isRequiresEnrollment())
+                .enrolled(Boolean.TRUE.equals(healthStatus.get(m.getType())) || !m.isRequiresEnrollment())
                 .preferred(m.getType().name().equals(preferred))
                 .requiresEnrollment(m.isRequiresEnrollment())
                 .build())

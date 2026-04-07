@@ -77,12 +77,14 @@ All handlers in `application/service/handler/`:
 - EnrollmentManagementController per-user endpoints unused by frontend
 - UserController.getAllUsers() uses in-memory pagination (fetches all, then slices) - works but inefficient for large datasets
 
-### Security hardening (March 2026):
+### Security hardening (April 2026):
 - JWT blacklist: fail-closed on null JTI (JwtAuthenticationFilter rejects tokens without JTI)
 - Logout: throws IllegalStateException if access token has no JTI claim
 - Redis event bus: uses @EventListener(ContextRefreshedEvent) instead of @PostConstruct
-- CORS: docker-compose.prod.yml includes ica-fivucsas subdomain
-- Flyway: production config with baseline-on-migrate
+- CORS: api.fivucsas.com, app.fivucsas.com, demo.fivucsas.com, verify.fivucsas.com
+- Flyway: production config with baseline-on-migrate, validate-on-migrate disabled (BFG checksum)
+- N-step MFA: JWT deferred until all steps complete, RFC 8176 amr claim
+- Enrollment health: validates backing data before showing methods as enrolled
 
 ### Cross-repo dependencies:
 - Communicates with **biometric-processor** (Python/FastAPI on port 8001) via BiometricServiceAdapter
@@ -112,7 +114,7 @@ All handlers in `application/service/handler/`:
 - **FlowType enum** — verification flow type definitions
 - **Test results**: Health 17/17, CRUD 33/33, RBAC 40/40, Verification 13/13 = 103 API tests total
 
-### Flyway Migrations (V1-V28):
+### Flyway Migrations (V1-V31):
 - V1-V15: Core schema (tenants, users, roles, permissions, audit_logs, sample data)
 - V16: Auth methods, auth flows, auth flow steps, auth sessions, auth session steps
 - V17: User devices with public_key for step-up authentication
@@ -122,6 +124,9 @@ All handlers in `application/service/handler/`:
 - V26: Verification sessions, step results, documents
 - V27: Verification flow seed data (5 industry templates)
 - V28: Video interview step
+- V29: Add EMAIL_OTP to default login flow
+- V30: Adaptive MFA engine (CHOICE steps, step_methods)
+- V31: Fix display_order 0-indexed for JPA @OrderColumn
 
 ### Critical fixes applied (2026-03-16):
 - **`@AutoConfigureMockMvc`** import path: `org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc` (Spring Boot 3.x path)

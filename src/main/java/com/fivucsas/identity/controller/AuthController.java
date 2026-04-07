@@ -47,7 +47,7 @@ import com.fivucsas.identity.entity.AuthFlowStep;
 import com.fivucsas.identity.entity.AuthMethod;
 import com.fivucsas.identity.entity.MfaSession;
 import com.fivucsas.identity.entity.RefreshToken;
-import com.fivucsas.identity.domain.model.auth.EnrollmentStatus;
+
 import com.fivucsas.identity.repository.MfaSessionRepository;
 import com.fivucsas.identity.repository.UserEnrollmentRepository;
 import com.fivucsas.identity.service.RefreshTokenService;
@@ -94,6 +94,7 @@ public class AuthController {
     private final TokenGenerationPort tokenGenerator;
     private final RefreshTokenService refreshTokenService;
     private final UserEnrollmentRepository userEnrollmentRepository;
+    private final com.fivucsas.identity.application.service.EnrollmentHealthService enrollmentHealthService;
     private final com.fivucsas.identity.application.port.output.NfcCardRepositoryPort nfcCardRepository;
     private final com.fivucsas.identity.infrastructure.qrcode.QrCodeService qrCodeService;
 
@@ -723,13 +724,12 @@ public class AuthController {
         }
     }
 
-    /** Build available methods for an MFA step, filtered by user enrollments */
+    /** Build available methods for an MFA step, validated against actual backing data */
     private List<AvailableMfaMethod> buildMfaAvailableMethods(AuthFlowStep step, User user) {
         List<AuthMethod> methods = step.getAvailableMethods();
-        Set<String> enrolledTypes = userEnrollmentRepository.findAllByUserId(user.getId()).stream()
-            .filter(e -> e.getStatus() == EnrollmentStatus.ENROLLED)
-            .map(e -> e.getAuthMethodType().name())
-            .collect(java.util.stream.Collectors.toSet());
+
+        // Validate enrollments against actual backing data (auto-revokes stale ones)
+        Map<AuthMethodType, Boolean> healthStatus = enrollmentHealthService.validateEnrollments(user.getId());
 
         String preferred = user.getPreferred2faMethod();
         return methods.stream()
@@ -738,7 +738,7 @@ public class AuthController {
                 .methodType(m.getType().name())
                 .name(m.getName())
                 .category(m.getCategory().name())
-                .enrolled(enrolledTypes.contains(m.getType().name()) || !m.isRequiresEnrollment())
+                .enrolled(Boolean.TRUE.equals(healthStatus.get(m.getType())) || !m.isRequiresEnrollment())
                 .preferred(m.getType().name().equals(preferred))
                 .requiresEnrollment(m.isRequiresEnrollment())
                 .build())

@@ -3,6 +3,7 @@ package com.fivucsas.identity.controller;
 import com.fivucsas.identity.application.dto.response.EnrollmentResponse;
 import com.fivucsas.identity.application.port.input.ManageEnrollmentUseCase;
 import com.fivucsas.identity.application.port.output.BiometricServicePort;
+import com.fivucsas.identity.application.service.EnrollmentHealthService;
 import com.fivucsas.identity.application.service.EnrollmentQueryService;
 import com.fivucsas.identity.domain.exception.UnauthorizedException;
 import com.fivucsas.identity.domain.model.auth.AuthMethodType;
@@ -47,6 +48,7 @@ public class EnrollmentController {
     private final BiometricServicePort biometricService;
     private final BiometricDataRepository biometricDataRepository;
     private final RbacAuthorizationService rbacService;
+    private final EnrollmentHealthService enrollmentHealthService;
 
     // --- /api/v1/enrollments endpoints ---
 
@@ -123,6 +125,23 @@ public class EnrollmentController {
             @PathVariable AuthMethodType methodType) {
         manageEnrollmentUseCase.revokeEnrollment(userId, methodType);
         return ResponseEntity.noContent().build();
+    }
+
+    @GetMapping("/api/v1/users/{userId}/enrollments/health")
+    @Operation(summary = "Validate enrollment health against actual backing data")
+    @PreAuthorize("hasPermission(#userId, 'User', 'enrollment:read') or @userSecurityService.isCurrentUser(#userId)")
+    public ResponseEntity<Map<String, Object>> getEnrollmentHealth(@PathVariable UUID userId) {
+        log.info("GET /api/v1/users/{}/enrollments/health", userId);
+        Map<AuthMethodType, Boolean> health = enrollmentHealthService.validateEnrollments(userId);
+
+        Map<String, Object> response = new LinkedHashMap<>();
+        Map<String, Boolean> methods = new LinkedHashMap<>();
+        health.forEach((type, valid) -> methods.put(type.name(), valid));
+        response.put("userId", userId.toString());
+        response.put("methods", methods);
+        response.put("validCount", health.values().stream().filter(Boolean::booleanValue).count());
+        response.put("totalCount", health.size());
+        return ResponseEntity.ok(response);
     }
 
     // --- /api/v1/enrollment endpoints (from UserEnrollmentFlowController) ---
