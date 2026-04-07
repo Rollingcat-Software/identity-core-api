@@ -4,7 +4,7 @@
 
 ## Deployment Status
 
-**Deployed at:** https://auth.rollingcatsoftware.com
+**Deployed at:** https://api.fivucsas.com
 **Stack:** Java 21 / Spring Boot 3.2
 **Server:** Hetzner VPS (Docker + Traefik + Let's Encrypt)
 **Health:** UP (biometric service UNKNOWN — not yet deployed)
@@ -28,7 +28,7 @@
 
 ### Known Behaviors
 
-- `auth.rollingcatsoftware.com/` returns 403 — Spring Security blocks unauthenticated root. Use `/actuator/health`.
+- `api.fivucsas.com/` returns 403 — Spring Security blocks unauthenticated root. Use `/actuator/health`.
 - Biometric health shows UNKNOWN until biometric-processor is deployed. Does not affect overall UP status.
 - `favicon.ico` requests return 401/403 — APIs don't serve favicons.
 

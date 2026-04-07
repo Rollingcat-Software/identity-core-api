@@ -23,7 +23,7 @@ SELECT
     'fivucsas-web-dashboard',
     '$2a$12$LJ3m5Zq2q6P8W5X9c7xAneKbK3YvW2VxJd5S8V4E1mQ7JR9W8q9uy',
     'FIVUCSAS Web Dashboard',
-    '["https://ica-fivucsas.rollingcatsoftware.com/callback","http://localhost:5173/callback","http://localhost:3000/callback"]',
+    '["https://app.fivucsas.com/callback","http://localhost:5173/callback","http://localhost:3000/callback"]',
     'openid profile email',
     t.id,
     TRUE

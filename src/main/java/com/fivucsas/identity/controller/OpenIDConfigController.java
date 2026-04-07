@@ -25,7 +25,7 @@ import java.util.*;
 @Tag(name = "OpenID Connect", description = "OIDC discovery and key endpoints")
 public class OpenIDConfigController {
 
-    @Value("${app.base-url:https://auth.rollingcatsoftware.com}")
+    @Value("${app.base-url:https://api.fivucsas.com}")
     private String baseUrl;
 
     /**
@@ -65,7 +65,7 @@ public class OpenIDConfigController {
         config.put("code_challenge_methods_supported", List.of("S256", "plain"));
 
         // Service documentation
-        config.put("service_documentation", "https://ica-fivucsas.rollingcatsoftware.com/developer-portal");
+        config.put("service_documentation", "https://app.fivucsas.com/developer-portal");
 
         return ResponseEntity.ok(config);
     }

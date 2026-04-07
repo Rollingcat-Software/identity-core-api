@@ -45,7 +45,7 @@ class FingerprintAuthHandlerTest {
         UUID sessionId = UUID.randomUUID();
         when(session.getId()).thenReturn(sessionId);
         when(webAuthnService.generateChallenge(sessionId)).thenReturn("challengeBase64");
-        when(webAuthnService.getRpId()).thenReturn("rollingcatsoftware.com");
+        when(webAuthnService.getRpId()).thenReturn("fivucsas.com");
 
         StepResult result = handler.validate(session, step, Map.of("action", "challenge"));
 

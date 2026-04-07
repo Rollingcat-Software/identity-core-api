@@ -5,7 +5,7 @@
 # Tests Create / Read-single / Read-list / Update / Delete for every entity.
 # Usage:
 #   ./scripts/test-crud.sh                          # localhost
-#   BASE_URL=https://auth.rollingcatsoftware.com ./scripts/test-crud.sh   # production
+#   BASE_URL=https://api.fivucsas.com ./scripts/test-crud.sh   # production
 #
 # Output: PASS/FAIL + HTTP status for every operation.
 # Exit code: 0 if all pass, 1 if any fail.

@@ -4,7 +4,7 @@
 
 Java 21 / Spring Boot **3.2.0** backend API for the FIVUCSAS biometric identity platform.
 Hexagonal Architecture with Ports and Adapters pattern.
-Production URL: https://auth.rollingcatsoftware.com
+Production URL: https://api.fivucsas.com
 
 ## Build & Test
 
@@ -120,7 +120,7 @@ All handlers in `application/service/handler/`:
 
 ### Email OTP (production, 2026-03-16):
 - SMTP: `smtp.hostinger.com:587` with STARTTLS
-- Sender: `info@ica-fivucsas.rollingcatsoftware.com`
+- Sender: `info@app.fivucsas.com`
 - Credentials stored in `.env.prod` as `MAIL_*` + `SPRING_MAIL_*`
 
 ### Session endpoints (2026-04-05):

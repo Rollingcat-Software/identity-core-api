@@ -37,7 +37,7 @@ jobs:
             # Health check with retries (Spring Boot startup ~30s)
             for i in 1 2 3 4 5; do
               sleep 15
-              if curl -sf https://auth.rollingcatsoftware.com/actuator/health > /dev/null 2>&1; then
+              if curl -sf https://api.fivucsas.com/actuator/health > /dev/null 2>&1; then
                 echo "API healthy after attempt $i"
                 break
               fi

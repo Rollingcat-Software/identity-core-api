@@ -64,14 +64,14 @@ class WebAuthnControllerTest {
         void shouldReturnRegistrationOptions() {
             when(userRepository.findById(userId)).thenReturn(Optional.of(testUser));
             when(webAuthnService.generateChallenge(any(UUID.class))).thenReturn("challengeBase64");
-            when(webAuthnService.getRpId()).thenReturn("fivucsas.rollingcatsoftware.com");
+            when(webAuthnService.getRpId()).thenReturn("fivucsas.com");
             when(credentialRepository.findAllByUserId(userId)).thenReturn(List.of());
 
             ResponseEntity<Map<String, Object>> response = webAuthnController.getRegistrationOptions(userId);
 
             assertThat(response.getStatusCode().value()).isEqualTo(200);
             assertThat(response.getBody()).containsEntry("challenge", "challengeBase64");
-            assertThat(response.getBody()).containsEntry("rpId", "fivucsas.rollingcatsoftware.com");
+            assertThat(response.getBody()).containsEntry("rpId", "fivucsas.com");
             assertThat(response.getBody()).containsEntry("userName", "test@example.com");
         }
 
@@ -216,7 +216,7 @@ class WebAuthnControllerTest {
             setAuthContext("test@example.com");
             when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(testUser));
             when(webAuthnService.generateChallenge(any(UUID.class))).thenReturn("testChallenge");
-            when(webAuthnService.getRpId()).thenReturn("rollingcatsoftware.com");
+            when(webAuthnService.getRpId()).thenReturn("fivucsas.com");
             when(credentialRepository.findAllByUserId(userId)).thenReturn(List.of());
 
             ResponseEntity<Map<String, Object>> response = webAuthnController.registerOptions(null);
@@ -224,7 +224,7 @@ class WebAuthnControllerTest {
             assertThat(response.getStatusCode().value()).isEqualTo(200);
             Map<String, Object> body = response.getBody();
             assertThat(body).containsEntry("challenge", "testChallenge");
-            assertThat(body).containsEntry("rpId", "rollingcatsoftware.com");
+            assertThat(body).containsEntry("rpId", "fivucsas.com");
             assertThat(body).containsEntry("rpName", "Fivucsas Identity");
             assertThat(body).containsEntry("userName", "test@example.com");
             assertThat(body).containsEntry("userDisplayName", "John Doe");
@@ -315,7 +315,7 @@ class WebAuthnControllerTest {
             when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(testUser));
             when(credentialRepository.findAllByUserId(userId)).thenReturn(List.of(cred));
             when(webAuthnService.generateChallenge(any(UUID.class))).thenReturn("authChallenge");
-            when(webAuthnService.getRpId()).thenReturn("rollingcatsoftware.com");
+            when(webAuthnService.getRpId()).thenReturn("fivucsas.com");
 
             ResponseEntity<Map<String, Object>> response = webAuthnController.authenticateOptions(
                     Map.of("email", "test@example.com"));
@@ -323,7 +323,7 @@ class WebAuthnControllerTest {
             assertThat(response.getStatusCode().value()).isEqualTo(200);
             Map<String, Object> body = response.getBody();
             assertThat(body).containsEntry("challenge", "authChallenge");
-            assertThat(body).containsEntry("rpId", "rollingcatsoftware.com");
+            assertThat(body).containsEntry("rpId", "fivucsas.com");
             assertThat(body).containsKey("sessionId");
             assertThat(body).containsKey("allowCredentials");
 

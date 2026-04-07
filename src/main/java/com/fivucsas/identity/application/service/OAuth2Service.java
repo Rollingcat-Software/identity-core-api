@@ -45,7 +45,7 @@ public class OAuth2Service {
     private final StringRedisTemplate redisTemplate;
     private final PasswordEncoder passwordEncoder;
 
-    @Value("${app.base-url:https://auth.rollingcatsoftware.com}")
+    @Value("${app.base-url:https://api.fivucsas.com}")
     private String issuer;
 
     private static final String AUTH_CODE_PREFIX = "oauth2:code:";

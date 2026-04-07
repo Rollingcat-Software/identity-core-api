@@ -35,12 +35,12 @@ public class OpenApiConfig {
                         .version("1.0.0")
                         .contact(new Contact()
                                 .name("Rolling Cat Software")
-                                .url("https://rollingcatsoftware.com"))
+                                .url("https://fivucsas.com"))
                         .license(new License()
                                 .name("Proprietary")))
                 .servers(List.of(
                         new Server().url("http://localhost:" + serverPort).description("Local development"),
-                        new Server().url("https://ica-fivucsas.rollingcatsoftware.com").description("Production")))
+                        new Server().url("https://app.fivucsas.com").description("Production")))
                 .components(new Components()
                         .addSecuritySchemes("bearer-jwt", new SecurityScheme()
                                 .type(SecurityScheme.Type.HTTP)

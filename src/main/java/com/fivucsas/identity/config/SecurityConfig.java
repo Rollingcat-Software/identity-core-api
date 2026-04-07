@@ -41,7 +41,7 @@ public class SecurityConfig {
     private final UserDetailsService userDetailsService;
     private final RbacPermissionEvaluator rbacPermissionEvaluator;
 
-    @Value("${app.cors.allowed-origins:http://localhost:5173,http://localhost:3000,http://localhost:8080,http://localhost:4200,https://ica-fivucsas.rollingcatsoftware.com}")
+    @Value("${app.cors.allowed-origins:http://localhost:5173,http://localhost:3000,http://localhost:8080,http://localhost:4200,https://app.fivucsas.com}")
     private String allowedOrigins;
 
     @Value("${spring.profiles.active:dev}")

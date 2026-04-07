@@ -29,7 +29,7 @@ public class WebAuthnService {
 
     public WebAuthnService(
             StringRedisTemplate redisTemplate,
-            @Value("${webauthn.rp-id:rollingcatsoftware.com}") String rpId) {
+            @Value("${webauthn.rp-id:fivucsas.com}") String rpId) {
         this.redisTemplate = redisTemplate;
         this.rpId = rpId;
     }

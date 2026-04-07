@@ -54,7 +54,7 @@ spring:
 # CORS Configuration (Production)
 app:
   cors:
-    allowed-origins: ${CORS_ALLOWED_ORIGINS:https://auth.rollingcatsoftware.com,https://ica-fivucsas.rollingcatsoftware.com,https://mizan.rollingcatsoftware.com,https://sarnic.rollingcatsoftware.com,https://muhabbet.rollingcatsoftware.com}
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:https://api.fivucsas.com,https://app.fivucsas.com,https://mizan.fivucsas.com,https://sarnic.fivucsas.com,https://muhabbet.fivucsas.com}
 
 # JWT Configuration (Production)
 # CRITICAL: JWT secret MUST come from environment variable (see JwtSecretProvider)
