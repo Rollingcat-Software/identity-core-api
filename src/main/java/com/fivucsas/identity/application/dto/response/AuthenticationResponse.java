@@ -78,4 +78,23 @@ public class AuthenticationResponse {
             .availableMethods(availableMethods)
             .build();
     }
+
+    /** MFA pending: NO tokens issued, only session token + step info. JWT comes after all steps complete. */
+    public static AuthenticationResponse ofMfaPending(String mfaSessionToken, int totalSteps, int currentStep,
+                                                       String primaryMethod, List<AvailableMfaMethod> availableMethods,
+                                                       UserResponse user) {
+        return AuthenticationResponse.builder()
+            .accessToken(null)
+            .refreshToken(null)
+            .expiresIn(null)
+            .user(user)
+            .twoFactorRequired(true)
+            .mfaRequired(true)
+            .twoFactorMethod(primaryMethod)
+            .mfaSessionToken(mfaSessionToken)
+            .totalSteps(totalSteps)
+            .currentStep(currentStep)
+            .availableMethods(availableMethods)
+            .build();
+    }
 }

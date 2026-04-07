@@ -45,6 +45,15 @@ public class JwtService implements TokenGenerationPort {
         return buildToken(new HashMap<>(), email, jwtExpiration);
     }
 
+    @Override
+    public String generateAccessToken(String email, java.util.List<String> amr) {
+        Map<String, Object> claims = new HashMap<>();
+        if (amr != null && !amr.isEmpty()) {
+            claims.put("amr", amr);
+        }
+        return buildToken(claims, email, jwtExpiration);
+    }
+
     public String generateToken(Map<String, Object> extraClaims, String email) {
         return buildToken(extraClaims, email, jwtExpiration);
     }

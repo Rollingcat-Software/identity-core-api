@@ -1,11 +1,15 @@
 package com.fivucsas.identity.entity;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -83,5 +87,32 @@ public class MfaSession {
 
     public boolean allStepsCompleted() {
         return currentStep > totalSteps;
+    }
+
+    private static final ObjectMapper MAPPER = new ObjectMapper();
+
+    /**
+     * Appends a completed auth method reference (RFC 8176) to stepsData.
+     * e.g. "pwd", "otp", "face", "fpt", "hwk", "voice"
+     */
+    public void addCompletedMethod(String amrValue) {
+        try {
+            List<String> methods = MAPPER.readValue(stepsData, new TypeReference<List<String>>() {});
+            methods.add(amrValue);
+            this.stepsData = MAPPER.writeValueAsString(methods);
+        } catch (Exception e) {
+            this.stepsData = "[\"" + amrValue + "\"]";
+        }
+    }
+
+    /**
+     * Returns the list of completed auth method references for the amr JWT claim.
+     */
+    public List<String> getCompletedMethods() {
+        try {
+            return MAPPER.readValue(stepsData, new TypeReference<List<String>>() {});
+        } catch (Exception e) {
+            return new ArrayList<>();
+        }
     }
 }

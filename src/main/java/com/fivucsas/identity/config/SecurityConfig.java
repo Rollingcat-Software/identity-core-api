@@ -77,6 +77,9 @@ public class SecurityConfig {
                                 "/api/v1/auth/reset-password"
                         ).permitAll()
 
+                        // N-step MFA flow (public — uses session token, not JWT)
+                        .requestMatchers(HttpMethod.POST, "/api/v1/auth/mfa/step").permitAll()
+
                         // OAuth 2.0 / OIDC public endpoints
                         .requestMatchers(
                                 "/api/v1/oauth2/authorize",

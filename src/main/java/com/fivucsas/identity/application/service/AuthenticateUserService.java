@@ -121,13 +121,6 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
         }
         eventPublisher.publishUserAuthenticated(user.getId().toString(), user.getEmail());
 
-        String accessToken = tokenGenerator.generateAccessToken(user.getEmail());
-        RefreshToken refreshToken = refreshTokenService.createRefreshToken(
-            user,
-            command.getIpAddress(),
-            command.getUserAgent()
-        );
-
         // Save user (resets failed attempts + updates lastLoginAt if needed)
         userRepository.save(user);
 
@@ -149,14 +142,11 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
                     .toList();
 
                 if (!remainingSteps.isEmpty()) {
-                    // MFA required — build the step chain
+                    // MFA required — DO NOT issue JWT yet. Only create MFA session.
                     AuthFlowStep nextStep = remainingSteps.get(0);
                     List<AvailableMfaMethod> availableMethods = buildAvailableMethods(nextStep, user);
-
-                    // Determine primary method (user's preferred or first enrolled)
                     String primaryMethod = pickPrimaryMethod(availableMethods, user.getPreferred2faMethod());
 
-                    // Create MFA session
                     String sessionToken = UUID.randomUUID().toString().replace("-", "");
                     MfaSession mfaSession = MfaSession.builder()
                         .sessionToken(sessionToken)
@@ -165,19 +155,19 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
                         .flowId(flow.getId())
                         .currentStep(2)  // step 1 (PASSWORD) already done
                         .totalSteps(flow.getStepCount())
-                        .stepsData("[]")
+                        .stepsData("[\"pwd\"]")  // RFC 8176: password already verified
                         .ipAddress(command.getIpAddress())
                         .userAgent(command.getUserAgent())
                         .expiresAt(Instant.now().plus(MFA_SESSION_TTL))
                         .build();
                     mfaSessionRepository.save(mfaSession);
 
-                    log.info("MFA required for user {} — {} remaining steps, next step type: {}, available methods: {}",
+                    log.info("MFA required for user {} — {} remaining steps, next: {}, methods: {}",
                         user.getId(), remainingSteps.size(), nextStep.getStepType(), availableMethods.size());
 
-                    return AuthenticationResponse.ofMfa(
-                        accessToken, refreshToken.getToken(), tokenGenerator.getExpirationMillis(), userResponse,
-                        sessionToken, flow.getStepCount(), 2, primaryMethod, availableMethods
+                    // Return MFA pending response — NO accessToken, NO refreshToken
+                    return AuthenticationResponse.ofMfaPending(
+                        sessionToken, flow.getStepCount(), 2, primaryMethod, availableMethods, userResponse
                     );
                 }
             }
@@ -185,7 +175,12 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
             log.warn("Failed to check tenant auth flow for user {}: {}", user.getId(), e.getMessage(), e);
         }
 
-        // No MFA required — single-factor login
+        // No MFA required — single-factor login, issue JWT immediately
+        String accessToken = tokenGenerator.generateAccessToken(user.getEmail(), List.of("pwd"));
+        RefreshToken refreshToken = refreshTokenService.createRefreshToken(
+            user, command.getIpAddress(), command.getUserAgent()
+        );
+
         return AuthenticationResponse.of(accessToken, refreshToken.getToken(), tokenGenerator.getExpirationMillis(), userResponse);
     }
 
@@ -204,6 +199,7 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
         String preferred = user.getPreferred2faMethod();
 
         return methods.stream()
+            .filter(Objects::nonNull)
             .map(m -> AvailableMfaMethod.builder()
                 .methodType(m.getType().name())
                 .name(m.getName())

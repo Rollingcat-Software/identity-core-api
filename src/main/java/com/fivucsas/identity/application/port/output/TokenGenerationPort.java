@@ -23,6 +23,17 @@ public interface TokenGenerationPort {
     String generateAccessToken(String email);
 
     /**
+     * Generates a JWT access token with RFC 8176 amr (Authentication Methods References) claim.
+     *
+     * @param email the user email
+     * @param amr list of authentication method references (e.g. ["pwd", "otp", "face"])
+     * @return JWT access token string
+     */
+    default String generateAccessToken(String email, java.util.List<String> amr) {
+        return generateAccessToken(email);
+    }
+
+    /**
      * Extracts the email from a JWT token.
      *
      * @param token the JWT token

@@ -95,9 +95,12 @@ public class AuthFlowStep {
      */
     public List<AuthMethod> getAvailableMethods() {
         if (stepType == StepType.CHOICE && alternativeMethods != null && !alternativeMethods.isEmpty()) {
-            return alternativeMethods;
+            // Filter nulls: @OrderColumn gaps produce null entries
+            return alternativeMethods.stream()
+                .filter(java.util.Objects::nonNull)
+                .toList();
         }
-        return List.of(authMethod);
+        return authMethod != null ? List.of(authMethod) : List.of();
     }
 
     public boolean isChoice() {

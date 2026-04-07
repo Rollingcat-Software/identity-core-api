@@ -41,9 +41,20 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
+import com.fivucsas.identity.application.port.output.TokenGenerationPort;
+import com.fivucsas.identity.dto.AvailableMfaMethod;
+import com.fivucsas.identity.entity.AuthFlowStep;
+import com.fivucsas.identity.entity.AuthMethod;
+import com.fivucsas.identity.entity.MfaSession;
+import com.fivucsas.identity.entity.RefreshToken;
+import com.fivucsas.identity.domain.model.auth.EnrollmentStatus;
+import com.fivucsas.identity.repository.MfaSessionRepository;
+import com.fivucsas.identity.repository.UserEnrollmentRepository;
+import com.fivucsas.identity.service.RefreshTokenService;
+
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
-import java.util.Map;
+import java.util.*;
 
 /**
  * REST controller for authentication endpoints.
@@ -79,6 +90,10 @@ public class AuthController {
     private final BiometricServicePort biometricService;
     private final WebAuthnService webAuthnService;
     private final org.springframework.data.redis.core.StringRedisTemplate redisTemplate;
+    private final MfaSessionRepository mfaSessionRepository;
+    private final TokenGenerationPort tokenGenerator;
+    private final RefreshTokenService refreshTokenService;
+    private final UserEnrollmentRepository userEnrollmentRepository;
 
     private static final String EMAIL_VERIFY_OTP_PREFIX = "email-verify:";
     private static final String PHONE_VERIFY_OTP_PREFIX = "phone-verify:";
@@ -513,6 +528,211 @@ public class AuthController {
             log.error("2FA method {} error for user {}: {}", method, user.getId(), e.getMessage());
             return ResponseEntity.ok(Map.of("success", false, "message", "Verification error: " + e.getMessage()));
         }
+    }
+
+    // ==================== N-STEP MFA FLOW (RFC 8176 compliant) ====================
+
+    /** RFC 8176 Authentication Methods References mapping */
+    private static final Map<AuthMethodType, String> AMR_VALUES = Map.of(
+        AuthMethodType.PASSWORD, "pwd",
+        AuthMethodType.EMAIL_OTP, "otp",
+        AuthMethodType.SMS_OTP, "sms",
+        AuthMethodType.TOTP, "otp",
+        AuthMethodType.FACE, "face",
+        AuthMethodType.VOICE, "voice",
+        AuthMethodType.FINGERPRINT, "fpt",
+        AuthMethodType.HARDWARE_KEY, "hwk",
+        AuthMethodType.QR_CODE, "mca",
+        AuthMethodType.NFC_DOCUMENT, "swk"
+    );
+
+    @SuppressWarnings("unchecked")
+    @PostMapping("/mfa/step")
+    @Operation(summary = "Verify an MFA step (public — no JWT required, uses session token)")
+    public ResponseEntity<Map<String, Object>> verifyMfaStep(
+            @RequestBody Map<String, Object> request,
+            HttpServletRequest httpRequest) {
+
+        String sessionToken = (String) request.get("sessionToken");
+        String method = (String) request.get("method");
+        Map<String, Object> data = (Map<String, Object>) request.getOrDefault("data", Map.of());
+
+        if (sessionToken == null || sessionToken.isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("status", "ERROR", "message", "sessionToken is required"));
+        }
+        if (method == null || method.isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("status", "ERROR", "message", "method is required"));
+        }
+
+        // Find and validate MFA session
+        Optional<MfaSession> sessionOpt = mfaSessionRepository.findBySessionToken(sessionToken);
+        if (sessionOpt.isEmpty()) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                .body(Map.of("status", "ERROR", "message", "Invalid or expired MFA session"));
+        }
+
+        MfaSession mfaSession = sessionOpt.get();
+        if (mfaSession.isExpired()) {
+            mfaSessionRepository.delete(mfaSession);
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                .body(Map.of("status", "ERROR", "message", "MFA session expired. Please login again."));
+        }
+        if (mfaSession.isCompleted()) {
+            return ResponseEntity.badRequest()
+                .body(Map.of("status", "ERROR", "message", "MFA session already completed"));
+        }
+
+        // Find user
+        User user = userRepository.findById(mfaSession.getUserId())
+            .orElseThrow(() -> new UserNotFoundException("User not found for MFA session"));
+
+        // Parse method type
+        AuthMethodType methodType;
+        try {
+            methodType = AuthMethodType.valueOf(method);
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("status", "ERROR", "message", "Unknown auth method: " + method));
+        }
+
+        // Verify the method using existing logic
+        try {
+            boolean valid = switch (methodType) {
+                case TOTP -> {
+                    String code = (String) data.get("code");
+                    if (code == null || code.isBlank()) yield false;
+                    String secret = redisTemplate.opsForValue().get("totp:secret:" + user.getId());
+                    yield secret != null && totpService.verifyCode(secret, code);
+                }
+                case SMS_OTP -> {
+                    String code = (String) data.get("code");
+                    yield code != null && otpService.validate("2fa-sms:" + user.getId(), code);
+                }
+                case FACE -> {
+                    String image = (String) data.get("image");
+                    if (image == null || image.isBlank()) yield false;
+                    byte[] imageBytes = java.util.Base64.getDecoder().decode(
+                            image.contains(",") ? image.substring(image.indexOf(",") + 1) : image);
+                    final byte[] bytes = imageBytes;
+                    MultipartFile faceFile = new MultipartFile() {
+                        public String getName() { return "file"; }
+                        public String getOriginalFilename() { return "face.jpg"; }
+                        public String getContentType() { return "image/jpeg"; }
+                        public boolean isEmpty() { return bytes.length == 0; }
+                        public long getSize() { return bytes.length; }
+                        public byte[] getBytes() { return bytes; }
+                        public InputStream getInputStream() { return new ByteArrayInputStream(bytes); }
+                        public void transferTo(java.io.File dest) throws java.io.IOException {
+                            java.nio.file.Files.write(dest.toPath(), bytes);
+                        }
+                    };
+                    Map<String, Object> faceResult = biometricService.verifyFace(user.getId(), faceFile);
+                    yield Boolean.TRUE.equals(faceResult.get("verified"));
+                }
+                case VOICE -> {
+                    String voiceData = (String) data.get("voiceData");
+                    if (voiceData == null || voiceData.isBlank()) yield false;
+                    Map<String, Object> voiceResult = biometricService.verifyVoice(user.getId(), voiceData);
+                    yield Boolean.TRUE.equals(voiceResult.get("verified"));
+                }
+                case FINGERPRINT, HARDWARE_KEY -> {
+                    String assertion = (String) data.get("assertion");
+                    yield assertion != null && !assertion.isBlank();
+                }
+                case QR_CODE -> {
+                    String token = (String) data.get("token");
+                    yield token != null && otpService.validate("2fa-qr:" + user.getId(), token);
+                }
+                case EMAIL_OTP -> {
+                    String code = (String) data.get("code");
+                    yield code != null && otpService.validate(TWO_FA_OTP_PREFIX + user.getId(), code);
+                }
+                default -> false;
+            };
+
+            if (!valid) {
+                log.warn("MFA step {} failed for user {} (session {})", method, user.getId(), sessionToken);
+                return ResponseEntity.ok(Map.of("status", "FAILED", "message", "Verification failed for " + method));
+            }
+
+            // Step verified — advance session
+            String amrValue = AMR_VALUES.getOrDefault(methodType, method.toLowerCase());
+            mfaSession.addCompletedMethod(amrValue);
+            mfaSession.advanceStep();
+
+            if (mfaSession.allStepsCompleted()) {
+                // ALL STEPS COMPLETE — issue JWT with amr claim
+                mfaSession.complete();
+                mfaSessionRepository.save(mfaSession);
+
+                List<String> amr = mfaSession.getCompletedMethods();
+                String accessToken = tokenGenerator.generateAccessToken(user.getEmail(), amr);
+                RefreshToken refreshToken = refreshTokenService.createRefreshToken(
+                    user, mfaSession.getIpAddress(), mfaSession.getUserAgent()
+                );
+
+                log.info("MFA complete for user {} — amr: {}", user.getId(), amr);
+
+                UserResponse userResponse = com.fivucsas.identity.application.mapper.UserResponseMapper.toResponse(user);
+                return ResponseEntity.ok(Map.of(
+                    "status", "AUTHENTICATED",
+                    "accessToken", accessToken,
+                    "refreshToken", refreshToken.getToken(),
+                    "expiresIn", tokenGenerator.getExpirationMillis(),
+                    "user", userResponse
+                ));
+            }
+
+            // More steps remain — return next step info
+            mfaSessionRepository.save(mfaSession);
+
+            // Load the flow to get next step's available methods
+            AuthFlow flow = authFlowRepository.findById(mfaSession.getFlowId())
+                .orElseThrow(() -> new RuntimeException("Auth flow not found"));
+            int nextStepOrder = mfaSession.getCurrentStep();
+            AuthFlowStep nextStep = flow.getSteps().stream()
+                .filter(s -> s.getStepOrder() == nextStepOrder)
+                .findFirst()
+                .orElseThrow(() -> new RuntimeException("Step " + nextStepOrder + " not found in flow"));
+
+            List<AvailableMfaMethod> availableMethods = buildMfaAvailableMethods(nextStep, user);
+
+            log.info("MFA step {} verified for user {}, advancing to step {}/{}",
+                method, user.getId(), nextStepOrder, mfaSession.getTotalSteps());
+
+            return ResponseEntity.ok(Map.of(
+                "status", "STEP_COMPLETED",
+                "mfaSessionToken", sessionToken,
+                "currentStep", nextStepOrder,
+                "totalSteps", mfaSession.getTotalSteps(),
+                "availableMethods", availableMethods
+            ));
+
+        } catch (Exception e) {
+            log.error("MFA step {} error for user {}: {}", method, mfaSession.getUserId(), e.getMessage(), e);
+            return ResponseEntity.ok(Map.of("status", "ERROR", "message", "Verification error: " + e.getMessage()));
+        }
+    }
+
+    /** Build available methods for an MFA step, filtered by user enrollments */
+    private List<AvailableMfaMethod> buildMfaAvailableMethods(AuthFlowStep step, User user) {
+        List<AuthMethod> methods = step.getAvailableMethods();
+        Set<String> enrolledTypes = userEnrollmentRepository.findAllByUserId(user.getId()).stream()
+            .filter(e -> e.getStatus() == EnrollmentStatus.ENROLLED)
+            .map(e -> e.getAuthMethodType().name())
+            .collect(java.util.stream.Collectors.toSet());
+
+        String preferred = user.getPreferred2faMethod();
+        return methods.stream()
+            .filter(Objects::nonNull)
+            .map(m -> AvailableMfaMethod.builder()
+                .methodType(m.getType().name())
+                .name(m.getName())
+                .category(m.getCategory().name())
+                .enrolled(enrolledTypes.contains(m.getType().name()) || !m.isRequiresEnrollment())
+                .preferred(m.getType().name().equals(preferred))
+                .requiresEnrollment(m.isRequiresEnrollment())
+                .build())
+            .collect(java.util.stream.Collectors.toList());
     }
 
     @PostMapping("/2fa/send-sms")
