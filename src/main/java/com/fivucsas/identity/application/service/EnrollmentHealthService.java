@@ -166,37 +166,27 @@ public class EnrollmentHealthService {
 
     /**
      * Checks whether biometric data (face/voice) exists for the user.
-     * Attempts to call the biometric service; on failure, falls back to
-     * checking the enrollment_data JSON field.
+     * Biometric embeddings live in biometric_db (separate database managed by biometric-processor),
+     * NOT in the enrollment_data field of user_enrollments (which is always "{}").
+     * We trust the enrollment status if the biometric service is healthy.
+     * If the service is down, fail open (don't revoke).
      */
     private boolean hasBiometricData(UUID userId, AuthMethodType biometricType) {
         try {
-            // Try a lightweight verify call to see if data exists.
-            // The biometric service will return an error if no enrollment exists.
             Map<String, Object> health = biometricServicePort.checkHealth();
             String status = health != null ? String.valueOf(health.getOrDefault("status", "")) : "";
             if (!"ok".equalsIgnoreCase(status) && !"healthy".equalsIgnoreCase(status)) {
                 log.warn("Biometric service unhealthy during {} health check for user {}", biometricType, userId);
-                // Fail open: don't revoke enrollments when the biometric service is down
-                return true;
             }
+            // Biometric data is in biometric_db (face_embeddings/voice_enrollments tables).
+            // We cannot query it from identity-core-api. Trust the enrollment if service is reachable.
+            return true;
         } catch (Exception e) {
             log.warn("Biometric service unreachable during {} health check for user {}: {}",
                     biometricType, userId, e.getMessage());
             // Fail open: don't revoke when service is unreachable
             return true;
         }
-
-        // If the biometric service is healthy, check if the enrollment has data.
-        // The enrollment_data JSON field stores metadata about the enrollment.
-        // A non-empty enrollment_data (beyond "{}") indicates data was stored.
-        Optional<UserEnrollment> enrollment = userEnrollmentRepository
-                .findByUserIdAndAuthMethodType(userId, biometricType);
-        if (enrollment.isPresent()) {
-            String data = enrollment.get().getEnrollmentData();
-            return data != null && !data.isBlank() && !"{}".equals(data.trim());
-        }
-        return false;
     }
 
     /**
