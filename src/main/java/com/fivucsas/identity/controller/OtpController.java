@@ -188,11 +188,18 @@ public class OtpController {
             ));
         }
 
+        // Cache in Redis for fast lookups
         String activeKey = TOTP_KEY_PREFIX + userId;
         redisTemplate.opsForValue().set(activeKey, secret);
         redisTemplate.delete(pendingKey);
 
-        log.info("TOTP setup completed for user: {}", userId);
+        // Persist to PostgreSQL (source of truth — survives Redis restarts)
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new UserNotFoundException(userId.toString()));
+        user.enable2FA(secret, null);
+        userRepository.save(user);
+
+        log.info("TOTP setup completed for user: {} (persisted to DB + Redis)", userId);
         return ResponseEntity.ok(Map.of(
                 "success", true,
                 "message", "TOTP successfully configured"
@@ -203,8 +210,19 @@ public class OtpController {
     @Operation(summary = "Check if TOTP is configured for a user")
     @PreAuthorize("hasAuthority('totp:read') or @userSecurityService.isCurrentUser(#userId)")
     public ResponseEntity<Map<String, Object>> getTotpStatus(@PathVariable UUID userId) {
+        // Check Redis first (fast path), then fall back to PostgreSQL (source of truth)
         String activeKey = TOTP_KEY_PREFIX + userId;
         boolean configured = Boolean.TRUE.equals(redisTemplate.hasKey(activeKey));
+
+        if (!configured) {
+            User user = userRepository.findById(userId).orElse(null);
+            configured = user != null && user.is2faEnabled();
+            // Re-cache in Redis if found in DB but missing from Redis
+            if (configured) {
+                redisTemplate.opsForValue().set(activeKey, user.getTwoFactorSecret());
+                log.info("TOTP secret re-cached in Redis for user: {}", userId);
+            }
+        }
 
         return ResponseEntity.ok(Map.of(
                 "userId", userId.toString(),
@@ -218,10 +236,17 @@ public class OtpController {
     public ResponseEntity<Map<String, Object>> revokeTotp(@PathVariable UUID userId) {
         log.info("TOTP revocation request for user: {}", userId);
 
+        // Clear from Redis
         String activeKey = TOTP_KEY_PREFIX + userId;
         String pendingKey = TOTP_KEY_PREFIX + "pending:" + userId;
         redisTemplate.delete(activeKey);
         redisTemplate.delete(pendingKey);
+
+        // Clear from PostgreSQL (source of truth)
+        userRepository.findById(userId).ifPresent(user -> {
+            user.disable2FA();
+            userRepository.save(user);
+        });
 
         return ResponseEntity.ok(Map.of(
                 "success", true,

@@ -1,8 +1,10 @@
 package com.fivucsas.identity.application.service.handler;
 
 import com.fivucsas.identity.domain.model.auth.AuthMethodType;
+import com.fivucsas.identity.domain.repository.UserRepository;
 import com.fivucsas.identity.entity.AuthFlowStep;
 import com.fivucsas.identity.entity.AuthSession;
+import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.infrastructure.totp.TotpService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -11,6 +13,7 @@ import org.springframework.stereotype.Component;
 
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 
 @Component
 @RequiredArgsConstructor
@@ -21,6 +24,7 @@ public class TotpAuthHandler implements AuthMethodHandler {
 
     private final TotpService totpService;
     private final StringRedisTemplate redisTemplate;
+    private final UserRepository userRepository;
 
     @Override
     public AuthMethodType getMethodType() {
@@ -44,8 +48,7 @@ public class TotpAuthHandler implements AuthMethodHandler {
             return StepResult.failure("User must be identified before TOTP verification");
         }
 
-        String secretKey = buildSecretKey(session.getUser().getId().toString());
-        String secret = redisTemplate.opsForValue().get(secretKey);
+        String secret = resolveTotpSecret(session.getUser().getId());
 
         if (secret == null) {
             return StepResult.failure("TOTP not configured for this user");
@@ -77,8 +80,8 @@ public class TotpAuthHandler implements AuthMethodHandler {
         }
 
         String secret = totpService.generateSecret();
-        String secretKey = buildSecretKey(session.getUser().getId().toString());
-        redisTemplate.opsForValue().set(secretKey, secret);
+        String redisKey = "totp:secret:" + session.getUser().getId();
+        redisTemplate.opsForValue().set(redisKey, secret);
 
         String otpAuthUri = totpService.buildOtpAuthUri(
                 secret, session.getUser().getEmail(), ISSUER);
@@ -90,7 +93,21 @@ public class TotpAuthHandler implements AuthMethodHandler {
         ));
     }
 
-    private String buildSecretKey(String userId) {
-        return "totp:secret:" + userId;
+    /**
+     * Resolve TOTP secret: try Redis (cache) first, fall back to PostgreSQL (source of truth).
+     * If found only in DB, re-cache in Redis for subsequent fast lookups.
+     */
+    private String resolveTotpSecret(UUID userId) {
+        String redisKey = "totp:secret:" + userId;
+        String secret = redisTemplate.opsForValue().get(redisKey);
+        if (secret == null) {
+            User user = userRepository.findById(userId).orElse(null);
+            if (user != null && user.getTwoFactorSecret() != null) {
+                secret = user.getTwoFactorSecret();
+                redisTemplate.opsForValue().set(redisKey, secret);
+                log.info("TOTP secret re-cached in Redis for user: {}", userId);
+            }
+        }
+        return secret;
     }
 }

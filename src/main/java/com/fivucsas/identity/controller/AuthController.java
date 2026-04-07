@@ -94,6 +94,7 @@ public class AuthController {
     private final TokenGenerationPort tokenGenerator;
     private final RefreshTokenService refreshTokenService;
     private final UserEnrollmentRepository userEnrollmentRepository;
+    private final com.fivucsas.identity.application.port.output.NfcCardRepositoryPort nfcCardRepository;
 
     private static final String EMAIL_VERIFY_OTP_PREFIX = "email-verify:";
     private static final String PHONE_VERIFY_OTP_PREFIX = "phone-verify:";
@@ -465,7 +466,7 @@ public class AuthController {
                 case TOTP -> {
                     String code = (String) data.get("code");
                     if (code == null || code.isBlank()) yield false;
-                    String secret = redisTemplate.opsForValue().get("totp:secret:" + user.getId());
+                    String secret = resolveTotpSecret(user);
                     yield secret != null && totpService.verifyCode(secret, code);
                 }
                 case SMS_OTP -> {
@@ -600,7 +601,7 @@ public class AuthController {
                 case TOTP -> {
                     String code = (String) data.get("code");
                     if (code == null || code.isBlank()) yield false;
-                    String secret = redisTemplate.opsForValue().get("totp:secret:" + user.getId());
+                    String secret = resolveTotpSecret(user);
                     yield secret != null && totpService.verifyCode(secret, code);
                 }
                 case SMS_OTP -> {
@@ -645,6 +646,14 @@ public class AuthController {
                 case EMAIL_OTP -> {
                     String code = (String) data.get("code");
                     yield code != null && otpService.validate(TWO_FA_OTP_PREFIX + user.getId(), code);
+                }
+                case NFC_DOCUMENT -> {
+                    String nfcData = (String) data.get("nfcData");
+                    if (nfcData == null || nfcData.isBlank()) yield false;
+                    var cardOpt = nfcCardRepository.findByCardSerialAndIsActiveTrue(nfcData);
+                    if (cardOpt.isEmpty()) yield false;
+                    var card = cardOpt.get();
+                    yield card.getUser().getId().equals(user.getId());
                 }
                 default -> false;
             };
@@ -867,6 +876,21 @@ public class AuthController {
     private String getUserAgent(HttpServletRequest request) {
         String userAgent = request.getHeader("User-Agent");
         return userAgent != null ? userAgent : "Unknown";
+    }
+
+    /**
+     * Resolve TOTP secret: try Redis (cache) first, fall back to PostgreSQL (source of truth).
+     * If found only in DB, re-cache in Redis for subsequent fast lookups.
+     */
+    private String resolveTotpSecret(User user) {
+        String redisKey = "totp:secret:" + user.getId();
+        String secret = redisTemplate.opsForValue().get(redisKey);
+        if (secret == null && user.getTwoFactorSecret() != null) {
+            secret = user.getTwoFactorSecret();
+            redisTemplate.opsForValue().set(redisKey, secret);
+            log.info("TOTP secret re-cached in Redis for user: {}", user.getId());
+        }
+        return secret;
     }
 
     /**
