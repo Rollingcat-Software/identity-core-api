@@ -97,6 +97,7 @@ public class AuthController {
     private final com.fivucsas.identity.application.service.EnrollmentHealthService enrollmentHealthService;
     private final com.fivucsas.identity.application.port.output.NfcCardRepositoryPort nfcCardRepository;
     private final com.fivucsas.identity.infrastructure.qrcode.QrCodeService qrCodeService;
+    private final com.fivucsas.identity.application.port.output.WebAuthnCredentialRepositoryPort webAuthnCredentialRepository;
 
     private static final String EMAIL_VERIFY_OTP_PREFIX = "email-verify:";
     private static final String PHONE_VERIFY_OTP_PREFIX = "phone-verify:";
@@ -597,6 +598,20 @@ public class AuthController {
             return ResponseEntity.badRequest().body(Map.of("status", "ERROR", "message", "Unknown auth method: " + method));
         }
 
+        // WebAuthn challenge generation (must happen before switch expression)
+        if ((methodType == AuthMethodType.FINGERPRINT || methodType == AuthMethodType.HARDWARE_KEY)
+                && "challenge".equals(data.get("action"))) {
+            String challenge = webAuthnService.generateChallenge(mfaSession.getId());
+            Map<String, Object> challengeData = new java.util.HashMap<>();
+            challengeData.put("status", "CHALLENGE");
+            challengeData.put("data", Map.of(
+                "challenge", challenge,
+                "rpId", webAuthnService.getRpId(),
+                "timeout", "60000"
+            ));
+            return ResponseEntity.ok(challengeData);
+        }
+
         // Verify the method using existing logic
         try {
             boolean valid = switch (methodType) {
@@ -638,8 +653,52 @@ public class AuthController {
                     yield Boolean.TRUE.equals(voiceResult.get("verified"));
                 }
                 case FINGERPRINT, HARDWARE_KEY -> {
-                    String assertion = (String) data.get("assertion");
-                    yield assertion != null && !assertion.isBlank();
+                    // Assertion verification
+                    String assertionRaw = (String) data.get("assertion");
+                    if (assertionRaw == null || assertionRaw.isBlank()) yield false;
+
+                    try {
+                        // Decode the base64 JSON assertion
+                        String assertionJson = new String(java.util.Base64.getDecoder().decode(assertionRaw));
+                        var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+                        var assertionNode = mapper.readTree(assertionJson);
+
+                        String credentialId = assertionNode.get("credentialId").asText();
+                        String authenticatorData = assertionNode.get("authenticatorData").asText();
+                        String clientDataJSON = assertionNode.get("clientDataJSON").asText();
+                        String signature = assertionNode.get("signature").asText();
+
+                        // Look up the credential
+                        var credentialOpt = webAuthnCredentialRepository.findByCredentialId(credentialId);
+                        if (credentialOpt.isEmpty()) {
+                            log.warn("WebAuthn credential not found: {}", credentialId);
+                            yield false;
+                        }
+                        var credential = credentialOpt.get();
+
+                        // Verify credential belongs to this user
+                        if (!credential.getUser().getId().equals(user.getId())) {
+                            log.warn("WebAuthn credential {} does not belong to user {}", credentialId, user.getId());
+                            yield false;
+                        }
+
+                        // Cryptographic verification
+                        boolean verified = webAuthnService.verifyAssertion(
+                            mfaSession.getId(), credentialId, authenticatorData,
+                            clientDataJSON, signature, credential.getPublicKey()
+                        );
+
+                        if (verified) {
+                            long signCount = webAuthnService.extractSignCount(authenticatorData);
+                            credential.updateSignCount(signCount);
+                            webAuthnCredentialRepository.save(credential);
+                        }
+
+                        yield verified;
+                    } catch (Exception e) {
+                        log.error("WebAuthn assertion verification failed", e);
+                        yield false;
+                    }
                 }
                 case QR_CODE -> {
                     String token = (String) data.get("token");

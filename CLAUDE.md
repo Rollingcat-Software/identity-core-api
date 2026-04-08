@@ -41,7 +41,7 @@ All handlers in `application/service/handler/`:
 - QrCodeAuthHandler, FaceAuthHandler, FingerprintAuthHandler, VoiceAuthHandler
 - NfcDocumentAuthHandler, HardwareKeyAuthHandler
 
-## N-Step MFA Flow (2026-04-07)
+## N-Step MFA Flow (2026-04-08)
 
 - **JWT deferred**: Login returns `mfaSessionToken` only (NO JWT) when auth flow has >1 step
 - **`POST /auth/mfa/step`**: Public endpoint, verifies each step using session token, advances flow
@@ -49,6 +49,8 @@ All handlers in `application/service/handler/`:
 - **N-step support**: 2FA, 3FA, 4FA+ — configurable per tenant via auth_flows table
 - **Backward compatible**: Single-step flows (password only) still issue JWT immediately
 - **MfaSession entity**: Tracks `currentStep`, `totalSteps`, `stepsData` (completed method refs)
+- **WebAuthn challenge generation (2026-04-08)**: `action: "challenge"` in data returns `{ status: "CHALLENGE", data: { challenge, rpId, timeout } }` — rpId defaults to `fivucsas.com`
+- **WebAuthn MFA verification (2026-04-08)**: FINGERPRINT/HARDWARE_KEY cases now do full cryptographic assertion verification via `WebAuthnService.verifyAssertion()` (was stub: `assertion != null`). Includes credential lookup, user ownership check, signature verification, sign count update.
 
 ### Flyway Migrations (V31):
 - V31: Fix display_order 0-indexed for JPA @OrderColumn
