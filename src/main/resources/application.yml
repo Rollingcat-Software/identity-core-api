@@ -36,13 +36,18 @@ mail:
   from: ${MAIL_FROM:noreply@fivucsas.com}
   enabled: ${MAIL_ENABLED:false}
 
-# SMS Gateway (Twilio)
+# SMS Gateway
 sms:
   enabled: ${SMS_ENABLED:false}
+  provider: ${SMS_PROVIDER:noop}  # noop, twilio, or netgsm
   twilio:
     account-sid: ${TWILIO_ACCOUNT_SID:}
     auth-token: ${TWILIO_AUTH_TOKEN:}
     from-number: ${TWILIO_FROM_NUMBER:}
+  netgsm:
+    usercode: ${NETGSM_USERCODE:}
+    password: ${NETGSM_PASSWORD:}
+    msgheader: ${NETGSM_MSGHEADER:FIVUCSAS}
 
 # JWT Configuration
 # CRITICAL SECURITY: Secret must come from JWT_SECRET environment variable (enforced by JwtSecretProvider)

@@ -10,7 +10,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 
 @Service
-@ConditionalOnProperty(name = "sms.enabled", havingValue = "true")
+@ConditionalOnProperty(name = "sms.provider", havingValue = "twilio")
 @Slf4j
 public class TwilioSmsService implements SmsService {
 

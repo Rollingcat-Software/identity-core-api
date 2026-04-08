@@ -5,7 +5,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 
 @Service
-@ConditionalOnProperty(name = "sms.enabled", havingValue = "false", matchIfMissing = true)
+@ConditionalOnProperty(name = "sms.provider", havingValue = "noop", matchIfMissing = true)
 @Slf4j
 public class NoOpSmsService implements SmsService {
 
