@@ -59,6 +59,7 @@ services:
       SPRING_MAIL_PROPERTIES_MAIL_SMTP_AUTH: "true"
       SPRING_MAIL_PROPERTIES_MAIL_SMTP_STARTTLS_ENABLE: "true"
       BIOMETRIC_SERVICE_URL: http://biometric-api:8001/api/v1
+      BIOMETRIC_SERVICE_API_KEY: ${BIOMETRIC_API_KEY}
     networks:
       - backend
       - proxy

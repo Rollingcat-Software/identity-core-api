@@ -87,7 +87,9 @@ All handlers in `application/service/handler/`:
 - Enrollment health: validates backing data before showing methods as enrolled
 
 ### Cross-repo dependencies:
-- Communicates with **biometric-processor** (Python/FastAPI on port 8001) via BiometricServiceAdapter
+- Communicates with **biometric-processor** (Python/FastAPI on port 8001) via BiometricProcessorClient
+  - Requires `BIOMETRIC_SERVICE_API_KEY` env var — sent as `X-API-Key` header on all requests
+  - Bio API is internal only (no public Traefik route), accessible only via Docker network
 - Consumed by **web-app** (React frontend on port 3000) via REST API
 
 ### Enrollment fixes (2026-04-04):
