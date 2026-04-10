@@ -13,6 +13,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import java.util.Base64;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -137,11 +138,22 @@ public class FingerprintAuthHandler implements AuthMethodHandler {
     private StepResult generateChallenge(AuthSession session) {
         String challenge = webAuthnService.generateChallenge(session.getId());
         log.info("WebAuthn fingerprint challenge generated for session: {}", session.getId());
+
+        // Include user's stored credential IDs so non-discoverable credentials are found.
+        // Without allowCredentials, Android Chrome's passkey picker only shows discoverable
+        // credentials — non-resident keys enrolled with requireResidentKey:false won't appear.
+        List<String> allowCredentials = session.getUser() != null
+                ? credentialRepository.findAllByUserId(session.getUser().getId()).stream()
+                    .map(WebAuthnCredential::getCredentialId)
+                    .toList()
+                : List.of();
+
         return StepResult.success(Map.of(
                 "challenge", challenge,
                 "rpId", webAuthnService.getRpId(),
                 "authenticatorAttachment", "platform",
-                "timeout", "60000"
+                "timeout", "60000",
+                "allowCredentials", allowCredentials
         ));
     }
 }
