@@ -44,6 +44,7 @@ public class EnrollmentHealthService {
     public static final Set<AuthMethodType> AUTO_COMPLETE_TYPES = Set.of(
             AuthMethodType.PASSWORD,
             AuthMethodType.EMAIL_OTP,
+            AuthMethodType.SMS_OTP,
             AuthMethodType.QR_CODE
     );
 
