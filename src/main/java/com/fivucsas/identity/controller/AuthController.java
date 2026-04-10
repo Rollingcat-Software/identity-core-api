@@ -612,6 +612,19 @@ public class AuthController {
             return ResponseEntity.ok(challengeData);
         }
 
+        // Reject if this method was already used in a previous step (same-method prevention)
+        String newAmrValue = AMR_VALUES.getOrDefault(methodType, method.toLowerCase());
+        List<String> completedMethods = mfaSession.getCompletedMethods();
+        if (completedMethods.contains(newAmrValue)) {
+            log.warn("MFA same-method reuse attempt: user {} tried {} (amr={}) but it was already completed",
+                    user.getId(), method, newAmrValue);
+            return ResponseEntity.badRequest().body(Map.of(
+                "status", "ERROR",
+                "error", "METHOD_ALREADY_USED",
+                "message", "You cannot use the same authentication method for multiple steps."
+            ));
+        }
+
         // Verify the method using existing logic
         try {
             boolean valid = switch (methodType) {
@@ -724,9 +737,8 @@ public class AuthController {
                 return ResponseEntity.ok(Map.of("status", "FAILED", "message", "Verification failed for " + method));
             }
 
-            // Step verified — advance session
-            String amrValue = AMR_VALUES.getOrDefault(methodType, method.toLowerCase());
-            mfaSession.addCompletedMethod(amrValue);
+            // Step verified — advance session (newAmrValue was resolved before the verification)
+            mfaSession.addCompletedMethod(newAmrValue);
             mfaSession.advanceStep();
 
             if (mfaSession.allStepsCompleted()) {

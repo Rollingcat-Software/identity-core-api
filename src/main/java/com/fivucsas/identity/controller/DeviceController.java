@@ -3,9 +3,11 @@ package com.fivucsas.identity.controller;
 import com.fivucsas.identity.application.dto.command.RegisterDeviceCommand;
 import com.fivucsas.identity.application.dto.response.DeviceResponse;
 import com.fivucsas.identity.application.port.input.ManageDeviceUseCase;
+import com.fivucsas.identity.application.port.input.ManageEnrollmentUseCase;
 import com.fivucsas.identity.domain.exception.ResourceNotFoundException;
 import com.fivucsas.identity.domain.exception.UserNotFoundException;
 import com.fivucsas.identity.application.port.output.WebAuthnCredentialRepositoryPort;
+import com.fivucsas.identity.domain.model.auth.AuthMethodType;
 import com.fivucsas.identity.domain.repository.UserRepository;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.entity.WebAuthnCredential;
@@ -43,6 +45,7 @@ public class DeviceController {
     private final WebAuthnService webAuthnService;
     private final WebAuthnCredentialRepositoryPort credentialRepository;
     private final UserRepository userRepository;
+    private final ManageEnrollmentUseCase manageEnrollmentUseCase;
 
     // --- /api/v1/devices endpoints ---
 
@@ -161,6 +164,9 @@ public class DeviceController {
 
         credentialRepository.save(credential);
 
+        // Auto-complete the enrollment record so the user's biometric_enrollments row is marked ENROLLED
+        autoCompleteWebAuthnEnrollment(userId, transports);
+
         return ResponseEntity.status(HttpStatus.CREATED).body(Map.of(
                 "success", true,
                 "message", "Credential registered successfully",
@@ -186,6 +192,34 @@ public class DeviceController {
                 .toList();
 
         return ResponseEntity.ok(credentials);
+    }
+
+    /**
+     * Determines the auth method type for a WebAuthn credential based on its transports field.
+     * "internal" transport indicates a platform authenticator (fingerprint/Face ID).
+     * All other transports (usb, ble, nfc, hybrid) indicate a roaming/cross-platform hardware key.
+     */
+    private AuthMethodType resolveWebAuthnMethodType(String transports) {
+        if (transports != null && transports.toLowerCase().contains("internal")) {
+            return AuthMethodType.FINGERPRINT;
+        }
+        return AuthMethodType.HARDWARE_KEY;
+    }
+
+    /**
+     * Auto-completes the enrollment record for a WebAuthn credential after successful registration.
+     * Logs a warning (but does NOT fail) if the enrollment record cannot be updated,
+     * since the credential itself has already been persisted.
+     */
+    private void autoCompleteWebAuthnEnrollment(UUID userId, String transports) {
+        AuthMethodType methodType = resolveWebAuthnMethodType(transports);
+        try {
+            manageEnrollmentUseCase.completeEnrollment(userId, methodType, "{}");
+            log.info("Auto-completed {} enrollment for user {}", methodType, userId);
+        } catch (Exception e) {
+            log.warn("Failed to auto-complete {} enrollment for user {} after WebAuthn registration: {}",
+                    methodType, userId, e.getMessage());
+        }
     }
 
     @DeleteMapping("/api/v1/webauthn/credentials/by-id/{id}")
@@ -308,6 +342,9 @@ public class DeviceController {
                 .build();
 
         WebAuthnCredential saved = credentialRepository.save(credential);
+
+        // Auto-complete the enrollment record so the user's biometric_enrollments row is marked ENROLLED
+        autoCompleteWebAuthnEnrollment(user.getId(), transports);
 
         log.info("WebAuthn credential registered for user: {}, credentialId: {}", user.getEmail(), credentialId);
         return ResponseEntity.status(HttpStatus.CREATED).body(Map.of(
