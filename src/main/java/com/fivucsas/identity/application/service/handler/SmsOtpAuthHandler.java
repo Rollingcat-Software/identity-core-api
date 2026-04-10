@@ -5,6 +5,7 @@ import com.fivucsas.identity.entity.AuthFlowStep;
 import com.fivucsas.identity.entity.AuthSession;
 import com.fivucsas.identity.infrastructure.otp.OtpService;
 import com.fivucsas.identity.infrastructure.sms.SmsService;
+import com.fivucsas.identity.infrastructure.sms.VerifiableSmsService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -38,6 +39,22 @@ public class SmsOtpAuthHandler implements AuthMethodHandler {
             return StepResult.failure("SMS OTP code is required");
         }
 
+        // Use Twilio Verify native check when available (no Redis OTP store needed)
+        if (smsService instanceof VerifiableSmsService verifiable) {
+            String phoneNumber = session.getUser() != null ? session.getUser().getPhoneNumber() : null;
+            if (phoneNumber == null || phoneNumber.isEmpty()) {
+                return StepResult.failure("User does not have a phone number configured");
+            }
+            boolean valid = verifiable.verifyCode(phoneNumber, code);
+            if (!valid) {
+                log.warn("Twilio Verify check failed for session: {}", session.getId());
+                return StepResult.failure("Invalid or expired SMS OTP code");
+            }
+            log.info("Twilio Verify check succeeded for session: {}", session.getId());
+            return StepResult.success();
+        }
+
+        // Fallback: local Redis-based OTP validation
         String otpKey = buildOtpKey(session.getId().toString(), step.getStepOrder());
         boolean valid = otpService.validate(otpKey, code);
 
