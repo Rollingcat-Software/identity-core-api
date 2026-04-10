@@ -24,6 +24,7 @@ import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.infrastructure.email.EmailService;
 import com.fivucsas.identity.infrastructure.otp.OtpService;
 import com.fivucsas.identity.infrastructure.sms.SmsService;
+import com.fivucsas.identity.infrastructure.sms.VerifiableSmsService;
 import com.fivucsas.identity.domain.repository.UserRepository;
 import com.fivucsas.identity.domain.exception.UserNotFoundException;
 import com.fivucsas.identity.security.RateLimitService;
@@ -474,7 +475,13 @@ public class AuthController {
                 }
                 case SMS_OTP -> {
                     String code = (String) data.get("code");
-                    yield code != null && otpService.validate("2fa-sms:" + user.getId(), code);
+                    if (code == null || code.isBlank()) yield false;
+                    if (smsService instanceof VerifiableSmsService verifiableSms) {
+                        String phone = user.getPhoneNumber();
+                        if (phone == null || phone.isBlank()) yield false;
+                        yield verifiableSms.verifyCode(phone, code);
+                    }
+                    yield otpService.validate("2fa-sms:" + user.getId(), code);
                 }
                 case FACE -> {
                     String image = (String) data.get("image");
@@ -636,7 +643,13 @@ public class AuthController {
                 }
                 case SMS_OTP -> {
                     String code = (String) data.get("code");
-                    yield code != null && otpService.validate("2fa-sms:" + user.getId(), code);
+                    if (code == null || code.isBlank()) yield false;
+                    if (smsService instanceof VerifiableSmsService verifiableSms) {
+                        String phone = user.getPhoneNumber();
+                        if (phone == null || phone.isBlank()) yield false;
+                        yield verifiableSms.verifyCode(phone, code);
+                    }
+                    yield otpService.validate("2fa-sms:" + user.getId(), code);
                 }
                 case FACE -> {
                     String image = (String) data.get("image");
