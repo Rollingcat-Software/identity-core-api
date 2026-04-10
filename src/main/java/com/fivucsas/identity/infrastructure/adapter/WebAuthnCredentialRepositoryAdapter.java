@@ -22,6 +22,11 @@ public class WebAuthnCredentialRepositoryAdapter implements WebAuthnCredentialRe
     }
 
     @Override
+    public Optional<WebAuthnCredential> findById(UUID id) {
+        return jpaRepository.findById(id);
+    }
+
+    @Override
     public List<WebAuthnCredential> findAllByUserId(UUID userId) {
         return jpaRepository.findAllByUserId(userId);
     }

@@ -207,6 +207,32 @@ public class DeviceController {
     }
 
     /**
+     * Revokes the WebAuthn enrollment record if no credentials of the given transport type
+     * remain after a deletion. This keeps the enrollment status in sync with actual credentials.
+     *
+     * Called from delete endpoints so that removing the last passkey automatically
+     * marks the method as NOT_ENROLLED rather than leaving a stale ENROLLED record.
+     */
+    private void revokeWebAuthnEnrollmentIfNeeded(UUID userId, String transports) {
+        AuthMethodType methodType = resolveWebAuthnMethodType(transports);
+        List<WebAuthnCredential> remaining = credentialRepository.findAllByUserId(userId);
+        boolean anyOfSameType = remaining.stream().anyMatch(c -> {
+            boolean isInternal = c.getTransports() != null && c.getTransports().toLowerCase().contains("internal");
+            return methodType == AuthMethodType.FINGERPRINT ? isInternal : !isInternal;
+        });
+
+        if (!anyOfSameType) {
+            try {
+                manageEnrollmentUseCase.revokeEnrollment(userId, methodType);
+                log.info("Auto-revoked {} enrollment for user {} after last credential deleted", methodType, userId);
+            } catch (Exception e) {
+                log.warn("Failed to revoke {} enrollment for user {} after credential deletion: {}",
+                        methodType, userId, e.getMessage());
+            }
+        }
+    }
+
+    /**
      * Auto-completes the enrollment record for a WebAuthn credential after successful registration.
      * Logs a warning (but does NOT fail) if the enrollment record cannot be updated,
      * since the credential itself has already been persisted.
@@ -227,10 +253,16 @@ public class DeviceController {
     @PreAuthorize("isAuthenticated()")
     @Transactional
     public ResponseEntity<Void> deleteCredentialById(@PathVariable UUID id) {
-        if (!credentialRepository.existsById(id)) {
-            throw new ResourceNotFoundException("Credential", id.toString());
-        }
+        WebAuthnCredential credential = credentialRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Credential", id.toString()));
+        UUID userId = credential.getUser().getId();
+        String transports = credential.getTransports();
+
         credentialRepository.deleteById(id);
+
+        // Revoke the enrollment if no credentials of this transport type remain
+        revokeWebAuthnEnrollmentIfNeeded(userId, transports);
+
         return ResponseEntity.noContent().build();
     }
 

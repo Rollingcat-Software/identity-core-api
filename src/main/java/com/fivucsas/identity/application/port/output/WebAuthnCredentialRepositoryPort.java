@@ -13,6 +13,8 @@ public interface WebAuthnCredentialRepositoryPort {
 
     Optional<WebAuthnCredential> findByCredentialId(String credentialId);
 
+    Optional<WebAuthnCredential> findById(UUID id);
+
     List<WebAuthnCredential> findAllByUserId(UUID userId);
 
     boolean existsByCredentialId(String credentialId);
