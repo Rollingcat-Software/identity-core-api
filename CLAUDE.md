@@ -89,6 +89,13 @@ All handlers in `application/service/handler/`:
 - Enrollment health: validates backing data before showing methods as enrolled
 - **WebAuthn base64 fix (2026-04-11)**: `WebAuthnService.decodeBase64()` normalizes standard base64 (`+/`) to URL-safe (`-_`) before decoding. Frontend `btoa()` produces standard base64 — NEVER use `Base64.getUrlDecoder().decode()` directly on frontend data.
 - **MFA challenge `allowCredentials` (2026-04-11)**: `AuthController.verifyMfaStep()` challenge response includes credential IDs filtered by transport type. Required for Android Chrome non-discoverable credentials.
+- **Session path B1-B6 fixes (2026-04-11)**: All 6 AuthMethodHandlers now accept both old and new field names for backward compatibility:
+  - EmailOtp/SmsOtp: accept both `send` and `send_otp` action
+  - FaceAuthHandler: strips `data:image/jpeg;base64,` prefix if present
+  - FingerprintAuthHandler: fallback from `fingerprintData` to `assertion`
+  - HardwareKeyAuthHandler: decodes base64 JSON blob `assertion` field
+  - QrCodeAuthHandler: fallback from `qrToken` to `token`
+- **NFC auto-enrollment (2026-04-11)**: NfcController.enrollCard() now creates user_enrollments record. NFC_DOCUMENT added to AUTO_COMPLETE_TYPES.
 
 ### Cross-repo dependencies:
 - Communicates with **biometric-processor** (Python/FastAPI on port 8001) via BiometricProcessorClient
