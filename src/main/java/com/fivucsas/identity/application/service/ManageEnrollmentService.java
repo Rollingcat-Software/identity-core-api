@@ -3,7 +3,10 @@ package com.fivucsas.identity.application.service;
 import com.fivucsas.identity.application.dto.response.EnrollmentResponse;
 import com.fivucsas.identity.application.port.input.ManageEnrollmentUseCase;
 import com.fivucsas.identity.application.port.output.BiometricServicePort;
+import com.fivucsas.identity.application.port.output.NfcCardRepositoryPort;
+import com.fivucsas.identity.application.port.output.WebAuthnCredentialRepositoryPort;
 import com.fivucsas.identity.domain.model.auth.AuthMethodType;
+import com.fivucsas.identity.entity.NfcCard;
 import com.fivucsas.identity.entity.Tenant;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.entity.UserEnrollment;
@@ -33,6 +36,8 @@ public class ManageEnrollmentService implements ManageEnrollmentUseCase {
     private final UserRepository userRepository;
     private final JpaTenantRepository tenantRepository;
     private final BiometricServicePort biometricServicePort;
+    private final NfcCardRepositoryPort nfcCardRepository;
+    private final WebAuthnCredentialRepositoryPort webAuthnCredentialRepository;
 
     @Override
     public List<EnrollmentResponse> getUserEnrollments(UUID userId) {
@@ -87,13 +92,59 @@ public class ManageEnrollmentService implements ManageEnrollmentUseCase {
                 .findByUserIdAndAuthMethodType(userId, methodType)
                 .orElseThrow(() -> new EntityNotFoundException("Enrollment not found for user: " + userId + " method: " + methodType));
 
-        // Delete biometric data from external service when revoking biometric enrollments
+        // Clean up backing data for methods that have external storage
         if (BIOMETRIC_TYPES.contains(methodType)) {
             deleteBiometricData(userId, methodType);
         }
+        cleanupMethodData(userId, methodType);
 
         enrollment.revoke();
         userEnrollmentRepository.save(enrollment);
+    }
+
+    private void cleanupMethodData(UUID userId, AuthMethodType methodType) {
+        try {
+            switch (methodType) {
+                case NFC_DOCUMENT -> {
+                    List<NfcCard> cards = nfcCardRepository.findByUserIdAndIsActiveTrue(userId);
+                    for (NfcCard card : cards) {
+                        card.deactivate();
+                        nfcCardRepository.save(card);
+                    }
+                    if (!cards.isEmpty()) {
+                        log.info("Deactivated {} NFC cards for user: {}", cards.size(), userId);
+                    }
+                }
+                case HARDWARE_KEY -> {
+                    // Hardware keys have transports like "usb", "nfc", "ble" (not "internal")
+                    var credentials = webAuthnCredentialRepository.findAllByUserId(userId).stream()
+                            .filter(c -> c.getTransports() == null || !c.getTransports().contains("internal"))
+                            .toList();
+                    for (var cred : credentials) {
+                        webAuthnCredentialRepository.deleteById(cred.getId());
+                    }
+                    if (!credentials.isEmpty()) {
+                        log.info("Deleted {} hardware key credentials for user: {}", credentials.size(), userId);
+                    }
+                }
+                case FINGERPRINT -> {
+                    // Platform authenticators have "internal" transport
+                    var credentials = webAuthnCredentialRepository.findAllByUserId(userId).stream()
+                            .filter(c -> c.getTransports() != null && c.getTransports().contains("internal"))
+                            .toList();
+                    for (var cred : credentials) {
+                        webAuthnCredentialRepository.deleteById(cred.getId());
+                    }
+                    if (!credentials.isEmpty()) {
+                        log.info("Deleted {} fingerprint credentials for user: {}", credentials.size(), userId);
+                    }
+                }
+                default -> { /* no additional cleanup needed */ }
+            }
+        } catch (Exception e) {
+            log.warn("Failed to clean up {} data for user: {}. Revocation will proceed. Error: {}",
+                    methodType, userId, e.getMessage());
+        }
     }
 
     private void deleteBiometricData(UUID userId, AuthMethodType methodType) {

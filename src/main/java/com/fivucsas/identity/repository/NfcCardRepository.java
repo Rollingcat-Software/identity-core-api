@@ -25,5 +25,7 @@ public interface NfcCardRepository extends JpaRepository<NfcCard, UUID> {
 
     boolean existsByCardSerialAndTenantId(String cardSerial, UUID tenantId);
 
+    boolean existsByCardSerialAndTenantIdAndIsActiveTrue(String cardSerial, UUID tenantId);
+
     void deleteByUserIdAndTenantId(UUID userId, UUID tenantId);
 }

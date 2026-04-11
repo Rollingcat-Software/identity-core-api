@@ -22,6 +22,8 @@ public interface NfcCardRepositoryPort {
 
     boolean existsByCardSerialAndTenantId(String cardSerial, UUID tenantId);
 
+    boolean existsByCardSerialAndTenantIdAndIsActiveTrue(String cardSerial, UUID tenantId);
+
     List<NfcCard> findByCardSerial(String cardSerial);
 
     List<NfcCard> findByUserIdAndIsActiveTrue(UUID userId);

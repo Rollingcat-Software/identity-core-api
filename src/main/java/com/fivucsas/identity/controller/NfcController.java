@@ -5,6 +5,7 @@ import com.fivucsas.identity.application.port.output.NfcCardRepositoryPort;
 import com.fivucsas.identity.domain.model.auth.AuthMethodType;
 import com.fivucsas.identity.domain.repository.UserRepository;
 import com.fivucsas.identity.entity.NfcCard;
+import java.util.List;
 import com.fivucsas.identity.entity.Tenant;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.security.RbacAuthorizationService;
@@ -62,8 +63,8 @@ public class NfcController {
             targetUserId = currentUser.getId();
         }
 
-        // Check if card is already enrolled in this tenant
-        if (nfcCardRepository.existsByCardSerialAndTenantId(cardSerial, tenant.getId())) {
+        // Check if card is already actively enrolled in this tenant
+        if (nfcCardRepository.existsByCardSerialAndTenantIdAndIsActiveTrue(cardSerial, tenant.getId())) {
             return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of(
                     "success", false,
                     "message", "Card is already enrolled in this tenant"
@@ -215,11 +216,11 @@ public class NfcController {
     }
 
     @GetMapping("/user/{userId}")
-    @Operation(summary = "List all NFC cards for a user")
+    @Operation(summary = "List all NFC cards for a user (active and inactive)")
     @PreAuthorize("isAuthenticated()")
     @Transactional(readOnly = true)
     public ResponseEntity<Map<String, Object>> listUserCards(@PathVariable UUID userId) {
-        List<NfcCard> cards = nfcCardRepository.findByUserIdAndIsActiveTrue(userId);
+        List<NfcCard> cards = nfcCardRepository.findByUserId(userId);
 
         List<Map<String, Object>> results = new ArrayList<>();
         for (NfcCard card : cards) {
@@ -228,6 +229,7 @@ public class NfcController {
             entry.put("cardSerial", card.getCardSerial());
             entry.put("cardType", card.getCardType());
             entry.put("label", card.getLabel());
+            entry.put("isActive", card.isActive());
             entry.put("enrolledAt", card.getEnrolledAt().toString());
             entry.put("lastUsedAt", card.getLastUsedAt() != null ? card.getLastUsedAt().toString() : null);
             results.add(entry);
@@ -236,7 +238,48 @@ public class NfcController {
         return ResponseEntity.ok(Map.of(
                 "userId", userId.toString(),
                 "count", cards.size(),
+                "activeCount", cards.stream().filter(NfcCard::isActive).count(),
                 "cards", results
+        ));
+    }
+
+    @DeleteMapping("/cards/{cardId}")
+    @Operation(summary = "Deactivate a specific NFC card by its ID")
+    @PreAuthorize("isAuthenticated()")
+    @Transactional
+    public ResponseEntity<Map<String, Object>> deactivateCard(@PathVariable UUID cardId) {
+        User currentUser = rbacService.getCurrentUser()
+                .orElseThrow(UnauthorizedException::new);
+
+        // Find the card — use findByUserId and filter, since we don't have findById on port
+        List<NfcCard> userCards = nfcCardRepository.findByUserId(currentUser.getId());
+        Optional<NfcCard> targetCard = userCards.stream()
+                .filter(c -> c.getId().equals(cardId))
+                .findFirst();
+
+        if (targetCard.isEmpty()) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of(
+                    "success", false,
+                    "message", "Card not found or does not belong to you"
+            ));
+        }
+
+        NfcCard card = targetCard.get();
+        if (!card.isActive()) {
+            return ResponseEntity.ok(Map.of(
+                    "success", false,
+                    "message", "Card is already deactivated"
+            ));
+        }
+
+        card.deactivate();
+        nfcCardRepository.save(card);
+        log.info("NFC card {} deactivated by user {}", cardId, currentUser.getId());
+
+        return ResponseEntity.ok(Map.of(
+                "success", true,
+                "message", "Card deactivated successfully",
+                "cardId", cardId.toString()
         ));
     }
 }

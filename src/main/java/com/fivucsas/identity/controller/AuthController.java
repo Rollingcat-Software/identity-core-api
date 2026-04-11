@@ -503,7 +503,22 @@ public class AuthController {
                         }
                     };
                     Map<String, Object> faceResult = biometricService.verifyFace(user.getId(), faceFile);
-                    yield Boolean.TRUE.equals(faceResult.get("verified"));
+                    // Check spoof detection
+                    String errorCode2fa = faceResult.get("error_code") instanceof String ec ? ec : null;
+                    if ("SPOOF_DETECTED".equals(errorCode2fa)) {
+                        log.warn("Spoof detected for 2FA user: {}", user.getId());
+                        yield false;
+                    }
+                    boolean faceVerified2fa = Boolean.TRUE.equals(faceResult.get("verified"))
+                            || "true".equalsIgnoreCase(String.valueOf(faceResult.get("verified")));
+                    // Confidence fallback (same threshold as FaceAuthHandler)
+                    if (!faceVerified2fa) {
+                        Object conf = faceResult.get("confidence");
+                        if (conf instanceof Number num && num.doubleValue() >= 0.7) {
+                            faceVerified2fa = true;
+                        }
+                    }
+                    yield faceVerified2fa;
                 }
                 case VOICE -> {
                     String voiceData = (String) data.get("voiceData");
@@ -687,7 +702,22 @@ public class AuthController {
                         }
                     };
                     Map<String, Object> faceResult = biometricService.verifyFace(user.getId(), faceFile);
-                    yield Boolean.TRUE.equals(faceResult.get("verified"));
+                    // Check spoof detection
+                    String errorCodeMfa = faceResult.get("error_code") instanceof String ec ? ec : null;
+                    if ("SPOOF_DETECTED".equals(errorCodeMfa)) {
+                        log.warn("Spoof detected for MFA user: {}", user.getId());
+                        yield false;
+                    }
+                    boolean faceVerifiedMfa = Boolean.TRUE.equals(faceResult.get("verified"))
+                            || "true".equalsIgnoreCase(String.valueOf(faceResult.get("verified")));
+                    // Confidence fallback (same threshold as FaceAuthHandler: 0.7)
+                    if (!faceVerifiedMfa) {
+                        Object confMfa = faceResult.get("confidence");
+                        if (confMfa instanceof Number num && num.doubleValue() >= 0.7) {
+                            faceVerifiedMfa = true;
+                        }
+                    }
+                    yield faceVerifiedMfa;
                 }
                 case VOICE -> {
                     String voiceData = (String) data.get("voiceData");
