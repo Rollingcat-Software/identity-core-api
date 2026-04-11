@@ -87,6 +87,8 @@ All handlers in `application/service/handler/`:
 - Flyway: production config with baseline-on-migrate, validate-on-migrate disabled (BFG checksum)
 - N-step MFA: JWT deferred until all steps complete, RFC 8176 amr claim
 - Enrollment health: validates backing data before showing methods as enrolled
+- **WebAuthn base64 fix (2026-04-11)**: `WebAuthnService.decodeBase64()` normalizes standard base64 (`+/`) to URL-safe (`-_`) before decoding. Frontend `btoa()` produces standard base64 — NEVER use `Base64.getUrlDecoder().decode()` directly on frontend data.
+- **MFA challenge `allowCredentials` (2026-04-11)**: `AuthController.verifyMfaStep()` challenge response includes credential IDs filtered by transport type. Required for Android Chrome non-discoverable credentials.
 
 ### Cross-repo dependencies:
 - Communicates with **biometric-processor** (Python/FastAPI on port 8001) via BiometricProcessorClient

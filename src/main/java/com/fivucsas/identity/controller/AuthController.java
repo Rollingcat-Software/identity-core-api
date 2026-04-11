@@ -48,6 +48,7 @@ import com.fivucsas.identity.entity.AuthFlowStep;
 import com.fivucsas.identity.entity.AuthMethod;
 import com.fivucsas.identity.entity.MfaSession;
 import com.fivucsas.identity.entity.RefreshToken;
+import com.fivucsas.identity.entity.WebAuthnCredential;
 
 import com.fivucsas.identity.repository.MfaSessionRepository;
 import com.fivucsas.identity.repository.UserEnrollmentRepository;
@@ -609,12 +610,28 @@ public class AuthController {
         if ((methodType == AuthMethodType.FINGERPRINT || methodType == AuthMethodType.HARDWARE_KEY)
                 && "challenge".equals(data.get("action"))) {
             String challenge = webAuthnService.generateChallenge(mfaSession.getId());
+
+            // Include allowCredentials filtered by transport type so non-discoverable
+            // credentials are found on Android Chrome (passkey picker requires explicit IDs)
+            boolean wantPlatform = methodType == AuthMethodType.FINGERPRINT;
+            List<String> allowCredentials = webAuthnCredentialRepository
+                    .findAllByUserId(user.getId()).stream()
+                    .filter(c -> {
+                        String t = c.getTransports();
+                        if (t == null || t.isBlank()) return true;
+                        boolean isInternal = t.toLowerCase().contains("internal");
+                        return wantPlatform == isInternal;
+                    })
+                    .map(WebAuthnCredential::getCredentialId)
+                    .toList();
+
             Map<String, Object> challengeData = new java.util.HashMap<>();
             challengeData.put("status", "CHALLENGE");
             challengeData.put("data", Map.of(
                 "challenge", challenge,
                 "rpId", webAuthnService.getRpId(),
-                "timeout", "60000"
+                "timeout", "60000",
+                "allowCredentials", allowCredentials
             ));
             return ResponseEntity.ok(challengeData);
         }
@@ -681,7 +698,10 @@ public class AuthController {
                 case FINGERPRINT, HARDWARE_KEY -> {
                     // Assertion verification
                     String assertionRaw = (String) data.get("assertion");
-                    if (assertionRaw == null || assertionRaw.isBlank()) yield false;
+                    if (assertionRaw == null || assertionRaw.isBlank()) {
+                        log.warn("MFA {}: assertion field is null/blank. Data keys: {}", methodType, data.keySet());
+                        yield false;
+                    }
 
                     try {
                         // Decode the base64 JSON assertion

@@ -60,7 +60,7 @@ public class WebAuthnService {
 
         if (clientDataJsonB64 != null && !clientDataJsonB64.isEmpty()) {
             try {
-                byte[] decoded = Base64.getUrlDecoder().decode(clientDataJsonB64);
+                byte[] decoded = decodeBase64(clientDataJsonB64);
                 JsonNode clientData = OBJECT_MAPPER.readTree(decoded);
 
                 String type = clientData.has("type") ? clientData.get("type").asText() : null;
@@ -154,14 +154,14 @@ public class WebAuthnService {
                                                   String clientDataJsonB64, String signatureB64) {
         try {
             // Decode the public key
-            byte[] keyBytes = Base64.getUrlDecoder().decode(publicKeyBase64);
+            byte[] keyBytes = decodeBase64(publicKeyBase64);
             X509EncodedKeySpec keySpec = new X509EncodedKeySpec(keyBytes);
             KeyFactory kf = KeyFactory.getInstance("EC");
             PublicKey pk = kf.generatePublic(keySpec);
 
             // Build signed data: authenticatorData || SHA-256(clientDataJSON)
-            byte[] authData = Base64.getUrlDecoder().decode(authenticatorDataB64);
-            byte[] clientDataJsonRaw = Base64.getUrlDecoder().decode(clientDataJsonB64);
+            byte[] authData = decodeBase64(authenticatorDataB64);
+            byte[] clientDataJsonRaw = decodeBase64(clientDataJsonB64);
 
             MessageDigest sha256 = MessageDigest.getInstance("SHA-256");
             byte[] clientDataHash = sha256.digest(clientDataJsonRaw);
@@ -175,7 +175,7 @@ public class WebAuthnService {
             sig.initVerify(pk);
             sig.update(signedData);
 
-            byte[] signatureBytes = Base64.getUrlDecoder().decode(signatureB64);
+            byte[] signatureBytes = decodeBase64(signatureB64);
             return sig.verify(signatureBytes);
         } catch (Exception e) {
             log.warn("WebAuthn ECDSA signature verification error: {}", e.getMessage());
@@ -188,7 +188,7 @@ public class WebAuthnService {
      */
     public long extractSignCount(String authenticatorDataB64) {
         try {
-            byte[] authData = Base64.getUrlDecoder().decode(authenticatorDataB64);
+            byte[] authData = decodeBase64(authenticatorDataB64);
             if (authData.length < 37) return 0;
             return ((authData[33] & 0xFFL) << 24) |
                    ((authData[34] & 0xFFL) << 16) |
@@ -212,7 +212,7 @@ public class WebAuthnService {
         }
 
         try {
-            byte[] decoded = Base64.getUrlDecoder().decode(clientDataJsonB64);
+            byte[] decoded = decodeBase64(clientDataJsonB64);
             JsonNode clientData = OBJECT_MAPPER.readTree(decoded);
 
             // Verify type
@@ -255,7 +255,7 @@ public class WebAuthnService {
         }
 
         try {
-            byte[] authData = Base64.getUrlDecoder().decode(authenticatorDataB64);
+            byte[] authData = decodeBase64(authenticatorDataB64);
 
             // Minimum length: 32 (rpIdHash) + 1 (flags) + 4 (signCount) = 37
             if (authData.length < 37) {
@@ -292,5 +292,18 @@ public class WebAuthnService {
 
     private String buildChallengeKey(UUID sessionId) {
         return "webauthn:challenge:" + sessionId;
+    }
+
+    /**
+     * Decodes a base64 string that may be standard (+ /) or URL-safe (- _) encoded.
+     * The frontend uses btoa() which produces standard base64, while the WebAuthn spec
+     * often uses base64url. This helper normalizes both to work correctly.
+     */
+    private byte[] decodeBase64(String input) {
+        // Convert standard base64 chars to URL-safe before decoding
+        String normalized = input.replace('+', '-').replace('/', '_');
+        // Remove any padding — URL decoder handles unpadded
+        normalized = normalized.replaceAll("=+$", "");
+        return Base64.getUrlDecoder().decode(normalized);
     }
 }
