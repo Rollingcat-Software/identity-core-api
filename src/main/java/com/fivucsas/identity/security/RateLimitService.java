@@ -15,11 +15,11 @@ import java.util.concurrent.atomic.AtomicLong;
 /**
  * Rate limiting service using Bucket4j token bucket algorithm.
  *
- * Rate Limits (OWASP Recommendations):
- * - Login attempts: 5 per 15 minutes per IP
- * - Registration: 3 per hour per IP
- * - Password reset: 3 per hour per IP
- * - Biometric verification: 10 per minute per user
+ * Rate Limits:
+ * - Login attempts: 10 per 5 minutes per IP
+ * - Registration: 5 per hour per IP
+ * - Password reset: 5 per hour per IP
+ * - Biometric verification: 20 per minute per user
  * - API calls: 100 per minute per user
  *
  * Implementation:
@@ -56,7 +56,7 @@ public class RateLimitService {
      * @return true if attempt is allowed, false if rate limit exceeded
      */
     public boolean allowLoginAttempt(String identifier) {
-        Bucket bucket = getOrCreateBucket(loginBuckets, identifier, this::createLoginBucket, Duration.ofMinutes(15));
+        Bucket bucket = getOrCreateBucket(loginBuckets, identifier, this::createLoginBucket, Duration.ofMinutes(5));
         boolean allowed = bucket.tryConsume(1);
 
         if (!allowed) {
@@ -172,7 +172,7 @@ public class RateLimitService {
     public void cleanupExpiredBuckets() {
         long now = System.currentTimeMillis();
         int cleaned = 0;
-        cleaned += evictExpired(loginBuckets, now, Duration.ofMinutes(15).toMillis());
+        cleaned += evictExpired(loginBuckets, now, Duration.ofMinutes(5).toMillis());
         cleaned += evictExpired(registerBuckets, now, Duration.ofHours(1).toMillis());
         cleaned += evictExpired(passwordResetBuckets, now, Duration.ofHours(1).toMillis());
         cleaned += evictExpired(biometricBuckets, now, Duration.ofMinutes(1).toMillis());
@@ -215,32 +215,32 @@ public class RateLimitService {
     }
 
     private Bucket createLoginBucket() {
-        // 5 attempts per 15 minutes
-        Bandwidth limit = Bandwidth.classic(5, Refill.intervally(5, Duration.ofMinutes(15)));
+        // 10 attempts per 5 minutes
+        Bandwidth limit = Bandwidth.classic(10, Refill.intervally(10, Duration.ofMinutes(5)));
         return Bucket.builder()
             .addLimit(limit)
             .build();
     }
 
     private Bucket createRegistrationBucket() {
-        // 3 attempts per hour
-        Bandwidth limit = Bandwidth.classic(3, Refill.intervally(3, Duration.ofHours(1)));
+        // 5 attempts per hour
+        Bandwidth limit = Bandwidth.classic(5, Refill.intervally(5, Duration.ofHours(1)));
         return Bucket.builder()
             .addLimit(limit)
             .build();
     }
 
     private Bucket createPasswordResetBucket() {
-        // 3 attempts per hour
-        Bandwidth limit = Bandwidth.classic(3, Refill.intervally(3, Duration.ofHours(1)));
+        // 5 attempts per hour
+        Bandwidth limit = Bandwidth.classic(5, Refill.intervally(5, Duration.ofHours(1)));
         return Bucket.builder()
             .addLimit(limit)
             .build();
     }
 
     private Bucket createBiometricBucket() {
-        // 10 attempts per minute
-        Bandwidth limit = Bandwidth.classic(10, Refill.intervally(10, Duration.ofMinutes(1)));
+        // 20 attempts per minute
+        Bandwidth limit = Bandwidth.classic(20, Refill.intervally(20, Duration.ofMinutes(1)));
         return Bucket.builder()
             .addLimit(limit)
             .build();

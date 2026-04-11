@@ -81,11 +81,14 @@ public class RateLimitFilter extends OncePerRequestFilter {
             response.setHeader("X-RateLimit-Remaining", String.valueOf(Math.max(0, MAX_REQUESTS - requests)));
 
             if (requests > MAX_REQUESTS) {
+                long retryAfterSeconds = WINDOW.getSeconds();
                 log.warn("Rate limit exceeded for client: {} on path: {}", clientId, path);
                 response.setStatus(HttpStatus.TOO_MANY_REQUESTS.value());
-                response.setHeader("X-RateLimit-Retry-After", String.valueOf(WINDOW.getSeconds()));
-                response.getWriter().write("{\"error\": \"Rate limit exceeded. Please try again later.\"}");
+                response.setHeader("Retry-After", String.valueOf(retryAfterSeconds));
+                response.setHeader("X-RateLimit-Retry-After", String.valueOf(retryAfterSeconds));
                 response.setContentType("application/json");
+                response.getWriter().write(
+                        "{\"error\": \"Rate limit exceeded\", \"retryAfterSeconds\": " + retryAfterSeconds + "}");
                 return;
             }
 
@@ -96,10 +99,13 @@ public class RateLimitFilter extends OncePerRequestFilter {
             // For sensitive auth endpoints, use in-memory fallback instead of failing open
             if (isSensitivePath(path)) {
                 if (fallbackRateLimitExceeded(clientId, path)) {
+                    long retryAfterSeconds = WINDOW.getSeconds();
                     log.warn("Fallback rate limit exceeded for client: {} on path: {}", clientId, path);
                     response.setStatus(HttpStatus.TOO_MANY_REQUESTS.value());
+                    response.setHeader("Retry-After", String.valueOf(retryAfterSeconds));
                     response.setContentType("application/json");
-                    response.getWriter().write("{\"error\": \"Rate limit exceeded. Please try again later.\"}");
+                    response.getWriter().write(
+                            "{\"error\": \"Rate limit exceeded\", \"retryAfterSeconds\": " + retryAfterSeconds + "}");
                     return;
                 }
             }
