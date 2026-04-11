@@ -43,6 +43,9 @@ public class NfcCard {
     @Builder.Default
     private boolean isActive = true;
 
+    @Column(name = "revoked_at")
+    private Instant revokedAt;
+
     @Column(name = "enrolled_at", nullable = false)
     @Builder.Default
     private Instant enrolledAt = Instant.now();
@@ -64,9 +67,11 @@ public class NfcCard {
 
     public void deactivate() {
         this.isActive = false;
+        this.revokedAt = Instant.now();
     }
 
     public void activate() {
         this.isActive = true;
+        this.revokedAt = null;
     }
 }

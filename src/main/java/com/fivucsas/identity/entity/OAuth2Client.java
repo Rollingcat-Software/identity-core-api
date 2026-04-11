@@ -61,6 +61,12 @@ public class OAuth2Client {
     @Builder.Default
     private boolean active = true;
 
+    @Column(name = "revoked_at")
+    private Instant revokedAt;
+
+    @Column(name = "expires_at")
+    private Instant expiresAt;
+
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
@@ -104,6 +110,28 @@ public class OAuth2Client {
     }
 
     /**
+     * Checks if the client registration has expired.
+     */
+    public boolean isExpired() {
+        return expiresAt != null && Instant.now().isAfter(expiresAt);
+    }
+
+    /**
+     * Checks if this client is valid (active, not expired, not revoked).
+     */
+    public boolean isValid() {
+        return active && !isExpired() && revokedAt == null;
+    }
+
+    /**
+     * Revokes this client permanently with an audit timestamp.
+     */
+    public void revoke() {
+        this.active = false;
+        this.revokedAt = Instant.now();
+    }
+
+    /**
      * Deactivates this client.
      */
     public void deactivate() {
@@ -115,5 +143,6 @@ public class OAuth2Client {
      */
     public void activate() {
         this.active = true;
+        this.revokedAt = null;
     }
 }

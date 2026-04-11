@@ -100,6 +100,7 @@ public class AuthController {
     private final com.fivucsas.identity.application.port.output.NfcCardRepositoryPort nfcCardRepository;
     private final com.fivucsas.identity.infrastructure.qrcode.QrCodeService qrCodeService;
     private final com.fivucsas.identity.application.port.output.WebAuthnCredentialRepositoryPort webAuthnCredentialRepository;
+    private final com.fivucsas.identity.application.port.output.AuditLogPort auditLogPort;
 
     private static final String EMAIL_VERIFY_OTP_PREFIX = "email-verify:";
     private static final String PHONE_VERIFY_OTP_PREFIX = "phone-verify:";
@@ -109,7 +110,8 @@ public class AuthController {
     public ResponseEntity<AuthResponse> register(
             @Valid @RequestBody RegisterRequest request,
             HttpServletRequest httpRequest) {
-        log.info("Register request received for email: {}", request.getEmail());
+        log.info("AUDIT: Register attempt — email={}, ip={}, userAgent={}",
+                request.getEmail(), getClientIP(httpRequest), getUserAgent(httpRequest));
 
         RegisterUserCommand command = RegisterUserCommand.builder()
             .email(request.getEmail())
@@ -130,7 +132,8 @@ public class AuthController {
     public ResponseEntity<AuthResponse> login(
             @Valid @RequestBody LoginRequest request,
             HttpServletRequest httpRequest) {
-        log.info("Login request received for email: {}", request.getEmail());
+        log.info("AUDIT: Login attempt — email={}, ip={}, userAgent={}",
+                request.getEmail(), getClientIP(httpRequest), getUserAgent(httpRequest));
 
         AuthenticateUserCommand command = AuthenticateUserCommand.builder()
             .email(request.getEmail())
@@ -150,7 +153,7 @@ public class AuthController {
     public ResponseEntity<AuthResponse> refreshToken(
             @Valid @RequestBody RefreshTokenRequest request,
             HttpServletRequest httpRequest) {
-        log.info("Refresh token request received");
+        log.info("AUDIT: Token refresh request — ip={}", getClientIP(httpRequest));
 
         RefreshTokenCommand command = RefreshTokenCommand.builder()
             .refreshToken(request.getRefreshToken())
@@ -169,7 +172,8 @@ public class AuthController {
             @Valid @RequestBody RefreshTokenRequest request,
             Authentication authentication,
             HttpServletRequest httpRequest) {
-        log.info("Logout request received");
+        log.info("AUDIT: Logout request — user={}, ip={}, userAgent={}",
+                authentication.getName(), getClientIP(httpRequest), getUserAgent(httpRequest));
 
         String authHeader = httpRequest.getHeader("Authorization");
         String accessToken = (authHeader != null && authHeader.startsWith("Bearer "))
@@ -206,7 +210,7 @@ public class AuthController {
             @RequestBody Map<String, String> request,
             HttpServletRequest httpRequest) {
         String email = request.get("email");
-        log.info("Forgot password request for email: {}", email);
+        log.info("AUDIT: Forgot password request — email={}, ip={}", email, getClientIP(httpRequest));
 
         if (email == null || email.isBlank()) {
             return ResponseEntity.badRequest().body(ErrorResponse.of(
@@ -239,7 +243,7 @@ public class AuthController {
         String email = request.get("email");
         String code = request.get("code");
         String newPassword = request.get("newPassword");
-        log.info("Reset password request for email: {}", email);
+        log.info("AUDIT: Reset password request — email={}, ip={}", email, getClientIP(httpRequest));
 
         if (email == null || code == null || newPassword == null) {
             return ResponseEntity.badRequest().body(ErrorResponse.of(
@@ -277,7 +281,7 @@ public class AuthController {
 
         user.updatePassword(newPassword, passwordEncoder);
         userRepository.save(user);
-        log.info("Password successfully reset for user: {}", user.getId());
+        log.info("AUDIT: Password reset successful — userId={}, ip={}", user.getId(), getClientIP(httpRequest));
 
         return ResponseEntity.ok(Map.of("message", "Password has been reset successfully"));
     }
@@ -435,11 +439,11 @@ public class AuthController {
 
         boolean valid = otpService.validate(TWO_FA_OTP_PREFIX + user.getId(), code);
         if (!valid) {
-            log.warn("Invalid 2FA code for user: {}", user.getId());
+            log.warn("AUDIT: 2FA failed — method: EMAIL_OTP, reason: invalid_or_expired_otp, userId={}", user.getId());
             return ResponseEntity.ok(Map.of("success", false, "message", "Invalid or expired verification code"));
         }
 
-        log.info("2FA verified for user: {}", user.getId());
+        log.info("AUDIT: 2FA verified — method: EMAIL_OTP, userId={}", user.getId());
         return ResponseEntity.ok(Map.of("success", true, "message", "Two-factor authentication successful"));
     }
 
@@ -448,7 +452,8 @@ public class AuthController {
     @Operation(summary = "Verify 2FA using any supported auth method", security = @SecurityRequirement(name = "bearer-jwt"))
     public ResponseEntity<Map<String, Object>> verify2FAMethod(
             @RequestBody Map<String, Object> request,
-            Authentication authentication) {
+            Authentication authentication,
+            HttpServletRequest httpRequest) {
         String method = (String) request.get("method");
         Map<String, Object> data = (Map<String, Object>) request.getOrDefault("data", Map.of());
 
@@ -506,7 +511,8 @@ public class AuthController {
                     // Check spoof detection
                     String errorCode2fa = faceResult.get("error_code") instanceof String ec ? ec : null;
                     if ("SPOOF_DETECTED".equals(errorCode2fa)) {
-                        log.warn("Spoof detected for 2FA user: {}", user.getId());
+                        log.warn("AUDIT: 2FA face spoof detected — userId={}, ip={}",
+                                user.getId(), getClientIP(httpRequest));
                         yield false;
                     }
                     boolean faceVerified2fa = Boolean.TRUE.equals(faceResult.get("verified"))
@@ -544,15 +550,27 @@ public class AuthController {
                 default -> false;
             };
 
+            String clientIp = getClientIP(httpRequest);
+            String ua = getUserAgent(httpRequest);
+
             if (valid) {
-                log.info("2FA method {} verified for user: {}", method, user.getId());
+                log.info("AUDIT: 2FA verified — method: {}, userId={}, ip={}, userAgent={}",
+                        method, user.getId(), clientIp, ua);
+                auditLogPort.logTwoFactorVerified(user.getId().toString(), method, clientIp, ua);
                 return ResponseEntity.ok(Map.of("success", true, "message", "Two-factor authentication successful"));
             } else {
-                log.warn("2FA method {} failed for user: {}", method, user.getId());
+                String reason = resolveFailureReason(methodType, data);
+                log.warn("AUDIT: 2FA failed — method: {}, reason: {}, userId={}, ip={}, userAgent={}",
+                        method, reason, user.getId(), clientIp, ua);
+                auditLogPort.logTwoFactorFailed(user.getId().toString(), method, reason, clientIp, ua);
                 return ResponseEntity.ok(Map.of("success", false, "message", "Verification failed for " + method));
             }
         } catch (Exception e) {
-            log.error("2FA method {} error for user {}: {}", method, user.getId(), e.getMessage());
+            String clientIp = getClientIP(httpRequest);
+            String ua = getUserAgent(httpRequest);
+            log.error("AUDIT: 2FA error — method: {}, userId={}, error: {}, ip={}, userAgent={}",
+                    method, user.getId(), e.getMessage(), clientIp, ua);
+            auditLogPort.logTwoFactorFailed(user.getId().toString(), method, "error: " + e.getMessage(), clientIp, ua);
             return ResponseEntity.ok(Map.of("success", false, "message", "Verification error: " + e.getMessage()));
         }
     }
@@ -655,8 +673,8 @@ public class AuthController {
         String newAmrValue = AMR_VALUES.getOrDefault(methodType, method.toLowerCase());
         List<String> completedMethods = mfaSession.getCompletedMethods();
         if (completedMethods.contains(newAmrValue)) {
-            log.warn("MFA same-method reuse attempt: user {} tried {} (amr={}) but it was already completed",
-                    user.getId(), method, newAmrValue);
+            log.warn("AUDIT: MFA same-method reuse attempt — method: {}, amr: {}, userId={}, ip={}, userAgent={}",
+                    method, newAmrValue, user.getId(), getClientIP(httpRequest), getUserAgent(httpRequest));
             return ResponseEntity.badRequest().body(Map.of(
                 "status", "ERROR",
                 "error", "METHOD_ALREADY_USED",
@@ -705,7 +723,8 @@ public class AuthController {
                     // Check spoof detection
                     String errorCodeMfa = faceResult.get("error_code") instanceof String ec ? ec : null;
                     if ("SPOOF_DETECTED".equals(errorCodeMfa)) {
-                        log.warn("Spoof detected for MFA user: {}", user.getId());
+                        log.warn("AUDIT: MFA face spoof detected — userId={}, ip={}",
+                                user.getId(), getClientIP(httpRequest));
                         yield false;
                     }
                     boolean faceVerifiedMfa = Boolean.TRUE.equals(faceResult.get("verified"))
@@ -787,16 +806,20 @@ public class AuthController {
                 case NFC_DOCUMENT -> {
                     String nfcData = (String) data.get("nfcData");
                     if (nfcData == null || nfcData.isBlank()) yield false;
-                    var cardOpt = nfcCardRepository.findByCardSerialAndIsActiveTrue(nfcData);
-                    if (cardOpt.isEmpty()) yield false;
-                    var card = cardOpt.get();
-                    yield card.getUser().getId().equals(user.getId());
+                    var cardOpt = nfcCardRepository.findByCardSerialAndUserIdAndIsActiveTrue(nfcData, user.getId());
+                    yield cardOpt.isPresent();
                 }
                 default -> false;
             };
 
             if (!valid) {
-                log.warn("MFA step {} failed for user {} (session {})", method, user.getId(), sessionToken);
+                String reason = resolveFailureReason(methodType, data);
+                String clientIp = getClientIP(httpRequest);
+                String ua = getUserAgent(httpRequest);
+                log.warn("AUDIT: MFA step failed — method: {}, reason: {}, userId={}, step: {}/{}, ip={}, userAgent={}",
+                        method, reason, user.getId(), mfaSession.getCurrentStep(), mfaSession.getTotalSteps(),
+                        clientIp, ua);
+                auditLogPort.logMfaStepFailed(user.getId().toString(), method, reason, clientIp, ua);
                 return ResponseEntity.ok(Map.of("status", "FAILED", "message", "Verification failed for " + method));
             }
 
@@ -815,7 +838,11 @@ public class AuthController {
                     user, mfaSession.getIpAddress(), mfaSession.getUserAgent()
                 );
 
-                log.info("MFA complete for user {} — amr: {}", user.getId(), amr);
+                String mfaCompleteIp = getClientIP(httpRequest);
+                String mfaCompleteUa = getUserAgent(httpRequest);
+                log.info("AUDIT: MFA complete — methods: {}, userId={}, ip={}, userAgent={}",
+                        amr, user.getId(), mfaCompleteIp, mfaCompleteUa);
+                auditLogPort.logMfaComplete(user.getId().toString(), amr, mfaCompleteIp, mfaCompleteUa);
 
                 UserResponse userResponse = com.fivucsas.identity.application.mapper.UserResponseMapper.toResponse(user);
                 return ResponseEntity.ok(Map.of(
@@ -841,8 +868,14 @@ public class AuthController {
 
             List<AvailableMfaMethod> availableMethods = buildMfaAvailableMethods(nextStep, user);
 
-            log.info("MFA step {} verified for user {}, advancing to step {}/{}",
-                method, user.getId(), nextStepOrder, mfaSession.getTotalSteps());
+            {
+                String stepIp = getClientIP(httpRequest);
+                String stepUa = getUserAgent(httpRequest);
+                log.info("AUDIT: MFA step completed — method: {}, step: {}/{}, userId={}, ip={}, userAgent={}",
+                        method, nextStepOrder - 1, mfaSession.getTotalSteps(), user.getId(), stepIp, stepUa);
+                auditLogPort.logMfaStepCompleted(user.getId().toString(), method,
+                        nextStepOrder - 1, mfaSession.getTotalSteps(), stepIp, stepUa);
+            }
 
             return ResponseEntity.ok(Map.of(
                 "status", "STEP_COMPLETED",
@@ -853,7 +886,12 @@ public class AuthController {
             ));
 
         } catch (Exception e) {
-            log.error("MFA step {} error for user {}: {}", method, mfaSession.getUserId(), e.getMessage(), e);
+            String errIp = getClientIP(httpRequest);
+            String errUa = getUserAgent(httpRequest);
+            log.error("AUDIT: MFA step error — method: {}, userId={}, error: {}, ip={}, userAgent={}",
+                    method, mfaSession.getUserId(), e.getMessage(), errIp, errUa, e);
+            auditLogPort.logMfaStepFailed(mfaSession.getUserId().toString(), method,
+                    "error: " + e.getMessage(), errIp, errUa);
             return ResponseEntity.ok(Map.of("status", "ERROR", "message", "Verification error: " + e.getMessage()));
         }
     }
@@ -1035,6 +1073,45 @@ public class AuthController {
     private String getUserAgent(HttpServletRequest request) {
         String userAgent = request.getHeader("User-Agent");
         return userAgent != null ? userAgent : "Unknown";
+    }
+
+    /**
+     * Resolves a human-readable failure reason based on the auth method and submitted data.
+     * Used to produce actionable audit log entries for failed authentication attempts.
+     */
+    private String resolveFailureReason(AuthMethodType methodType, Map<String, Object> data) {
+        return switch (methodType) {
+            case PASSWORD -> "invalid_password";
+            case EMAIL_OTP, SMS_OTP -> {
+                String code = data != null ? (String) data.get("code") : null;
+                yield (code == null || code.isBlank()) ? "missing_otp_code" : "invalid_or_expired_otp";
+            }
+            case TOTP -> {
+                String code = data != null ? (String) data.get("code") : null;
+                yield (code == null || code.isBlank()) ? "missing_totp_code" : "invalid_totp_code";
+            }
+            case FACE -> {
+                String image = data != null ? (String) data.get("image") : null;
+                yield (image == null || image.isBlank()) ? "missing_face_image" : "face_verification_failed";
+            }
+            case VOICE -> {
+                String voiceData = data != null ? (String) data.get("voiceData") : null;
+                yield (voiceData == null || voiceData.isBlank()) ? "missing_voice_data" : "voice_verification_failed";
+            }
+            case FINGERPRINT, HARDWARE_KEY -> {
+                String assertion = data != null ? (String) data.get("assertion") : null;
+                yield (assertion == null || assertion.isBlank()) ? "missing_webauthn_assertion" : "webauthn_verification_failed";
+            }
+            case QR_CODE -> {
+                String token = data != null ? (String) data.get("token") : null;
+                yield (token == null || token.isBlank()) ? "missing_qr_token" : "invalid_qr_token";
+            }
+            case NFC_DOCUMENT -> {
+                String nfcData = data != null ? (String) data.get("nfcData") : null;
+                yield (nfcData == null || nfcData.isBlank()) ? "missing_nfc_data" : "nfc_card_not_found_or_not_owned";
+            }
+            default -> "verification_failed";
+        };
     }
 
     /**

@@ -6,6 +6,7 @@ import com.fivucsas.identity.domain.model.auth.AuthMethodType;
 import com.fivucsas.identity.domain.repository.UserRepository;
 import com.fivucsas.identity.entity.NfcCard;
 import java.util.List;
+import java.util.Optional;
 import com.fivucsas.identity.entity.Tenant;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.security.RbacAuthorizationService;
@@ -80,15 +81,29 @@ public class NfcController {
             ));
         }
 
-        NfcCard card = NfcCard.builder()
-                .user(targetUser)
-                .tenant(tenant)
-                .cardSerial(cardSerial)
-                .cardType(cardType)
-                .label(label)
-                .build();
-
-        NfcCard saved = nfcCardRepository.save(card);
+        // Check for existing inactive card (previously revoked) — reactivate instead of creating new
+        Optional<NfcCard> existingCard = nfcCardRepository.findByCardSerialAndTenantId(cardSerial, tenant.getId());
+        NfcCard saved;
+        if (existingCard.isPresent()) {
+            NfcCard existing = existingCard.get();
+            existing.activate();
+            existing.setUser(targetUser);
+            existing.setCardType(cardType);
+            if (label != null) existing.setLabel(label);
+            existing.setEnrolledAt(java.time.Instant.now());
+            saved = nfcCardRepository.save(existing);
+            log.info("NFC card reactivated: serial={} user={} tenant={}", cardSerial, targetUserId, tenant.getId());
+        } else {
+            NfcCard card = NfcCard.builder()
+                    .user(targetUser)
+                    .tenant(tenant)
+                    .cardSerial(cardSerial)
+                    .cardType(cardType)
+                    .label(label)
+                    .build();
+            saved = nfcCardRepository.save(card);
+            log.info("NFC card enrolled: serial={} user={} tenant={}", cardSerial, targetUserId, tenant.getId());
+        }
         log.info("NFC card enrolled: serial={} user={} tenant={}", cardSerial, targetUserId, tenant.getId());
 
         // Auto-create + auto-complete the enrollment record so the enrollment page

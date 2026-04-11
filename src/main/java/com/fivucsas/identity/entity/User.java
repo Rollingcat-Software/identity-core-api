@@ -207,6 +207,18 @@ public class User {
     @Builder.Default
     private List<UserDevice> devices = new ArrayList<>();
 
+    // ========== JPA Lifecycle Callbacks ==========
+
+    /**
+     * Ensures isActive column stays in sync with status enum.
+     * The isActive column is kept for query performance but derived from status.
+     */
+    @PrePersist
+    @PreUpdate
+    void syncIsActiveFromStatus() {
+        this.isActive = (this.status == UserStatus.ACTIVE);
+    }
+
     // ========== Value Object Getters (Type-Safe) ==========
 
     /**
@@ -422,6 +434,7 @@ public class User {
      */
     public void activate() {
         this.status = UserStatus.ACTIVE;
+        this.isActive = true;
     }
 
     /**
@@ -429,6 +442,7 @@ public class User {
      */
     public void deactivate() {
         this.status = UserStatus.INACTIVE;
+        this.isActive = false;
     }
 
     /**
@@ -437,6 +451,7 @@ public class User {
      */
     public void suspend() {
         this.status = UserStatus.SUSPENDED;
+        this.isActive = false;
     }
 
     /**

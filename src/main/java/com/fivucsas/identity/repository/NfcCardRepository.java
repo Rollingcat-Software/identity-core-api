@@ -15,6 +15,8 @@ public interface NfcCardRepository extends JpaRepository<NfcCard, UUID> {
 
     Optional<NfcCard> findByCardSerialAndIsActiveTrue(String cardSerial);
 
+    Optional<NfcCard> findByCardSerialAndUserIdAndIsActiveTrue(String cardSerial, UUID userId);
+
     List<NfcCard> findByCardSerial(String cardSerial);
 
     List<NfcCard> findByUserIdAndIsActiveTrue(UUID userId);

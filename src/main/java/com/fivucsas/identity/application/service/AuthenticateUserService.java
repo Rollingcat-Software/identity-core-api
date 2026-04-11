@@ -60,7 +60,7 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
     @Override
     @Transactional
     public AuthenticationResponse execute(AuthenticateUserCommand command) {
-        log.info("Login attempt for user: {}", command.getEmail());
+        log.info("AUDIT: Login attempt — email={}, ip={}", command.getEmail(), command.getIpAddress());
 
         User user = userRepository.findByEmail(command.getEmail())
             .orElseThrow(InvalidCredentialsException::new);
@@ -73,7 +73,7 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
                 userRepository.save(user);
                 log.info("Account auto-unlocked after lockout period for user: {}", command.getEmail());
             } else {
-                log.warn("Login attempt on locked account: {}", command.getEmail());
+                log.warn("AUDIT: Login failed — email={}, reason: account_locked, ip={}", command.getEmail(), command.getIpAddress());
                 auditLogPort.logAuthenticationFailed(command.getEmail(), command.getIpAddress(), "Account locked");
                 throw new InvalidCredentialsException("Account is temporarily locked due to too many failed login attempts. Please try again later.");
             }
@@ -84,7 +84,7 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
             user.incrementFailedLoginAttempts();
             if (user.getFailedLoginAttempts() >= MAX_FAILED_ATTEMPTS) {
                 user.lockAccount(LOCKOUT_DURATION);
-                log.warn("Account locked after {} failed attempts for user: {}", MAX_FAILED_ATTEMPTS, command.getEmail());
+                log.warn("AUDIT: Account locked — email={}, failedAttempts={}, ip={}", command.getEmail(), MAX_FAILED_ATTEMPTS, command.getIpAddress());
                 auditLogPort.logAuthenticationFailed(command.getEmail(), command.getIpAddress(),
                         "Account locked after " + MAX_FAILED_ATTEMPTS + " failed attempts");
             } else {
@@ -92,7 +92,8 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
                         "Invalid password (attempt " + user.getFailedLoginAttempts() + "/" + MAX_FAILED_ATTEMPTS + ")");
             }
             userRepository.save(user);
-            log.warn("Invalid password for user: {}", command.getEmail());
+            log.warn("AUDIT: Login failed — email={}, reason: invalid_password, attempt: {}/{}, ip={}",
+                    command.getEmail(), user.getFailedLoginAttempts(), MAX_FAILED_ATTEMPTS, command.getIpAddress());
             throw new InvalidCredentialsException();
         }
 
@@ -102,7 +103,8 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
         }
         user.recordLogin(command.getIpAddress());
 
-        log.info("User logged in successfully: {}", user.getId());
+        log.info("AUDIT: User authenticated — method: PASSWORD, userId={}, ip={}, userAgent={}",
+                user.getId(), command.getIpAddress(), command.getUserAgent());
 
         // Look up OAuth client name if login came from a widget/OAuth flow
         String oauthClientName = null;
@@ -163,8 +165,8 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
                         .build();
                     mfaSessionRepository.save(mfaSession);
 
-                    log.info("MFA required for user {} — {} remaining steps, next: {}, methods: {}",
-                        user.getId(), remainingSteps.size(), nextStep.getStepType(), availableMethods.size());
+                    log.info("AUDIT: MFA required — userId={}, remainingSteps={}, nextStepType={}, availableMethods={}, ip={}",
+                        user.getId(), remainingSteps.size(), nextStep.getStepType(), availableMethods.size(), command.getIpAddress());
 
                     // Return MFA pending response — NO accessToken, NO refreshToken
                     return AuthenticationResponse.ofMfaPending(

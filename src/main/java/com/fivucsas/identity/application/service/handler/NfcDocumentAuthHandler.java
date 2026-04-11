@@ -39,22 +39,17 @@ public class NfcDocumentAuthHandler implements AuthMethodHandler {
             return StepResult.failure("User must be identified before NFC document verification");
         }
 
-        // Look up the card by serial number (only active cards)
-        Optional<NfcCard> cardOpt = nfcCardRepository.findByCardSerialAndIsActiveTrue(cardSerial);
+        // Look up the card by serial number, user ID, and active status
+        Optional<NfcCard> cardOpt = nfcCardRepository.findByCardSerialAndUserIdAndIsActiveTrue(
+                cardSerial, session.getUser().getId());
 
         if (cardOpt.isEmpty()) {
-            log.warn("NFC card not found or inactive: serial={} session={}", cardSerial, session.getId());
+            log.warn("NFC card not found or inactive: serial={} userId={} session={}",
+                    cardSerial, session.getUser().getId(), session.getId());
             return StepResult.failure("NFC card is not enrolled or has been deactivated");
         }
 
         NfcCard card = cardOpt.get();
-
-        // Verify the card belongs to the session user
-        if (!card.getUser().getId().equals(session.getUser().getId())) {
-            log.warn("NFC card user mismatch: cardUser={} sessionUser={} session={}",
-                    card.getUser().getId(), session.getUser().getId(), session.getId());
-            return StepResult.failure("NFC card does not belong to this user");
-        }
 
         // Mark the card as used
         card.markUsed();

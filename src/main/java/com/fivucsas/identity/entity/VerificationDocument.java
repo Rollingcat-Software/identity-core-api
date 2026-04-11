@@ -56,11 +56,15 @@ public class VerificationDocument {
     @Builder.Default
     private boolean verified = false;
 
+    @Column(name = "verified_at")
+    private Instant verifiedAt;
+
     @CreationTimestamp
     @Column(nullable = false, updatable = false)
     private Instant createdAt;
 
     public void markVerified() {
         this.verified = true;
+        this.verifiedAt = Instant.now();
     }
 }

@@ -9,6 +9,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -42,24 +43,25 @@ public class AuditLogAdapter implements AuditLogPort {
     @Override
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void logUserAuthenticated(String userId, String email, String ipAddress, String userAgent) {
-        log.info("AUDIT: User authenticated - userId={}, email={}, ip={}", userId, email, ipAddress);
+        log.info("AUDIT: User authenticated — method: PASSWORD, userId={}, email={}, ip={}, userAgent={}",
+                userId, email, ipAddress, userAgent);
         saveAuditLog("USER_LOGIN", "USER", userId, true, ipAddress, userAgent,
-                Map.of("email", email));
+                Map.of("email", email, "method", "PASSWORD"));
     }
 
     @Override
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void logUserAuthenticated(String userId, String email, String ipAddress, String userAgent, String oauthClientName) {
-        log.info("AUDIT: User authenticated via OAuth client - userId={}, email={}, ip={}, client={}",
-                userId, email, ipAddress, oauthClientName);
+        log.info("AUDIT: User authenticated — method: PASSWORD, oauthClient: {}, userId={}, email={}, ip={}, userAgent={}",
+                oauthClientName, userId, email, ipAddress, userAgent);
         saveAuditLog("USER_LOGIN", "USER", userId, true, ipAddress, userAgent,
-                Map.of("email", email, "oauthClient", oauthClientName));
+                Map.of("email", email, "method", "PASSWORD", "oauthClient", oauthClientName));
     }
 
     @Override
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void logAuthenticationFailed(String email, String ipAddress, String reason) {
-        log.warn("AUDIT: Authentication failed - email={}, ip={}, reason={}", email, ipAddress, reason);
+        log.warn("AUDIT: Login failed — email={}, reason={}, ip={}", email, reason, ipAddress);
         saveAuditLog("FAILED_LOGIN_ATTEMPT", "USER", null, false, ipAddress,
                 Map.of("email", email, "reason", reason));
     }
@@ -67,7 +69,7 @@ public class AuditLogAdapter implements AuditLogPort {
     @Override
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void logUserLoggedOut(String userId, String email) {
-        log.info("AUDIT: User logged out - userId={}, email={}", userId, email);
+        log.info("AUDIT: User logged out — userId={}, email={}", userId, email);
         saveAuditLog("USER_LOGOUT", "USER", userId, true, null,
                 Map.of("email", email));
     }
@@ -75,23 +77,73 @@ public class AuditLogAdapter implements AuditLogPort {
     @Override
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void logBiometricEnrollment(String userId, boolean success) {
-        log.info("AUDIT: Biometric enrollment - userId={}, success={}", userId, success);
+        log.info("AUDIT: Biometric enrollment — userId={}, success={}", userId, success);
         saveAuditLog("BIOMETRIC_ENROLLMENT", "BIOMETRIC", userId, success, null, Map.of());
     }
 
     @Override
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void logBiometricVerification(String userId, boolean success) {
-        log.info("AUDIT: Biometric verification - userId={}, success={}", userId, success);
+        log.info("AUDIT: Biometric verification — userId={}, success={}", userId, success);
         saveAuditLog("BIOMETRIC_VERIFICATION", "BIOMETRIC", userId, success, null, Map.of());
     }
 
     @Override
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void logSecurityEvent(String userId, String eventType, String ipAddress, String details) {
-        log.info("AUDIT: Security event - userId={}, type={}, ip={}, details={}", userId, eventType, ipAddress, details);
+        log.info("AUDIT: Security event — userId={}, type={}, ip={}, details={}", userId, eventType, ipAddress, details);
         saveAuditLog(eventType, "SECURITY", userId, true, ipAddress,
                 Map.of("details", details != null ? details : ""));
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void logMfaStepCompleted(String userId, String method, int stepCurrent, int stepTotal,
+                                     String ipAddress, String userAgent) {
+        log.info("AUDIT: MFA step completed — method: {}, step: {}/{}, userId={}, ip={}, userAgent={}",
+                method, stepCurrent, stepTotal, userId, ipAddress, userAgent);
+        saveAuditLog("MFA_STEP_COMPLETED", "AUTH", userId, true, ipAddress, userAgent,
+                Map.of("method", method, "stepCurrent", stepCurrent, "stepTotal", stepTotal));
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void logMfaStepFailed(String userId, String method, String reason,
+                                  String ipAddress, String userAgent) {
+        log.warn("AUDIT: MFA step failed — method: {}, reason: {}, userId={}, ip={}, userAgent={}",
+                method, reason, userId, ipAddress, userAgent);
+        saveAuditLog("MFA_STEP_FAILED", "AUTH", userId, false, ipAddress, userAgent,
+                Map.of("method", method, "reason", reason));
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void logMfaComplete(String userId, List<String> amrValues,
+                                String ipAddress, String userAgent) {
+        log.info("AUDIT: MFA complete — methods: {}, userId={}, ip={}, userAgent={}",
+                amrValues, userId, ipAddress, userAgent);
+        saveAuditLog("MFA_COMPLETE", "AUTH", userId, true, ipAddress, userAgent,
+                Map.of("amr", amrValues));
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void logTwoFactorFailed(String userId, String method, String reason,
+                                    String ipAddress, String userAgent) {
+        log.warn("AUDIT: 2FA failed — method: {}, reason: {}, userId={}, ip={}, userAgent={}",
+                method, reason, userId, ipAddress, userAgent);
+        saveAuditLog("TWO_FACTOR_FAILED", "AUTH", userId, false, ipAddress, userAgent,
+                Map.of("method", method, "reason", reason));
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void logTwoFactorVerified(String userId, String method,
+                                      String ipAddress, String userAgent) {
+        log.info("AUDIT: 2FA verified — method: {}, userId={}, ip={}, userAgent={}",
+                method, userId, ipAddress, userAgent);
+        saveAuditLog("TWO_FACTOR_VERIFIED", "AUTH", userId, true, ipAddress, userAgent,
+                Map.of("method", method));
     }
 
     private void saveAuditLog(String action, String resourceType, String userId,

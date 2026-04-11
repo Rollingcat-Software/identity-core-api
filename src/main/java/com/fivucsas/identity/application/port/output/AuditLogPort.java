@@ -87,4 +87,63 @@ public interface AuditLogPort {
      * @param details additional event details
      */
     void logSecurityEvent(String userId, String eventType, String ipAddress, String details);
+
+    /**
+     * Logs an MFA step completion.
+     *
+     * @param userId the user ID
+     * @param method the auth method used (e.g., "SMS_OTP", "FACE")
+     * @param stepCurrent current step number
+     * @param stepTotal total number of steps
+     * @param ipAddress the client IP address
+     * @param userAgent the client User-Agent string
+     */
+    void logMfaStepCompleted(String userId, String method, int stepCurrent, int stepTotal,
+                             String ipAddress, String userAgent);
+
+    /**
+     * Logs a failed MFA step attempt.
+     *
+     * @param userId the user ID
+     * @param method the auth method attempted (e.g., "FACE", "TOTP")
+     * @param reason failure reason (e.g., "low_confidence", "invalid_otp")
+     * @param ipAddress the client IP address
+     * @param userAgent the client User-Agent string
+     */
+    void logMfaStepFailed(String userId, String method, String reason,
+                          String ipAddress, String userAgent);
+
+    /**
+     * Logs successful completion of all MFA steps (full authentication).
+     *
+     * @param userId the user ID
+     * @param amrValues the RFC 8176 amr claim values (e.g., ["pwd", "sms"])
+     * @param ipAddress the client IP address
+     * @param userAgent the client User-Agent string
+     */
+    void logMfaComplete(String userId, java.util.List<String> amrValues,
+                        String ipAddress, String userAgent);
+
+    /**
+     * Logs a failed 2FA verification attempt (legacy 2FA endpoints).
+     *
+     * @param userId the user ID
+     * @param method the auth method attempted
+     * @param reason failure reason
+     * @param ipAddress the client IP address
+     * @param userAgent the client User-Agent string
+     */
+    void logTwoFactorFailed(String userId, String method, String reason,
+                            String ipAddress, String userAgent);
+
+    /**
+     * Logs a successful 2FA verification (legacy 2FA endpoints).
+     *
+     * @param userId the user ID
+     * @param method the auth method used
+     * @param ipAddress the client IP address
+     * @param userAgent the client User-Agent string
+     */
+    void logTwoFactorVerified(String userId, String method,
+                              String ipAddress, String userAgent);
 }
