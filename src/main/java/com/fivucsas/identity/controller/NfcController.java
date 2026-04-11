@@ -1,6 +1,8 @@
 package com.fivucsas.identity.controller;
 
+import com.fivucsas.identity.application.port.input.ManageEnrollmentUseCase;
 import com.fivucsas.identity.application.port.output.NfcCardRepositoryPort;
+import com.fivucsas.identity.domain.model.auth.AuthMethodType;
 import com.fivucsas.identity.domain.repository.UserRepository;
 import com.fivucsas.identity.entity.NfcCard;
 import com.fivucsas.identity.entity.Tenant;
@@ -29,6 +31,7 @@ public class NfcController {
     private final NfcCardRepositoryPort nfcCardRepository;
     private final UserRepository userRepository;
     private final RbacAuthorizationService rbacService;
+    private final ManageEnrollmentUseCase manageEnrollmentUseCase;
 
     @PostMapping("/enroll")
     @Operation(summary = "Enroll an NFC card for a user")
@@ -86,6 +89,17 @@ public class NfcController {
 
         NfcCard saved = nfcCardRepository.save(card);
         log.info("NFC card enrolled: serial={} user={} tenant={}", cardSerial, targetUserId, tenant.getId());
+
+        // Auto-create + auto-complete the enrollment record so the enrollment page
+        // shows NFC_DOCUMENT as ENROLLED. NFC_DOCUMENT is in AUTO_COMPLETE_TYPES,
+        // so startEnrollment() will immediately mark it as ENROLLED.
+        try {
+            manageEnrollmentUseCase.startEnrollment(targetUserId, tenant.getId(), AuthMethodType.NFC_DOCUMENT);
+            log.info("Auto-completed NFC_DOCUMENT enrollment for user {}", targetUserId);
+        } catch (Exception e) {
+            log.warn("Failed to auto-complete NFC_DOCUMENT enrollment for user {} after card registration: {}",
+                    targetUserId, e.getMessage());
+        }
 
         return ResponseEntity.status(HttpStatus.CREATED).body(Map.of(
                 "success", true,

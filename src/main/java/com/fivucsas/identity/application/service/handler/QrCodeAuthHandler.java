@@ -26,6 +26,9 @@ public class QrCodeAuthHandler implements AuthMethodHandler {
     @Override
     public StepResult validate(AuthSession session, AuthFlowStep step, Map<String, Object> data) {
         String qrToken = (String) data.get("qrToken");
+        if (qrToken == null || qrToken.isEmpty()) {
+            qrToken = (String) data.get("token");
+        }
 
         if (qrToken == null || qrToken.isEmpty()) {
             return StepResult.failure("QR token is required");

@@ -49,8 +49,11 @@ public class FingerprintAuthHandler implements AuthMethodHandler {
             return generateChallenge(session);
         }
 
-        // Phase 2: Validate the WebAuthn assertion from fingerprintData
+        // Phase 2: Validate the WebAuthn assertion from fingerprintData or assertion (frontend compat)
         String fingerprintData = (String) data.get("fingerprintData");
+        if (fingerprintData == null || fingerprintData.isEmpty()) {
+            fingerprintData = (String) data.get("assertion");
+        }
 
         if (fingerprintData == null || fingerprintData.isEmpty()) {
             return StepResult.failure("Fingerprint data is required");

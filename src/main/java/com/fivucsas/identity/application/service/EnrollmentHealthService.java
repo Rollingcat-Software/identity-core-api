@@ -45,7 +45,8 @@ public class EnrollmentHealthService {
             AuthMethodType.PASSWORD,
             AuthMethodType.EMAIL_OTP,
             AuthMethodType.SMS_OTP,
-            AuthMethodType.QR_CODE
+            AuthMethodType.QR_CODE,
+            AuthMethodType.NFC_DOCUMENT
     );
 
     private final UserEnrollmentRepositoryPort userEnrollmentRepository;

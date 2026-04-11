@@ -38,6 +38,11 @@ public class FaceAuthHandler implements AuthMethodHandler {
             return StepResult.failure("Face image is required");
         }
 
+        // Strip data URI prefix if present (frontend may send "data:image/jpeg;base64,...")
+        if (imageBase64.contains(",")) {
+            imageBase64 = imageBase64.substring(imageBase64.indexOf(",") + 1);
+        }
+
         if (session.getUser() == null) {
             return StepResult.failure("User must be identified before face verification");
         }

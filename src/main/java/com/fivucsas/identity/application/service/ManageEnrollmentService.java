@@ -58,9 +58,9 @@ public class ManageEnrollmentService implements ManageEnrollmentUseCase {
                             .build();
                 });
 
-        // Only auto-complete for methods that don't require external data
-        // (PASSWORD, EMAIL_OTP, QR_CODE). All others stay PENDING until the
-        // actual enrollment flow completes via completeEnrollment().
+        // Only auto-complete for methods that don't require external async data
+        // (PASSWORD, EMAIL_OTP, SMS_OTP, QR_CODE, NFC_DOCUMENT). All others stay
+        // PENDING until the actual enrollment flow completes via completeEnrollment().
         if (EnrollmentHealthService.AUTO_COMPLETE_TYPES.contains(methodType)) {
             enrollment.completeEnrollment("{}");
         } else {

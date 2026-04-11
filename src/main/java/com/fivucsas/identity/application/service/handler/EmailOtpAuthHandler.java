@@ -29,8 +29,8 @@ public class EmailOtpAuthHandler implements AuthMethodHandler {
     public StepResult validate(AuthSession session, AuthFlowStep step, Map<String, Object> data) {
         String action = (String) data.get("action");
 
-        // If action is "send", generate and send OTP
-        if ("send".equals(action)) {
+        // If action is "send" or "send_otp", generate and send OTP
+        if ("send".equals(action) || "send_otp".equals(action)) {
             return sendOtp(session, step);
         }
 

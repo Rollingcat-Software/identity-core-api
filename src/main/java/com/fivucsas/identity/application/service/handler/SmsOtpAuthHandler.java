@@ -30,7 +30,7 @@ public class SmsOtpAuthHandler implements AuthMethodHandler {
     public StepResult validate(AuthSession session, AuthFlowStep step, Map<String, Object> data) {
         String action = (String) data.get("action");
 
-        if ("send".equals(action)) {
+        if ("send".equals(action) || "send_otp".equals(action)) {
             return sendOtp(session, step);
         }
 

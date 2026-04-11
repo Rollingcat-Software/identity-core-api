@@ -1,5 +1,7 @@
 package com.fivucsas.identity.application.service.handler;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fivucsas.identity.domain.model.auth.AuthMethodType;
 import com.fivucsas.identity.entity.AuthFlowStep;
 import com.fivucsas.identity.entity.AuthSession;
@@ -10,6 +12,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
+import java.util.Base64;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -18,6 +21,8 @@ import java.util.Set;
 @RequiredArgsConstructor
 @Slf4j
 public class HardwareKeyAuthHandler implements AuthMethodHandler {
+
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
     private final WebAuthnService webAuthnService;
     private final WebAuthnCredentialRepositoryPort credentialRepository;
@@ -39,6 +44,24 @@ public class HardwareKeyAuthHandler implements AuthMethodHandler {
         String authenticatorData = (String) data.get("authenticatorData");
         String clientDataJson = (String) data.get("clientDataJSON");
         String signature = (String) data.get("signature");
+
+        // Frontend may send a base64 JSON blob in "assertion" instead of individual fields
+        if (credentialId == null || credentialId.isEmpty()) {
+            String assertion = (String) data.get("assertion");
+            if (assertion != null && !assertion.isEmpty()) {
+                try {
+                    byte[] decoded = Base64.getDecoder().decode(assertion);
+                    JsonNode payload = OBJECT_MAPPER.readTree(decoded);
+                    credentialId = payload.has("credentialId") ? payload.get("credentialId").asText() : null;
+                    authenticatorData = payload.has("authenticatorData") ? payload.get("authenticatorData").asText() : authenticatorData;
+                    clientDataJson = payload.has("clientDataJSON") ? payload.get("clientDataJSON").asText() : clientDataJson;
+                    signature = payload.has("signature") ? payload.get("signature").asText() : signature;
+                } catch (Exception e) {
+                    log.warn("Failed to parse assertion blob for hardware key session: {}", session.getId(), e);
+                    return StepResult.failure("Invalid assertion data format");
+                }
+            }
+        }
 
         if (credentialId == null || credentialId.isEmpty()) {
             return StepResult.failure("Credential ID is required");
