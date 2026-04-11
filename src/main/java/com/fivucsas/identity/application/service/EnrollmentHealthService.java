@@ -160,9 +160,11 @@ public class EnrollmentHealthService {
         }
 
         // Has credentials but none match the expected transport type.
-        // Still consider it valid if there are any credentials at all,
-        // since transport metadata may not always be populated.
-        return true;
+        // Only consider it valid if some credentials have NO transport metadata (null/blank),
+        // since we can't distinguish platform vs cross-platform in that case.
+        // If all credentials have explicit transport types that don't match, it's invalid.
+        return credentials.stream().anyMatch(c ->
+                c.getTransports() == null || c.getTransports().isBlank());
     }
 
     /**
