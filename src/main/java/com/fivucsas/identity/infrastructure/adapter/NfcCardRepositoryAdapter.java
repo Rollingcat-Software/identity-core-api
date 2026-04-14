@@ -60,4 +60,9 @@ public class NfcCardRepositoryAdapter implements NfcCardRepositoryPort {
     public Optional<NfcCard> findByCardSerialAndUserIdAndIsActiveTrue(String cardSerial, UUID userId) {
         return jpaRepository.findByCardSerialAndUserIdAndIsActiveTrue(cardSerial, userId);
     }
+
+    @Override
+    public Optional<NfcCard> findByCardSerialAndTenantId(String cardSerial, UUID tenantId) {
+        return jpaRepository.findByCardSerialAndTenantId(cardSerial, tenantId);
+    }
 }

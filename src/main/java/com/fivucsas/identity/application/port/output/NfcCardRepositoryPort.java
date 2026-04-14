@@ -18,6 +18,8 @@ public interface NfcCardRepositoryPort {
 
     Optional<NfcCard> findByCardSerialAndUserIdAndIsActiveTrue(String cardSerial, UUID userId);
 
+    Optional<NfcCard> findByCardSerialAndTenantId(String cardSerial, UUID tenantId);
+
     <S extends NfcCard> S save(S card);
 
     <S extends NfcCard> List<S> saveAll(Iterable<S> cards);
