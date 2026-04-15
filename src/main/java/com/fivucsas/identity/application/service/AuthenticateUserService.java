@@ -158,7 +158,7 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
                         .flowId(flow.getId())
                         .currentStep(2)  // step 1 (PASSWORD) already done
                         .totalSteps(flow.getStepCount())
-                        .stepsData("[\"pwd\"]")  // RFC 8176: password already verified
+                        .stepsData("[\"PASSWORD\"]")  // track by AuthMethodType for reuse check; AMR mapped at token issuance
                         .ipAddress(command.getIpAddress())
                         .userAgent(command.getUserAgent())
                         .expiresAt(Instant.now().plus(MFA_SESSION_TTL))

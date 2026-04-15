@@ -669,12 +669,15 @@ public class AuthController {
             return ResponseEntity.ok(challengeData);
         }
 
-        // Reject if this method was already used in a previous step (same-method prevention)
+        // Reject if this method was already used in a previous step (same-method prevention).
+        // Compare by AuthMethodType.name() so EMAIL_OTP and TOTP (which share AMR "otp") are
+        // treated as distinct for reuse purposes while still emitting the correct AMR in the JWT.
         String newAmrValue = AMR_VALUES.getOrDefault(methodType, method.toLowerCase());
+        String reuseKey = methodType.name();
         List<String> completedMethods = mfaSession.getCompletedMethods();
-        if (completedMethods.contains(newAmrValue)) {
-            log.warn("AUDIT: MFA same-method reuse attempt — method: {}, amr: {}, userId={}, ip={}, userAgent={}",
-                    method, newAmrValue, user.getId(), getClientIP(httpRequest), getUserAgent(httpRequest));
+        if (completedMethods.contains(reuseKey)) {
+            log.warn("AUDIT: MFA same-method reuse attempt — method: {}, userId={}, ip={}, userAgent={}",
+                    method, user.getId(), getClientIP(httpRequest), getUserAgent(httpRequest));
             return ResponseEntity.badRequest().body(Map.of(
                 "status", "ERROR",
                 "error", "METHOD_ALREADY_USED",
@@ -823,8 +826,9 @@ public class AuthController {
                 return ResponseEntity.ok(Map.of("status", "FAILED", "message", "Verification failed for " + method));
             }
 
-            // Step verified — advance session (newAmrValue was resolved before the verification)
-            mfaSession.addCompletedMethod(newAmrValue);
+            // Step verified — advance session. Store reuseKey (AuthMethodType.name()) rather
+            // than the AMR value so TOTP vs EMAIL_OTP remain distinguishable.
+            mfaSession.addCompletedMethod(reuseKey);
             mfaSession.advanceStep();
 
             if (mfaSession.allStepsCompleted()) {
@@ -832,7 +836,16 @@ public class AuthController {
                 mfaSession.complete();
                 mfaSessionRepository.save(mfaSession);
 
-                List<String> amr = mfaSession.getCompletedMethods();
+                List<String> amr = mfaSession.getCompletedMethods().stream()
+                    .map(m -> {
+                        try {
+                            return AMR_VALUES.getOrDefault(AuthMethodType.valueOf(m), m.toLowerCase());
+                        } catch (IllegalArgumentException e) {
+                            return m.toLowerCase();
+                        }
+                    })
+                    .distinct()
+                    .toList();
                 String accessToken = tokenGenerator.generateAccessToken(user.getEmail(), amr);
                 RefreshToken refreshToken = refreshTokenService.createRefreshToken(
                     user, mfaSession.getIpAddress(), mfaSession.getUserAgent()

@@ -23,3 +23,8 @@
 ### Previous
 - Cross-module integration audit (March 2026): 41 issues identified
 - Previous audit (Feb 2026): 74/100 readiness score, 3 critical issues
+
+## [2026-04-15b] — MFA reuse check fix
+
+### Fixed
+- **TOTP + EMAIL_OTP collision**: reuse check compared AMR values, but both TOTP and EMAIL_OTP map to RFC 8176 `"otp"`. After TOTP completed, subsequent EMAIL_OTP returned 400 "METHOD_ALREADY_USED". Now reuse is tracked by `AuthMethodType.name()` (e.g. "TOTP", "EMAIL_OTP") and AMR values are mapped at JWT issuance. (AuthController.java, AuthenticateUserService.java)
