@@ -38,11 +38,12 @@ Password, EmailOtp, SmsOtp, Totp, QrCode, Face, Fingerprint, Voice, NfcDocument,
 - **NFC enrollment**: Auto-creates user_enrollments record. Reactivates existing inactive card on re-enrollment.
 - **CORS**: api.fivucsas.com, app.fivucsas.com, demo.fivucsas.com, verify.fivucsas.com
 
-## Flyway Migrations (V1-V32)
+## Flyway Migrations (V1-V33)
 
 V1-V15: Core schema | V16: Auth methods/flows | V17: Devices | V24: OAuth2 | V25: Enrollments
 V26-V28: Verification pipeline | V29: EMAIL_OTP default | V30: Adaptive MFA (CHOICE steps)
 V31: display_order fix | V32: Entity professionalization (revokedAt, expiresAt, verifiedAt)
+V33: voice_enrollments table (deployed 2026-04-14 — unblocked VOICE auth)
 
 ## Cross-Repo Dependencies
 
