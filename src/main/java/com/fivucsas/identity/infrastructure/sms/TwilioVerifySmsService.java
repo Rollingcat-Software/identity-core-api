@@ -36,7 +36,9 @@ public class TwilioVerifySmsService implements SmsService, VerifiableSmsService 
     @Override
     public void sendOtp(String phoneNumber, String code) {
         try {
-            Verification verification = Verification.creator(verifyServiceSid, phoneNumber, "sms").create();
+            Verification verification = Verification.creator(verifyServiceSid, phoneNumber, "sms")
+                    .setLocale("tr")
+                    .create();
             log.info("Twilio Verify OTP sent to {} — status: {}", phoneNumber, verification.getStatus());
         } catch (Exception e) {
             log.error("Failed to send Twilio Verify OTP to {}: {}", phoneNumber, e.getMessage());
