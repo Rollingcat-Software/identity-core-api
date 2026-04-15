@@ -1,5 +1,10 @@
 # Changelog - Identity Core API
 
+## [2026-04-15]
+
+### Added
+- **Rate limit** on `/auth/mfa/qr-generate` — defends against broken clients looping on QR generation. Uses biometric bucket (20/min per IP). Sends `Retry-After` header so the widget can surface a friendly countdown instead of re-firing. (RateLimitInterceptor.java)
+
 ## [Unreleased] - 2026-03-07
 
 ### Added
