@@ -108,11 +108,11 @@ public class OAuth2Controller {
             // Validate scopes
             oAuth2Service.validateScopes(client, scope);
 
-            // OIDC §3.1.2.1 content negotiation: display=page, or browsers asking for HTML,
-            // get a 302 to the hosted login surface. The JSON response below stays the
-            // contract for the inline widget flow, so existing tenants don't break.
-            boolean wantsHtml = isHtmlAccept(httpRequest.getHeader(HttpHeaders.ACCEPT));
-            if ("page".equalsIgnoreCase(display) || wantsHtml) {
+            // OIDC §3.1.2.1 content negotiation: redirect to the hosted login surface
+            // only on explicit display=page. The SDK (FivucsasAuth.loginRedirect) always
+            // sets this, so the Accept: text/html fallback branch was redundant and
+            // could accidentally redirect XHR callers that happened to pass text/html.
+            if ("page".equalsIgnoreCase(display)) {
                 URI location = buildHostedLoginUri(clientId, redirectUri, scope, state, nonce,
                         codeChallenge, codeChallengeMethod);
                 return ResponseEntity.status(HttpStatus.FOUND)
@@ -295,10 +295,6 @@ public class OAuth2Controller {
         response.put("client_name", client.getClientName());
         response.put("tenant_name", client.getTenant() != null ? client.getTenant().getName() : null);
         return ResponseEntity.ok().header(HttpHeaders.CACHE_CONTROL, "public, max-age=60").body(response);
-    }
-
-    private boolean isHtmlAccept(String accept) {
-        return accept != null && accept.toLowerCase().contains("text/html");
     }
 
     private URI buildHostedLoginUri(String clientId, String redirectUri, String scope, String state,

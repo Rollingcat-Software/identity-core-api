@@ -22,6 +22,7 @@ import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -248,8 +249,11 @@ class OAuth2ControllerTest {
     }
 
     @Test
-    @DisplayName("GET /api/v1/oauth2/authorize - HTML Accept header also redirects")
-    void authorize_WhenAcceptHtml_ShouldRedirectToHostedLogin() throws Exception {
+    @DisplayName("GET /api/v1/oauth2/authorize - HTML Accept alone (no display=page) does NOT redirect")
+    void authorize_WhenAcceptHtmlWithoutDisplayPage_ShouldReturnJson() throws Exception {
+        // The SDK always sets display=page explicitly — the old Accept: text/html
+        // fallback was redundant and could accidentally redirect XHR callers whose
+        // headers happened to include text/html. Dropping it requires display=page.
         OAuth2Client client = mock(OAuth2Client.class);
         when(client.getClientName()).thenReturn("Test App");
         when(oAuth2Service.validateClient("test-client", "https://example.com/cb")).thenReturn(client);
@@ -258,8 +262,10 @@ class OAuth2ControllerTest {
                         .param("client_id", "test-client")
                         .param("redirect_uri", "https://example.com/cb")
                         .param("response_type", "code")
-                        .header("Accept", "text/html,application/xhtml+xml"))
-                .andExpect(status().isFound());
+                        .header("Accept", "text/html,application/xhtml+xml,application/json"))
+                .andExpect(status().isOk())
+                // Must NOT be 302 — the old isHtmlAccept branch would have redirected.
+                .andExpect(header().doesNotExist(HttpHeaders.LOCATION));
     }
 
     @Test
