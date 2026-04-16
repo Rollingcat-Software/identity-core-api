@@ -1,5 +1,7 @@
 package com.fivucsas.identity.entity;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
@@ -8,7 +10,6 @@ import org.hibernate.annotations.UpdateTimestamp;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.time.Instant;
-import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
 
@@ -123,13 +124,26 @@ public class OAuth2Client {
         return false;
     }
 
+    private static final ObjectMapper REDIRECT_URI_MAPPER = new ObjectMapper();
+    private static final TypeReference<List<String>> STRING_LIST_TYPE = new TypeReference<>() {};
+
+    /**
+     * Parses the JSON-array-encoded redirect_uris column.
+     *
+     * <p>The previous implementation split on comma, which corrupted URIs containing
+     * commas in query strings (e.g. {@code https://example.com/cb?next=a,b}). Jackson
+     * parses the real JSON structure and preserves each URI intact.
+     *
+     * <p>Falls back to an empty list if the column contains malformed JSON so a bad
+     * row doesn't break redirect validation for the whole request.
+     */
     private List<String> splitRegisteredRedirectUris() {
-        String raw = redirectUris.replaceAll("^\\[|\\]$", "").replace("\"", "");
-        if (raw.isEmpty()) return List.of();
-        return Arrays.stream(raw.split(","))
-                .map(String::trim)
-                .filter(s -> !s.isEmpty())
-                .toList();
+        if (redirectUris == null || redirectUris.isBlank()) return List.of();
+        try {
+            return REDIRECT_URI_MAPPER.readValue(redirectUris, STRING_LIST_TYPE);
+        } catch (Exception e) {
+            return List.of();
+        }
     }
 
     /**
