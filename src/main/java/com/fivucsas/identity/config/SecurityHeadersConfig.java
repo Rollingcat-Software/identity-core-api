@@ -60,9 +60,26 @@ public class SecurityHeadersConfig {
                     response.setHeader("Strict-Transport-Security",
                             "max-age=31536000; includeSubDomains");
 
-                    // Content-Security-Policy for API responses
-                    response.setHeader("Content-Security-Policy",
-                            "default-src 'none'; frame-ancestors 'none'");
+                    String reqPath = request.getRequestURI();
+                    boolean isSwagger = reqPath.startsWith("/swagger-ui")
+                            || reqPath.startsWith("/v3/api-docs")
+                            || reqPath.startsWith("/api-docs")
+                            || reqPath.equals("/swagger-ui.html");
+
+                    if (isSwagger) {
+                        // Swagger UI needs self-hosted JS + CSS + inline styles + data URIs for icons
+                        response.setHeader("Content-Security-Policy",
+                                "default-src 'self'; "
+                                        + "script-src 'self' 'unsafe-inline'; "
+                                        + "style-src 'self' 'unsafe-inline'; "
+                                        + "img-src 'self' data: https:; "
+                                        + "font-src 'self' data:; "
+                                        + "connect-src 'self'; "
+                                        + "frame-ancestors 'none'");
+                    } else {
+                        response.setHeader("Content-Security-Policy",
+                                "default-src 'none'; frame-ancestors 'none'");
+                    }
                 }
 
                 // Prevent caching of API responses containing sensitive data

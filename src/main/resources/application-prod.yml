@@ -113,13 +113,25 @@ management:
       prometheus:
         enabled: true
 
-# Swagger/OpenAPI (enabled — public API docs, industry standard)
+# Swagger/OpenAPI — filtered public docs (developer surface only)
+# Admin endpoints (tenants, users, roles, audit-logs, admin/*, oauth2/clients, actuator)
+# are hidden to avoid exposing internal management API surface.
 springdoc:
   api-docs:
     enabled: true
   swagger-ui:
     enabled: true
     disable-swagger-default-url: true
+    try-it-out-enabled: true
+  paths-to-exclude:
+    - /api/v1/admin/**
+    - /api/v1/tenants/**
+    - /api/v1/users/**
+    - /api/v1/roles/**
+    - /api/v1/audit-logs/**
+    - /api/v1/oauth2/clients/**
+    - /actuator/**
+  show-actuator: false
 
 # Security Headers (Production)
 security:
