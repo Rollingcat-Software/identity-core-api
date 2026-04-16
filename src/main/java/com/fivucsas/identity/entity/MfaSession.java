@@ -69,12 +69,30 @@ public class MfaSession {
     @Column(name = "completed_at")
     private Instant completedAt;
 
+    /**
+     * Marks the session as already spent by a downstream flow (e.g. OAuth2
+     * authorization code mint). Once non-null, the session MUST be rejected
+     * on subsequent reads — this is the anti-replay barrier.
+     */
+    @Column(name = "consumed_at")
+    private Instant consumedAt;
+
     public boolean isExpired() {
         return Instant.now().isAfter(expiresAt);
     }
 
     public boolean isCompleted() {
         return completedAt != null;
+    }
+
+    /** True once consume() has been called — session is single-use. */
+    public boolean isConsumed() {
+        return consumedAt != null;
+    }
+
+    /** Atomically mark as spent. Callers must persist inside the same TX. */
+    public void consume() {
+        this.consumedAt = Instant.now();
     }
 
     public void advanceStep() {

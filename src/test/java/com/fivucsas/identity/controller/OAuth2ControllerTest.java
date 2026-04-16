@@ -346,4 +346,31 @@ class OAuth2ControllerTest {
         when(session.isCompleted()).thenReturn(true);
         return session;
     }
+
+    @Test
+    @DisplayName("POST /authorize/complete - already-consumed session returns 400 invalid_request")
+    void authorizeComplete_WhenSessionAlreadyConsumed_ShouldReturn400() throws Exception {
+        com.fivucsas.identity.entity.MfaSession session =
+                mock(com.fivucsas.identity.entity.MfaSession.class);
+        when(session.isExpired()).thenReturn(false);
+        when(session.isCompleted()).thenReturn(true);
+        when(session.isConsumed()).thenReturn(true);
+
+        when(mfaSessionRepository.findBySessionToken("replay-token"))
+                .thenReturn(java.util.Optional.of(session));
+
+        String body = "{" +
+                "\"mfaSessionToken\":\"replay-token\"," +
+                "\"clientId\":\"test-client\"," +
+                "\"redirectUri\":\"https://example.com/cb\"" +
+                "}";
+
+        mockMvc.perform(post("/api/v1/oauth2/authorize/complete")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("invalid_request"))
+                .andExpect(jsonPath("$.error_description",
+                        org.hamcrest.Matchers.containsString("already used")));
+    }
 }

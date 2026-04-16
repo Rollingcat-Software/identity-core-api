@@ -192,4 +192,36 @@ class MfaSessionTest {
         session.complete();
         assertTrue(session.isCompleted());
     }
+
+    // ──────────────────────────────────────────────────────────────
+    // consume() / isConsumed() — B4 single-use anti-replay
+    // ──────────────────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("fresh session is not consumed")
+    void freshSessionIsNotConsumed() {
+        assertFalse(session.isConsumed());
+        assertNull(session.getConsumedAt());
+    }
+
+    @Test
+    @DisplayName("consume() stamps consumedAt and flips isConsumed()")
+    void consumeStampsConsumedAt() {
+        Instant before = Instant.now().minusSeconds(1);
+        session.consume();
+
+        assertTrue(session.isConsumed());
+        assertNotNull(session.getConsumedAt());
+        assertTrue(session.getConsumedAt().isAfter(before),
+                "consumedAt must be recent");
+    }
+
+    @Test
+    @DisplayName("consume() is independent of complete() — a completed session can still be unconsumed")
+    void consumedOrthogonalToCompleted() {
+        session.complete();
+        assertTrue(session.isCompleted());
+        assertFalse(session.isConsumed(),
+                "complete() alone must not mark the session as consumed");
+    }
 }

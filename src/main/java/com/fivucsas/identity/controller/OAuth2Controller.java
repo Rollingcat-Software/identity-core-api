@@ -19,6 +19,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.util.UriComponentsBuilder;
 
@@ -175,6 +176,7 @@ public class OAuth2Controller {
      */
     @PostMapping("/authorize/complete")
     @Operation(summary = "Mint an OAuth2 authorization code after hosted-login MFA completes")
+    @Transactional
     public ResponseEntity<?> authorizeComplete(@RequestBody HostedAuthorizeCompleteRequest body) {
         if (body == null || isBlank(body.mfaSessionToken) || isBlank(body.clientId) || isBlank(body.redirectUri)) {
             return errorResponse(400, "invalid_request",
@@ -190,6 +192,14 @@ public class OAuth2Controller {
         }
         if (!session.isCompleted()) {
             return errorResponse(400, "invalid_request", "MFA not completed", body.state);
+        }
+        // Anti-replay: reject any session already spent by a prior code mint. The
+        // consumed_at flip below happens inside the same @Transactional boundary as
+        // the code generation, so failures after flip roll both back atomically.
+        if (session.isConsumed()) {
+            log.warn("OAuth2 authorize/complete — attempt to reuse consumed MFA session: token={}",
+                    body.mfaSessionToken);
+            return errorResponse(400, "invalid_request", "MFA session already used", body.state);
         }
 
         OAuth2Client client;
@@ -225,12 +235,20 @@ public class OAuth2Controller {
             return errorResponse(403, "access_denied", "Client does not belong to user's tenant", body.state);
         }
 
+        // Mark consumed BEFORE minting the code so a crash between consume and mint
+        // leaves the session poisoned (still marked consumed) and the transaction
+        // rolls back the consume with the mint.
+        session.consume();
+        mfaSessionRepository.save(session);
+
         String code = oAuth2Service.generateAuthorizationCode(
                 user.getEmail(), body.clientId, body.redirectUri,
                 body.scope == null ? "openid profile email" : body.scope,
                 body.nonce, body.codeChallenge, body.codeChallengeMethod);
 
-        // Burn the MFA session so it can't be replayed for a second code
+        // Burn the MFA session record so it can't be replayed for a second code.
+        // Runs inside the same @Transactional — delete + consume + code mint all
+        // commit or rollback together.
         mfaSessionRepository.delete(session);
 
         Map<String, Object> response = new LinkedHashMap<>();
