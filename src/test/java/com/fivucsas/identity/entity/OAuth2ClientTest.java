@@ -95,12 +95,29 @@ class OAuth2ClientTest {
         }
 
         @Test
-        @DisplayName("registration with explicit query must match incoming query exactly")
-        void registrationWithQueryMustMatch() {
+        @DisplayName("any incoming query string is rejected — no smuggling even on registered query")
+        void anyIncomingQueryIsRejected() {
+            // RFC 8252 §7.3 tightened: the loopback redirect match ignores query
+            // entirely. Even if the registration declares a query, the incoming
+            // URI must be query-free. This is the strictest interpretation and
+            // matches the task spec (B5).
             OAuth2Client client = withRedirects("[\"http://127.0.0.1/cb?app=cli\"]");
-            assertTrue(client.isRedirectUriAllowed("http://127.0.0.1:3000/cb?app=cli"));
+            assertFalse(client.isRedirectUriAllowed("http://127.0.0.1:3000/cb?app=cli"));
             assertFalse(client.isRedirectUriAllowed("http://127.0.0.1:3000/cb?app=evil"));
-            assertFalse(client.isRedirectUriAllowed("http://127.0.0.1:3000/cb"));
+            assertTrue(client.isRedirectUriAllowed("http://127.0.0.1:3000/cb"),
+                    "Path + host + scheme match with no incoming query is still accepted");
+        }
+
+        @Test
+        @DisplayName("fragment is tolerated per RFC 8252 (client-side only)")
+        void fragmentIsTolerated() {
+            // Fragments never reach the server, so they cannot be used for
+            // attacker smuggling in the redirect URI itself. They only affect
+            // exact-string matching of the JSON registration, not loopback
+            // relaxation — but if a client library appends "#_=_" (a known
+            // Facebook SDK quirk), the loopback match still accepts it.
+            OAuth2Client client = withRedirects("[\"http://127.0.0.1/cb\"]");
+            assertTrue(client.isRedirectUriAllowed("http://127.0.0.1:3000/cb#state"));
         }
 
         @Test
@@ -117,10 +134,28 @@ class OAuth2ClientTest {
         }
 
         @Test
-        @DisplayName("IPv6 loopback [::1] is accepted as an IP literal")
-        void ipv6LoopbackAccepted() {
-            OAuth2Client client = withRedirects("[\"http://[::1]/cb\"]");
-            assertTrue(client.isRedirectUriAllowed("http://[::1]:4000/cb"));
+        @DisplayName("IPv6 loopback [::1] is rejected — IPv4 literal only per RFC 8252 §7.3")
+        void ipv6LoopbackRejected() {
+            // Task B5 tightening: the spec says IPv4 loopback literal only.
+            // IPv6 [::1] and ::1 are both rejected to keep the allowlist
+            // minimal and defensive against URI-parser divergence between
+            // native-app HTTP clients.
+            OAuth2Client clientIpv6 = withRedirects("[\"http://[::1]/cb\"]");
+            assertFalse(clientIpv6.isRedirectUriAllowed("http://[::1]:4000/cb"),
+                    "IPv6 loopback registration must not match — IPv4 127.0.0.1 only");
+            OAuth2Client clientIpv4 = withRedirects("[\"http://127.0.0.1/cb\"]");
+            assertFalse(clientIpv4.isRedirectUriAllowed("http://[::1]:4000/cb"),
+                    "IPv6 loopback incoming must not match an IPv4 registration");
+        }
+
+        @Test
+        @DisplayName("various ephemeral ports all accepted on 127.0.0.1")
+        void variousPortsAccepted() {
+            OAuth2Client client = withRedirects("[\"http://127.0.0.1/cb\"]");
+            assertTrue(client.isRedirectUriAllowed("http://127.0.0.1:1024/cb"));
+            assertTrue(client.isRedirectUriAllowed("http://127.0.0.1:8080/cb"));
+            assertTrue(client.isRedirectUriAllowed("http://127.0.0.1:54321/cb"));
+            assertTrue(client.isRedirectUriAllowed("http://127.0.0.1:65535/cb"));
         }
 
         @Test

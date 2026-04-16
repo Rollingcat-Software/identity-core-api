@@ -116,10 +116,13 @@ public class OAuth2Client {
     }
 
     private static boolean isLoopbackHost(String host) {
-        // RFC 8252 §7.3: loopback redirect URIs use IP literals only.
-        // "localhost" is intentionally rejected — it is a DNS name that may
-        // resolve to an external address in hostile network environments.
-        return "127.0.0.1".equals(host) || "[::1]".equals(host) || "::1".equals(host);
+        // RFC 8252 §7.3 mandates the IPv4 loopback literal 127.0.0.1 only.
+        // "localhost" is rejected because it is a DNS name that can resolve to
+        // an external address in hostile network environments. IPv6 loopback
+        // is also rejected — the spec is explicit about IPv4 literal, and
+        // several native-app stacks still round-trip [::1] inconsistently
+        // across URI parsers. Keeping the allowlist tight closes both holes.
+        return "127.0.0.1".equals(host);
     }
 
     private boolean matchesLoopbackRegistration(String uri) {
@@ -128,9 +131,16 @@ public class OAuth2Client {
             if (!"http".equalsIgnoreCase(incoming.getScheme())) return false;
             String incomingHost = incoming.getHost();
             if (!isLoopbackHost(incomingHost)) return false;
+            // Query-string smuggling defense: RFC 8252 §7.3 requires the
+            // loopback redirect to match the registered URI exactly apart
+            // from the port. We go one step further and reject ANY incoming
+            // query (raw or decoded) — even if a registration also declares
+            // one — because the hosted-login flow never needs attacker-
+            // controlled query params on loopback redirects. Fragments are
+            // tolerated per the RFC since they are client-side only.
+            if (incoming.getQuery() != null || incoming.getRawQuery() != null) return false;
             String incomingPath = incoming.getPath() == null ? "" : incoming.getPath();
 
-            String incomingQuery = incoming.getQuery();
             for (String candidate : splitRegisteredRedirectUris()) {
                 URI reg;
                 try {
@@ -144,13 +154,11 @@ public class OAuth2Client {
                 if (!incomingHost.equals(regHost)) continue;
                 String regPath = reg.getPath() == null ? "" : reg.getPath();
                 if (!incomingPath.equals(regPath)) continue;
-                // Query-string safety: if registration has no query, reject any
-                // incoming query (prevents ?attacker_param=x smuggling). If
-                // registration has a query, it must match the incoming one byte-
-                // for-byte. Port is intentionally not compared — RFC 8252 §7.3
-                // explicitly permits ephemeral-port selection on loopback.
-                String regQuery = reg.getQuery();
-                if (java.util.Objects.equals(regQuery, incomingQuery)) return true;
+                // Port is intentionally not compared — RFC 8252 §7.3 explicitly
+                // permits ephemeral-port selection on loopback. Path + host +
+                // scheme already checked above; the registered query is
+                // ignored because the incoming URI is guaranteed query-free.
+                return true;
             }
         } catch (URISyntaxException ignored) {
         }
