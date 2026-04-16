@@ -66,6 +66,15 @@ public class OAuth2Client {
     @Builder.Default
     private boolean active = true;
 
+    /**
+     * True for traditional server-side web apps that can hold a client_secret.
+     * False for public clients (SPAs, native mobile, CLI) — these MUST use PKCE
+     * S256 per RFC 7636 and cannot authenticate with a secret.
+     */
+    @Column(name = "confidential", nullable = false)
+    @Builder.Default
+    private boolean confidential = true;
+
     @Column(name = "revoked_at")
     private Instant revokedAt;
 

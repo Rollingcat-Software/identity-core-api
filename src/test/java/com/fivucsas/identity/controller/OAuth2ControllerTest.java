@@ -282,4 +282,68 @@ class OAuth2ControllerTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error").value("invalid_request"));
     }
+
+    @Test
+    @DisplayName("POST /authorize/complete - public client without code_challenge returns 400")
+    void authorizeComplete_PublicClientMissingPkce_ShouldReturn400() throws Exception {
+        var session = newCompletedMfaSession();
+        when(mfaSessionRepository.findBySessionToken("s-token")).thenReturn(java.util.Optional.of(session));
+
+        OAuth2Client publicClient = mock(OAuth2Client.class);
+        when(publicClient.isConfidential()).thenReturn(false);
+        when(oAuth2Service.validateClient("public-spa", "https://spa.example.com/cb")).thenReturn(publicClient);
+
+        String body = "{" +
+                "\"mfaSessionToken\":\"s-token\"," +
+                "\"clientId\":\"public-spa\"," +
+                "\"redirectUri\":\"https://spa.example.com/cb\"" +
+                "}";
+
+        mockMvc.perform(post("/api/v1/oauth2/authorize/complete")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("invalid_request"))
+                .andExpect(jsonPath("$.error_description",
+                        org.hamcrest.Matchers.containsString("code_challenge is required for public clients")));
+    }
+
+    @Test
+    @DisplayName("POST /authorize/complete - public client with plain PKCE method returns 400")
+    void authorizeComplete_PublicClientPlainPkce_ShouldReturn400() throws Exception {
+        var session = newCompletedMfaSession();
+        when(mfaSessionRepository.findBySessionToken("s-token")).thenReturn(java.util.Optional.of(session));
+
+        OAuth2Client publicClient = mock(OAuth2Client.class);
+        when(publicClient.isConfidential()).thenReturn(false);
+        when(oAuth2Service.validateClient("public-spa", "https://spa.example.com/cb")).thenReturn(publicClient);
+
+        String body = "{" +
+                "\"mfaSessionToken\":\"s-token\"," +
+                "\"clientId\":\"public-spa\"," +
+                "\"redirectUri\":\"https://spa.example.com/cb\"," +
+                "\"codeChallenge\":\"any-challenge\"," +
+                "\"codeChallengeMethod\":\"plain\"" +
+                "}";
+
+        mockMvc.perform(post("/api/v1/oauth2/authorize/complete")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("invalid_request"))
+                .andExpect(jsonPath("$.error_description",
+                        org.hamcrest.Matchers.containsString("S256")));
+    }
+
+    /**
+     * Builds an MfaSession stub already marked completed, unexpired. Tests that want to
+     * exercise branches after the session/client checks can reuse this helper.
+     */
+    private com.fivucsas.identity.entity.MfaSession newCompletedMfaSession() {
+        com.fivucsas.identity.entity.MfaSession session =
+                mock(com.fivucsas.identity.entity.MfaSession.class);
+        when(session.isExpired()).thenReturn(false);
+        when(session.isCompleted()).thenReturn(true);
+        return session;
+    }
 }

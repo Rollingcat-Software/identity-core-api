@@ -201,6 +201,21 @@ public class OAuth2Controller {
             return errorResponse(400, "invalid_request", e.getMessage(), body.state);
         }
 
+        // PKCE enforcement for public clients (RFC 7636 + RFC 8252 §8.1).
+        // Public clients cannot hold a client_secret, so PKCE S256 is the only
+        // protection against code interception. Plain is rejected — only S256
+        // provides the hash that makes the verifier safe to transmit.
+        if (!client.isConfidential()) {
+            if (isBlank(body.codeChallenge)) {
+                return errorResponse(400, "invalid_request",
+                        "code_challenge is required for public clients (PKCE S256 mandatory)", body.state);
+            }
+            if (!"S256".equalsIgnoreCase(body.codeChallengeMethod)) {
+                return errorResponse(400, "invalid_request",
+                        "code_challenge_method must be S256 for public clients; plain is not allowed", body.state);
+            }
+        }
+
         User user = userRepository.findById(session.getUserId()).orElse(null);
         if (user == null) {
             return errorResponse(400, "invalid_request", "User not found for MFA session", body.state);
