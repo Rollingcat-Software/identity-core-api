@@ -144,7 +144,7 @@ class OAuth2ServiceTest {
         ValueOperations<String, String> valueOps = mock(ValueOperations.class);
         when(redisTemplate.opsForValue()).thenReturn(valueOps);
         when(valueOps.get("oauth2:code:test-code"))
-                .thenReturn("user@test.com|client-1|https://cb.com|openid email|||");
+                .thenReturn("user@test.com|client-1|https://cb.com|openid profile email|||");
 
         OAuth2Client client = mock(OAuth2Client.class);
         when(client.getClientSecret()).thenReturn("hashed-secret");
@@ -231,7 +231,7 @@ class OAuth2ServiceTest {
         ValueOperations<String, String> valueOps = mock(ValueOperations.class);
         when(redisTemplate.opsForValue()).thenReturn(valueOps);
         when(valueOps.get("oauth2:code:pkce-code"))
-                .thenReturn("user@test.com|client-1|https://cb.com|openid||" + codeChallenge + "|S256");
+                .thenReturn("user@test.com|client-1|https://cb.com|openid profile email||" + codeChallenge + "|S256");
 
         OAuth2Client client = mock(OAuth2Client.class);
         when(clientRepository.findByClientIdAndActiveTrue("client-1")).thenReturn(Optional.of(client));

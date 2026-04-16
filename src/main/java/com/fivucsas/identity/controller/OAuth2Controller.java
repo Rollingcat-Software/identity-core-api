@@ -150,9 +150,11 @@ public class OAuth2Controller {
 
         } catch (IllegalArgumentException e) {
             log.warn("OAuth2 authorize failed: {}", e.getMessage());
-            // RFC 6749 Section 4.1.2.1: error responses for authorization endpoint
-            String errorCode = e.getMessage().contains("client_id") ? "unauthorized_client" : "invalid_request";
-            return errorResponse(400, errorCode, e.getMessage(), state);
+            // RFC 6749 Section 4.1.2.1: authorization-endpoint error responses.
+            // Unknown/invalid client_id and redirect_uri are parameter-validation
+            // failures — RFC-correct code is invalid_request, not unauthorized_client
+            // (which signals grant-type mismatch for an otherwise-valid client).
+            return errorResponse(400, "invalid_request", e.getMessage(), state);
         }
     }
 
