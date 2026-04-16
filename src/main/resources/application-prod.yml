@@ -113,12 +113,13 @@ management:
       prometheus:
         enabled: true
 
-# Swagger/OpenAPI (Disabled in production)
+# Swagger/OpenAPI (enabled — public API docs, industry standard)
 springdoc:
   api-docs:
-    enabled: false
+    enabled: true
   swagger-ui:
-    enabled: false
+    enabled: true
+    disable-swagger-default-url: true
 
 # Security Headers (Production)
 security:
