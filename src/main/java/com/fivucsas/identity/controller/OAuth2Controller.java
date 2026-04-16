@@ -242,8 +242,12 @@ public class OAuth2Controller {
             return errorResponse(400, "invalid_request", "User not found for MFA session", body.state);
         }
         if (!user.getTenant().getId().equals(client.getTenant().getId())) {
-            // Prevents a code mint against a client that belongs to a different tenant than the authenticated user
-            return errorResponse(403, "access_denied", "Client does not belong to user's tenant", body.state);
+            // Prevents a code mint against a client that belongs to a different tenant than the authenticated user.
+            // RFC 6749 §5.2 authorization-server error responses are 400 — 403 here would leak policy info
+            // (the fact that a tenant boundary check exists) and is not an HTTP-level authz failure anyway.
+            log.warn("OAuth2 authorize/complete — tenant mismatch: userTenant={}, clientTenant={}",
+                    user.getTenant().getId(), client.getTenant().getId());
+            return errorResponse(400, "invalid_request", "Client does not belong to user's tenant", body.state);
         }
 
         // Mark consumed BEFORE minting the code so a crash between consume and mint
