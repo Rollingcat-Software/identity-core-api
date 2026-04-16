@@ -161,6 +161,10 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
                         .stepsData("[\"PASSWORD\"]")  // track by AuthMethodType for reuse check; AMR mapped at token issuance
                         .ipAddress(command.getIpAddress())
                         .userAgent(command.getUserAgent())
+                        // Bind this MFA session to the OAuth2 client_id when the hosted
+                        // login initiated the flow — enforced at /oauth2/authorize/complete
+                        // to prevent cross-client authorization-code replay within a tenant.
+                        .clientId(command.getClientId())
                         .expiresAt(Instant.now().plus(MFA_SESSION_TTL))
                         .build();
                     mfaSessionRepository.save(mfaSession);

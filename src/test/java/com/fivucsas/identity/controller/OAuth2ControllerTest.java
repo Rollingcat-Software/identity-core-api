@@ -348,6 +348,36 @@ class OAuth2ControllerTest {
     }
 
     @Test
+    @DisplayName("POST /authorize/complete - cross-client replay (session bound to A, request for B) returns 400")
+    void authorizeComplete_WhenClientIdMismatch_ShouldReturn400() throws Exception {
+        com.fivucsas.identity.entity.MfaSession session =
+                mock(com.fivucsas.identity.entity.MfaSession.class);
+        when(session.isExpired()).thenReturn(false);
+        when(session.isCompleted()).thenReturn(true);
+        when(session.isConsumed()).thenReturn(false);
+        when(session.getClientId()).thenReturn("client-A");
+
+        when(mfaSessionRepository.findBySessionToken("bound-token"))
+                .thenReturn(java.util.Optional.of(session));
+
+        // NOTE: oAuth2Service.validateClient is not stubbed — the request must
+        // fail at the client_id-mismatch guard BEFORE reaching client validation.
+        String body = "{" +
+                "\"mfaSessionToken\":\"bound-token\"," +
+                "\"clientId\":\"client-B\"," +
+                "\"redirectUri\":\"https://b.example.com/cb\"" +
+                "}";
+
+        mockMvc.perform(post("/api/v1/oauth2/authorize/complete")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("invalid_request"))
+                .andExpect(jsonPath("$.error_description",
+                        org.hamcrest.Matchers.containsString("bound to a different client_id")));
+    }
+
+    @Test
     @DisplayName("POST /authorize/complete - already-consumed session returns 400 invalid_request")
     void authorizeComplete_WhenSessionAlreadyConsumed_ShouldReturn400() throws Exception {
         com.fivucsas.identity.entity.MfaSession session =

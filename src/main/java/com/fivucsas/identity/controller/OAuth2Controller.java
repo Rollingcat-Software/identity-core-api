@@ -202,6 +202,17 @@ public class OAuth2Controller {
             return errorResponse(400, "invalid_request", "MFA session already used", body.state);
         }
 
+        // Cross-client replay defense: when the MFA session was created with a
+        // bound client_id (hosted-login flow), require the code mint to use the
+        // same client_id. Null binding is allowed — it represents widget step-up
+        // MFA, which is client-agnostic by design.
+        if (session.getClientId() != null && !session.getClientId().equals(body.clientId)) {
+            log.warn("OAuth2 authorize/complete — client_id mismatch: session={}, request={}",
+                    session.getClientId(), body.clientId);
+            return errorResponse(400, "invalid_request",
+                    "MFA session is bound to a different client_id", body.state);
+        }
+
         OAuth2Client client;
         try {
             client = oAuth2Service.validateClient(body.clientId, body.redirectUri);
