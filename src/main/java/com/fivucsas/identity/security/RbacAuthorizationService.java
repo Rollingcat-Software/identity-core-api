@@ -116,6 +116,17 @@ public class RbacAuthorizationService {
     }
 
     /**
+     * Checks if the current user is the platform super-admin (ROOT).
+     *
+     * <p>Alias for {@link #isRoot()} exposed under the name used in GDPR-purge
+     * {@code @PreAuthorize} expressions — keeps {@code @rbac.isSuperAdmin()} readable
+     * at the call-site without conflating "tenant admin" with "platform owner".</p>
+     */
+    public boolean isSuperAdmin() {
+        return isRoot();
+    }
+
+    /**
      * Checks if the current user is at least a TENANT_ADMIN.
      */
     public boolean isTenantAdmin() {

@@ -86,4 +86,15 @@ public interface UserRepository extends JpaRepository<User, UUID> {
     @EntityGraph(attributePaths = {"userRoles", "userRoles.role", "userRoles.role.permissions"})
     @Query("SELECT u FROM User u")
     Page<User> findAllWithRoles(Pageable pageable);
+
+    /**
+     * Finds users soft-deleted before the given cutoff — candidates for permanent
+     * purge under the 30-day retention window (GDPR Art. 17 / KVKK).
+     *
+     * @param cutoff users with {@code deletedAt < cutoff} are returned
+     * @param pageable pagination for batched purge
+     * @return page of purge-eligible users
+     */
+    @Query("SELECT u FROM User u WHERE u.deletedAt IS NOT NULL AND u.deletedAt < :cutoff")
+    Page<User> findPurgeCandidates(@Param("cutoff") Instant cutoff, Pageable pageable);
 }

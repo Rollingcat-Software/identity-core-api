@@ -18,6 +18,14 @@ spring:
   application:
     name: identity-core-api
 
+# GDPR Art. 17 / KVKK right-to-erasure. Permanently purges users soft-deleted more
+# than 30 days ago. DISABLED by default — operator must validate via
+# `DELETE /api/v1/admin/purge/dry-run` before flipping to true per environment.
+app:
+  purge:
+    softDelete:
+      enabled: ${APP_PURGE_SOFT_DELETE_ENABLED:false}
+
 # Redis Configuration
 redis:
   host: ${REDIS_HOST:localhost}
