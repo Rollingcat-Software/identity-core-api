@@ -248,7 +248,12 @@ public class GlobalExceptionHandler {
                 request.getRequestURI()
         );
 
-        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).body(error);
+        // RFC 6585 §4: 429 responses SHOULD include Retry-After. The interceptor
+        // already sets it on the raw response, but Spring's ResponseEntity build
+        // path here overwrites headers — re-attach it from the exception payload.
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                .header("Retry-After", String.valueOf(ex.getRetryAfterSeconds()))
+                .body(error);
     }
 
     @ExceptionHandler(AccessDeniedException.class)

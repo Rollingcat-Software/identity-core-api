@@ -2,7 +2,9 @@ package com.fivucsas.identity.controller;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fivucsas.identity.application.port.output.CachePort;
+import com.fivucsas.identity.application.port.output.OAuth2ClientRepositoryPort;
 import com.fivucsas.identity.domain.repository.TenantRepository;
+import com.fivucsas.identity.repository.MfaSessionRepository;
 import com.fivucsas.identity.repository.UserRepository;
 import com.fivucsas.identity.application.service.OAuth2Service;
 import com.fivucsas.identity.entity.OAuth2Client;
@@ -11,6 +13,7 @@ import com.fivucsas.identity.infrastructure.otp.OtpService;
 import com.fivucsas.identity.infrastructure.sms.SmsService;
 import com.fivucsas.identity.security.JwtAuthenticationFilter;
 import com.fivucsas.identity.security.RateLimitService;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -19,6 +22,7 @@ import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -48,6 +52,9 @@ class OAuth2ControllerTest {
     @Autowired private ObjectMapper objectMapper;
 
     @MockBean private OAuth2Service oAuth2Service;
+    @MockBean private OAuth2ClientRepositoryPort oAuth2ClientRepository;
+    @MockBean private MfaSessionRepository mfaSessionRepository;
+    @MockBean private com.fivucsas.identity.domain.repository.UserRepository domainUserRepository;
 
     // Security and infrastructure beans
     @MockBean private TenantRepository tenantRepository;
@@ -62,6 +69,14 @@ class OAuth2ControllerTest {
     @MockBean private OtpService otpService;
     @MockBean private EmailService emailService;
     @MockBean private SmsService smsService;
+
+    @BeforeEach
+    void allowRateLimiter() {
+        // Rate-limit interceptor now covers /api/v1/oauth2/** — pass-through for tests.
+        when(rateLimitService.allowLoginAttempt(anyString())).thenReturn(true);
+        when(rateLimitService.allowRegistrationAttempt(anyString())).thenReturn(true);
+        when(rateLimitService.allowBiometricVerification(anyString())).thenReturn(true);
+    }
 
     @Test
     @DisplayName("GET /api/v1/oauth2/authorize - Unsupported response_type")
@@ -209,5 +224,189 @@ class OAuth2ControllerTest {
                         .header("Authorization", "Bearer bad-jwt"))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.error").value("invalid_token"));
+    }
+
+    @Test
+    @DisplayName("GET /api/v1/oauth2/authorize - display=page issues 302 to hosted login")
+    void authorize_WhenDisplayPage_ShouldRedirectToHostedLogin() throws Exception {
+        OAuth2Client client = mock(OAuth2Client.class);
+        when(client.getClientName()).thenReturn("Test App");
+        when(oAuth2Service.validateClient("test-client", "https://example.com/cb")).thenReturn(client);
+
+        mockMvc.perform(get("/api/v1/oauth2/authorize")
+                        .param("client_id", "test-client")
+                        .param("redirect_uri", "https://example.com/cb")
+                        .param("response_type", "code")
+                        .param("state", "xyz")
+                        .param("display", "page"))
+                .andExpect(status().isFound())
+                .andExpect(header().string("Location",
+                        org.hamcrest.Matchers.containsString("verify.fivucsas.com/login")))
+                .andExpect(header().string("Location",
+                        org.hamcrest.Matchers.containsString("client_id=test-client")))
+                .andExpect(header().string("Location",
+                        org.hamcrest.Matchers.containsString("state=xyz")));
+    }
+
+    @Test
+    @DisplayName("GET /api/v1/oauth2/authorize - HTML Accept alone (no display=page) does NOT redirect")
+    void authorize_WhenAcceptHtmlWithoutDisplayPage_ShouldReturnJson() throws Exception {
+        // The SDK always sets display=page explicitly — the old Accept: text/html
+        // fallback was redundant and could accidentally redirect XHR callers whose
+        // headers happened to include text/html. Dropping it requires display=page.
+        OAuth2Client client = mock(OAuth2Client.class);
+        when(client.getClientName()).thenReturn("Test App");
+        when(oAuth2Service.validateClient("test-client", "https://example.com/cb")).thenReturn(client);
+
+        mockMvc.perform(get("/api/v1/oauth2/authorize")
+                        .param("client_id", "test-client")
+                        .param("redirect_uri", "https://example.com/cb")
+                        .param("response_type", "code")
+                        .header("Accept", "text/html,application/xhtml+xml,application/json"))
+                .andExpect(status().isOk())
+                // Must NOT be 302 — the old isHtmlAccept branch would have redirected.
+                .andExpect(header().doesNotExist(HttpHeaders.LOCATION));
+    }
+
+    @Test
+    @DisplayName("GET /api/v1/oauth2/clients/{id}/public - unknown client returns 404")
+    void getClientPublicMeta_WhenUnknown_ShouldReturn404() throws Exception {
+        when(oAuth2ClientRepository.findByClientIdAndActiveTrue("ghost"))
+                .thenReturn(java.util.Optional.empty());
+
+        mockMvc.perform(get("/api/v1/oauth2/clients/ghost/public"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error").value("not_found"));
+    }
+
+    @Test
+    @DisplayName("POST /api/v1/oauth2/authorize/complete - missing fields return 400")
+    void authorizeComplete_WhenMissingFields_ShouldReturn400() throws Exception {
+        mockMvc.perform(post("/api/v1/oauth2/authorize/complete")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("invalid_request"));
+    }
+
+    @Test
+    @DisplayName("POST /authorize/complete - public client without code_challenge returns 400")
+    void authorizeComplete_PublicClientMissingPkce_ShouldReturn400() throws Exception {
+        var session = newCompletedMfaSession();
+        when(mfaSessionRepository.findBySessionToken("s-token")).thenReturn(java.util.Optional.of(session));
+
+        OAuth2Client publicClient = mock(OAuth2Client.class);
+        when(publicClient.isConfidential()).thenReturn(false);
+        when(oAuth2Service.validateClient("public-spa", "https://spa.example.com/cb")).thenReturn(publicClient);
+
+        String body = "{" +
+                "\"mfaSessionToken\":\"s-token\"," +
+                "\"clientId\":\"public-spa\"," +
+                "\"redirectUri\":\"https://spa.example.com/cb\"" +
+                "}";
+
+        mockMvc.perform(post("/api/v1/oauth2/authorize/complete")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("invalid_request"))
+                .andExpect(jsonPath("$.error_description",
+                        org.hamcrest.Matchers.containsString("code_challenge is required for public clients")));
+    }
+
+    @Test
+    @DisplayName("POST /authorize/complete - public client with plain PKCE method returns 400")
+    void authorizeComplete_PublicClientPlainPkce_ShouldReturn400() throws Exception {
+        var session = newCompletedMfaSession();
+        when(mfaSessionRepository.findBySessionToken("s-token")).thenReturn(java.util.Optional.of(session));
+
+        OAuth2Client publicClient = mock(OAuth2Client.class);
+        when(publicClient.isConfidential()).thenReturn(false);
+        when(oAuth2Service.validateClient("public-spa", "https://spa.example.com/cb")).thenReturn(publicClient);
+
+        String body = "{" +
+                "\"mfaSessionToken\":\"s-token\"," +
+                "\"clientId\":\"public-spa\"," +
+                "\"redirectUri\":\"https://spa.example.com/cb\"," +
+                "\"codeChallenge\":\"any-challenge\"," +
+                "\"codeChallengeMethod\":\"plain\"" +
+                "}";
+
+        mockMvc.perform(post("/api/v1/oauth2/authorize/complete")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("invalid_request"))
+                .andExpect(jsonPath("$.error_description",
+                        org.hamcrest.Matchers.containsString("S256")));
+    }
+
+    /**
+     * Builds an MfaSession stub already marked completed, unexpired. Tests that want to
+     * exercise branches after the session/client checks can reuse this helper.
+     */
+    private com.fivucsas.identity.entity.MfaSession newCompletedMfaSession() {
+        com.fivucsas.identity.entity.MfaSession session =
+                mock(com.fivucsas.identity.entity.MfaSession.class);
+        when(session.isExpired()).thenReturn(false);
+        when(session.isCompleted()).thenReturn(true);
+        return session;
+    }
+
+    @Test
+    @DisplayName("POST /authorize/complete - cross-client replay (session bound to A, request for B) returns 400")
+    void authorizeComplete_WhenClientIdMismatch_ShouldReturn400() throws Exception {
+        com.fivucsas.identity.entity.MfaSession session =
+                mock(com.fivucsas.identity.entity.MfaSession.class);
+        when(session.isExpired()).thenReturn(false);
+        when(session.isCompleted()).thenReturn(true);
+        when(session.isConsumed()).thenReturn(false);
+        when(session.getClientId()).thenReturn("client-A");
+
+        when(mfaSessionRepository.findBySessionToken("bound-token"))
+                .thenReturn(java.util.Optional.of(session));
+
+        // NOTE: oAuth2Service.validateClient is not stubbed — the request must
+        // fail at the client_id-mismatch guard BEFORE reaching client validation.
+        String body = "{" +
+                "\"mfaSessionToken\":\"bound-token\"," +
+                "\"clientId\":\"client-B\"," +
+                "\"redirectUri\":\"https://b.example.com/cb\"" +
+                "}";
+
+        mockMvc.perform(post("/api/v1/oauth2/authorize/complete")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("invalid_request"))
+                .andExpect(jsonPath("$.error_description",
+                        org.hamcrest.Matchers.containsString("bound to a different client_id")));
+    }
+
+    @Test
+    @DisplayName("POST /authorize/complete - already-consumed session returns 400 invalid_request")
+    void authorizeComplete_WhenSessionAlreadyConsumed_ShouldReturn400() throws Exception {
+        com.fivucsas.identity.entity.MfaSession session =
+                mock(com.fivucsas.identity.entity.MfaSession.class);
+        when(session.isExpired()).thenReturn(false);
+        when(session.isCompleted()).thenReturn(true);
+        when(session.isConsumed()).thenReturn(true);
+
+        when(mfaSessionRepository.findBySessionToken("replay-token"))
+                .thenReturn(java.util.Optional.of(session));
+
+        String body = "{" +
+                "\"mfaSessionToken\":\"replay-token\"," +
+                "\"clientId\":\"test-client\"," +
+                "\"redirectUri\":\"https://example.com/cb\"" +
+                "}";
+
+        mockMvc.perform(post("/api/v1/oauth2/authorize/complete")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("invalid_request"))
+                .andExpect(jsonPath("$.error_description",
+                        org.hamcrest.Matchers.containsString("already used")));
     }
 }

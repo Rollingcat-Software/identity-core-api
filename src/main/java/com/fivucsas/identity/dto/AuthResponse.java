@@ -44,6 +44,9 @@ public class AuthResponse {
     /** Available methods for the current step (for CHOICE steps). Null for single-factor. */
     private List<AvailableMfaMethod> availableMethods;
 
+    /** Methods already completed in this MFA session (canonical AuthMethodType names). Null for single-factor. */
+    private List<String> completedMethods;
+
     // --- Factory methods ---
 
     public static AuthResponse of(String accessToken, String refreshToken, Long expiresIn, UserResponse user) {
@@ -74,7 +77,8 @@ public class AuthResponse {
     /** New: multi-method MFA with session token */
     public static AuthResponse ofMfa(String accessToken, String refreshToken, Long expiresIn, UserResponse user,
                                      String mfaSessionToken, int totalSteps, int currentStep,
-                                     String primaryMethod, List<AvailableMfaMethod> availableMethods) {
+                                     String primaryMethod, List<AvailableMfaMethod> availableMethods,
+                                     List<String> completedMethods) {
         return AuthResponse.builder()
                 .accessToken(accessToken)
                 .refreshToken(refreshToken)
@@ -88,6 +92,7 @@ public class AuthResponse {
                 .totalSteps(totalSteps)
                 .currentStep(currentStep)
                 .availableMethods(availableMethods)
+                .completedMethods(completedMethods)
                 .build();
     }
 }

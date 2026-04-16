@@ -895,7 +895,8 @@ public class AuthController {
                 "mfaSessionToken", sessionToken,
                 "currentStep", nextStepOrder,
                 "totalSteps", mfaSession.getTotalSteps(),
-                "availableMethods", availableMethods
+                "availableMethods", availableMethods,
+                "completedMethods", mfaSession.getCompletedMethods()
             ));
 
         } catch (Exception e) {
@@ -1060,7 +1061,8 @@ public class AuthController {
                 response.getTotalSteps(),
                 response.getCurrentStep(),
                 response.getTwoFactorMethod(),
-                response.getAvailableMethods()
+                response.getAvailableMethods(),
+                response.getCompletedMethods()
             );
         }
         return AuthResponse.of(

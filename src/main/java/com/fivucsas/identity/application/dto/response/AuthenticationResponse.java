@@ -33,6 +33,8 @@ public class AuthenticationResponse {
     private Integer totalSteps;
     private Integer currentStep;
     private List<AvailableMfaMethod> availableMethods;
+    /** Methods already completed in this MFA session (canonical AuthMethodType names). */
+    private List<String> completedMethods;
 
     /** Single-factor login (no MFA) */
     public static AuthenticationResponse of(String accessToken, String refreshToken, Long expiresIn, UserResponse user) {
@@ -82,7 +84,7 @@ public class AuthenticationResponse {
     /** MFA pending: NO tokens issued, only session token + step info. JWT comes after all steps complete. */
     public static AuthenticationResponse ofMfaPending(String mfaSessionToken, int totalSteps, int currentStep,
                                                        String primaryMethod, List<AvailableMfaMethod> availableMethods,
-                                                       UserResponse user) {
+                                                       UserResponse user, List<String> completedMethods) {
         return AuthenticationResponse.builder()
             .accessToken(null)
             .refreshToken(null)
@@ -95,6 +97,7 @@ public class AuthenticationResponse {
             .totalSteps(totalSteps)
             .currentStep(currentStep)
             .availableMethods(availableMethods)
+            .completedMethods(completedMethods)
             .build();
     }
 }

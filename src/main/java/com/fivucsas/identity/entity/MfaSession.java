@@ -59,6 +59,20 @@ public class MfaSession {
     @Column(name = "user_agent", columnDefinition = "text")
     private String userAgent;
 
+    /**
+     * OAuth 2.0 client_id the MFA session was initiated against (nullable).
+     *
+     * <p>Set by AuthController.login when the hosted-login page forwards the
+     * OAuth client_id. When non-null, {@code /oauth2/authorize/complete} MUST
+     * reject any code-mint attempt whose request body carries a different
+     * client_id (cross-client code replay defense).
+     *
+     * <p>Null is permitted for the widget step-up MFA flow, which has no
+     * bound client.
+     */
+    @Column(name = "client_id", length = 128)
+    private String clientId;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     @Builder.Default
     private Instant createdAt = Instant.now();
@@ -69,12 +83,30 @@ public class MfaSession {
     @Column(name = "completed_at")
     private Instant completedAt;
 
+    /**
+     * Marks the session as already spent by a downstream flow (e.g. OAuth2
+     * authorization code mint). Once non-null, the session MUST be rejected
+     * on subsequent reads — this is the anti-replay barrier.
+     */
+    @Column(name = "consumed_at")
+    private Instant consumedAt;
+
     public boolean isExpired() {
         return Instant.now().isAfter(expiresAt);
     }
 
     public boolean isCompleted() {
         return completedAt != null;
+    }
+
+    /** True once consume() has been called — session is single-use. */
+    public boolean isConsumed() {
+        return consumedAt != null;
+    }
+
+    /** Atomically mark as spent. Callers must persist inside the same TX. */
+    public void consume() {
+        this.consumedAt = Instant.now();
     }
 
     public void advanceStep() {

@@ -38,12 +38,17 @@ public class RateLimitInterceptor implements HandlerInterceptor {
         String clientIp = getClientIP(request);
 
         // Apply rate limiting based on endpoint
-        if (path.contains("/auth/login")) {
+        if (path.contains("/auth/login") || path.contains("/oauth2/authorize/complete")) {
+            // Hosted-login completion rides the same bucket as /auth/login because it
+            // is the terminal step of a user-initiated login from an anonymous browser
             if (!rateLimitService.allowLoginAttempt(clientIp)) {
                 long retryAfter = rateLimitService.getSecondsUntilRefill(
                     clientIp,
                     RateLimitService.RateLimitType.LOGIN
                 );
+                // RFC 6585 §4: 429 responses SHOULD carry Retry-After so clients can
+                // back off deterministically instead of tight-looping.
+                response.setHeader("Retry-After", String.valueOf(retryAfter));
                 throw new RateLimitExceededException(
                     "Too many login attempts. Please try again later.",
                     retryAfter
@@ -55,8 +60,22 @@ public class RateLimitInterceptor implements HandlerInterceptor {
                     clientIp,
                     RateLimitService.RateLimitType.REGISTRATION
                 );
+                response.setHeader("Retry-After", String.valueOf(retryAfter));
                 throw new RateLimitExceededException(
                     "Too many registration attempts. Please try again later.",
+                    retryAfter
+                );
+            }
+        } else if (path.contains("/oauth2/clients/") && path.endsWith("/public")) {
+            // Public branding endpoint — rate-limit against scraping/brute-force of client_ids
+            if (!rateLimitService.allowBiometricVerification(clientIp)) {
+                long retryAfter = rateLimitService.getSecondsUntilRefill(
+                    clientIp,
+                    RateLimitService.RateLimitType.BIOMETRIC
+                );
+                response.setHeader("Retry-After", String.valueOf(retryAfter));
+                throw new RateLimitExceededException(
+                    "Too many client metadata requests. Please wait and try again.",
                     retryAfter
                 );
             }

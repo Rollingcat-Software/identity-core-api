@@ -1,11 +1,16 @@
 package com.fivucsas.identity.entity;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -61,6 +66,15 @@ public class OAuth2Client {
     @Builder.Default
     private boolean active = true;
 
+    /**
+     * True for traditional server-side web apps that can hold a client_secret.
+     * False for public clients (SPAs, native mobile, CLI) — these MUST use PKCE
+     * S256 per RFC 7636 and cannot authenticate with a secret.
+     */
+    @Column(name = "confidential", nullable = false)
+    @Builder.Default
+    private boolean confidential = true;
+
     @Column(name = "revoked_at")
     private Instant revokedAt;
 
@@ -79,10 +93,98 @@ public class OAuth2Client {
 
     /**
      * Checks if the given redirect URI is allowed for this client.
+     *
+     * <p>Matching rules:
+     * <ol>
+     *   <li>HTTPS and custom-scheme URIs (e.g. {@code com.acme://auth}) — exact
+     *       string match.</li>
+     *   <li>Loopback URIs per RFC 8252 §7.3 — a registered
+     *       {@code http://127.0.0.1/cb} matches any port supplied by a native app
+     *       because ephemeral ports are chosen at runtime. Scheme + host + path
+     *       must match. Query string is ignored during matching (the attacker
+     *       MUST NOT be able to smuggle arbitrary query params past registration).
+     *       Only the IP literal 127.0.0.1 (or [::1]) is accepted; the hostname
+     *       "localhost" is explicitly rejected because it resolves differently on
+     *       different platforms and can be hijacked by DNS.</li>
+     * </ol>
      */
     public boolean isRedirectUriAllowed(String uri) {
         if (redirectUris == null || uri == null) return false;
-        return redirectUris.contains("\"" + uri + "\"");
+        // Fast path — exact JSON-embedded literal match
+        if (redirectUris.contains("\"" + uri + "\"")) return true;
+        return matchesLoopbackRegistration(uri);
+    }
+
+    private static boolean isLoopbackHost(String host) {
+        // RFC 8252 §7.3 mandates the IPv4 loopback literal 127.0.0.1 only.
+        // "localhost" is rejected because it is a DNS name that can resolve to
+        // an external address in hostile network environments. IPv6 loopback
+        // is also rejected — the spec is explicit about IPv4 literal, and
+        // several native-app stacks still round-trip [::1] inconsistently
+        // across URI parsers. Keeping the allowlist tight closes both holes.
+        return "127.0.0.1".equals(host);
+    }
+
+    private boolean matchesLoopbackRegistration(String uri) {
+        try {
+            URI incoming = new URI(uri);
+            if (!"http".equalsIgnoreCase(incoming.getScheme())) return false;
+            String incomingHost = incoming.getHost();
+            if (!isLoopbackHost(incomingHost)) return false;
+            // Query-string smuggling defense: RFC 8252 §7.3 requires the
+            // loopback redirect to match the registered URI exactly apart
+            // from the port. We go one step further and reject ANY incoming
+            // query (raw or decoded) — even if a registration also declares
+            // one — because the hosted-login flow never needs attacker-
+            // controlled query params on loopback redirects. Fragments are
+            // tolerated per the RFC since they are client-side only.
+            if (incoming.getQuery() != null || incoming.getRawQuery() != null) return false;
+            String incomingPath = incoming.getPath() == null ? "" : incoming.getPath();
+
+            for (String candidate : splitRegisteredRedirectUris()) {
+                URI reg;
+                try {
+                    reg = new URI(candidate);
+                } catch (URISyntaxException e) {
+                    continue;
+                }
+                if (!"http".equalsIgnoreCase(reg.getScheme())) continue;
+                String regHost = reg.getHost();
+                if (!isLoopbackHost(regHost)) continue;
+                if (!incomingHost.equals(regHost)) continue;
+                String regPath = reg.getPath() == null ? "" : reg.getPath();
+                if (!incomingPath.equals(regPath)) continue;
+                // Port is intentionally not compared — RFC 8252 §7.3 explicitly
+                // permits ephemeral-port selection on loopback. Path + host +
+                // scheme already checked above; the registered query is
+                // ignored because the incoming URI is guaranteed query-free.
+                return true;
+            }
+        } catch (URISyntaxException ignored) {
+        }
+        return false;
+    }
+
+    private static final ObjectMapper REDIRECT_URI_MAPPER = new ObjectMapper();
+    private static final TypeReference<List<String>> STRING_LIST_TYPE = new TypeReference<>() {};
+
+    /**
+     * Parses the JSON-array-encoded redirect_uris column.
+     *
+     * <p>The previous implementation split on comma, which corrupted URIs containing
+     * commas in query strings (e.g. {@code https://example.com/cb?next=a,b}). Jackson
+     * parses the real JSON structure and preserves each URI intact.
+     *
+     * <p>Falls back to an empty list if the column contains malformed JSON so a bad
+     * row doesn't break redirect validation for the whole request.
+     */
+    private List<String> splitRegisteredRedirectUris() {
+        if (redirectUris == null || redirectUris.isBlank()) return List.of();
+        try {
+            return REDIRECT_URI_MAPPER.readValue(redirectUris, STRING_LIST_TYPE);
+        } catch (Exception e) {
+            return List.of();
+        }
     }
 
     /**
