@@ -85,10 +85,13 @@ public class SecurityConfig {
                         // OAuth 2.0 / OIDC public endpoints
                         .requestMatchers(
                                 "/api/v1/oauth2/authorize",
+                                "/api/v1/oauth2/authorize/complete",
                                 "/api/v1/oauth2/token",
                                 "/.well-known/openid-configuration",
                                 "/.well-known/jwks.json"
                         ).permitAll()
+                        // Public OAuth2 client branding metadata (hosted-login page)
+                        .requestMatchers(HttpMethod.GET, "/api/v1/oauth2/clients/*/public").permitAll()
 
                         // WebAuthn authentication endpoints (pre-login, no JWT yet)
                         .requestMatchers(
