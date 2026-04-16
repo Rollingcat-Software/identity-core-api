@@ -5,7 +5,11 @@ import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.time.Instant;
+import java.util.Arrays;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -79,10 +83,53 @@ public class OAuth2Client {
 
     /**
      * Checks if the given redirect URI is allowed for this client.
+     *
+     * Matching rules:
+     * 1. HTTPS and custom-scheme URIs (e.g. "com.acme://auth") — exact string match.
+     * 2. Loopback URIs per RFC 8252 §7.3 — a registered "http://127.0.0.1/cb" (or
+     *    "http://localhost/cb") matches any port supplied by a native app, because
+     *    ephemeral ports are chosen at runtime. Path + scheme + host must still match.
      */
     public boolean isRedirectUriAllowed(String uri) {
         if (redirectUris == null || uri == null) return false;
-        return redirectUris.contains("\"" + uri + "\"");
+        // Fast path — exact JSON-embedded literal match
+        if (redirectUris.contains("\"" + uri + "\"")) return true;
+        return matchesLoopbackRegistration(uri);
+    }
+
+    private boolean matchesLoopbackRegistration(String uri) {
+        try {
+            URI incoming = new URI(uri);
+            if (!"http".equalsIgnoreCase(incoming.getScheme())) return false;
+            String incomingHost = incoming.getHost();
+            if (!"127.0.0.1".equals(incomingHost) && !"localhost".equals(incomingHost)) return false;
+            String incomingPath = incoming.getPath() == null ? "" : incoming.getPath();
+
+            for (String candidate : splitRegisteredRedirectUris()) {
+                URI reg;
+                try {
+                    reg = new URI(candidate);
+                } catch (URISyntaxException e) {
+                    continue;
+                }
+                if (!"http".equalsIgnoreCase(reg.getScheme())) continue;
+                String regHost = reg.getHost();
+                if (!incomingHost.equals(regHost)) continue;
+                String regPath = reg.getPath() == null ? "" : reg.getPath();
+                if (incomingPath.equals(regPath)) return true;
+            }
+        } catch (URISyntaxException ignored) {
+        }
+        return false;
+    }
+
+    private List<String> splitRegisteredRedirectUris() {
+        String raw = redirectUris.replaceAll("^\\[|\\]$", "").replace("\"", "");
+        if (raw.isEmpty()) return List.of();
+        return Arrays.stream(raw.split(","))
+                .map(String::trim)
+                .filter(s -> !s.isEmpty())
+                .toList();
     }
 
     /**

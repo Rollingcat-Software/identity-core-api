@@ -1,7 +1,12 @@
 package com.fivucsas.identity.controller;
 
+import com.fivucsas.identity.application.port.output.OAuth2ClientRepositoryPort;
 import com.fivucsas.identity.application.service.OAuth2Service;
+import com.fivucsas.identity.entity.MfaSession;
 import com.fivucsas.identity.entity.OAuth2Client;
+import com.fivucsas.identity.entity.User;
+import com.fivucsas.identity.domain.repository.UserRepository;
+import com.fivucsas.identity.repository.MfaSessionRepository;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
@@ -9,11 +14,15 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.util.UriComponentsBuilder;
 
+import java.net.URI;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -38,6 +47,12 @@ import java.util.Map;
 public class OAuth2Controller {
 
     private final OAuth2Service oAuth2Service;
+    private final OAuth2ClientRepositoryPort clientRepository;
+    private final MfaSessionRepository mfaSessionRepository;
+    private final UserRepository userRepository;
+
+    @Value("${app.hosted-login-url:https://verify.fivucsas.com/login}")
+    private String hostedLoginUrl;
 
     /**
      * OAuth 2.0 Authorization Endpoint (RFC 6749 Section 3.1).
@@ -64,10 +79,12 @@ public class OAuth2Controller {
             @RequestParam(value = "code_challenge", required = false) String codeChallenge,
             @Parameter(description = "PKCE code challenge method: S256 (recommended) or plain")
             @RequestParam(value = "code_challenge_method", required = false, defaultValue = "S256") String codeChallengeMethod,
+            @Parameter(description = "OIDC display hint — set to 'page' for a hosted redirective login, otherwise the JSON widget flow runs")
+            @RequestParam(value = "display", required = false) String display,
             Authentication authentication,
             HttpServletRequest httpRequest) {
 
-        log.info("OAuth2 authorize request: client_id={}, response_type={}", clientId, responseType);
+        log.info("OAuth2 authorize request: client_id={}, response_type={}, display={}", clientId, responseType, display);
 
         // RFC 6749 Section 3.1.1: response_type is REQUIRED
         if (!"code".equals(responseType)) {
@@ -89,6 +106,19 @@ public class OAuth2Controller {
 
             // Validate scopes
             oAuth2Service.validateScopes(client, scope);
+
+            // OIDC §3.1.2.1 content negotiation: display=page, or browsers asking for HTML,
+            // get a 302 to the hosted login surface. The JSON response below stays the
+            // contract for the inline widget flow, so existing tenants don't break.
+            boolean wantsHtml = isHtmlAccept(httpRequest.getHeader(HttpHeaders.ACCEPT));
+            if ("page".equalsIgnoreCase(display) || wantsHtml) {
+                URI location = buildHostedLoginUri(clientId, redirectUri, scope, state, nonce,
+                        codeChallenge, codeChallengeMethod);
+                return ResponseEntity.status(HttpStatus.FOUND)
+                        .header(HttpHeaders.LOCATION, location.toString())
+                        .header(HttpHeaders.CACHE_CONTROL, "no-store")
+                        .build();
+            }
 
             // If user is authenticated, generate the code directly
             if (authentication != null && authentication.isAuthenticated()) {
@@ -124,6 +154,131 @@ public class OAuth2Controller {
             String errorCode = e.getMessage().contains("client_id") ? "unauthorized_client" : "invalid_request";
             return errorResponse(400, errorCode, e.getMessage(), state);
         }
+    }
+
+    /**
+     * POST /oauth2/authorize/complete
+     *
+     * Called by the hosted login page ({@code verify.fivucsas.com/login}) after MFA
+     * has finished. Trades an already-completed MfaSession for a single-use OAuth 2.0
+     * authorization code, which the browser then posts to the tenant's redirect URI.
+     * <p>
+     * Security:
+     * <ul>
+     *   <li>MfaSession must be marked completed and not expired.</li>
+     *   <li>clientId + redirectUri are re-validated against the allowlist — URL params
+     *       are never trusted.</li>
+     *   <li>The MfaSession is deleted immediately after code minting (single-use).</li>
+     * </ul>
+     */
+    @PostMapping("/authorize/complete")
+    @Operation(summary = "Mint an OAuth2 authorization code after hosted-login MFA completes")
+    public ResponseEntity<?> authorizeComplete(@RequestBody HostedAuthorizeCompleteRequest body) {
+        if (body == null || isBlank(body.mfaSessionToken) || isBlank(body.clientId) || isBlank(body.redirectUri)) {
+            return errorResponse(400, "invalid_request",
+                    "mfaSessionToken, clientId, and redirectUri are required", body == null ? null : body.state);
+        }
+
+        MfaSession session = mfaSessionRepository.findBySessionToken(body.mfaSessionToken).orElse(null);
+        if (session == null) {
+            return errorResponse(400, "invalid_request", "Unknown MFA session", body.state);
+        }
+        if (session.isExpired()) {
+            return errorResponse(400, "invalid_request", "MFA session expired", body.state);
+        }
+        if (!session.isCompleted()) {
+            return errorResponse(400, "invalid_request", "MFA not completed", body.state);
+        }
+
+        OAuth2Client client;
+        try {
+            client = oAuth2Service.validateClient(body.clientId, body.redirectUri);
+            oAuth2Service.validateScopes(client, body.scope);
+        } catch (IllegalArgumentException e) {
+            log.warn("OAuth2 authorize/complete failed: {}", e.getMessage());
+            return errorResponse(400, "invalid_request", e.getMessage(), body.state);
+        }
+
+        User user = userRepository.findById(session.getUserId()).orElse(null);
+        if (user == null) {
+            return errorResponse(400, "invalid_request", "User not found for MFA session", body.state);
+        }
+        if (!user.getTenant().getId().equals(client.getTenant().getId())) {
+            // Prevents a code mint against a client that belongs to a different tenant than the authenticated user
+            return errorResponse(403, "access_denied", "Client does not belong to user's tenant", body.state);
+        }
+
+        String code = oAuth2Service.generateAuthorizationCode(
+                user.getEmail(), body.clientId, body.redirectUri,
+                body.scope == null ? "openid profile email" : body.scope,
+                body.nonce, body.codeChallenge, body.codeChallengeMethod);
+
+        // Burn the MFA session so it can't be replayed for a second code
+        mfaSessionRepository.delete(session);
+
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("code", code);
+        response.put("redirect_uri", body.redirectUri);
+        if (body.state != null) {
+            response.put("state", body.state);
+        }
+        log.info("OAuth2 hosted code minted — userId={}, clientId={}", user.getId(), body.clientId);
+        return ResponseEntity.ok(response);
+    }
+
+    /**
+     * GET /oauth2/clients/{clientId}/public
+     *
+     * Returns the publicly displayable metadata the hosted login page needs to render
+     * branding ("You're signing in to ACME"). No auth required — rate-limited upstream.
+     */
+    @GetMapping("/clients/{clientId}/public")
+    @Operation(summary = "Public client metadata for hosted-login branding")
+    public ResponseEntity<?> getClientPublicMeta(@PathVariable("clientId") String clientId) {
+        OAuth2Client client = clientRepository.findByClientIdAndActiveTrue(clientId).orElse(null);
+        if (client == null || !client.isValid()) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(Map.of("error", "not_found", "error_description", "Unknown client_id"));
+        }
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("client_id", client.getClientId());
+        response.put("client_name", client.getClientName());
+        response.put("tenant_name", client.getTenant() != null ? client.getTenant().getName() : null);
+        return ResponseEntity.ok().header(HttpHeaders.CACHE_CONTROL, "public, max-age=60").body(response);
+    }
+
+    private boolean isHtmlAccept(String accept) {
+        return accept != null && accept.toLowerCase().contains("text/html");
+    }
+
+    private URI buildHostedLoginUri(String clientId, String redirectUri, String scope, String state,
+                                    String nonce, String codeChallenge, String codeChallengeMethod) {
+        UriComponentsBuilder builder = UriComponentsBuilder.fromUriString(hostedLoginUrl)
+                .queryParam("client_id", clientId)
+                .queryParam("redirect_uri", redirectUri)
+                .queryParam("response_type", "code");
+        if (scope != null) builder.queryParam("scope", scope);
+        if (state != null) builder.queryParam("state", state);
+        if (nonce != null) builder.queryParam("nonce", nonce);
+        if (codeChallenge != null) builder.queryParam("code_challenge", codeChallenge);
+        if (codeChallengeMethod != null) builder.queryParam("code_challenge_method", codeChallengeMethod);
+        return builder.build().toUri();
+    }
+
+    private boolean isBlank(String s) {
+        return s == null || s.isBlank();
+    }
+
+    /** Request body for POST /oauth2/authorize/complete. */
+    public static class HostedAuthorizeCompleteRequest {
+        public String mfaSessionToken;
+        public String clientId;
+        public String redirectUri;
+        public String scope;
+        public String state;
+        public String nonce;
+        public String codeChallenge;
+        public String codeChallengeMethod;
     }
 
     /**
