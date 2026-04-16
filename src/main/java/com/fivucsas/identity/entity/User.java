@@ -191,6 +191,15 @@ public class User {
     @Column(nullable = false)
     private Instant updatedAt;
 
+    /**
+     * Soft-delete timestamp for GDPR Art. 17 / KVKK compliance.
+     * When non-null, the user is considered deleted and subject to the
+     * 30-day retention window before permanent purge (see SoftDeletePurgeJob).
+     * Backed by the pre-existing {@code deleted_at} column from V2 migration.
+     */
+    @Column(name = "deleted_at")
+    private Instant deletedAt;
+
     // ========== RBAC Relationships ==========
 
     @OneToMany(mappedBy = "user", fetch = FetchType.LAZY, cascade = CascadeType.ALL, orphanRemoval = true)
@@ -452,6 +461,25 @@ public class User {
     public void suspend() {
         this.status = UserStatus.SUSPENDED;
         this.isActive = false;
+    }
+
+    /**
+     * Soft-deletes the user account.
+     * Sets {@code deletedAt} to now and deactivates the account.
+     * Permanent purge occurs after the 30-day retention window via
+     * {@code SoftDeletePurgeJob} (GDPR Art. 17 / KVKK compliance).
+     */
+    public void softDelete() {
+        this.deletedAt = Instant.now();
+        this.status = UserStatus.INACTIVE;
+        this.isActive = false;
+    }
+
+    /**
+     * Checks if the user has been soft-deleted.
+     */
+    public boolean isSoftDeleted() {
+        return this.deletedAt != null;
     }
 
     /**

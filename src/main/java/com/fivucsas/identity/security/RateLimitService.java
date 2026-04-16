@@ -48,6 +48,7 @@ public class RateLimitService {
     private final ConcurrentHashMap<String, TimedBucket> passwordResetBuckets = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, TimedBucket> biometricBuckets = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, TimedBucket> apiBuckets = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, TimedBucket> exportBuckets = new ConcurrentHashMap<>();
 
     /**
      * Checks if a login attempt is allowed for the given identifier (usually IP address).
@@ -135,6 +136,25 @@ public class RateLimitService {
     }
 
     /**
+     * Checks if a GDPR data-export request is allowed for the given user.
+     * Exports are expensive (cross-table aggregation) and should be rare — 1 per hour
+     * per user matches the GDPR Art. 12 §5 "reasonable-effort" threshold for repeat requests.
+     *
+     * @param userId user identifier (not IP — export is per-user, not per-IP)
+     * @return true if export is allowed, false if rate limit exceeded
+     */
+    public boolean allowDataExport(String userId) {
+        Bucket bucket = getOrCreateBucket(exportBuckets, userId, this::createExportBucket, Duration.ofHours(1));
+        boolean allowed = bucket.tryConsume(1);
+
+        if (!allowed) {
+            log.warn("Rate limit exceeded for GDPR data export from user: {}", userId);
+        }
+
+        return allowed;
+    }
+
+    /**
      * Gets remaining time until next token is available (in seconds).
      *
      * @param identifier unique identifier
@@ -177,6 +197,7 @@ public class RateLimitService {
         cleaned += evictExpired(passwordResetBuckets, now, Duration.ofHours(1).toMillis());
         cleaned += evictExpired(biometricBuckets, now, Duration.ofMinutes(1).toMillis());
         cleaned += evictExpired(apiBuckets, now, Duration.ofMinutes(1).toMillis());
+        cleaned += evictExpired(exportBuckets, now, Duration.ofHours(1).toMillis());
         if (cleaned > 0) {
             log.debug("Evicted {} expired rate limit bucket entries", cleaned);
         }
@@ -254,6 +275,14 @@ public class RateLimitService {
             .build();
     }
 
+    private Bucket createExportBucket() {
+        // 1 GDPR data-export per hour (Art. 12 §5 reasonable-effort threshold)
+        Bandwidth limit = Bandwidth.classic(1, Refill.intervally(1, Duration.ofHours(1)));
+        return Bucket.builder()
+            .addLimit(limit)
+            .build();
+    }
+
     private ConcurrentHashMap<String, TimedBucket> getBucketMap(RateLimitType bucketType) {
         return switch (bucketType) {
             case LOGIN -> loginBuckets;
@@ -261,6 +290,7 @@ public class RateLimitService {
             case PASSWORD_RESET -> passwordResetBuckets;
             case BIOMETRIC -> biometricBuckets;
             case API -> apiBuckets;
+            case EXPORT -> exportBuckets;
         };
     }
 
@@ -277,6 +307,7 @@ public class RateLimitService {
         REGISTRATION,
         PASSWORD_RESET,
         BIOMETRIC,
-        API
+        API,
+        EXPORT
     }
 }
