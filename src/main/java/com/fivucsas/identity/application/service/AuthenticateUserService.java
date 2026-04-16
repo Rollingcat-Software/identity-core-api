@@ -169,8 +169,10 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
                         user.getId(), remainingSteps.size(), nextStep.getStepType(), availableMethods.size(), command.getIpAddress());
 
                     // Return MFA pending response — NO accessToken, NO refreshToken
+                    // Echo completed methods so the widget can hide reused factors without extra round-trips
                     return AuthenticationResponse.ofMfaPending(
-                        sessionToken, flow.getStepCount(), 2, primaryMethod, availableMethods, userResponse
+                        sessionToken, flow.getStepCount(), 2, primaryMethod, availableMethods, userResponse,
+                        List.of("PASSWORD")
                     );
                 }
             }
