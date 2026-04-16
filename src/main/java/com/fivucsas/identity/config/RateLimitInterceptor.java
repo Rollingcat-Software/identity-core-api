@@ -46,6 +46,9 @@ public class RateLimitInterceptor implements HandlerInterceptor {
                     clientIp,
                     RateLimitService.RateLimitType.LOGIN
                 );
+                // RFC 6585 §4: 429 responses SHOULD carry Retry-After so clients can
+                // back off deterministically instead of tight-looping.
+                response.setHeader("Retry-After", String.valueOf(retryAfter));
                 throw new RateLimitExceededException(
                     "Too many login attempts. Please try again later.",
                     retryAfter
@@ -57,6 +60,7 @@ public class RateLimitInterceptor implements HandlerInterceptor {
                     clientIp,
                     RateLimitService.RateLimitType.REGISTRATION
                 );
+                response.setHeader("Retry-After", String.valueOf(retryAfter));
                 throw new RateLimitExceededException(
                     "Too many registration attempts. Please try again later.",
                     retryAfter
