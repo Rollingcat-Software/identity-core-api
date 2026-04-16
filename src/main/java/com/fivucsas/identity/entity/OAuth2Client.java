@@ -94,11 +94,19 @@ public class OAuth2Client {
     /**
      * Checks if the given redirect URI is allowed for this client.
      *
-     * Matching rules:
-     * 1. HTTPS and custom-scheme URIs (e.g. "com.acme://auth") — exact string match.
-     * 2. Loopback URIs per RFC 8252 §7.3 — a registered "http://127.0.0.1/cb" (or
-     *    "http://localhost/cb") matches any port supplied by a native app, because
-     *    ephemeral ports are chosen at runtime. Path + scheme + host must still match.
+     * <p>Matching rules:
+     * <ol>
+     *   <li>HTTPS and custom-scheme URIs (e.g. {@code com.acme://auth}) — exact
+     *       string match.</li>
+     *   <li>Loopback URIs per RFC 8252 §7.3 — a registered
+     *       {@code http://127.0.0.1/cb} matches any port supplied by a native app
+     *       because ephemeral ports are chosen at runtime. Scheme + host + path
+     *       must match. Query string is ignored during matching (the attacker
+     *       MUST NOT be able to smuggle arbitrary query params past registration).
+     *       Only the IP literal 127.0.0.1 (or [::1]) is accepted; the hostname
+     *       "localhost" is explicitly rejected because it resolves differently on
+     *       different platforms and can be hijacked by DNS.</li>
+     * </ol>
      */
     public boolean isRedirectUriAllowed(String uri) {
         if (redirectUris == null || uri == null) return false;
@@ -107,14 +115,22 @@ public class OAuth2Client {
         return matchesLoopbackRegistration(uri);
     }
 
+    private static boolean isLoopbackHost(String host) {
+        // RFC 8252 §7.3: loopback redirect URIs use IP literals only.
+        // "localhost" is intentionally rejected — it is a DNS name that may
+        // resolve to an external address in hostile network environments.
+        return "127.0.0.1".equals(host) || "[::1]".equals(host) || "::1".equals(host);
+    }
+
     private boolean matchesLoopbackRegistration(String uri) {
         try {
             URI incoming = new URI(uri);
             if (!"http".equalsIgnoreCase(incoming.getScheme())) return false;
             String incomingHost = incoming.getHost();
-            if (!"127.0.0.1".equals(incomingHost) && !"localhost".equals(incomingHost)) return false;
+            if (!isLoopbackHost(incomingHost)) return false;
             String incomingPath = incoming.getPath() == null ? "" : incoming.getPath();
 
+            String incomingQuery = incoming.getQuery();
             for (String candidate : splitRegisteredRedirectUris()) {
                 URI reg;
                 try {
@@ -124,9 +140,17 @@ public class OAuth2Client {
                 }
                 if (!"http".equalsIgnoreCase(reg.getScheme())) continue;
                 String regHost = reg.getHost();
+                if (!isLoopbackHost(regHost)) continue;
                 if (!incomingHost.equals(regHost)) continue;
                 String regPath = reg.getPath() == null ? "" : reg.getPath();
-                if (incomingPath.equals(regPath)) return true;
+                if (!incomingPath.equals(regPath)) continue;
+                // Query-string safety: if registration has no query, reject any
+                // incoming query (prevents ?attacker_param=x smuggling). If
+                // registration has a query, it must match the incoming one byte-
+                // for-byte. Port is intentionally not compared — RFC 8252 §7.3
+                // explicitly permits ephemeral-port selection on loopback.
+                String regQuery = reg.getQuery();
+                if (java.util.Objects.equals(regQuery, incomingQuery)) return true;
             }
         } catch (URISyntaxException ignored) {
         }

@@ -70,4 +70,65 @@ class OAuth2ClientTest {
             assertFalse(client.isRedirectUriAllowed("https://app.example.com/cb"));
         }
     }
+
+    @Nested
+    @DisplayName("isRedirectUriAllowed — loopback redirect matching (RFC 8252 §7.3)")
+    class LoopbackMatch {
+
+        @Test
+        @DisplayName("registered http://127.0.0.1/cb matches incoming with any ephemeral port")
+        void loopbackPortIsIgnored() {
+            OAuth2Client client = withRedirects("[\"http://127.0.0.1/cb\"]");
+            assertTrue(client.isRedirectUriAllowed("http://127.0.0.1:54123/cb"));
+            assertTrue(client.isRedirectUriAllowed("http://127.0.0.1:65535/cb"));
+        }
+
+        @Test
+        @DisplayName("attacker cannot smuggle query params past registration without query")
+        void queryStringAttackIsBlocked() {
+            // Task requirement: registration "http://127.0.0.1/cb" MUST NOT match
+            // "http://127.0.0.1:3000/cb?attacker_param=x" — the incoming URI adds
+            // a query string not present in the registration.
+            OAuth2Client client = withRedirects("[\"http://127.0.0.1/cb\"]");
+            assertFalse(client.isRedirectUriAllowed("http://127.0.0.1:3000/cb?attacker_param=x"),
+                    "Extra query params must not widen the loopback allowlist");
+        }
+
+        @Test
+        @DisplayName("registration with explicit query must match incoming query exactly")
+        void registrationWithQueryMustMatch() {
+            OAuth2Client client = withRedirects("[\"http://127.0.0.1/cb?app=cli\"]");
+            assertTrue(client.isRedirectUriAllowed("http://127.0.0.1:3000/cb?app=cli"));
+            assertFalse(client.isRedirectUriAllowed("http://127.0.0.1:3000/cb?app=evil"));
+            assertFalse(client.isRedirectUriAllowed("http://127.0.0.1:3000/cb"));
+        }
+
+        @Test
+        @DisplayName("localhost hostname is rejected — IP literal only")
+        void localhostIsRejected() {
+            // RFC 8252 §7.3 recommends IP literal (127.0.0.1) because "localhost"
+            // is a DNS name that can be hijacked. Dropping the localhost branch
+            // closes that bypass.
+            OAuth2Client client = withRedirects("[\"http://localhost/cb\"]");
+            assertFalse(client.isRedirectUriAllowed("http://localhost:3000/cb"),
+                    "localhost must not match — only 127.0.0.1 is allowed for loopback");
+            assertFalse(client.isRedirectUriAllowed("http://127.0.0.1:3000/cb"),
+                    "A registration using localhost must not match a 127.0.0.1 incoming URI either");
+        }
+
+        @Test
+        @DisplayName("IPv6 loopback [::1] is accepted as an IP literal")
+        void ipv6LoopbackAccepted() {
+            OAuth2Client client = withRedirects("[\"http://[::1]/cb\"]");
+            assertTrue(client.isRedirectUriAllowed("http://[::1]:4000/cb"));
+        }
+
+        @Test
+        @DisplayName("non-loopback IP does not hit loopback branch")
+        void nonLoopbackIpIsRejected() {
+            OAuth2Client client = withRedirects("[\"http://127.0.0.1/cb\"]");
+            assertFalse(client.isRedirectUriAllowed("http://192.168.1.1:3000/cb"));
+            assertFalse(client.isRedirectUriAllowed("http://10.0.0.1/cb"));
+        }
+    }
 }
