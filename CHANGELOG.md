@@ -1,5 +1,61 @@
 # Changelog - Identity Core API
 
+## [2026-04-16b] — GDPR Art. 17 + Art. 20 compliance (data export + soft-delete purge)
+
+Closes the P0 compliance gap flagged in the 2026-04-16 audit. No Flyway migration
+required — the `users.deleted_at` column already exists from V2; this change only
+maps it onto the `User` entity and adds the job + endpoints that consume it.
+
+### Added
+- **`GET /api/v1/users/{id}/export`** — GDPR Art. 20 portability. Returns a JSON
+  bundle (`Content-Disposition: attachment`) containing user profile, enrollments,
+  auth-flows, user-scoped audit logs (capped at 10 000 entries),
+  verification sessions, OAuth2 clients (tenant admins only), and biometric
+  enrollment metadata. **Excludes** password hashes, MFA secrets, session tokens,
+  and raw biometric embeddings — embeddings live in the separate `biometric_db`
+  and are never returned to clients (matches Auth0 / Okta precedent).
+  (`UserDataExportController.java`, `UserDataExportService.java`,
+  `UserDataExportUseCase.java`)
+- **Rate limit** on data export — 1 request per hour per user via
+  `RateLimitService.allowDataExport(userId)`, returns `429` with `Retry-After`
+  header (RFC 6585). Checked **before** authorization to avoid ID enumeration
+  via 403-vs-429 timing.
+- **`USER_DATA_EXPORTED` audit event** emitted on every successful export with
+  caller ID, IP, and target user ID.
+- **`SoftDeletePurgeJob`** — GDPR Art. 17 / KVKK right-to-erasure. Daily
+  `@Scheduled(cron = "0 30 3 * * *")` permanently purges users with
+  `deleted_at < NOW() - 30 days`. Batched (100/tx) with
+  `REQUIRES_NEW` propagation so a single bad row doesn't poison the run.
+  Emits `USER_HARD_PURGED` per deletion. `audit_logs.user_id` is set to `NULL`
+  via the V5 FK (history survives purge for SOC2 / ISO 27001 / KVKK 7-year
+  retention).
+- **Feature flag** `app.purge.softDelete.enabled` (default **false**). Flip per
+  environment only after validating via dry-run.
+- **`DELETE /api/v1/admin/purge/dry-run`** — super-admin endpoint returning
+  cutoff timestamp, candidate count, and candidate IDs without mutating rows.
+  Works regardless of the feature flag. Guarded by `@rbac.isSuperAdmin()`.
+  (`PurgeAdminController.java`)
+- **`RbacAuthorizationService.isSuperAdmin()`** — named alias for `isRoot()` so
+  `@PreAuthorize` expressions read correctly at call sites.
+- **`User.softDelete()` + `User.isSoftDeleted()`** — explicit soft-delete
+  behavior on the entity; sets `deletedAt`, flips `status` to `INACTIVE`,
+  clears `isActive`.
+- **`UserRepository.findPurgeCandidates(cutoff, pageable)`** — JPQL query
+  scoped to `deletedAt IS NOT NULL AND deletedAt < :cutoff`.
+- **14 unit tests** covering export (self-access, tenant-admin delegation,
+  cross-user denial, not-found, sensitive-field exclusion, unauthenticated,
+  rate-limit) and purge (feature flag off/on, short-batch termination,
+  audit emission, dry-run without mutation).
+
+### Safety notes (operators)
+- Purge job is **off by default**. Run dry-run in each environment and verify
+  `candidateCount` / `candidateIds` match expectations **before** setting
+  `APP_PURGE_SOFT_DELETE_ENABLED=true`.
+- Purge is irreversible. The 30-day window starts from `deleted_at`, not from
+  account creation.
+- Audit-log history persists per regulatory retention — do not rely on purge
+  to remove user references from audit trails.
+
 ## [2026-04-16] — PR-1 Hosted-first V1 + PR-1 review blockers
 
 ### Added
