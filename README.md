@@ -1,20 +1,20 @@
 # Identity Core API
 
-![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)
 ![Java](https://img.shields.io/badge/Java-21-orange.svg)
-![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.2+-green.svg)
-![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-blue.svg)
+![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.4.7-green.svg)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-17%20%2B%20pgvector-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 
 ## Overview
 
-**Identity Core API** is the central authentication and identity management microservice of the **FIVUCSAS** (Face and
-Identity Verification Using Cloud-based SaaS) platform. Built with Spring Boot following Hexagonal Architecture
-principles, this service acts as the system's brain, managing user authentication, authorization, multi-tenancy, and
-security policies for both physical and digital access control.
+Identity Core API is the authentication and identity management microservice for the **FIVUCSAS** biometric identity platform. Built with Spring Boot 3.4.7 on Java 21, it follows Hexagonal Architecture (ports & adapters) and provides:
 
-This microservice is part of a larger biometric authentication ecosystem developed as an Engineering Project at Marmara
-University's Computer Engineering Department.
+- Ten composable authentication methods (password, email/SMS OTP, TOTP, QR code, face, voice, fingerprint, hardware key, NFC document) orchestrated through tenant-configured MFA flows
+- A production-grade OAuth 2.0 / OIDC authorization server with hosted-first redirective login (`display=page` content negotiation), PKCE S256, JWKS, discovery, OIDC nonce validation, and RFC 8252-compliant loopback + custom-scheme redirect URIs
+- Multi-tenant data isolation, RBAC, JWT access + refresh tokens, and rate-limited endpoints backed by Redis
+- GDPR Art. 17 / Art. 20 compliance (user data export + flag-gated soft-delete purge with 30-day retention)
+
+Engineering Project at **Marmara University's Computer Engineering Department** — CSE4297 / CSE4197.
 
 ## Table of Contents
 
