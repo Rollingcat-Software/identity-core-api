@@ -172,11 +172,13 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
                     log.info("AUDIT: MFA required — userId={}, remainingSteps={}, nextStepType={}, availableMethods={}, ip={}",
                         user.getId(), remainingSteps.size(), nextStep.getStepType(), availableMethods.size(), command.getIpAddress());
 
-                    // Return MFA pending response — NO accessToken, NO refreshToken
-                    // Echo completed methods so the widget can hide reused factors without extra round-trips
+                    // Return MFA pending response — NO accessToken, NO refreshToken.
+                    // Echo completed methods sourced from the MfaSession so the response
+                    // always reflects stored state (if the session ever records multiple
+                    // methods at create-time in the future, the response stays in sync).
                     return AuthenticationResponse.ofMfaPending(
                         sessionToken, flow.getStepCount(), 2, primaryMethod, availableMethods, userResponse,
-                        List.of("PASSWORD")
+                        mfaSession.getCompletedMethods()
                     );
                 }
             }
