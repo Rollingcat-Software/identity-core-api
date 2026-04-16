@@ -124,17 +124,17 @@ public class SecurityConfig {
                                 "/api/v1/guests/accept"
                         ).permitAll()
 
-                        // Development/Documentation endpoints - restricted by profile and expose-docs flag
+                        // H2 console - restricted by profile and expose-docs flag (NEVER public)
                         .requestMatchers("/h2-console/**").access((authentication, context) ->
                                 new org.springframework.security.authorization.AuthorizationDecision(exposeDocs && !isProductionProfile()))
+                        // Swagger UI / OpenAPI specs - public (industry standard for API docs)
                         .requestMatchers(
                                 "/swagger-ui/**",
                                 "/swagger-ui.html",
                                 "/v3/api-docs/**",
                                 "/api-docs/**",
                                 "/api-docs"
-                        ).access((authentication, context) ->
-                                new org.springframework.security.authorization.AuthorizationDecision(exposeDocs && !isProductionProfile()))
+                        ).permitAll()
                         // Biometric health proxy: public so monitoring tools can reach it
                         .requestMatchers(HttpMethod.GET, "/api/v1/biometric/health").permitAll()
 
