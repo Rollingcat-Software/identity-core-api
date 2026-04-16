@@ -1,5 +1,38 @@
 # Changelog - Identity Core API
 
+## [2026-04-16c] — Filtered public Swagger UI
+
+### Added
+- **Swagger UI at `/swagger-ui.html`** — public developer docs exposed
+  unconditionally so third-party integrators (tenants using the hosted-login
+  or OAuth2 flows) can explore the API. Matches the GitHub/Twilio/Stripe
+  pattern where documentation is a first-class public surface.
+
+### Changed
+- **`SecurityConfig.java`** — swagger/openapi paths changed from
+  `exposeDocs && !isProductionProfile()` gate to unconditional `.permitAll()`.
+  H2 console stays gated (never public).
+- **`application-prod.yml`** — enabled `springdoc.api-docs` + `swagger-ui`
+  in prod profile (previously `enabled: false`). Added `paths-to-exclude` to
+  hide admin surfaces:
+  - `/api/v1/admin/**`, `/api/v1/tenants/**`, `/api/v1/users/**`,
+    `/api/v1/roles/**`, `/api/v1/audit-logs/**`,
+    `/api/v1/oauth2/clients/**`, `/actuator/**`
+- **`SecurityHeadersConfig.java`** — emit a dedicated CSP for swagger paths
+  (`default-src 'self'` + inline styles/scripts + `data:` fonts) so the UI
+  renders. Non-swagger responses keep `default-src 'none'; frame-ancestors 'none'`.
+
+### Security notes
+- Only public developer endpoints visible: `/api/v1/auth/**`, `/api/v1/oauth2/**`
+  (flows, not admin), `/.well-known/**`, `/api/v1/verification/**`,
+  `/api/v1/biometric/**`, `/api/v1/nfc/**`, `/api/v1/otp/**`, `/api/v1/qr/**`,
+  `/api/v1/step-up/**`, `/api/v1/webauthn/**`, `/api/v1/devices/**`,
+  `/api/v1/enrollments/**`, `/api/v1/auth-methods/**`, `/api/v1/me`.
+- 114 paths exposed, 0 admin endpoints leaked (verified via
+  `curl https://api.fivucsas.com/api-docs | jq '.paths | keys'`).
+- Authentication enforcement is unchanged — Swagger only documents the
+  contract; it does not bypass per-endpoint auth/rbac.
+
 ## [2026-04-16b] — GDPR Art. 17 + Art. 20 compliance (data export + soft-delete purge)
 
 Closes the P0 compliance gap flagged in the 2026-04-16 audit. No Flyway migration
