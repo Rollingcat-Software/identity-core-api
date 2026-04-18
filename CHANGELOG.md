@@ -1,5 +1,44 @@
 # Changelog - Identity Core API
 
+## [2026-04-18b] — Test-source drift repair (38 red → 0; 838/838 pass)
+
+### Fixed
+Ubuntu-latest CI surfaced 38 failing tests today that the broken self-hosted
+runner had been silently skipping for weeks. Root cause: tests lagged behind
+25+ legit source changes (constructor growth, RFC-8176 `amr` claim, Redis+DB
+TOTP durability, NFC repository lookup, hosted-login controller bulk-up).
+No real product bugs uncovered; no tests weakened, no `@Disabled` shortcuts.
+
+Test files realigned:
+- `controller/AuthControllerTest` — `UserRepository` JPA→domain-port import;
+  +13 `@MockBean`s for the controller's grown 25-dependency constructor
+  (`EnrollmentHealthService`, `NfcCardRepositoryPort`, `QrCodeService`,
+  `WebAuthnCredentialRepositoryPort`, `AuditLogPort`, `AuthFlowRepositoryPort`,
+  `TotpService`, `BiometricServicePort`, `WebAuthnService`,
+  `MfaSessionRepository`, `TokenGenerationPort`, `RefreshTokenService`,
+  `UserEnrollmentRepository`). Corrected register status 201, logout 204.
+- `controller/EnrollmentControllerTest` — `+@MockBean EnrollmentHealthService`.
+- `controller/OtpControllerTest` — `UserRepository` JPA→domain-port import.
+- `controller/TotpControllerTest` — same import fix; stubbed new DB-persist
+  path in `shouldVerifySetup`.
+- `controller/UserEnrollmentFlowControllerTest` — rewrote `VerifyLiveness`
+  test to match current local frame validation (controller no longer calls
+  `biometricService.verifyLivenessPuzzle`).
+- `application/service/AuthenticateUserServiceTest` — +4 mocks; switched
+  stubs to 2-arg `generateAccessToken(email, amr)` form (RFC 8176).
+- `application/service/GetCurrentUserServiceTest` — `+TenantRepository` mock.
+- `application/service/ManageEnrollmentServiceTest` — +`NfcCardRepositoryPort`
+  + `WebAuthnCredentialRepositoryPort` mocks; re-enroll test switched to
+  PASSWORD (TOTP is not in `AUTO_COMPLETE_TYPES`).
+- `application/service/handler/NfcDocumentAuthHandlerTest` —
+  `+NfcCardRepositoryPort` mock; assertions aligned with real source strings
+  (old "not yet available" / "NFC hardware" stubs replaced).
+- `application/service/handler/TotpAuthHandlerTest` — `+UserRepository` mock
+  for new Redis-miss→DB fallback in `resolveTotpSecret`.
+
+Result: `mvn test` → `Tests run: 838, Failures: 0, Errors: 0, Skipped: 27`
+(27 skips are Testcontainers integration tests gated on `RUN_INTEGRATION=true`).
+
 ## [2026-04-18] — V37 index reaffirmation + V38 SPA public client fix + CI split
 
 ### Changed
