@@ -1,5 +1,17 @@
 # Changelog - Identity Core API
 
+## [2026-04-18] — V37 index reaffirmation on oauth2_clients.tenant_id
+
+### Added
+- **Flyway V37** (`V37__oauth2_clients_tenant_id_index.sql`) — idempotent
+  `CREATE INDEX IF NOT EXISTS idx_oauth2_clients_tenant_id ON oauth2_clients(tenant_id)`.
+  Addresses the sequential-scan finding from the 2026-04-16 five-agent audit on
+  the `/api/v1/oauth2/authorize` hot path, where `client_id -> tenant_id`
+  resolution was the critical lookup.
+- Note: V24 already declares the same index; V37 is a safety net for
+  environments where the V24 build never succeeded or was dropped manually.
+  Running V37 on a healthy DB is a no-op (no table lock, no rewrite).
+
 ## [2026-04-16c] — Filtered public Swagger UI
 
 ### Added
