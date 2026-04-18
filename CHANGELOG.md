@@ -1,6 +1,6 @@
 # Changelog - Identity Core API
 
-## [2026-04-18] — V37 index reaffirmation on oauth2_clients.tenant_id
+## [2026-04-18] — V37 index reaffirmation + V38 SPA public client fix
 
 ### Added
 - **Flyway V37** (`V37__oauth2_clients_tenant_id_index.sql`) — idempotent
@@ -11,6 +11,16 @@
 - Note: V24 already declares the same index; V37 is a safety net for
   environments where the V24 build never succeeded or was dropped manually.
   Running V37 on a healthy DB is a no-op (no table lock, no rewrite).
+- **Flyway V38** (`V38__oauth2_web_dashboard_public.sql`) — flips
+  `fivucsas-web-dashboard` to `confidential = false`. The web dashboard is a
+  React SPA at `app.fivucsas.com` running in browser context and therefore
+  cannot hold a client secret (RFC 6749 §2.1, RFC 8252 §8.4). V24 seeded it as
+  `confidential = true` with a bcrypt-hashed secret; `OAuth2Service.exchangeCode`
+  already accepts PKCE S256 in lieu of secret on the token endpoint so
+  end-to-end auth continued to work, but the flag was incorrect. PKCE S256 is
+  already mandatory for this client — no new verifier enforcement needed, only
+  the metadata flag is being corrected. No code or entity changes required
+  (`confidential` already exists on `OAuth2Client.java` from V34).
 
 ## [2026-04-16c] — Filtered public Swagger UI
 
