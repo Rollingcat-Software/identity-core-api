@@ -37,7 +37,7 @@ jobs:
       - name: Run unit tests
         env:
           MAVEN_OPTS: -Xmx2g
-        run: mvn -B -ntp test
+        run: mvn -B -ntp -T 2C test
 
       - name: Upload surefire reports on failure
         if: failure()
