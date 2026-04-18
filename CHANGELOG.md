@@ -26,6 +26,11 @@
   JUnit Jupiter skips the entire class — no container startup attempt, no
   flake. Pure unit tests (e.g. `OAuth2ClientTest` under `entity/`) are
   unaffected and continue to run on both runners.
+- **Maven parallelism** — `mvn -B -ntp -T 2C test` (2 threads per CPU core)
+  on the unit-test job. Roughly halves wall-clock on the ubuntu-latest
+  runner for a 633-test suite without affecting correctness since Surefire
+  per-module parallelism is safe for our pure unit tests. Phase E3 from the
+  2026-04-18 roadmap.
 
 ### Added
 - **Flyway V37** (`V37__oauth2_clients_tenant_id_index.sql`) — idempotent
