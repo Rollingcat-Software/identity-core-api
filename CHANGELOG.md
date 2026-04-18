@@ -1,5 +1,24 @@
 # Changelog - Identity Core API
 
+## [2026-04-18c] — OIDC ui_locales pass-through on hosted-login authorize
+
+### Added
+- **`OAuth2Controller.authorize` accepts `ui_locales`** — OIDC Core §3.1.2.1
+  optional parameter is now parsed on `GET /oauth2/authorize` and, when
+  `display=page`, forwarded via `buildHostedLoginUri` as a query param on the
+  `302 Location` pointing at `verify.fivucsas.com/login`. Tenants calling
+  `FivucsasAuth.loginRedirect({ locale: 'tr' })` now land on a Turkish hosted
+  login page instead of the browser-auto-detected default. Space-separated
+  BCP47 tag lists are passed through unmodified; the hosted page honours the
+  first supported tag (currently `tr`, `en`).
+- **`OAuth2ControllerTest.authorize_WhenDisplayPageWithUiLocales_ShouldForwardLocale`**
+  — MockMvc assertion that `Location` header contains `ui_locales=tr` when the
+  authorize request supplies it alongside `display=page`.
+
+### Tests
+- `mvn test`: 839 / 839 passing (was 838; +1 new locale-forwarding assertion).
+  27 skips remain (integration tests gated on `RUN_INTEGRATION=true`).
+
 ## [2026-04-18b] — Test-source drift repair (38 red → 0; 838/838 pass)
 
 ### Fixed

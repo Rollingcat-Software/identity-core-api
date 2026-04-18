@@ -82,6 +82,8 @@ public class OAuth2Controller {
             @RequestParam(value = "code_challenge_method", required = false, defaultValue = "S256") String codeChallengeMethod,
             @Parameter(description = "OIDC display hint — set to 'page' for a hosted redirective login, otherwise the JSON widget flow runs")
             @RequestParam(value = "display", required = false) String display,
+            @Parameter(description = "OIDC ui_locales — preferred UI language(s), space-separated BCP47 tags (e.g. 'tr' or 'en-US tr')")
+            @RequestParam(value = "ui_locales", required = false) String uiLocales,
             Authentication authentication,
             HttpServletRequest httpRequest) {
 
@@ -114,7 +116,7 @@ public class OAuth2Controller {
             // could accidentally redirect XHR callers that happened to pass text/html.
             if ("page".equalsIgnoreCase(display)) {
                 URI location = buildHostedLoginUri(clientId, redirectUri, scope, state, nonce,
-                        codeChallenge, codeChallengeMethod);
+                        codeChallenge, codeChallengeMethod, uiLocales);
                 return ResponseEntity.status(HttpStatus.FOUND)
                         .header(HttpHeaders.LOCATION, location.toString())
                         .header(HttpHeaders.CACHE_CONTROL, "no-store")
@@ -298,7 +300,8 @@ public class OAuth2Controller {
     }
 
     private URI buildHostedLoginUri(String clientId, String redirectUri, String scope, String state,
-                                    String nonce, String codeChallenge, String codeChallengeMethod) {
+                                    String nonce, String codeChallenge, String codeChallengeMethod,
+                                    String uiLocales) {
         UriComponentsBuilder builder = UriComponentsBuilder.fromUriString(hostedLoginUrl)
                 .queryParam("client_id", clientId)
                 .queryParam("redirect_uri", redirectUri)
@@ -308,6 +311,12 @@ public class OAuth2Controller {
         if (nonce != null) builder.queryParam("nonce", nonce);
         if (codeChallenge != null) builder.queryParam("code_challenge", codeChallenge);
         if (codeChallengeMethod != null) builder.queryParam("code_challenge_method", codeChallengeMethod);
+        // OIDC Core §3.1.2.1: forward ui_locales so the hosted login page renders
+        // in the tenant's requested language. The hosted page supports 'en' and
+        // 'tr'; other tags are ignored in favor of browser auto-detect fallback.
+        if (uiLocales != null && !uiLocales.isBlank()) {
+            builder.queryParam("ui_locales", uiLocales);
+        }
         return builder.build().toUri();
     }
 

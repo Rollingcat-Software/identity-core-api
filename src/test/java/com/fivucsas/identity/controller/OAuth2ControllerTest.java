@@ -249,6 +249,24 @@ class OAuth2ControllerTest {
     }
 
     @Test
+    @DisplayName("GET /api/v1/oauth2/authorize - display=page with ui_locales forwards to hosted login")
+    void authorize_WhenDisplayPageWithUiLocales_ShouldForwardLocale() throws Exception {
+        OAuth2Client client = mock(OAuth2Client.class);
+        when(client.getClientName()).thenReturn("Test App");
+        when(oAuth2Service.validateClient("test-client", "https://example.com/cb")).thenReturn(client);
+
+        mockMvc.perform(get("/api/v1/oauth2/authorize")
+                        .param("client_id", "test-client")
+                        .param("redirect_uri", "https://example.com/cb")
+                        .param("response_type", "code")
+                        .param("display", "page")
+                        .param("ui_locales", "tr"))
+                .andExpect(status().isFound())
+                .andExpect(header().string("Location",
+                        org.hamcrest.Matchers.containsString("ui_locales=tr")));
+    }
+
+    @Test
     @DisplayName("GET /api/v1/oauth2/authorize - HTML Accept alone (no display=page) does NOT redirect")
     void authorize_WhenAcceptHtmlWithoutDisplayPage_ShouldReturnJson() throws Exception {
         // The SDK always sets display=page explicitly — the old Accept: text/html
