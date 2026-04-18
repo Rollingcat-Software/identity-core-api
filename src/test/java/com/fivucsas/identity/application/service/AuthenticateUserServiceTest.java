@@ -5,6 +5,7 @@ import com.fivucsas.identity.application.dto.response.AuthenticationResponse;
 import com.fivucsas.identity.application.port.output.AuditLogPort;
 import com.fivucsas.identity.application.port.output.AuthFlowRepositoryPort;
 import com.fivucsas.identity.application.port.output.EventPublisherPort;
+import com.fivucsas.identity.application.port.output.OAuth2ClientRepositoryPort;
 import com.fivucsas.identity.application.port.output.PasswordEncoderPort;
 import com.fivucsas.identity.application.port.output.TokenGenerationPort;
 import com.fivucsas.identity.domain.exception.InvalidCredentialsException;
@@ -12,6 +13,8 @@ import com.fivucsas.identity.domain.repository.UserRepository;
 import com.fivucsas.identity.entity.RefreshToken;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.entity.UserStatus;
+import com.fivucsas.identity.repository.MfaSessionRepository;
+import com.fivucsas.identity.repository.UserEnrollmentRepository;
 import com.fivucsas.identity.service.RefreshTokenService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -25,6 +28,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.time.Instant;
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -61,6 +65,18 @@ class AuthenticateUserServiceTest {
 
     @Mock
     private AuthFlowRepositoryPort authFlowRepository;
+
+    @Mock
+    private OAuth2ClientRepositoryPort oAuth2ClientRepository;
+
+    @Mock
+    private UserEnrollmentRepository userEnrollmentRepository;
+
+    @Mock
+    private MfaSessionRepository mfaSessionRepository;
+
+    @Mock
+    private EnrollmentHealthService enrollmentHealthService;
 
     @InjectMocks
     private AuthenticateUserService authenticateUserService;
@@ -109,7 +125,8 @@ class AuthenticateUserServiceTest {
             // Given
             when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(existingUser));
             when(passwordEncoder.matches("Password123!", VALID_BCRYPT_HASH)).thenReturn(true);
-            when(tokenGenerator.generateAccessToken("test@example.com")).thenReturn("access-token");
+            // Single-factor login path issues JWT with amr=["pwd"] via the two-arg variant.
+            when(tokenGenerator.generateAccessToken("test@example.com", List.of("pwd"))).thenReturn("access-token");
             when(refreshTokenService.createRefreshToken(eq(existingUser), eq("192.168.1.1"), eq("Mozilla/5.0")))
                 .thenReturn(refreshToken);
 
@@ -127,7 +144,7 @@ class AuthenticateUserServiceTest {
 
             verify(userRepository).findByEmail("test@example.com");
             verify(passwordEncoder).matches("Password123!", VALID_BCRYPT_HASH);
-            verify(tokenGenerator).generateAccessToken("test@example.com");
+            verify(tokenGenerator).generateAccessToken("test@example.com", List.of("pwd"));
             verify(refreshTokenService).createRefreshToken(existingUser, "192.168.1.1", "Mozilla/5.0");
         }
 
@@ -153,7 +170,8 @@ class AuthenticateUserServiceTest {
 
             when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(userWithFullDetails));
             when(passwordEncoder.matches("Password123!", VALID_BCRYPT_HASH)).thenReturn(true);
-            when(tokenGenerator.generateAccessToken("test@example.com")).thenReturn("access-token");
+            // Single-factor login path issues JWT with amr=["pwd"] via the two-arg variant.
+            when(tokenGenerator.generateAccessToken("test@example.com", List.of("pwd"))).thenReturn("access-token");
             when(refreshTokenService.createRefreshToken(any(), any(), any())).thenReturn(refreshToken);
 
             // When
@@ -250,7 +268,8 @@ class AuthenticateUserServiceTest {
 
             when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(existingUser));
             when(passwordEncoder.matches("Password123!", VALID_BCRYPT_HASH)).thenReturn(true);
-            when(tokenGenerator.generateAccessToken("test@example.com")).thenReturn("access-token");
+            // Single-factor login path issues JWT with amr=["pwd"] via the two-arg variant.
+            when(tokenGenerator.generateAccessToken("test@example.com", List.of("pwd"))).thenReturn("access-token");
             when(refreshTokenService.createRefreshToken(eq(existingUser), isNull(), isNull()))
                 .thenReturn(refreshToken);
 
@@ -279,7 +298,8 @@ class AuthenticateUserServiceTest {
 
             when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(inactiveUser));
             when(passwordEncoder.matches("Password123!", VALID_BCRYPT_HASH)).thenReturn(true);
-            when(tokenGenerator.generateAccessToken("test@example.com")).thenReturn("access-token");
+            // Single-factor login path issues JWT with amr=["pwd"] via the two-arg variant.
+            when(tokenGenerator.generateAccessToken("test@example.com", List.of("pwd"))).thenReturn("access-token");
             when(refreshTokenService.createRefreshToken(any(), any(), any())).thenReturn(refreshToken);
 
             // When

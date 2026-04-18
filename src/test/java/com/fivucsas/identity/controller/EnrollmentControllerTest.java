@@ -6,6 +6,7 @@ import com.fivucsas.identity.application.port.input.ManageEnrollmentUseCase;
 import com.fivucsas.identity.application.port.output.BiometricServicePort;
 import com.fivucsas.identity.application.port.output.CachePort;
 import com.fivucsas.identity.domain.repository.TenantRepository;
+import com.fivucsas.identity.application.service.EnrollmentHealthService;
 import com.fivucsas.identity.application.service.EnrollmentQueryService;
 import com.fivucsas.identity.domain.model.auth.AuthMethodType;
 import com.fivucsas.identity.domain.model.auth.EnrollmentStatus;
@@ -61,6 +62,7 @@ class EnrollmentControllerTest {
     @MockBean private BiometricServicePort biometricService;
     @MockBean private BiometricDataRepository biometricDataRepository;
     @MockBean private RbacAuthorizationService rbacService;
+    @MockBean private EnrollmentHealthService enrollmentHealthService;
 
     // Security and infrastructure beans
     @MockBean private TenantRepository tenantRepository;

@@ -219,13 +219,14 @@ class UserEnrollmentFlowControllerTest {
         @Test
         @DisplayName("Should verify liveness successfully")
         void shouldVerifyLiveness() {
+            // The controller validates liveness locally by counting non-empty frames
+            // whose size exceeds 1KB. (Interactive puzzle verification happens
+            // client-side via biometric-processor's /liveness/verify endpoint.)
             when(rbacService.getCurrentUser()).thenReturn(Optional.of(testUser));
-            Map<String, Object> verifyResult = new LinkedHashMap<>();
-            verifyResult.put("success", true);
-            verifyResult.put("overall_score", 95.0);
-            when(biometricService.verifyLivenessPuzzle(eq("challenge-123"), any())).thenReturn(verifyResult);
 
             MultipartFile frame0 = mock(MultipartFile.class);
+            when(frame0.isEmpty()).thenReturn(false);
+            when(frame0.getSize()).thenReturn(4096L);
 
             ResponseEntity<Map<String, Object>> response = controller.verifyLiveness("challenge-123", frame0, null, null);
 

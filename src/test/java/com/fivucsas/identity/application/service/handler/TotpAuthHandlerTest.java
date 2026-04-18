@@ -1,6 +1,7 @@
 package com.fivucsas.identity.application.service.handler;
 
 import com.fivucsas.identity.domain.model.auth.AuthMethodType;
+import com.fivucsas.identity.domain.repository.UserRepository;
 import com.fivucsas.identity.entity.AuthFlowStep;
 import com.fivucsas.identity.entity.AuthSession;
 import com.fivucsas.identity.entity.User;
@@ -14,6 +15,7 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
 
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -26,6 +28,7 @@ class TotpAuthHandlerTest {
     @Mock private TotpService totpService;
     @Mock private StringRedisTemplate redisTemplate;
     @Mock private ValueOperations<String, String> valueOperations;
+    @Mock private UserRepository userRepository;
     @Mock private AuthSession session;
     @Mock private AuthFlowStep step;
 
@@ -85,6 +88,8 @@ class TotpAuthHandlerTest {
         when(session.getUser()).thenReturn(user);
         when(redisTemplate.opsForValue()).thenReturn(valueOperations);
         when(valueOperations.get("totp:secret:" + userId)).thenReturn(null);
+        // Redis miss → DB fallback; user absent or has no 2FA secret
+        when(userRepository.findById(userId)).thenReturn(Optional.empty());
 
         StepResult result = handler.validate(session, step, Map.of("code", "123456"));
 

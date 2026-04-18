@@ -5,6 +5,7 @@ import com.fivucsas.identity.application.dto.response.UserResponse;
 import com.fivucsas.identity.domain.exception.UserNotFoundException;
 import com.fivucsas.identity.domain.model.user.User;
 import com.fivucsas.identity.domain.model.user.UserStatus;
+import com.fivucsas.identity.domain.repository.TenantRepository;
 import com.fivucsas.identity.domain.repository.UserDomainRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -33,6 +34,9 @@ class GetCurrentUserServiceTest {
 
     @Mock
     private UserDomainRepository userRepository;
+
+    @Mock
+    private TenantRepository tenantRepository;
 
     @InjectMocks
     private GetCurrentUserService getCurrentUserService;

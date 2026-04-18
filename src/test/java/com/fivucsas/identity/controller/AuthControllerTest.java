@@ -10,18 +10,31 @@ import com.fivucsas.identity.application.port.input.GetCurrentUserUseCase;
 import com.fivucsas.identity.application.port.input.LogoutUserUseCase;
 import com.fivucsas.identity.application.port.input.RefreshTokenUseCase;
 import com.fivucsas.identity.application.port.input.RegisterUserUseCase;
+import com.fivucsas.identity.application.port.output.AuditLogPort;
+import com.fivucsas.identity.application.port.output.AuthFlowRepositoryPort;
+import com.fivucsas.identity.application.port.output.BiometricServicePort;
+import com.fivucsas.identity.application.port.output.CachePort;
+import com.fivucsas.identity.application.port.output.NfcCardRepositoryPort;
+import com.fivucsas.identity.application.port.output.TokenGenerationPort;
+import com.fivucsas.identity.application.port.output.WebAuthnCredentialRepositoryPort;
+import com.fivucsas.identity.application.service.EnrollmentHealthService;
 import com.fivucsas.identity.domain.exception.DuplicateEmailException;
 import com.fivucsas.identity.domain.exception.InvalidCredentialsException;
 import com.fivucsas.identity.domain.repository.TenantRepository;
+import com.fivucsas.identity.domain.repository.UserRepository;
 import com.fivucsas.identity.dto.LoginRequest;
 import com.fivucsas.identity.dto.RegisterRequest;
 import com.fivucsas.identity.infrastructure.email.EmailService;
 import com.fivucsas.identity.infrastructure.otp.OtpService;
+import com.fivucsas.identity.infrastructure.qrcode.QrCodeService;
 import com.fivucsas.identity.infrastructure.sms.SmsService;
-import com.fivucsas.identity.repository.UserRepository;
-import com.fivucsas.identity.application.port.output.CachePort;
+import com.fivucsas.identity.infrastructure.totp.TotpService;
+import com.fivucsas.identity.infrastructure.webauthn.WebAuthnService;
+import com.fivucsas.identity.repository.MfaSessionRepository;
+import com.fivucsas.identity.repository.UserEnrollmentRepository;
 import com.fivucsas.identity.security.JwtAuthenticationFilter;
 import com.fivucsas.identity.security.RateLimitService;
+import com.fivucsas.identity.service.RefreshTokenService;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -127,6 +140,47 @@ class AuthControllerTest {
     @MockBean
     private StringRedisTemplate stringRedisTemplate;
 
+    // AuthController dependencies grown since last CI run (ubuntu-latest
+    // surfaced the drift). Keep in sync with AuthController constructor.
+    @MockBean
+    private EnrollmentHealthService enrollmentHealthService;
+
+    @MockBean
+    private NfcCardRepositoryPort nfcCardRepository;
+
+    @MockBean
+    private QrCodeService qrCodeService;
+
+    @MockBean
+    private WebAuthnCredentialRepositoryPort webAuthnCredentialRepository;
+
+    @MockBean
+    private AuditLogPort auditLogPort;
+
+    @MockBean
+    private AuthFlowRepositoryPort authFlowRepository;
+
+    @MockBean
+    private TotpService totpService;
+
+    @MockBean
+    private BiometricServicePort biometricService;
+
+    @MockBean
+    private WebAuthnService webAuthnService;
+
+    @MockBean
+    private MfaSessionRepository mfaSessionRepository;
+
+    @MockBean
+    private TokenGenerationPort tokenGenerator;
+
+    @MockBean
+    private RefreshTokenService refreshTokenService;
+
+    @MockBean
+    private UserEnrollmentRepository userEnrollmentRepository;
+
     // Test Data
     private static final String TEST_EMAIL = "test@fivucsas.com";
     private static final String TEST_PASSWORD = "SecurePassword123!";
@@ -176,13 +230,13 @@ class AuthControllerTest {
         when(registerUserUseCase.execute(any(RegisterUserCommand.class)))
                 .thenReturn(authResponse);
 
-        // Act & Assert - Controller returns 200 OK
+        // Act & Assert - Controller returns 201 Created for new user registration
         mockMvc.perform(post("/api/v1/auth/register")
                         .with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
                 .andDo(print())
-                .andExpect(status().isOk())
+                .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.accessToken").value(TEST_ACCESS_TOKEN))
                 .andExpect(jsonPath("$.refreshToken").value(TEST_REFRESH_TOKEN))
                 .andExpect(jsonPath("$.tokenType").value("Bearer"))
@@ -381,15 +435,15 @@ class AuthControllerTest {
 
         doNothing().when(logoutUserUseCase).execute(any());
 
-        // Act & Assert - Controller returns empty 200 OK
+        // Act & Assert - Controller returns 204 No Content on successful logout.
         // Provide principal directly since addFilters=false prevents
-        // SecurityContextHolderAwareRequestFilter from wrapping the request
+        // SecurityContextHolderAwareRequestFilter from wrapping the request.
         mockMvc.perform(post("/api/v1/auth/logout")
                         .with(csrf())
                         .principal(new UsernamePasswordAuthenticationToken(TEST_EMAIL, null, java.util.Collections.emptyList()))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(requestJson))
-                .andExpect(status().isOk());
+                .andExpect(status().isNoContent());
 
         verify(logoutUserUseCase, times(1)).execute(any());
     }

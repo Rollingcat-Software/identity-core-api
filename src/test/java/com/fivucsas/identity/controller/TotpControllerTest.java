@@ -7,7 +7,7 @@ import com.fivucsas.identity.infrastructure.email.EmailService;
 import com.fivucsas.identity.infrastructure.otp.OtpService;
 import com.fivucsas.identity.infrastructure.sms.SmsService;
 import com.fivucsas.identity.infrastructure.totp.TotpService;
-import com.fivucsas.identity.repository.UserRepository;
+import com.fivucsas.identity.domain.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -103,6 +103,9 @@ class TotpControllerTest {
             when(redisTemplate.opsForValue()).thenReturn(valueOps);
             when(valueOps.get("totp:secret:pending:" + userId)).thenReturn("JBSWY3DPEHPK3PXP");
             when(totpService.verifyCode("JBSWY3DPEHPK3PXP", "123456")).thenReturn(true);
+            // Controller persists secret to DB as source of truth after successful verification.
+            when(userRepository.findById(userId)).thenReturn(Optional.of(testUser));
+            when(userRepository.save(testUser)).thenReturn(testUser);
 
             ResponseEntity<Map<String, Object>> response =
                     totpController.verifyTotpSetup(userId, Map.of("code", "123456"));
@@ -110,6 +113,7 @@ class TotpControllerTest {
             assertThat(response.getBody()).containsEntry("success", true);
             verify(valueOps).set("totp:secret:" + userId, "JBSWY3DPEHPK3PXP");
             verify(redisTemplate).delete("totp:secret:pending:" + userId);
+            verify(userRepository).save(testUser);
         }
 
         @Test

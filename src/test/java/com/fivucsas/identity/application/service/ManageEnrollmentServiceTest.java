@@ -2,7 +2,9 @@ package com.fivucsas.identity.application.service;
 
 import com.fivucsas.identity.application.dto.response.EnrollmentResponse;
 import com.fivucsas.identity.application.port.output.BiometricServicePort;
+import com.fivucsas.identity.application.port.output.NfcCardRepositoryPort;
 import com.fivucsas.identity.application.port.output.UserEnrollmentRepositoryPort;
+import com.fivucsas.identity.application.port.output.WebAuthnCredentialRepositoryPort;
 import com.fivucsas.identity.domain.model.auth.AuthMethodType;
 import com.fivucsas.identity.domain.model.auth.EnrollmentStatus;
 import com.fivucsas.identity.domain.repository.UserRepository;
@@ -33,6 +35,8 @@ class ManageEnrollmentServiceTest {
     @Mock private UserRepository userRepository;
     @Mock private JpaTenantRepository tenantRepository;
     @Mock private BiometricServicePort biometricServicePort;
+    @Mock private NfcCardRepositoryPort nfcCardRepository;
+    @Mock private WebAuthnCredentialRepositoryPort webAuthnCredentialRepository;
 
     @InjectMocks
     private ManageEnrollmentService service;
@@ -86,19 +90,22 @@ class ManageEnrollmentServiceTest {
 
     @Test
     void startEnrollment_WhenExistingEnrollment_ShouldReComplete() {
-        // given
+        // given — PASSWORD is in EnrollmentHealthService.AUTO_COMPLETE_TYPES, so
+        // re-enrolling an existing PASSWORD enrollment should call completeEnrollment("{}").
+        // (TOTP and other async methods call startEnrollment() instead and wait for the
+        // real flow to finish via completeEnrollment() with real data.)
         UserEnrollment existing = mock(UserEnrollment.class);
         when(existing.getId()).thenReturn(UUID.randomUUID());
-        when(existing.getAuthMethodType()).thenReturn(AuthMethodType.TOTP);
+        when(existing.getAuthMethodType()).thenReturn(AuthMethodType.PASSWORD);
         when(existing.getStatus()).thenReturn(EnrollmentStatus.ENROLLED);
         when(existing.getUser()).thenReturn(null);
         when(existing.getTenant()).thenReturn(null);
-        when(userEnrollmentRepository.findByUserIdAndAuthMethodType(userId, AuthMethodType.TOTP))
+        when(userEnrollmentRepository.findByUserIdAndAuthMethodType(userId, AuthMethodType.PASSWORD))
                 .thenReturn(Optional.of(existing));
         when(userEnrollmentRepository.save(existing)).thenReturn(existing);
 
         // when
-        EnrollmentResponse result = service.startEnrollment(userId, tenantId, AuthMethodType.TOTP);
+        EnrollmentResponse result = service.startEnrollment(userId, tenantId, AuthMethodType.PASSWORD);
 
         // then
         assertThat(result).isNotNull();
