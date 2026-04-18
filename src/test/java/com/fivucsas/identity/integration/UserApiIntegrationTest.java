@@ -7,6 +7,7 @@ import com.fivucsas.identity.repository.RefreshTokenRepository;
 import com.fivucsas.identity.repository.UserRepository;
 import com.fivucsas.identity.service.RefreshTokenService;
 import org.junit.jupiter.api.*;
+import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -46,6 +47,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @AutoConfigureMockMvc
 @Testcontainers
+@EnabledIfEnvironmentVariable(named = "RUN_INTEGRATION", matches = "true")
 @ActiveProfiles("integration")
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 @DisplayName("User API Integration Tests (PostgreSQL via Testcontainers)")

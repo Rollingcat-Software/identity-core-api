@@ -14,6 +14,7 @@ import com.fivucsas.identity.entity.RefreshToken;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.service.RefreshTokenService;
 import org.junit.jupiter.api.*;
+import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
@@ -44,6 +45,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 @SpringBootTest
 @Testcontainers
+@EnabledIfEnvironmentVariable(named = "RUN_INTEGRATION", matches = "true")
 @ActiveProfiles("integration")
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 @DisplayName("Authentication Flow Integration Tests (PostgreSQL via Testcontainers)")

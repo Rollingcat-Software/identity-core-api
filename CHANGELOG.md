@@ -1,6 +1,31 @@
 # Changelog - Identity Core API
 
-## [2026-04-18] — V37 index reaffirmation + V38 SPA public client fix
+## [2026-04-18] — V37 index reaffirmation + V38 SPA public client fix + CI split
+
+### Changed
+- **CI workflow (`.github/workflows/ci.yml`)** — split into two jobs:
+  1. `test` (unit) on `runs-on: ubuntu-latest` runs `mvn -B -ntp test` against
+     pure unit tests — no Docker, no Testcontainers. Fast, reliable on
+     GitHub-hosted runners.
+  2. `integration-tests` on `runs-on: [self-hosted, linux, x64]`
+     (`hetzner-cx43`) runs `mvn -B -ntp -Dtest='*IntegrationTest' verify` with
+     `RUN_INTEGRATION=true` so Testcontainers can reach the real Docker
+     daemon. Depends on `test` via `needs: test` (sequential).
+  - Rationale: `UserApiIntegrationTest`, `AuthenticationFlowIntegrationTest`,
+    and `OAuth2PublicEndpointsSecurityIntegrationTest` are flaky on
+    `ubuntu-latest` because Testcontainers cannot always reach the Docker
+    daemon on GitHub-hosted runners. Gating via
+    `@EnabledIfEnvironmentVariable(named = "RUN_INTEGRATION", matches = "true")`
+    makes them opt-in; the self-hosted runner (which has Docker locally
+    installed) sets the env and runs them.
+- **Integration test classes** — added
+  `@EnabledIfEnvironmentVariable(named = "RUN_INTEGRATION", matches = "true")`
+  (import `org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable`) on
+  the three `@Testcontainers` classes under `src/test/java/.../integration/`.
+  When `RUN_INTEGRATION` is unset or not `"true"` (as on `ubuntu-latest`),
+  JUnit Jupiter skips the entire class — no container startup attempt, no
+  flake. Pure unit tests (e.g. `OAuth2ClientTest` under `entity/`) are
+  unaffected and continue to run on both runners.
 
 ### Added
 - **Flyway V37** (`V37__oauth2_clients_tenant_id_index.sql`) — idempotent

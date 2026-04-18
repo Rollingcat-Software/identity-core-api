@@ -2,6 +2,7 @@ package com.fivucsas.identity.integration;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -39,6 +40,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest
 @AutoConfigureMockMvc
 @Testcontainers
+@EnabledIfEnvironmentVariable(named = "RUN_INTEGRATION", matches = "true")
 @ActiveProfiles("integration")
 @DisplayName("OAuth2 public endpoints reach controller through real SecurityFilterChain")
 class OAuth2PublicEndpointsSecurityIntegrationTest {
