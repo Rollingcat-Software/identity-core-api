@@ -5,6 +5,19 @@ services:
       dockerfile: Dockerfile
     container_name: identity-core-api
     restart: unless-stopped
+    # Hardening (IN-H4 — 2026-04-19):
+    # - read_only: rootfs is immutable; Spring Boot needs /tmp writable, so we
+    #   tmpfs it (plus /var/log for occasional logback rotations).
+    # - cap_drop ALL: nothing in this JVM workload needs linux capabilities.
+    # - no-new-privileges: already in place.
+    # If a future change requires writing to a path outside /tmp, add a tmpfs
+    # entry rather than toggling read_only off.
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /var/log
+    cap_drop:
+      - ALL
     security_opt:
       - no-new-privileges:true
     environment:
@@ -84,7 +97,8 @@ services:
     deploy:
       resources:
         limits:
-          memory: 768M
+          cpus: "2.0"
+          memory: 2G
           pids: 512
 
 networks:

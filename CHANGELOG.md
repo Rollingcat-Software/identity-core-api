@@ -1,5 +1,63 @@
 # Changelog - Identity Core API
 
+## [2026-04-19] Audit remediation
+
+Targeted backend + infra fixes from the 2026-04-19 comprehensive audit
+(`/opt/projects/fivucsas/docs/audits/AUDIT_2026-04-19.md` — Audit 1, Audit 5).
+No Flyway migration, no secret rotation, no container restart.
+
+### Fixed
+- **BE-H2 — `GET /oauth2/authorize` (authenticated branch) hardening.**
+  The GET branch minted codes with no PKCE enforcement for public clients, no
+  `user.tenant == client.tenant` guard, and `codeChallengeMethod != S256` went
+  unchallenged. Shared PKCE + tenant checks are now extracted into
+  `OAuth2Controller.validateAuthorizeRequest()` and invoked from both the GET
+  branch and `POST /authorize/complete`. Happy path for already-correct clients
+  is unchanged. `OAuth2Controller.java`.
+- **BE-M1 — OAuth2Service Redis auth-code metadata → JSON.** Payload switched
+  from pipe-delimited to Jackson JSON. Read side prefers JSON, falls back to
+  the legacy pipe split for in-flight codes and logs a one-shot warn. The pipe
+  fallback is scheduled for removal after deploy + 15 min (AUTH_CODE_TTL 10m +
+  5m margin) — TODO note dated 2026-04-19 in the file.
+  `OAuth2Service.java:125-145`.
+- **BE-M2 — confidential client hard-reject.** `exchangeCode` previously
+  logged a warn and fell through to the public-client code path when a
+  confidential client arrived without a `client_secret` and without a PKCE
+  verifier. It now throws a new `OAuth2Exception(401, "invalid_client",
+  "client_secret required for confidential client")`; the controller catch
+  maps the status verbatim. `OAuth2Service.java:201-210`, new
+  `domain/exception/OAuth2Exception.java`.
+- **BE-M5 — refresh-token rotation no longer revokes all devices.**
+  `RefreshTokenService.createRefreshToken` dropped the unconditional
+  `revokeAllUserTokens` call. Rotation via `rotateRefreshToken` already
+  revokes the specific token being replaced; other devices stay signed in.
+  Invariant documented in the method body. `RefreshTokenService.java:28-48`.
+- **IN-H2 — admin-whitelist attached.** Added a new file-based router
+  `fivucsas-api-admin` in `/opt/projects/infra/traefik/config/dynamic.yml`
+  that matches `api.fivucsas.com` + PathPrefix(`/swagger-ui`, `/v3/api-docs`,
+  `/actuator`) + Path(`/swagger-ui.html`), carrying
+  `admin-whitelist@file,secure-headers@file,rate-limit@file` and routing to
+  `identity-api@docker`. Traefik's longer-rule-wins precedence means the
+  public docker-label router (Host only) still serves `/oauth2/**`,
+  `/auth/**`, `/api/v1/**` unchanged. Traefik not reloaded per instructions.
+
+### Added
+- `com.fivucsas.identity.domain.exception.OAuth2Exception` — carries an
+  `HttpStatus` + OAuth2 `error` code so the token endpoint can return 401
+  `invalid_client` (vs. the old blanket 400).
+- `OAuth2ControllerTest` — three new cases: public client without PKCE → 400,
+  user-tenant ≠ client-tenant → 400, confidential client missing secret → 401.
+- `RefreshTokenServiceTest` — new test class asserting `createRefreshToken`
+  never calls `revokeAllUserTokens` (BE-M5 invariant).
+
+### Verified
+- `mvn -DskipTests clean compile` — BUILD SUCCESS (459 sources).
+- `mvn test -Dtest='OAuth2ControllerTest,OAuth2ServiceTest,RefreshTokenServiceTest'`
+  — 39 tests, 0 failures. `OAuth2ServiceTest` write-side assertions migrated
+  from pipe-match to JSON-field-match; read-side legacy pipe tests still pass
+  via the fallback.
+- `python3 -c "import yaml; yaml.safe_load(open('dynamic.yml'))"` — YAML OK.
+
 ## [2026-04-18c] — OIDC ui_locales pass-through on hosted-login authorize
 
 ### Added

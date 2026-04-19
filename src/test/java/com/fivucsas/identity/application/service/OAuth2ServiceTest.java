@@ -113,9 +113,10 @@ class OAuth2ServiceTest {
 
         // then
         assertThat(code).isNotBlank();
+        // BE-M1 (2026-04-19): payload is now JSON, not pipe-delimited.
         verify(valueOps).set(
                 eq("oauth2:code:" + code),
-                contains("user@test.com|client-1|https://example.com/cb|openid"),
+                contains("\"userEmail\":\"user@test.com\""),
                 any(Duration.class));
     }
 
@@ -132,9 +133,15 @@ class OAuth2ServiceTest {
 
         // then
         assertThat(code).isNotBlank();
+        // BE-M1 (2026-04-19): payload is JSON; assert each field present rather
+        // than a fragile full-string match.
         verify(valueOps).set(
                 eq("oauth2:code:" + code),
-                eq("user@test.com|client-1|https://example.com/cb|openid|test-nonce|challenge123|S256"),
+                argThat(v -> v.contains("\"userEmail\":\"user@test.com\"")
+                        && v.contains("\"clientId\":\"client-1\"")
+                        && v.contains("\"nonce\":\"test-nonce\"")
+                        && v.contains("\"codeChallenge\":\"challenge123\"")
+                        && v.contains("\"codeChallengeMethod\":\"S256\"")),
                 any(Duration.class));
     }
 

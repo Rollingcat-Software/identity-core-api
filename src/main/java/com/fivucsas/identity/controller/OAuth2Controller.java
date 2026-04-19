@@ -26,6 +26,7 @@ import org.springframework.web.util.UriComponentsBuilder;
 import java.net.URI;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.UUID;
 
 /**
  * REST controller for OAuth 2.0 authorization code flow.
@@ -125,6 +126,17 @@ public class OAuth2Controller {
 
             // If user is authenticated, generate the code directly
             if (authentication != null && authentication.isAuthenticated()) {
+                // Audit BE-H2 (2026-04-19): replicate the /authorize/complete
+                // PKCE + tenant + confidential checks here. The GET branch was
+                // previously minting codes with no PKCE enforcement for public
+                // clients and no user↔client tenant guard.
+                ResponseEntity<Map<String, Object>> validationError =
+                        validateAuthorizeRequest(client, authentication.getName(),
+                                codeChallenge, codeChallengeMethod, state);
+                if (validationError != null) {
+                    return validationError;
+                }
+
                 String code = oAuth2Service.generateAuthorizationCode(
                         authentication.getName(), clientId, redirectUri, scope,
                         nonce, codeChallenge, codeChallengeMethod);
@@ -224,32 +236,17 @@ public class OAuth2Controller {
             return errorResponse(400, "invalid_request", e.getMessage(), body.state);
         }
 
-        // PKCE enforcement for public clients (RFC 7636 + RFC 8252 §8.1).
-        // Public clients cannot hold a client_secret, so PKCE S256 is the only
-        // protection against code interception. Plain is rejected — only S256
-        // provides the hash that makes the verifier safe to transmit.
-        if (!client.isConfidential()) {
-            if (isBlank(body.codeChallenge)) {
-                return errorResponse(400, "invalid_request",
-                        "code_challenge is required for public clients (PKCE S256 mandatory)", body.state);
-            }
-            if (!"S256".equalsIgnoreCase(body.codeChallengeMethod)) {
-                return errorResponse(400, "invalid_request",
-                        "code_challenge_method must be S256 for public clients; plain is not allowed", body.state);
-            }
+        // Shared PKCE + tenant + confidential-secret checks. See
+        // validateAuthorizeRequest() below — also used by the GET branch.
+        ResponseEntity<Map<String, Object>> validationError = validateAuthorizeRequest(
+                client, session.getUserId(), body.codeChallenge, body.codeChallengeMethod, body.state);
+        if (validationError != null) {
+            return validationError;
         }
 
         User user = userRepository.findById(session.getUserId()).orElse(null);
         if (user == null) {
             return errorResponse(400, "invalid_request", "User not found for MFA session", body.state);
-        }
-        if (!user.getTenant().getId().equals(client.getTenant().getId())) {
-            // Prevents a code mint against a client that belongs to a different tenant than the authenticated user.
-            // RFC 6749 §5.2 authorization-server error responses are 400 — 403 here would leak policy info
-            // (the fact that a tenant boundary check exists) and is not an HTTP-level authz failure anyway.
-            log.warn("OAuth2 authorize/complete — tenant mismatch: userTenant={}, clientTenant={}",
-                    user.getTenant().getId(), client.getTenant().getId());
-            return errorResponse(400, "invalid_request", "Client does not belong to user's tenant", body.state);
         }
 
         // Mark consumed BEFORE minting the code so a crash between consume and mint
@@ -297,6 +294,74 @@ public class OAuth2Controller {
         response.put("client_name", client.getClientName());
         response.put("tenant_name", client.getTenant() != null ? client.getTenant().getName() : null);
         return ResponseEntity.ok().header(HttpHeaders.CACHE_CONTROL, "public, max-age=60").body(response);
+    }
+
+    /**
+     * Shared validation for both {@code GET /authorize} (authenticated branch) and
+     * {@code POST /authorize/complete}. Enforces:
+     * <ul>
+     *   <li>PKCE S256 mandatory for public clients (RFC 7636 + RFC 8252 §8.1).</li>
+     *   <li>{@code code_challenge_method=plain} rejected — only S256 is accepted.</li>
+     *   <li>User tenant must equal client tenant (multi-tenant isolation).</li>
+     * </ul>
+     * Returns {@code null} on success, or the error {@code ResponseEntity} the caller
+     * should return unchanged.
+     *
+     * @param client validated OAuth2 client (tenant non-null)
+     * @param userKey either a {@code UUID} (user id) or a {@code String} (email) used
+     *                to resolve the user for the tenant check
+     * @param codeChallenge PKCE challenge (nullable)
+     * @param codeChallengeMethod PKCE method (nullable; defaults to S256)
+     * @param state OAuth2 state (echoed in any error body)
+     */
+    private ResponseEntity<Map<String, Object>> validateAuthorizeRequest(
+            OAuth2Client client,
+            Object userKey,
+            String codeChallenge,
+            String codeChallengeMethod,
+            String state) {
+
+        // PKCE enforcement for public clients (RFC 7636 + RFC 8252 §8.1).
+        // Public clients cannot hold a client_secret, so PKCE S256 is the only
+        // protection against code interception. Plain is rejected — only S256
+        // provides the hash that makes the verifier safe to transmit.
+        if (!client.isConfidential()) {
+            if (isBlank(codeChallenge)) {
+                return errorResponse(400, "invalid_request",
+                        "code_challenge is required for public clients (PKCE S256 mandatory)", state);
+            }
+            String method = codeChallengeMethod == null ? "S256" : codeChallengeMethod;
+            if (!"S256".equalsIgnoreCase(method)) {
+                return errorResponse(400, "invalid_request",
+                        "code_challenge_method must be S256 for public clients; plain is not allowed", state);
+            }
+        }
+
+        // Resolve user (by id or email) for the tenant check. Null/missing user
+        // is reported generically to avoid leaking enumeration signal.
+        User user = null;
+        if (userKey instanceof UUID uid) {
+            user = userRepository.findById(uid).orElse(null);
+        } else if (userKey instanceof String email && !email.isBlank()) {
+            user = userRepository.findByEmail(email).orElse(null);
+        }
+        if (user == null) {
+            return errorResponse(400, "invalid_request", "User not found", state);
+        }
+
+        // Tenant isolation: a code must never be minted for a client that belongs
+        // to a different tenant than the authenticated user. RFC 6749 §5.2 maps
+        // this to 400 invalid_request (not 403) to avoid leaking policy info.
+        if (user.getTenant() == null || client.getTenant() == null
+                || !user.getTenant().getId().equals(client.getTenant().getId())) {
+            log.warn("OAuth2 authorize — tenant mismatch: userTenant={}, clientTenant={}",
+                    user.getTenant() == null ? null : user.getTenant().getId(),
+                    client.getTenant() == null ? null : client.getTenant().getId());
+            return errorResponse(400, "invalid_request",
+                    "Client does not belong to user's tenant", state);
+        }
+
+        return null;
     }
 
     private URI buildHostedLoginUri(String clientId, String redirectUri, String scope, String state,
@@ -370,6 +435,11 @@ public class OAuth2Controller {
                     .header("Cache-Control", "no-store")
                     .header("Pragma", "no-cache")
                     .body(tokens);
+        } catch (com.fivucsas.identity.domain.exception.OAuth2Exception e) {
+            // BE-M2 (2026-04-19): explicit status (e.g. 401 for missing
+            // confidential-client secret) rather than blanket 400.
+            log.warn("OAuth2 token exchange rejected: {} {}", e.getStatus(), e.getMessage());
+            return errorResponse(e.getStatus().value(), e.getErrorCode(), e.getMessage(), null);
         } catch (IllegalArgumentException e) {
             log.warn("OAuth2 token exchange failed: {}", e.getMessage());
             // RFC 6749 Section 5.2: use appropriate error codes

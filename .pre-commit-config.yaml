@@ -1,0 +1,7 @@
+# Pre-commit hooks (IN-M1 — 2026-04-19). Minimal: gitleaks only.
+# Set up with `pre-commit install` (see ../.pre-commit-install for bulk setup).
+repos:
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.21.2
+    hooks:
+      - id: gitleaks

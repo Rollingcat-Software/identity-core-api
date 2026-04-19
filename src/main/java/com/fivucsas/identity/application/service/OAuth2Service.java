@@ -1,6 +1,9 @@
 package com.fivucsas.identity.application.service;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fivucsas.identity.application.port.output.OAuth2ClientRepositoryPort;
+import com.fivucsas.identity.domain.exception.OAuth2Exception;
 import com.fivucsas.identity.domain.repository.UserRepository;
 import com.fivucsas.identity.entity.OAuth2Client;
 import com.fivucsas.identity.entity.User;
@@ -9,6 +12,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
@@ -52,6 +56,13 @@ public class OAuth2Service {
     // RFC 6749 Section 4.1.2: authorization code MUST expire shortly, max 10 minutes recommended
     private static final Duration AUTH_CODE_TTL = Duration.ofMinutes(10);
 
+    // BE-M1 (2026-04-19): Redis auth-code metadata is now JSON. The legacy pipe
+    // format is still tolerated on read for in-flight codes written before deploy,
+    // then re-serialized on next write. Remove the pipe fallback after the auth
+    // code TTL (10 min) has elapsed post-deploy — earliest cleanup 2026-04-19 +15m.
+    // TODO(2026-04-19 +15m / 2026-04-19 03:15Z): delete legacy pipe parser below.
+    private static final ObjectMapper AUTH_CODE_MAPPER = new ObjectMapper();
+
     /**
      * Validates the client and redirect URI combination.
      * Redirect URI must exact-match a registered URI (RFC 6749 Section 3.1.2.3).
@@ -93,16 +104,26 @@ public class OAuth2Service {
             String userEmail, String clientId, String redirectUri, String scope,
             String nonce, String codeChallenge, String codeChallengeMethod) {
         String code = UUID.randomUUID().toString();
-        // Store code metadata in Redis with pipe-delimited fields
-        // Fields: userEmail|clientId|redirectUri|scope|nonce|codeChallenge|codeChallengeMethod
-        String value = String.join("|",
-                userEmail,
-                clientId,
-                redirectUri,
-                scope != null ? scope : "",
-                nonce != null ? nonce : "",
-                codeChallenge != null ? codeChallenge : "",
-                codeChallengeMethod != null ? codeChallengeMethod : "");
+        // BE-M1 (2026-04-19): serialize as JSON — Jackson safely escapes pipes,
+        // brackets, and quotes in any field. Previously pipe-delimited; a pipe
+        // in any value corrupted parse boundaries.
+        Map<String, String> payload = new LinkedHashMap<>();
+        payload.put("userEmail", userEmail);
+        payload.put("clientId", clientId);
+        payload.put("redirectUri", redirectUri);
+        payload.put("scope", scope != null ? scope : "");
+        payload.put("nonce", nonce != null ? nonce : "");
+        payload.put("codeChallenge", codeChallenge != null ? codeChallenge : "");
+        payload.put("codeChallengeMethod", codeChallengeMethod != null ? codeChallengeMethod : "");
+        String value;
+        try {
+            value = AUTH_CODE_MAPPER.writeValueAsString(payload);
+        } catch (JsonProcessingException e) {
+            // Should never happen for a Map<String,String> — fail closed rather than
+            // silently fall back to the legacy pipe encoding.
+            log.error("OAuth2 auth-code JSON serialization failed", e);
+            throw new IllegalStateException("Failed to serialize authorization code metadata", e);
+        }
         redisTemplate.opsForValue().set(AUTH_CODE_PREFIX + code, value, AUTH_CODE_TTL);
         log.info("OAuth2 authorization code generated for user: {} client: {}", userEmail, clientId);
         return code;
@@ -136,18 +157,45 @@ public class OAuth2Service {
         // Consume the code immediately (single-use per RFC 6749 Section 4.1.2)
         redisTemplate.delete(key);
 
-        String[] parts = stored.split("\\|", -1);
-        if (parts.length < 3) {
-            throw new IllegalArgumentException("Corrupted authorization code data");
+        // BE-M1 (2026-04-19): prefer JSON; fall back to legacy pipe-split for
+        // in-flight codes written by the previous build. The fallback can be
+        // removed after 2026-04-19 +15m (AUTH_CODE_TTL + margin).
+        String userEmail;
+        String storedClientId;
+        String storedRedirectUri;
+        String storedScope;
+        String storedNonce;
+        String storedCodeChallenge;
+        String storedCodeChallengeMethod;
+        if (!stored.isEmpty() && stored.charAt(0) == '{') {
+            try {
+                @SuppressWarnings("unchecked")
+                Map<String, String> payload = AUTH_CODE_MAPPER.readValue(stored, Map.class);
+                userEmail = payload.getOrDefault("userEmail", "");
+                storedClientId = payload.getOrDefault("clientId", "");
+                storedRedirectUri = payload.getOrDefault("redirectUri", "");
+                storedScope = payload.getOrDefault("scope", "");
+                storedNonce = payload.getOrDefault("nonce", "");
+                storedCodeChallenge = payload.getOrDefault("codeChallenge", "");
+                storedCodeChallengeMethod = payload.getOrDefault("codeChallengeMethod", "");
+            } catch (JsonProcessingException e) {
+                throw new IllegalArgumentException("Corrupted authorization code data");
+            }
+        } else {
+            // Legacy path — log once and re-encode next mint will land as JSON.
+            log.warn("OAuth2 auth-code using legacy pipe encoding — remove fallback after deploy +15m");
+            String[] parts = stored.split("\\|", -1);
+            if (parts.length < 3) {
+                throw new IllegalArgumentException("Corrupted authorization code data");
+            }
+            userEmail = parts[0];
+            storedClientId = parts[1];
+            storedRedirectUri = parts[2];
+            storedScope = parts.length > 3 ? parts[3] : "";
+            storedNonce = parts.length > 4 ? parts[4] : "";
+            storedCodeChallenge = parts.length > 5 ? parts[5] : "";
+            storedCodeChallengeMethod = parts.length > 6 ? parts[6] : "";
         }
-
-        String userEmail = parts[0];
-        String storedClientId = parts[1];
-        String storedRedirectUri = parts[2];
-        String storedScope = parts.length > 3 ? parts[3] : "";
-        String storedNonce = parts.length > 4 ? parts[4] : "";
-        String storedCodeChallenge = parts.length > 5 ? parts[5] : "";
-        String storedCodeChallengeMethod = parts.length > 6 ? parts[6] : "";
 
         // Validate client_id matches
         if (!storedClientId.equals(clientId)) {
@@ -177,9 +225,17 @@ public class OAuth2Service {
             if (!passwordEncoder.matches(clientSecret, client.getClientSecret())) {
                 throw new IllegalArgumentException("Invalid client_secret");
             }
+        } else if (client.isConfidential() && (codeVerifier == null || codeVerifier.isEmpty())) {
+            // BE-M2 (2026-04-19): confidential clients MUST authenticate. Previously
+            // this only logged a warn and fell through to the public-client path,
+            // which meant a compromised confidential client_id could mint tokens
+            // without any credential. Hard-reject with RFC 6749 §5.2 invalid_client.
+            throw new OAuth2Exception(HttpStatus.UNAUTHORIZED,
+                    "client_secret required for confidential client");
         } else if (storedCodeChallenge.isEmpty()) {
-            // If no PKCE and no client_secret, this is a security risk
-            // Confidential clients MUST authenticate; public clients MUST use PKCE
+            // No PKCE and no client_secret — public client without PKCE. This is
+            // still a misconfiguration (we mandate PKCE for public clients at
+            // /authorize), so keep the warn trail for older registrations.
             log.warn("OAuth2 token request without client_secret or PKCE for client: {}", clientId);
         }
 

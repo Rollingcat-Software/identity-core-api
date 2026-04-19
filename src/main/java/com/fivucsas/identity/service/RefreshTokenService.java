@@ -29,8 +29,16 @@ public class RefreshTokenService implements com.fivucsas.identity.application.po
     public RefreshToken createRefreshToken(User user, String ipAddress, String userAgent) {
         log.info("Creating refresh token for user: {}", user.getEmail());
 
-        // Revoke existing active tokens for security (optional - can allow multiple devices)
-        revokeAllUserTokens(user);
+        // BE-M5 (2026-04-19): do NOT revoke all existing tokens here. Previously
+        // this path unconditionally called revokeAllUserTokens(user), which broke
+        // legitimate multi-device sessions: a user signing in on their phone would
+        // silently log themselves out of their laptop.
+        //
+        // Invariant (new): createRefreshToken mints a new token alongside any
+        // existing active tokens. Rotation of a *specific* token (login refresh)
+        // happens in rotateRefreshToken() below, which revokes only the one being
+        // replaced. Cross-device bulk revocation is a user-initiated operation
+        // (see SessionService) and not a side effect of normal login.
 
         RefreshToken refreshToken = RefreshToken.builder()
                 .user(user)

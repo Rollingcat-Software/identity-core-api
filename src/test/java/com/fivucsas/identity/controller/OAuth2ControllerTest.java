@@ -401,6 +401,89 @@ class OAuth2ControllerTest {
                         org.hamcrest.Matchers.containsString("bound to a different client_id")));
     }
 
+    // ─── BE-H2 (2026-04-19): GET /authorize authenticated branch hardening ──────
+
+    @Test
+    @DisplayName("GET /authorize (authenticated) - public client without PKCE returns 400 [BE-H2]")
+    void authorize_AuthenticatedPublicClientWithoutPkce_ShouldReturn400() throws Exception {
+        OAuth2Client publicClient = mock(OAuth2Client.class);
+        when(publicClient.isConfidential()).thenReturn(false);
+        when(publicClient.getClientName()).thenReturn("Public SPA");
+        when(oAuth2Service.validateClient("public-spa", "https://spa.example.com/cb")).thenReturn(publicClient);
+
+        org.springframework.security.authentication.UsernamePasswordAuthenticationToken auth =
+                new org.springframework.security.authentication.UsernamePasswordAuthenticationToken(
+                        "user@example.com", "n/a", java.util.Collections.emptyList());
+
+        mockMvc.perform(get("/api/v1/oauth2/authorize")
+                        .principal(auth)
+                        .param("client_id", "public-spa")
+                        .param("redirect_uri", "https://spa.example.com/cb")
+                        .param("response_type", "code"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("invalid_request"))
+                .andExpect(jsonPath("$.error_description",
+                        org.hamcrest.Matchers.containsString("code_challenge is required")));
+    }
+
+    @Test
+    @DisplayName("GET /authorize (authenticated) - user tenant != client tenant returns 400 [BE-H2]")
+    void authorize_AuthenticatedTenantMismatch_ShouldReturn400() throws Exception {
+        OAuth2Client client = mock(OAuth2Client.class);
+        when(client.isConfidential()).thenReturn(true); // skip PKCE branch
+        when(client.getClientName()).thenReturn("Confidential App");
+
+        com.fivucsas.identity.entity.Tenant tenantA = mock(com.fivucsas.identity.entity.Tenant.class);
+        com.fivucsas.identity.entity.Tenant tenantB = mock(com.fivucsas.identity.entity.Tenant.class);
+        java.util.UUID idA = java.util.UUID.randomUUID();
+        java.util.UUID idB = java.util.UUID.randomUUID();
+        when(tenantA.getId()).thenReturn(idA);
+        when(tenantB.getId()).thenReturn(idB);
+        when(client.getTenant()).thenReturn(tenantB);
+
+        com.fivucsas.identity.entity.User user = mock(com.fivucsas.identity.entity.User.class);
+        when(user.getTenant()).thenReturn(tenantA);
+        when(domainUserRepository.findByEmail("user@tenantA.example.com"))
+                .thenReturn(java.util.Optional.of(user));
+
+        when(oAuth2Service.validateClient("tenantB-client", "https://b.example.com/cb")).thenReturn(client);
+
+        org.springframework.security.authentication.UsernamePasswordAuthenticationToken auth =
+                new org.springframework.security.authentication.UsernamePasswordAuthenticationToken(
+                        "user@tenantA.example.com", "n/a", java.util.Collections.emptyList());
+
+        mockMvc.perform(get("/api/v1/oauth2/authorize")
+                        .principal(auth)
+                        .param("client_id", "tenantB-client")
+                        .param("redirect_uri", "https://b.example.com/cb")
+                        .param("response_type", "code"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("invalid_request"))
+                .andExpect(jsonPath("$.error_description",
+                        org.hamcrest.Matchers.containsString("does not belong")));
+    }
+
+    @Test
+    @DisplayName("POST /token - confidential client missing secret returns 401 invalid_client [BE-M2]")
+    void token_ConfidentialClientMissingSecret_ShouldReturn401() throws Exception {
+        when(oAuth2Service.exchangeCode(eq("code-x"), eq("confidential-app"),
+                eq("https://app.example.com/cb"), isNull(), isNull()))
+                .thenThrow(new com.fivucsas.identity.domain.exception.OAuth2Exception(
+                        org.springframework.http.HttpStatus.UNAUTHORIZED,
+                        "invalid_client",
+                        "client_secret required for confidential client"));
+
+        mockMvc.perform(post("/api/v1/oauth2/token")
+                        .param("grant_type", "authorization_code")
+                        .param("code", "code-x")
+                        .param("redirect_uri", "https://app.example.com/cb")
+                        .param("client_id", "confidential-app"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.error").value("invalid_client"))
+                .andExpect(jsonPath("$.error_description",
+                        org.hamcrest.Matchers.containsString("client_secret required")));
+    }
+
     @Test
     @DisplayName("POST /authorize/complete - already-consumed session returns 400 invalid_request")
     void authorizeComplete_WhenSessionAlreadyConsumed_ShouldReturn400() throws Exception {
