@@ -3,6 +3,34 @@
 ## [Unreleased]
 
 ### Security
+- **BE-H1 — JWT signing: dual-algorithm coexistence (HS512 + RS256).**
+  OIDC best practice is asymmetric (RS256) so relying parties can verify ID
+  tokens offline via JWKS without sharing the HS512 secret. This change ships
+  the RS256 key infrastructure alongside the legacy HS512 secret:
+  - New `RsaKeyProvider` loads an RSA 2048 key pair from
+    `JWT_RSA_PRIVATE_KEY_PEM` / `JWT_RSA_PUBLIC_KEY_PEM` (fail-fast in prod;
+    auto-generates + logs the PEMs once in dev/test profile).
+  - `JwtService` now attaches a `kid` header on every mint (`hs-2026-04` for
+    HS512, `rs-2026-04` for RS256) and uses a `keyLocator` to verify by kid.
+    Legacy tokens without a kid continue to validate against HS512 for
+    backward compatibility. Unknown kids are rejected with a SignatureException.
+  - Sign-time algorithm is selected by `fivucsas.jwt.default-algo`
+    (default `HS512` — **intentionally unchanged** during the coexistence
+    window; flip to `RS256` after a couple of days of soak via
+    `JWT_DEFAULT_ALGO=RS256`).
+  - `/.well-known/jwks.json` now publishes the RSA public key
+    (kty=RSA, alg=RS256, kid, n, e). HS512 never goes in JWKS by definition.
+  - `/.well-known/openid-configuration` advertises both algs in
+    `id_token_signing_alg_values_supported`.
+  - Config: new `fivucsas.jwt.*` block in `application.yml`,
+    new `JWT_DEFAULT_ALGO` / `JWT_RSA_KID` / `JWT_RSA_{PRIVATE,PUBLIC}_KEY_PEM`
+    entries in `.env.example` with an `openssl genrsa -out jwt_rs256.pem 2048`
+    generator hint.
+  - Tests: 7 new (`JwtDualAlgoTest` ×5, `OpenIDConfigControllerTest` ×2);
+    existing `JwtServiceTest` (16) rewired for the new 2-arg constructor.
+  Files: `security/RsaKeyProvider.java` (new), `security/JwtService.java`,
+  `controller/OpenIDConfigController.java`, `resources/application.yml`,
+  `.env.example`.
 - **BE-H3 — TOTP shared secrets encrypted at rest (AES-GCM-256).**
   `users.two_factor_secret` previously stored plaintext; now encrypted via new
   `TotpSecretCipher` (KEK from `FIVUCSAS_TOTP_ENC_KEY`, base64 32 bytes) and

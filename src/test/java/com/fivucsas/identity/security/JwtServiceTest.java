@@ -38,11 +38,17 @@ class JwtServiceTest {
     private static final String TEST_SECRET = "dGVzdC1zZWNyZXQta2V5LXRoYXQtaXMtYXQtbGVhc3QtMjU2LWJpdHMtbG9uZy1mb3ItaHMyNTYtYWxnb3JpdGhtLXNlY3VyaXR5LXJlcXVpcmVtZW50cw==";
     private static final long ACCESS_TOKEN_EXPIRATION = 900000L; // 15 minutes
 
+    private RsaKeyProvider rsaKeyProvider;
+
     @BeforeEach
     void setUp() {
-        when(jwtSecretProvider.getSecret()).thenReturn(TEST_SECRET);
-        jwtService = new JwtService(jwtSecretProvider);
+        // lenient: several tests pass through paths that never consult the HMAC secret
+        // (e.g. malformed-token parse failures). BE-H1 keeps HMAC still wired.
+        org.mockito.Mockito.lenient().when(jwtSecretProvider.getSecret()).thenReturn(TEST_SECRET);
+        rsaKeyProvider = JwtAlgoTestSupport.newRsaKeyProvider();
+        jwtService = new JwtService(jwtSecretProvider, rsaKeyProvider);
         ReflectionTestUtils.setField(jwtService, "jwtExpiration", ACCESS_TOKEN_EXPIRATION);
+        ReflectionTestUtils.setField(jwtService, "defaultAlgo", "HS512");
     }
 
     // ============== ACCESS TOKEN GENERATION TESTS ==============
@@ -123,8 +129,9 @@ class JwtServiceTest {
         JwtSecretProvider otherSecretProvider = org.mockito.Mockito.mock(JwtSecretProvider.class);
         // Different Base64-encoded secret
         when(otherSecretProvider.getSecret()).thenReturn("ZGlmZmVyZW50LXNlY3JldC1rZXktZm9yLXRlc3RpbmctcHVycG9zZXMtYXQtbGVhc3QtMjU2LWJpdHMtbG9uZw==");
-        JwtService otherJwtService = new JwtService(otherSecretProvider);
+        JwtService otherJwtService = new JwtService(otherSecretProvider, rsaKeyProvider);
         ReflectionTestUtils.setField(otherJwtService, "jwtExpiration", ACCESS_TOKEN_EXPIRATION);
+        ReflectionTestUtils.setField(otherJwtService, "defaultAlgo", "HS512");
         String tokenWithDifferentKey = otherJwtService.generateAccessToken(TEST_EMAIL);
 
         // Act & Assert
@@ -136,8 +143,9 @@ class JwtServiceTest {
     @DisplayName("Validate token - should return false for expired token")
     void testIsTokenValid_ExpiredToken() {
         // Arrange - Create service with very short expiration
-        JwtService shortExpirationService = new JwtService(jwtSecretProvider);
+        JwtService shortExpirationService = new JwtService(jwtSecretProvider, rsaKeyProvider);
         ReflectionTestUtils.setField(shortExpirationService, "jwtExpiration", 1L); // 1ms
+        ReflectionTestUtils.setField(shortExpirationService, "defaultAlgo", "HS512");
         String token = shortExpirationService.generateAccessToken(TEST_EMAIL);
 
         // Act - Wait for token to expire

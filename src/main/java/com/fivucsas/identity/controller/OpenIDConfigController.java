@@ -1,5 +1,6 @@
 package com.fivucsas.identity.controller;
 
+import com.fivucsas.identity.security.RsaKeyProvider;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.extern.slf4j.Slf4j;
@@ -8,6 +9,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.security.interfaces.RSAPublicKey;
 import java.util.*;
 
 /**
@@ -27,6 +29,12 @@ public class OpenIDConfigController {
 
     @Value("${app.base-url:https://api.fivucsas.com}")
     private String baseUrl;
+
+    private final RsaKeyProvider rsaKeyProvider;
+
+    public OpenIDConfigController(RsaKeyProvider rsaKeyProvider) {
+        this.rsaKeyProvider = rsaKeyProvider;
+    }
 
     /**
      * OIDC Discovery document (OpenID Connect Discovery 1.0 Section 4).
@@ -49,8 +57,9 @@ public class OpenIDConfigController {
         config.put("response_modes_supported", List.of("query"));
         config.put("grant_types_supported", List.of("authorization_code"));
         config.put("subject_types_supported", List.of("public"));
-        // JwtService uses Jwts.SIG.HS512 — must match actual signing algorithm
-        config.put("id_token_signing_alg_values_supported", List.of("HS512"));
+        // BE-H1: dual-alg coexistence. HS512 (legacy symmetric) + RS256 (OIDC best practice).
+        // The default signing algorithm is governed by fivucsas.jwt.default-algo.
+        config.put("id_token_signing_alg_values_supported", List.of("RS256", "HS512"));
         config.put("scopes_supported", List.of("openid", "profile", "email", "phone"));
         config.put("token_endpoint_auth_methods_supported", List.of("client_secret_post", "none"));
         config.put("claims_supported", List.of(
@@ -73,29 +82,42 @@ public class OpenIDConfigController {
     /**
      * JSON Web Key Set endpoint (RFC 7517).
      *
-     * Since this service uses HMAC-SHA512 (symmetric key), the JWKS
-     * exposes key metadata only — the actual secret is never exposed.
-     * For HMAC-signed tokens, relying parties should validate tokens
-     * via the UserInfo endpoint or token introspection, not via JWKS.
-     *
-     * Note: symmetric keys (kty=oct) in JWKS cannot be used by external
-     * parties for verification. This endpoint exists for discovery
-     * compliance; use /api/v1/oauth2/userinfo for token validation.
+     * Publishes the RS256 public key so relying parties (widget, third-party apps)
+     * can verify ID tokens offline. The HS512 symmetric secret is intentionally
+     * NOT published — by definition it cannot be shared without breaking security.
+     * Legacy HS512 tokens remain accepted during the coexistence window and should
+     * be validated via /userinfo or introspection.
      */
     @GetMapping("/.well-known/jwks.json")
-    @Operation(summary = "JSON Web Key Set for token verification metadata")
+    @Operation(summary = "JSON Web Key Set (RSA public key) for token verification")
     public ResponseEntity<Map<String, Object>> jwks() {
-        Map<String, Object> jwk = new LinkedHashMap<>();
-        jwk.put("kty", "oct");
-        jwk.put("use", "sig");
-        jwk.put("alg", "HS512");
-        jwk.put("kid", "fivucsas-identity-key-1");
-        jwk.put("key_ops", List.of("sign", "verify"));
+        RSAPublicKey pub = rsaKeyProvider.getPublicKey();
+
+        Map<String, Object> rsaJwk = new LinkedHashMap<>();
+        rsaJwk.put("kty", "RSA");
+        rsaJwk.put("use", "sig");
+        rsaJwk.put("alg", "RS256");
+        rsaJwk.put("kid", rsaKeyProvider.getKid());
+        rsaJwk.put("n", base64Url(pub.getModulus().toByteArray()));
+        rsaJwk.put("e", base64Url(pub.getPublicExponent().toByteArray()));
 
         Map<String, Object> jwks = new LinkedHashMap<>();
-        jwks.put("keys", List.of(jwk));
+        jwks.put("keys", List.of(rsaJwk));
 
         return ResponseEntity.ok(jwks);
+    }
+
+    /**
+     * Encodes a big-endian unsigned integer as base64url without padding per
+     * RFC 7518 Section 6.3.1. Strips a leading sign byte if present.
+     */
+    private static String base64Url(byte[] bytes) {
+        if (bytes.length > 1 && bytes[0] == 0) {
+            byte[] trimmed = new byte[bytes.length - 1];
+            System.arraycopy(bytes, 1, trimmed, 0, trimmed.length);
+            bytes = trimmed;
+        }
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
     }
 
 }
