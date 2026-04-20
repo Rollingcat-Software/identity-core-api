@@ -27,7 +27,6 @@ import com.fivucsas.identity.infrastructure.sms.SmsService;
 import com.fivucsas.identity.infrastructure.sms.VerifiableSmsService;
 import com.fivucsas.identity.domain.repository.UserRepository;
 import com.fivucsas.identity.domain.exception.UserNotFoundException;
-import com.fivucsas.identity.exception.RateLimitExceededException;
 import com.fivucsas.identity.security.RateLimitService;
 import com.fivucsas.identity.security.TotpSecretCipher;
 import io.swagger.v3.oas.annotations.Operation;
@@ -580,6 +579,15 @@ public class AuthController {
 
     // ==================== N-STEP MFA FLOW (RFC 8176 compliant) ====================
 
+    // Rejection messages for MFA rate-limit 429 responses. Extracted as constants
+    // so tests can pin them and future i18n can replace them with MessageSource keys.
+    private static final String MSG_MFA_STEP_RATE_LIMITED =
+        "Too many MFA attempts. Please wait and try again.";
+    private static final String MSG_MFA_QR_RATE_LIMITED =
+        "Too many QR generation requests. Please wait and try again.";
+    private static final String MSG_MFA_OTP_SEND_RATE_LIMITED =
+        "Too many OTP send requests. Please wait and try again.";
+
     /** RFC 8176 Authentication Methods References mapping */
     private static final Map<AuthMethodType, String> AMR_VALUES = Map.of(
         AuthMethodType.PASSWORD, "pwd",
@@ -602,12 +610,8 @@ public class AuthController {
             HttpServletRequest httpRequest) {
 
         String clientIp = getClientIP(httpRequest);
-        if (!rateLimitService.allowMfaStepAttempt(clientIp)) {
-            long retryAfter = rateLimitService.getSecondsUntilRefill(
-                clientIp, RateLimitService.RateLimitType.MFA_STEP);
-            throw new RateLimitExceededException(
-                "Too many MFA attempts. Please wait and try again.", retryAfter);
-        }
+        rateLimitService.enforce(
+            RateLimitService.RateLimitType.MFA_STEP, clientIp, MSG_MFA_STEP_RATE_LIMITED);
 
         String sessionToken = (String) request.get("sessionToken");
         String method = (String) request.get("method");
@@ -947,12 +951,9 @@ public class AuthController {
             @RequestBody Map<String, String> request,
             HttpServletRequest httpRequest) {
         String clientIp = getClientIP(httpRequest);
-        if (!rateLimitService.allowMfaQrGenerate(clientIp)) {
-            long retryAfter = rateLimitService.getSecondsUntilRefill(
-                clientIp, RateLimitService.RateLimitType.MFA_QR);
-            throw new RateLimitExceededException(
-                "Too many QR generation requests. Please wait and try again.", retryAfter);
-        }
+        rateLimitService.enforce(
+            RateLimitService.RateLimitType.MFA_QR, clientIp, MSG_MFA_QR_RATE_LIMITED);
+
         String sessionToken = request.get("sessionToken");
         if (sessionToken == null || sessionToken.isBlank()) {
             return ResponseEntity.badRequest().body(Map.of("message", "sessionToken is required"));
@@ -980,12 +981,9 @@ public class AuthController {
             @RequestBody Map<String, String> request,
             HttpServletRequest httpRequest) {
         String clientIp = getClientIP(httpRequest);
-        if (!rateLimitService.allowMfaOtpSend(clientIp)) {
-            long retryAfter = rateLimitService.getSecondsUntilRefill(
-                clientIp, RateLimitService.RateLimitType.MFA_OTP_SEND);
-            throw new RateLimitExceededException(
-                "Too many OTP send requests. Please wait and try again.", retryAfter);
-        }
+        rateLimitService.enforce(
+            RateLimitService.RateLimitType.MFA_OTP_SEND, clientIp, MSG_MFA_OTP_SEND_RATE_LIMITED);
+
         String sessionToken = request.get("sessionToken");
         String method = request.getOrDefault("method", "EMAIL_OTP");
 

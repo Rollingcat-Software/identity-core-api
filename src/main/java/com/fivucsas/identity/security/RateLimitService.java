@@ -1,5 +1,6 @@
 package com.fivucsas.identity.security;
 
+import com.fivucsas.identity.exception.RateLimitExceededException;
 import io.github.bucket4j.Bandwidth;
 import io.github.bucket4j.Bucket;
 import io.github.bucket4j.Refill;
@@ -11,6 +12,7 @@ import java.time.Duration;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Predicate;
 
 /**
  * Rate limiting service using Bucket4j token bucket algorithm.
@@ -212,6 +214,40 @@ public class RateLimitService {
         }
 
         return allowed;
+    }
+
+    /**
+     * Consumes a token from the given bucket and throws {@link RateLimitExceededException}
+     * if the quota is exhausted. Centralizes the allow-check + throw pattern so call sites
+     * become one line and the exception carries the correct {@code Retry-After} seconds —
+     * {@link com.fivucsas.identity.exception.GlobalExceptionHandler} then serializes a
+     * consistent 429 envelope.
+     *
+     * @param bucketType bucket to debit
+     * @param identifier per-identifier key (IP, session ID, user ID — caller's choice)
+     * @param rejectionMessage human-readable message attached to the exception
+     * @throws RateLimitExceededException when the bucket denies
+     */
+    public void enforce(RateLimitType bucketType, String identifier, String rejectionMessage) {
+        Predicate<String> allowCheck = allowCheckFor(bucketType);
+        if (!allowCheck.test(identifier)) {
+            long retryAfter = getSecondsUntilRefill(identifier, bucketType);
+            throw new RateLimitExceededException(rejectionMessage, retryAfter);
+        }
+    }
+
+    private Predicate<String> allowCheckFor(RateLimitType bucketType) {
+        return switch (bucketType) {
+            case LOGIN -> this::allowLoginAttempt;
+            case REGISTRATION -> this::allowRegistrationAttempt;
+            case PASSWORD_RESET -> this::allowPasswordResetAttempt;
+            case BIOMETRIC -> this::allowBiometricVerification;
+            case API -> this::allowApiCall;
+            case EXPORT -> this::allowDataExport;
+            case MFA_STEP -> this::allowMfaStepAttempt;
+            case MFA_OTP_SEND -> this::allowMfaOtpSend;
+            case MFA_QR -> this::allowMfaQrGenerate;
+        };
     }
 
     /**

@@ -20,6 +20,7 @@ import com.fivucsas.identity.application.port.output.WebAuthnCredentialRepositor
 import com.fivucsas.identity.application.service.EnrollmentHealthService;
 import com.fivucsas.identity.domain.exception.DuplicateEmailException;
 import com.fivucsas.identity.domain.exception.InvalidCredentialsException;
+import com.fivucsas.identity.exception.RateLimitExceededException;
 import com.fivucsas.identity.domain.repository.TenantRepository;
 import com.fivucsas.identity.domain.repository.UserRepository;
 import com.fivucsas.identity.dto.LoginRequest;
@@ -195,12 +196,12 @@ class AuthControllerTest {
 
     @BeforeEach
     void setUp() {
-        // Configure rate limit service to allow all requests in tests
+        // Allow login + register happy paths. MFA endpoints go through the single
+        // rateLimitService.enforce(...) entry point — void, Mockito defaults to no-op,
+        // so no stub is needed for the happy path. Tests that exercise 429 behavior
+        // set up a doThrow(...) for enforce explicitly.
         when(rateLimitService.allowLoginAttempt(anyString())).thenReturn(true);
         when(rateLimitService.allowRegistrationAttempt(anyString())).thenReturn(true);
-        when(rateLimitService.allowMfaStepAttempt(anyString())).thenReturn(true);
-        when(rateLimitService.allowMfaOtpSend(anyString())).thenReturn(true);
-        when(rateLimitService.allowMfaQrGenerate(anyString())).thenReturn(true);
     }
 
     // ============== REGISTRATION TESTS ==============
@@ -457,17 +458,26 @@ class AuthControllerTest {
 
     // ============== MFA RATE LIMIT TESTS (PR #17 Copilot follow-up) ==============
 
+    private static final String SESSION_TOKEN_STUB = "stub-session-token";
+    private static final String MFA_STEP_BODY =
+        "{\"sessionToken\":\"" + SESSION_TOKEN_STUB + "\",\"method\":\"EMAIL_OTP\"}";
+    private static final String MFA_QR_BODY =
+        "{\"sessionToken\":\"" + SESSION_TOKEN_STUB + "\"}";
+
+    private void stubEnforceThrows(RateLimitService.RateLimitType type, long retryAfterSeconds) {
+        doThrow(new RateLimitExceededException("rate limited", retryAfterSeconds))
+            .when(rateLimitService).enforce(eq(type), anyString(), anyString());
+    }
+
     @Test
     @DisplayName("POST /api/v1/auth/mfa/step - Rate Limited (429 + Retry-After)")
     void testMfaStep_RateLimited() throws Exception {
-        when(rateLimitService.allowMfaStepAttempt(anyString())).thenReturn(false);
-        when(rateLimitService.getSecondsUntilRefill(anyString(),
-                eq(RateLimitService.RateLimitType.MFA_STEP))).thenReturn(42L);
+        stubEnforceThrows(RateLimitService.RateLimitType.MFA_STEP, 42L);
 
         mockMvc.perform(post("/api/v1/auth/mfa/step")
                         .with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"sessionToken\":\"x\",\"method\":\"EMAIL_OTP\"}"))
+                        .content(MFA_STEP_BODY))
                 .andExpect(status().isTooManyRequests())
                 .andExpect(header().string("Retry-After", "42"));
     }
@@ -475,14 +485,12 @@ class AuthControllerTest {
     @Test
     @DisplayName("POST /api/v1/auth/mfa/send-otp - Rate Limited (429 + Retry-After)")
     void testMfaSendOtp_RateLimited() throws Exception {
-        when(rateLimitService.allowMfaOtpSend(anyString())).thenReturn(false);
-        when(rateLimitService.getSecondsUntilRefill(anyString(),
-                eq(RateLimitService.RateLimitType.MFA_OTP_SEND))).thenReturn(120L);
+        stubEnforceThrows(RateLimitService.RateLimitType.MFA_OTP_SEND, 120L);
 
         mockMvc.perform(post("/api/v1/auth/mfa/send-otp")
                         .with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"sessionToken\":\"x\",\"method\":\"EMAIL_OTP\"}"))
+                        .content(MFA_STEP_BODY))
                 .andExpect(status().isTooManyRequests())
                 .andExpect(header().string("Retry-After", "120"));
     }
@@ -490,14 +498,12 @@ class AuthControllerTest {
     @Test
     @DisplayName("POST /api/v1/auth/mfa/qr-generate - Rate Limited (429 + Retry-After)")
     void testMfaQrGenerate_RateLimited() throws Exception {
-        when(rateLimitService.allowMfaQrGenerate(anyString())).thenReturn(false);
-        when(rateLimitService.getSecondsUntilRefill(anyString(),
-                eq(RateLimitService.RateLimitType.MFA_QR))).thenReturn(60L);
+        stubEnforceThrows(RateLimitService.RateLimitType.MFA_QR, 60L);
 
         mockMvc.perform(post("/api/v1/auth/mfa/qr-generate")
                         .with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"sessionToken\":\"x\"}"))
+                        .content(MFA_QR_BODY))
                 .andExpect(status().isTooManyRequests())
                 .andExpect(header().string("Retry-After", "60"));
     }
