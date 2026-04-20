@@ -1,0 +1,33 @@
+-- V39__encrypt_totp_secrets.sql
+--
+-- BE-H3 (AUDIT_2026-04-19): Encrypt TOTP shared secrets at rest (AES-GCM-256).
+--
+-- This migration is intentionally a NO-OP at the SQL layer.
+--
+-- Rationale:
+--   * pgcrypto is not provisioned with the application KEK
+--     (FIVUCSAS_TOTP_ENC_KEY) and we do not want the key leaving Java memory
+--     or appearing in migration logs / WAL.
+--   * Re-encryption is performed by `TotpSecretMigrator`, a gated
+--     CommandLineRunner that streams legacy-plaintext rows and re-writes them
+--     in the `enc:v1:<base64(iv||ct||tag)>` format produced by
+--     `TotpSecretCipher`.
+--
+-- Operator runbook:
+--   1. Generate and deploy the KEK:
+--        openssl rand -base64 32   →   FIVUCSAS_TOTP_ENC_KEY
+--      Set in .env.prod and restart the container so the cipher bean
+--      initializes. Without the key the service refuses to boot.
+--   2. Announce a short maintenance window (reads still work via the
+--      dual-read path, but any concurrent writes during migration could
+--      race).
+--   3. Set fivucsas.totp.migrate-on-boot=true (or
+--      FIVUCSAS_TOTP_MIGRATE_ON_BOOT=true) and redeploy.
+--   4. The migrator logs "[TotpSecretMigrator] done: N legacy rows
+--      re-encrypted, M already encrypted" on completion. Flip the flag back
+--      to false.
+--
+-- The dual-read code path continues to work indefinitely, so scheduling is
+-- not time-critical. New enrollments are always encrypted from V39 onward.
+
+SELECT 1;  -- placeholder so Flyway records the migration

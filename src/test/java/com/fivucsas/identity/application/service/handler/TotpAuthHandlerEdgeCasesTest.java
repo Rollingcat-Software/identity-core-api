@@ -31,6 +31,7 @@ class TotpAuthHandlerEdgeCasesTest {
     @Mock private StringRedisTemplate redisTemplate;
     @Mock private ValueOperations<String, String> valueOperations;
     @Mock private UserRepository userRepository;
+    @Mock private com.fivucsas.identity.security.TotpSecretCipher totpSecretCipher;
     @Mock private AuthSession session;
     @Mock private AuthFlowStep step;
 
@@ -78,13 +79,38 @@ class TotpAuthHandlerEdgeCasesTest {
         when(redisTemplate.opsForValue()).thenReturn(valueOperations);
         when(valueOperations.get("totp:secret:" + userId)).thenReturn(null);
         when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+        // BE-H3 dual-read: legacy plaintext → cipher returns unchanged.
+        when(totpSecretCipher.decryptIfNeeded("DB_SECRET_VALUE")).thenReturn("DB_SECRET_VALUE");
         when(totpService.verifyCode("DB_SECRET_VALUE", "123456")).thenReturn(true);
 
         StepResult result = handler.validate(session, step, Map.of("code", "123456"));
 
         assertThat(result.isSuccess()).isTrue();
-        // Verify it re-cached the secret in Redis
+        // Verify it re-cached the plaintext secret in Redis
         verify(valueOperations).set("totp:secret:" + userId, "DB_SECRET_VALUE");
+    }
+
+    // ── BE-H3 dual-read: encrypted DB value decrypted on fallback ───────
+
+    @Test
+    void validate_WhenSecretInDbIsEncrypted_ShouldDecryptAndSucceed() {
+        UUID userId = UUID.randomUUID();
+        User user = mock(User.class);
+        String ciphertext = "enc:v1:ZmFrZUJsb2I=";
+        when(user.getId()).thenReturn(userId);
+        when(user.getTwoFactorSecret()).thenReturn(ciphertext);
+        when(session.getUser()).thenReturn(user);
+        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+        when(valueOperations.get("totp:secret:" + userId)).thenReturn(null);
+        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+        when(totpSecretCipher.decryptIfNeeded(ciphertext)).thenReturn("PLAINTEXT_SEED");
+        when(totpService.verifyCode("PLAINTEXT_SEED", "654321")).thenReturn(true);
+
+        StepResult result = handler.validate(session, step, Map.of("code", "654321"));
+
+        assertThat(result.isSuccess()).isTrue();
+        // Redis cache holds PLAINTEXT, not ciphertext
+        verify(valueOperations).set("totp:secret:" + userId, "PLAINTEXT_SEED");
     }
 
     @Test

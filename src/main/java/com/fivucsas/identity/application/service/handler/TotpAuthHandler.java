@@ -6,6 +6,7 @@ import com.fivucsas.identity.entity.AuthFlowStep;
 import com.fivucsas.identity.entity.AuthSession;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.infrastructure.totp.TotpService;
+import com.fivucsas.identity.security.TotpSecretCipher;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -25,6 +26,7 @@ public class TotpAuthHandler implements AuthMethodHandler {
     private final TotpService totpService;
     private final StringRedisTemplate redisTemplate;
     private final UserRepository userRepository;
+    private final TotpSecretCipher totpSecretCipher;
 
     @Override
     public AuthMethodType getMethodType() {
@@ -103,7 +105,8 @@ public class TotpAuthHandler implements AuthMethodHandler {
         if (secret == null) {
             User user = userRepository.findById(userId).orElse(null);
             if (user != null && user.getTwoFactorSecret() != null) {
-                secret = user.getTwoFactorSecret();
+                // BE-H3: DB value may be enc:v1:... or legacy plaintext.
+                secret = totpSecretCipher.decryptIfNeeded(user.getTwoFactorSecret());
                 redisTemplate.opsForValue().set(redisKey, secret);
                 log.info("TOTP secret re-cached in Redis for user: {}", userId);
             }

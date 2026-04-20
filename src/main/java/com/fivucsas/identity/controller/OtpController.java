@@ -5,6 +5,7 @@ import com.fivucsas.identity.infrastructure.email.EmailService;
 import com.fivucsas.identity.infrastructure.otp.OtpService;
 import com.fivucsas.identity.infrastructure.sms.SmsService;
 import com.fivucsas.identity.infrastructure.totp.TotpService;
+import com.fivucsas.identity.security.TotpSecretCipher;
 import com.fivucsas.identity.domain.repository.UserRepository;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -41,6 +42,7 @@ public class OtpController {
     private final TotpService totpService;
     private final UserRepository userRepository;
     private final StringRedisTemplate redisTemplate;
+    private final TotpSecretCipher totpSecretCipher;
 
     // --- /api/v1/otp endpoints ---
 
@@ -193,10 +195,12 @@ public class OtpController {
         redisTemplate.opsForValue().set(activeKey, secret);
         redisTemplate.delete(pendingKey);
 
-        // Persist to PostgreSQL (source of truth — survives Redis restarts)
+        // Persist to PostgreSQL (source of truth — survives Redis restarts).
+        // BE-H3: secret is encrypted at-rest via TotpSecretCipher (AES-GCM-256).
+        // Redis keeps plaintext (ephemeral cache). DB always stores enc:v1:... form.
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new UserNotFoundException(userId.toString()));
-        user.enable2FA(secret, null);
+        user.enable2FA(totpSecretCipher.encrypt(secret), null);
         userRepository.save(user);
 
         log.info("TOTP setup completed for user: {} (persisted to DB + Redis)", userId);
@@ -217,9 +221,11 @@ public class OtpController {
         if (!configured) {
             User user = userRepository.findById(userId).orElse(null);
             configured = user != null && user.is2faEnabled();
-            // Re-cache in Redis if found in DB but missing from Redis
+            // Re-cache in Redis if found in DB but missing from Redis.
+            // BE-H3: decrypt DB value (may be legacy plaintext) before caching.
             if (configured) {
-                redisTemplate.opsForValue().set(activeKey, user.getTwoFactorSecret());
+                String plaintext = totpSecretCipher.decryptIfNeeded(user.getTwoFactorSecret());
+                redisTemplate.opsForValue().set(activeKey, plaintext);
                 log.info("TOTP secret re-cached in Redis for user: {}", userId);
             }
         }

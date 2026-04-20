@@ -181,6 +181,9 @@ class AuthControllerTest {
     @MockBean
     private UserEnrollmentRepository userEnrollmentRepository;
 
+    @MockBean
+    private com.fivucsas.identity.security.TotpSecretCipher totpSecretCipher;
+
     // Test Data
     private static final String TEST_EMAIL = "test@fivucsas.com";
     private static final String TEST_PASSWORD = "SecurePassword123!";

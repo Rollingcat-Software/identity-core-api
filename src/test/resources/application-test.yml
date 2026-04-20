@@ -48,6 +48,13 @@ jwt:
   expiration: 3600000  # 1 hour in milliseconds
   refresh-expiration: 86400000  # 24 hours in milliseconds
 
+# BE-H3: test-only KEK for TotpSecretCipher so Spring contexts boot.
+# Real environments must set FIVUCSAS_TOTP_ENC_KEY via openssl rand -base64 32.
+fivucsas:
+  totp:
+    enc-key: AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=
+    migrate-on-boot: false
+
 # CORS Configuration for Testing
 cors:
   allowed-origins: http://localhost:3000,http://localhost:5173

@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+### Security
+- **BE-H3 — TOTP shared secrets encrypted at rest (AES-GCM-256).**
+  `users.two_factor_secret` previously stored plaintext; now encrypted via new
+  `TotpSecretCipher` (KEK from `FIVUCSAS_TOTP_ENC_KEY`, base64 32 bytes) and
+  written in format `enc:v1:<base64(iv||ct||tag)>`. Service refuses to boot
+  when the KEK is missing/malformed — no silent plaintext fallback. All read
+  sites (`AuthController.resolveTotpSecret`, `TotpAuthHandler.resolveTotpSecret`,
+  `OtpController.getTotpStatus`) apply dual-read: legacy plaintext returned
+  unchanged, `enc:v1:` values decrypted. Writes always encrypt. Redis cache
+  continues to hold plaintext (ephemeral, not at-rest). Flyway V39 is a
+  placeholder; companion `TotpSecretMigrator` CommandLineRunner (gated by
+  `fivucsas.totp.migrate-on-boot=true`, default OFF) re-encrypts legacy rows
+  during a maintenance window. `.env.example` documents `openssl rand -base64
+  32` generation. AUDIT_2026-04-19.
+
 ### Added
 - **IN-H5 — `audit_logs` range-partitioned by `created_at` (monthly).**
   New Flyway migrations `V40__partition_audit_logs.sql` and

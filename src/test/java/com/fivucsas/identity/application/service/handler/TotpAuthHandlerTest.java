@@ -29,6 +29,7 @@ class TotpAuthHandlerTest {
     @Mock private StringRedisTemplate redisTemplate;
     @Mock private ValueOperations<String, String> valueOperations;
     @Mock private UserRepository userRepository;
+    @Mock private com.fivucsas.identity.security.TotpSecretCipher totpSecretCipher;
     @Mock private AuthSession session;
     @Mock private AuthFlowStep step;
 

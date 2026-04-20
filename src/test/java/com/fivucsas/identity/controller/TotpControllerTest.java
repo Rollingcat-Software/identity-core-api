@@ -42,6 +42,7 @@ class TotpControllerTest {
     @Mock private UserRepository userRepository;
     @Mock private StringRedisTemplate redisTemplate;
     @Mock private ValueOperations<String, String> valueOps;
+    @Mock private com.fivucsas.identity.security.TotpSecretCipher totpSecretCipher;
 
     @InjectMocks
     private OtpController totpController;

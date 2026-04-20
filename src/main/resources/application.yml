@@ -64,6 +64,28 @@ jwt:
   expiration: ${JWT_EXPIRATION:86400000}  # 24 hours default
   refresh-expiration: ${JWT_REFRESH_EXPIRATION:604800000}  # 7 days default
 
+# FIVUCSAS application-level knobs
+# BE-H1 dual-algo JWT coexistence:
+#   default-algo selects the algorithm used to SIGN new tokens.
+#     HS512 = legacy symmetric (default during coexistence window)
+#     RS256 = asymmetric, OIDC best practice (flip after soak)
+#   Verification always accepts BOTH HS512 and RS256 via kid lookup.
+#   RSA keys are loaded from JWT_RSA_PRIVATE_KEY_PEM / JWT_RSA_PUBLIC_KEY_PEM env vars
+#   (required in prod; auto-generated in dev profile).
+fivucsas:
+  jwt:
+    default-algo: ${JWT_DEFAULT_ALGO:HS512}
+    rsa-kid: ${JWT_RSA_KID:rs-2026-04}
+    rsa-private-key-pem: ${JWT_RSA_PRIVATE_KEY_PEM:}
+    rsa-public-key-pem: ${JWT_RSA_PUBLIC_KEY_PEM:}
+  # BE-H3 (AUDIT_2026-04-19): TOTP shared-secret at-rest encryption.
+  # enc-key: base64 32 bytes; app refuses to boot without it.
+  # migrate-on-boot: gates TotpSecretMigrator (legacy plaintext → enc:v1:...).
+  # Generate: openssl rand -base64 32
+  totp:
+    enc-key: ${FIVUCSAS_TOTP_ENC_KEY:}
+    migrate-on-boot: ${FIVUCSAS_TOTP_MIGRATE_ON_BOOT:false}
+
 # FastAPI Integration
 biometric:
   service:

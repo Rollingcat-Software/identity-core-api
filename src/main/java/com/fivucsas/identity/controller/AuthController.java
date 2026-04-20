@@ -28,6 +28,7 @@ import com.fivucsas.identity.infrastructure.sms.VerifiableSmsService;
 import com.fivucsas.identity.domain.repository.UserRepository;
 import com.fivucsas.identity.domain.exception.UserNotFoundException;
 import com.fivucsas.identity.security.RateLimitService;
+import com.fivucsas.identity.security.TotpSecretCipher;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -97,6 +98,7 @@ public class AuthController {
     private final RefreshTokenService refreshTokenService;
     private final UserEnrollmentRepository userEnrollmentRepository;
     private final com.fivucsas.identity.application.service.EnrollmentHealthService enrollmentHealthService;
+    private final TotpSecretCipher totpSecretCipher;
     private final com.fivucsas.identity.application.port.output.NfcCardRepositoryPort nfcCardRepository;
     private final com.fivucsas.identity.infrastructure.qrcode.QrCodeService qrCodeService;
     private final com.fivucsas.identity.application.port.output.WebAuthnCredentialRepositoryPort webAuthnCredentialRepository;
@@ -1137,7 +1139,9 @@ public class AuthController {
         String redisKey = "totp:secret:" + user.getId();
         String secret = redisTemplate.opsForValue().get(redisKey);
         if (secret == null && user.getTwoFactorSecret() != null) {
-            secret = user.getTwoFactorSecret();
+            // BE-H3: DB value may be enc:v1:... (encrypted) or legacy plaintext.
+            // decryptIfNeeded() handles both; Redis cache always holds plaintext.
+            secret = totpSecretCipher.decryptIfNeeded(user.getTwoFactorSecret());
             redisTemplate.opsForValue().set(redisKey, secret);
             log.info("TOTP secret re-cached in Redis for user: {}", user.getId());
         }
