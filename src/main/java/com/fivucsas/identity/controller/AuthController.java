@@ -27,6 +27,7 @@ import com.fivucsas.identity.infrastructure.sms.SmsService;
 import com.fivucsas.identity.infrastructure.sms.VerifiableSmsService;
 import com.fivucsas.identity.domain.repository.UserRepository;
 import com.fivucsas.identity.domain.exception.UserNotFoundException;
+import com.fivucsas.identity.exception.RateLimitExceededException;
 import com.fivucsas.identity.security.RateLimitService;
 import com.fivucsas.identity.security.TotpSecretCipher;
 import io.swagger.v3.oas.annotations.Operation;
@@ -602,8 +603,10 @@ public class AuthController {
 
         String clientIp = getClientIP(httpRequest);
         if (!rateLimitService.allowMfaStepAttempt(clientIp)) {
-            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
-                .body(Map.of("status", "ERROR", "message", "Too many MFA attempts. Please wait and try again."));
+            long retryAfter = rateLimitService.getSecondsUntilRefill(
+                clientIp, RateLimitService.RateLimitType.MFA_STEP);
+            throw new RateLimitExceededException(
+                "Too many MFA attempts. Please wait and try again.", retryAfter);
         }
 
         String sessionToken = (String) request.get("sessionToken");
@@ -945,8 +948,10 @@ public class AuthController {
             HttpServletRequest httpRequest) {
         String clientIp = getClientIP(httpRequest);
         if (!rateLimitService.allowMfaQrGenerate(clientIp)) {
-            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
-                .body(Map.of("message", "Too many QR generation requests. Please wait and try again."));
+            long retryAfter = rateLimitService.getSecondsUntilRefill(
+                clientIp, RateLimitService.RateLimitType.MFA_QR);
+            throw new RateLimitExceededException(
+                "Too many QR generation requests. Please wait and try again.", retryAfter);
         }
         String sessionToken = request.get("sessionToken");
         if (sessionToken == null || sessionToken.isBlank()) {
@@ -976,8 +981,10 @@ public class AuthController {
             HttpServletRequest httpRequest) {
         String clientIp = getClientIP(httpRequest);
         if (!rateLimitService.allowMfaOtpSend(clientIp)) {
-            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
-                .body(Map.of("message", "Too many OTP send requests. Please wait and try again."));
+            long retryAfter = rateLimitService.getSecondsUntilRefill(
+                clientIp, RateLimitService.RateLimitType.MFA_OTP_SEND);
+            throw new RateLimitExceededException(
+                "Too many OTP send requests. Please wait and try again.", retryAfter);
         }
         String sessionToken = request.get("sessionToken");
         String method = request.getOrDefault("method", "EMAIL_OTP");

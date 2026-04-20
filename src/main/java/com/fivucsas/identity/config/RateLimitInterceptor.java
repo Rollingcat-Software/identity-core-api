@@ -79,21 +79,10 @@ public class RateLimitInterceptor implements HandlerInterceptor {
                     retryAfter
                 );
             }
-        } else if (path.contains("/auth/mfa/qr-generate")) {
-            // Defend against broken clients looping on QR generation.
-            // Uses the biometric bucket (20/min per IP) — matches the expected legitimate rate.
-            if (!rateLimitService.allowBiometricVerification(clientIp)) {
-                long retryAfter = rateLimitService.getSecondsUntilRefill(
-                    clientIp,
-                    RateLimitService.RateLimitType.BIOMETRIC
-                );
-                response.setHeader("Retry-After", String.valueOf(retryAfter));
-                throw new RateLimitExceededException(
-                    "Too many QR generation requests. Please wait and try again.",
-                    retryAfter
-                );
-            }
         }
+        // NOTE: /auth/mfa/qr-generate is rate-limited at the controller layer
+        // via RateLimitService.allowMfaQrGenerate (MFA_QR bucket, 5/10min per IP).
+        // Centralizing there avoids double-limiting with two conflicting policies.
 
         return true;
     }

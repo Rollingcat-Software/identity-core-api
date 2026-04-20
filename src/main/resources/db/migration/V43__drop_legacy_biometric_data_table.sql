@@ -23,16 +23,11 @@
 --     is already covered by the "enrollments" section (user_enrollments).
 --   * EnrollmentController.getEnrollmentStatus() and EnrollmentQueryService
 --     have been rewired to read user_enrollments instead of biometric_data.
---   * DROP is idempotent (IF EXISTS) and uses CASCADE to clean up any stray
---     foreign keys from prior experiments (none expected in prod).
+--   * DROP is idempotent (IF EXISTS). No dependent objects are expected in
+--     production, so the table is dropped without CASCADE.
 --
 -- Rollback: if ever needed, replay V4's CREATE TABLE biometric_data DDL plus
 -- its user_id FK. No data restoration is necessary — the production table
 -- was empty at the time of this drop.
 
--- Dead code cleanup (AUDIT_2026-04-20). The biometric_data table was a legacy
--- table from an earlier architecture where face embeddings lived in identity-core-api.
--- The current architecture delegates all biometric storage to biometric-processor's
--- separate biometric_db (face_embeddings + voice_enrollments, pgvector). The Java
--- BiometricService class has had zero live callers since commit X (verified via git log + grep).
-DROP TABLE IF EXISTS biometric_data CASCADE;
+DROP TABLE IF EXISTS biometric_data;

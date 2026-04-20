@@ -55,6 +55,7 @@ import org.junit.jupiter.api.BeforeEach;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -452,5 +453,52 @@ class AuthControllerTest {
                 .andExpect(status().isNoContent());
 
         verify(logoutUserUseCase, times(1)).execute(any());
+    }
+
+    // ============== MFA RATE LIMIT TESTS (PR #17 Copilot follow-up) ==============
+
+    @Test
+    @DisplayName("POST /api/v1/auth/mfa/step - Rate Limited (429 + Retry-After)")
+    void testMfaStep_RateLimited() throws Exception {
+        when(rateLimitService.allowMfaStepAttempt(anyString())).thenReturn(false);
+        when(rateLimitService.getSecondsUntilRefill(anyString(),
+                eq(RateLimitService.RateLimitType.MFA_STEP))).thenReturn(42L);
+
+        mockMvc.perform(post("/api/v1/auth/mfa/step")
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"sessionToken\":\"x\",\"method\":\"EMAIL_OTP\"}"))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(header().string("Retry-After", "42"));
+    }
+
+    @Test
+    @DisplayName("POST /api/v1/auth/mfa/send-otp - Rate Limited (429 + Retry-After)")
+    void testMfaSendOtp_RateLimited() throws Exception {
+        when(rateLimitService.allowMfaOtpSend(anyString())).thenReturn(false);
+        when(rateLimitService.getSecondsUntilRefill(anyString(),
+                eq(RateLimitService.RateLimitType.MFA_OTP_SEND))).thenReturn(120L);
+
+        mockMvc.perform(post("/api/v1/auth/mfa/send-otp")
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"sessionToken\":\"x\",\"method\":\"EMAIL_OTP\"}"))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(header().string("Retry-After", "120"));
+    }
+
+    @Test
+    @DisplayName("POST /api/v1/auth/mfa/qr-generate - Rate Limited (429 + Retry-After)")
+    void testMfaQrGenerate_RateLimited() throws Exception {
+        when(rateLimitService.allowMfaQrGenerate(anyString())).thenReturn(false);
+        when(rateLimitService.getSecondsUntilRefill(anyString(),
+                eq(RateLimitService.RateLimitType.MFA_QR))).thenReturn(60L);
+
+        mockMvc.perform(post("/api/v1/auth/mfa/qr-generate")
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"sessionToken\":\"x\"}"))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(header().string("Retry-After", "60"));
     }
 }
