@@ -38,7 +38,7 @@ Password, EmailOtp, SmsOtp, Totp, QrCode, Face, Fingerprint, Voice, NfcDocument,
 - **NFC enrollment**: Auto-creates user_enrollments record. Reactivates existing inactive card on re-enrollment.
 - **CORS**: api.fivucsas.com, app.fivucsas.com, demo.fivucsas.com, verify.fivucsas.com
 
-## Flyway Migrations (V1-V38)
+## Flyway Migrations (V1-V43)
 
 V1-V15: Core schema | V16: Auth methods/flows | V17: Devices | V24: OAuth2 | V25: Enrollments
 V26-V28: Verification pipeline | V29: EMAIL_OTP default | V30: Adaptive MFA (CHOICE steps)
@@ -49,8 +49,13 @@ V35: mfa_sessions.consumed_at TIMESTAMP (atomic code-mint replay guard — PR-1 
 V36: mfa_sessions.client_id UUID (cross-client replay guard — PR-1 B2)
 V37: oauth2_clients.tenant_id index (audit safety-net; V24 already had it)
 V38: fivucsas-web-dashboard → confidential=false (SPA cannot hold a secret)
+V39: users.two_factor_secret AES-GCM-256 encryption (BE-H3, AUDIT_2026-04-19)
+V40: audit_logs monthly RANGE partitioning (IN-H5, AUDIT_2026-04-19)
+V41: audit_logs pg_partman maintenance (auto-create partitions)
+V42: CHECK constraint — two_factor_secret LIKE 'enc:v1:%' (TOTP strict, PR #17)
+V43: DROP TABLE biometric_data (dead-code cleanup, 0 rows in prod; PR #17)
 
-**V34-V38 all applied to prod DB (container rebuilt 2026-04-16 + 2026-04-18).**
+**V34-V43 all applied to prod DB (container rebuilt 2026-04-16, -18, -20).**
 
 ## Cross-Repo Dependencies
 
