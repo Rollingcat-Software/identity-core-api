@@ -600,6 +600,12 @@ public class AuthController {
             @RequestBody Map<String, Object> request,
             HttpServletRequest httpRequest) {
 
+        String clientIp = getClientIP(httpRequest);
+        if (!rateLimitService.allowMfaStepAttempt(clientIp)) {
+            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                .body(Map.of("status", "ERROR", "message", "Too many MFA attempts. Please wait and try again."));
+        }
+
         String sessionToken = (String) request.get("sessionToken");
         String method = (String) request.get("method");
         Map<String, Object> data = (Map<String, Object>) request.getOrDefault("data", Map.of());
@@ -819,7 +825,6 @@ public class AuthController {
 
             if (!valid) {
                 String reason = resolveFailureReason(methodType, data);
-                String clientIp = getClientIP(httpRequest);
                 String ua = getUserAgent(httpRequest);
                 log.warn("AUDIT: MFA step failed — method: {}, reason: {}, userId={}, step: {}/{}, ip={}, userAgent={}",
                         method, reason, user.getId(), mfaSession.getCurrentStep(), mfaSession.getTotalSteps(),
@@ -935,7 +940,14 @@ public class AuthController {
 
     @PostMapping("/mfa/qr-generate")
     @Operation(summary = "Generate QR token during MFA flow (public — no JWT, uses session token)")
-    public ResponseEntity<Map<String, Object>> generateMfaQrToken(@RequestBody Map<String, String> request) {
+    public ResponseEntity<Map<String, Object>> generateMfaQrToken(
+            @RequestBody Map<String, String> request,
+            HttpServletRequest httpRequest) {
+        String clientIp = getClientIP(httpRequest);
+        if (!rateLimitService.allowMfaQrGenerate(clientIp)) {
+            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                .body(Map.of("message", "Too many QR generation requests. Please wait and try again."));
+        }
         String sessionToken = request.get("sessionToken");
         if (sessionToken == null || sessionToken.isBlank()) {
             return ResponseEntity.badRequest().body(Map.of("message", "sessionToken is required"));
@@ -959,7 +971,14 @@ public class AuthController {
 
     @PostMapping("/mfa/send-otp")
     @Operation(summary = "Send OTP during MFA flow (public — no JWT, uses session token)")
-    public ResponseEntity<Map<String, String>> sendMfaOtp(@RequestBody Map<String, String> request) {
+    public ResponseEntity<Map<String, String>> sendMfaOtp(
+            @RequestBody Map<String, String> request,
+            HttpServletRequest httpRequest) {
+        String clientIp = getClientIP(httpRequest);
+        if (!rateLimitService.allowMfaOtpSend(clientIp)) {
+            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                .body(Map.of("message", "Too many OTP send requests. Please wait and try again."));
+        }
         String sessionToken = request.get("sessionToken");
         String method = request.getOrDefault("method", "EMAIL_OTP");
 

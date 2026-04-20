@@ -27,7 +27,8 @@ import java.util.function.Function;
  * - RS256 (asymmetric, OIDC best practice) — kid = RsaKeyProvider.getKid()
  *
  * Signing algorithm is selected by {@code fivucsas.jwt.default-algo}
- * (default HS512 during the coexistence window; flip to RS256 after soak).
+ * (default RS256 as of 2026-04-20; HS512 retained in verify-only mode for
+ * legacy tokens minted during the coexistence window).
  *
  * Verification inspects the incoming JWS header "kid" and routes to the
  * matching key. Tokens without a recognised kid are rejected.
@@ -45,7 +46,7 @@ public class JwtService implements TokenGenerationPort {
     @Value("${jwt.expiration}")
     private long jwtExpiration;
 
-    @Value("${fivucsas.jwt.default-algo:HS512}")
+    @Value("${fivucsas.jwt.default-algo:RS256}")
     private String defaultAlgo;
 
     public JwtService(JwtSecretProvider jwtSecretProvider, RsaKeyProvider rsaKeyProvider) {
@@ -93,7 +94,7 @@ public class JwtService implements TokenGenerationPort {
                 .issuedAt(new Date(System.currentTimeMillis()))
                 .expiration(new Date(System.currentTimeMillis() + expiration));
 
-        String alg = defaultAlgo == null ? "HS512" : defaultAlgo.trim().toUpperCase();
+        String alg = defaultAlgo == null ? "RS256" : defaultAlgo.trim().toUpperCase();
         String token;
         if ("RS256".equals(alg)) {
             token = builder

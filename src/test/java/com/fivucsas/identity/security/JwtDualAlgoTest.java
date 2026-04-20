@@ -96,6 +96,20 @@ class JwtDualAlgoTest {
     }
 
     @Test
+    @DisplayName("Default-algo unset (null) falls through to RS256 (defense-in-depth, 2026-04-20)")
+    void defaultAlgoNullSignsRs256() {
+        ReflectionTestUtils.setField(service, "defaultAlgo", null);
+        String token = service.generateAccessToken(TEST_EMAIL);
+
+        // Header inspection — the JWS kid must match the RSA provider's kid, not HS_KID
+        String header = new String(io.jsonwebtoken.io.Decoders.BASE64URL.decode(
+                token.split("\\.")[0]));
+        assertThat(header).contains("\"alg\":\"RS256\"");
+        assertThat(header).contains("\"kid\":\"" + rsa.getKid() + "\"");
+        assertThat(service.isTokenValid(token, TEST_EMAIL)).isTrue();
+    }
+
+    @Test
     @DisplayName("Unknown kid is rejected")
     void unknownKidRejected() {
         byte[] bytes = io.jsonwebtoken.io.Decoders.BASE64.decode(TEST_SECRET);

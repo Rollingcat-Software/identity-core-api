@@ -4,14 +4,12 @@ import com.fivucsas.identity.application.port.input.UserDataExportUseCase;
 import com.fivucsas.identity.domain.exception.UserNotFoundException;
 import com.fivucsas.identity.entity.AuditLog;
 import com.fivucsas.identity.entity.AuthSession;
-import com.fivucsas.identity.entity.BiometricData;
 import com.fivucsas.identity.entity.OAuth2Client;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.entity.UserEnrollment;
 import com.fivucsas.identity.entity.VerificationSession;
 import com.fivucsas.identity.repository.AuditLogRepository;
 import com.fivucsas.identity.repository.AuthSessionRepository;
-import com.fivucsas.identity.repository.BiometricDataRepository;
 import com.fivucsas.identity.repository.OAuth2ClientRepository;
 import com.fivucsas.identity.repository.UserEnrollmentRepository;
 import com.fivucsas.identity.repository.UserRepository;
@@ -23,8 +21,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
-import java.util.Collections;
-import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -34,17 +30,18 @@ import java.util.UUID;
  * GDPR Art. 20 / KVKK data-portability service.
  *
  * <p>Gathers personal data from identity-core tables (users, user_enrollments, auth_sessions,
- * audit_logs, verification_sessions, oauth2_clients, biometric_data metadata) into a single
- * JSON-serialisable bundle. Biometric face/voice embeddings stored in the separate
- * {@code biometric_db} are out of scope for this service — only metadata (enrolled_at,
- * auth method) is exposed.</p>
+ * audit_logs, verification_sessions, oauth2_clients) into a single JSON-serialisable bundle.
+ * Biometric face/voice embeddings live in the separate {@code biometric_db} managed by
+ * biometric-processor and are out of scope for this service — only metadata that is already
+ * present in {@code user_enrollments} (auth method, enrolled_at, status) is exposed.</p>
  *
  * <p>Exclusions (deliberate, industry norm):
  * <ul>
  *   <li>password_hash, two_factor_secret (BCrypt hash + TOTP seed)</li>
  *   <li>two_factor_backup_codes (treat as credentials)</li>
  *   <li>email/password-reset tokens (ephemeral credentials)</li>
- *   <li>raw 512-dim embedding vector from {@code biometric_data} (opaque security artefact)</li>
+ *   <li>raw 512-dim face / voice embedding vectors (opaque security artefacts, held in
+ *       biometric_db; Auth0/Okta precedent excludes raw biometric templates from exports)</li>
  *   <li>WebAuthn credential private material (handled at registration-time)</li>
  * </ul>
  */
@@ -66,7 +63,6 @@ public class UserDataExportService implements UserDataExportUseCase {
     private final AuditLogRepository auditLogRepository;
     private final VerificationSessionRepository verificationSessionRepository;
     private final OAuth2ClientRepository oauth2ClientRepository;
-    private final BiometricDataRepository biometricDataRepository;
 
     @Override
     public Map<String, Object> exportUserData(UUID userId) {
@@ -83,7 +79,7 @@ public class UserDataExportService implements UserDataExportUseCase {
         bundle.put("verificationSessions", serializeVerificationSessions(userId));
         bundle.put("oauth2Clients", serializeOAuth2Clients(user));
         bundle.put("voiceEnrollments", List.of());   // metadata lives in biometric_db (separate service)
-        bundle.put("biometricEnrollments", serializeBiometricMetadata(userId));
+        bundle.put("biometricEnrollments", serializeBiometricMetadata());
         return bundle;
     }
 
@@ -223,23 +219,14 @@ public class UserDataExportService implements UserDataExportUseCase {
             .toList();
     }
 
-    private List<Map<String, Object>> serializeBiometricMetadata(UUID userId) {
-        // biometric_data table in identity DB stores a legacy face embedding for some users.
-        // Export metadata only — the 512-dim vector is an opaque security artefact (Auth0/Okta
-        // precedent excludes raw biometric templates from exports).
-        return biometricDataRepository.findByUserId(userId)
-            .map(this::serializeBiometricMetadata)
-            .map(List::of)
-            .orElse(Collections.emptyList());
-    }
-
-    private Map<String, Object> serializeBiometricMetadata(BiometricData b) {
-        Map<String, Object> m = new HashMap<>();
-        m.put("id", b.getId() != null ? b.getId().toString() : null);
-        m.put("enrolledAt", toStringOrNull(b.getEnrolledAt()));
-        m.put("method", "FACE");
-        // embedding vector deliberately omitted
-        return m;
+    private List<Map<String, Object>> serializeBiometricMetadata() {
+        // The legacy biometric_data table in identity_core was dropped in V43
+        // (AUDIT_2026-04-20 dead-code cleanup). Biometric face/voice enrollments
+        // are already reported under "enrollments" (from user_enrollments), and
+        // the raw embedding vectors live in biometric_db and remain out of scope
+        // for this export (Auth0/Okta precedent excludes raw biometric templates).
+        // Key retained in the bundle for schema-stability with existing consumers.
+        return List.of();
     }
 
     private static String toStringOrNull(Instant instant) {

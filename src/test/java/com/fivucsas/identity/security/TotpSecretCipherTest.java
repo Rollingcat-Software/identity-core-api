@@ -34,7 +34,7 @@ class TotpSecretCipherTest {
 
     @BeforeEach
     void setUp() {
-        cipher = new TotpSecretCipher(TEST_KEK_B64);
+        cipher = new TotpSecretCipher(TEST_KEK_B64, false);
         ReflectionTestUtils.invokeMethod(cipher, "init");
     }
 
@@ -119,7 +119,7 @@ class TotpSecretCipherTest {
 
     @Test
     void init_WithMissingKey_ShouldFailFast() {
-        TotpSecretCipher noKey = new TotpSecretCipher("");
+        TotpSecretCipher noKey = new TotpSecretCipher("", false);
 
         assertThatThrownBy(() -> ReflectionTestUtils.invokeMethod(noKey, "init"))
                 .isInstanceOf(IllegalStateException.class)
@@ -128,7 +128,7 @@ class TotpSecretCipherTest {
 
     @Test
     void init_WithNullKey_ShouldFailFast() {
-        TotpSecretCipher noKey = new TotpSecretCipher(null);
+        TotpSecretCipher noKey = new TotpSecretCipher(null, false);
 
         assertThatThrownBy(() -> ReflectionTestUtils.invokeMethod(noKey, "init"))
                 .isInstanceOf(IllegalStateException.class)
@@ -137,7 +137,7 @@ class TotpSecretCipherTest {
 
     @Test
     void init_WithInvalidBase64_ShouldFailFast() {
-        TotpSecretCipher bad = new TotpSecretCipher("!!!not-base64!!!");
+        TotpSecretCipher bad = new TotpSecretCipher("!!!not-base64!!!", false);
 
         assertThatThrownBy(() -> ReflectionTestUtils.invokeMethod(bad, "init"))
                 .isInstanceOf(IllegalStateException.class)
@@ -148,11 +148,39 @@ class TotpSecretCipherTest {
     void init_WithWrongKeyLength_ShouldFailFast() {
         // 16 bytes → 128 bits; we require 256.
         String shortKey = Base64.getEncoder().encodeToString(new byte[16]);
-        TotpSecretCipher bad = new TotpSecretCipher(shortKey);
+        TotpSecretCipher bad = new TotpSecretCipher(shortKey, false);
 
         assertThatThrownBy(() -> ReflectionTestUtils.invokeMethod(bad, "init"))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("32 bytes");
+    }
+
+    @Test
+    void strictMode_PlaintextRead_ShouldThrow() {
+        TotpSecretCipher strict = new TotpSecretCipher(TEST_KEK_B64, true);
+        ReflectionTestUtils.invokeMethod(strict, "init");
+
+        assertThatThrownBy(() -> strict.decryptIfNeeded("JBSWY3DPEHPK3PXP"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Refusing to read plaintext TOTP");
+    }
+
+    @Test
+    void strictMode_CiphertextRead_ShouldStillWork() {
+        TotpSecretCipher strict = new TotpSecretCipher(TEST_KEK_B64, true);
+        ReflectionTestUtils.invokeMethod(strict, "init");
+        String ciphertext = cipher.encrypt("JBSWY3DPEHPK3PXP"); // produced via lenient cipher, same KEK
+
+        // Strict mode MUST still read valid ciphertext — it only rejects plaintext.
+        assertThat(strict.decryptIfNeeded(ciphertext)).isEqualTo("JBSWY3DPEHPK3PXP");
+    }
+
+    @Test
+    void strictMode_Null_ShouldStillReturnNull() {
+        TotpSecretCipher strict = new TotpSecretCipher(TEST_KEK_B64, true);
+        ReflectionTestUtils.invokeMethod(strict, "init");
+
+        assertThat(strict.decryptIfNeeded(null)).isNull();
     }
 
     @Test

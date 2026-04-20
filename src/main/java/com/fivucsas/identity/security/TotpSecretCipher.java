@@ -31,6 +31,13 @@ import java.util.Base64;
  * values unchanged so the migration window does not break existing users.
  * Writes go through {@link #encrypt(String)} so every new/updated row is
  * encrypted.
+ *
+ * <p>Strict mode (post-migration): set
+ * {@code fivucsas.totp.reject-plaintext-on-read=true} (env
+ * {@code FIVUCSAS_TOTP_REJECT_PLAINTEXT=true}) to fail-fast on any legacy
+ * plaintext row encountered at read time. Flip this only after
+ * {@code TotpSecretMigrator} has reported zero remaining plaintext rows AND
+ * the V42 CHECK constraint has been applied.
  */
 @Component
 @Slf4j
@@ -43,11 +50,15 @@ public class TotpSecretCipher {
     private static final int KEY_LENGTH_BYTES = 32;
 
     private final String rawKey;
+    private final boolean rejectPlaintextOnRead;
     private final SecureRandom rng = new SecureRandom();
     private SecretKey secretKey;
 
-    public TotpSecretCipher(@Value("${fivucsas.totp.enc-key:}") String rawKey) {
+    public TotpSecretCipher(
+            @Value("${fivucsas.totp.enc-key:}") String rawKey,
+            @Value("${fivucsas.totp.reject-plaintext-on-read:false}") boolean rejectPlaintextOnRead) {
         this.rawKey = rawKey;
+        this.rejectPlaintextOnRead = rejectPlaintextOnRead;
     }
 
     @PostConstruct
@@ -110,12 +121,24 @@ public class TotpSecretCipher {
      * Dual-read. If {@code stored} starts with {@link #CIPHERTEXT_PREFIX},
      * decrypt and return plaintext. Otherwise treat as legacy plaintext and
      * return unchanged. Null in → null out.
+     *
+     * <p>When {@code fivucsas.totp.reject-plaintext-on-read=true}, any legacy
+     * plaintext row triggers an {@link IllegalStateException} instead of being
+     * returned. Operators flip this flag after V42 + the migrator confirm zero
+     * legacy rows remain.
      */
     public String decryptIfNeeded(String stored) {
         if (stored == null) {
             return null;
         }
         if (!isEncrypted(stored)) {
+            if (rejectPlaintextOnRead) {
+                throw new IllegalStateException(
+                        "Refusing to read plaintext TOTP secret: "
+                                + "reject-plaintext-on-read=true and a legacy row was encountered. "
+                                + "Run TotpSecretMigrator (fivucsas.totp.migrate-on-boot=true) "
+                                + "before enabling strict mode.");
+            }
             return stored; // legacy plaintext row — re-encrypted on next write
         }
         String payload = stored.substring(CIPHERTEXT_PREFIX.length());

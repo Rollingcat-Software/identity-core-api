@@ -4,11 +4,13 @@ import com.fivucsas.identity.application.port.input.ManageEnrollmentUseCase;
 import com.fivucsas.identity.application.port.output.BiometricServicePort;
 import com.fivucsas.identity.application.service.EnrollmentQueryService;
 import com.fivucsas.identity.domain.exception.UnauthorizedException;
+import com.fivucsas.identity.domain.model.auth.AuthMethodType;
+import com.fivucsas.identity.domain.model.auth.EnrollmentStatus;
 import com.fivucsas.identity.entity.Tenant;
 import com.fivucsas.identity.entity.TenantStatus;
 import com.fivucsas.identity.entity.User;
+import com.fivucsas.identity.entity.UserEnrollment;
 import com.fivucsas.identity.entity.UserStatus;
-import com.fivucsas.identity.repository.BiometricDataRepository;
 import com.fivucsas.identity.repository.UserEnrollmentRepository;
 import com.fivucsas.identity.security.RbacAuthorizationService;
 import org.junit.jupiter.api.BeforeEach;
@@ -39,7 +41,6 @@ class UserEnrollmentFlowControllerTest {
     @Mock private UserEnrollmentRepository enrollmentRepository;
     @Mock private ManageEnrollmentUseCase manageEnrollmentUseCase;
     @Mock private BiometricServicePort biometricService;
-    @Mock private BiometricDataRepository biometricDataRepository;
     @Mock private RbacAuthorizationService rbacService;
 
     @InjectMocks
@@ -150,7 +151,10 @@ class UserEnrollmentFlowControllerTest {
         @DisplayName("Should return COMPLETED when enrolled")
         void shouldReturnCompletedWhenEnrolled() {
             when(rbacService.getCurrentUser()).thenReturn(Optional.of(testUser));
-            when(biometricDataRepository.findByUserId(userId)).thenReturn(Optional.of(mock()));
+            UserEnrollment enrollment = mock(UserEnrollment.class);
+            when(enrollment.getStatus()).thenReturn(EnrollmentStatus.ENROLLED);
+            when(enrollmentRepository.findByUserIdAndAuthMethodType(userId, AuthMethodType.FACE))
+                    .thenReturn(Optional.of(enrollment));
 
             ResponseEntity<Map<String, Object>> response = controller.getEnrollmentStatus();
 
@@ -163,7 +167,8 @@ class UserEnrollmentFlowControllerTest {
         @DisplayName("Should return NOT_STARTED when not enrolled")
         void shouldReturnNotStartedWhenNotEnrolled() {
             when(rbacService.getCurrentUser()).thenReturn(Optional.of(testUser));
-            when(biometricDataRepository.findByUserId(userId)).thenReturn(Optional.empty());
+            when(enrollmentRepository.findByUserIdAndAuthMethodType(userId, AuthMethodType.FACE))
+                    .thenReturn(Optional.empty());
 
             ResponseEntity<Map<String, Object>> response = controller.getEnrollmentStatus();
 

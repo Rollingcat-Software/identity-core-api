@@ -1,0 +1,38 @@
+-- V43__drop_legacy_biometric_data_table.sql
+--
+-- AUDIT_2026-04-20 Phase-1 dead-code cleanup.
+--
+-- The biometric_data table (created in V4) was a legacy structure from an
+-- earlier architecture where face embeddings lived inside identity-core-api's
+-- PostgreSQL database. The current architecture delegates ALL biometric
+-- storage to biometric-processor's separate biometric_db (face_embeddings +
+-- voice_enrollments, both pgvector). identity-core-api now only records
+-- enrollment metadata in user_enrollments (V16) and treats biometric_processor
+-- as an external service behind BiometricServicePort.
+--
+-- The orphan Java class com.fivucsas.identity.service.BiometricService — the
+-- only live writer of biometric_data — had ZERO live callers (verified by
+-- grep + callgraph analysis, AUDIT_2026-04-20). The class, its JPA entity
+-- (BiometricData), and both repository interfaces have been deleted in the
+-- same commit that applies this migration.
+--
+-- Safety:
+--   * Pre-migration production row count was 0 (verified 2026-04-20).
+--   * The schema-stable GDPR/KVKK export (UserDataExportService) has been
+--     updated to stop touching biometric_data — biometric face/voice metadata
+--     is already covered by the "enrollments" section (user_enrollments).
+--   * EnrollmentController.getEnrollmentStatus() and EnrollmentQueryService
+--     have been rewired to read user_enrollments instead of biometric_data.
+--   * DROP is idempotent (IF EXISTS) and uses CASCADE to clean up any stray
+--     foreign keys from prior experiments (none expected in prod).
+--
+-- Rollback: if ever needed, replay V4's CREATE TABLE biometric_data DDL plus
+-- its user_id FK. No data restoration is necessary — the production table
+-- was empty at the time of this drop.
+
+-- Dead code cleanup (AUDIT_2026-04-20). The biometric_data table was a legacy
+-- table from an earlier architecture where face embeddings lived in identity-core-api.
+-- The current architecture delegates all biometric storage to biometric-processor's
+-- separate biometric_db (face_embeddings + voice_enrollments, pgvector). The Java
+-- BiometricService class has had zero live callers since commit X (verified via git log + grep).
+DROP TABLE IF EXISTS biometric_data CASCADE;

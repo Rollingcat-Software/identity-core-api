@@ -197,6 +197,9 @@ class AuthControllerTest {
         // Configure rate limit service to allow all requests in tests
         when(rateLimitService.allowLoginAttempt(anyString())).thenReturn(true);
         when(rateLimitService.allowRegistrationAttempt(anyString())).thenReturn(true);
+        when(rateLimitService.allowMfaStepAttempt(anyString())).thenReturn(true);
+        when(rateLimitService.allowMfaOtpSend(anyString())).thenReturn(true);
+        when(rateLimitService.allowMfaQrGenerate(anyString())).thenReturn(true);
     }
 
     // ============== REGISTRATION TESTS ==============

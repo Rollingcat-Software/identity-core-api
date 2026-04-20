@@ -139,3 +139,6 @@ package-lock.json
 # Production secrets
 .env.prod
 .env.gcp
+
+# Claude Code agent worktrees (local only)
+.claude/worktrees/

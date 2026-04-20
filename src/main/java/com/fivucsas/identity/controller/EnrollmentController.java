@@ -7,11 +7,11 @@ import com.fivucsas.identity.application.service.EnrollmentHealthService;
 import com.fivucsas.identity.application.service.EnrollmentQueryService;
 import com.fivucsas.identity.domain.exception.UnauthorizedException;
 import com.fivucsas.identity.domain.model.auth.AuthMethodType;
+import com.fivucsas.identity.domain.model.auth.EnrollmentStatus;
 import com.fivucsas.identity.dto.EnrollmentDto;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.entity.UserEnrollment;
 import com.fivucsas.identity.exception.ResourceNotFoundException;
-import com.fivucsas.identity.repository.BiometricDataRepository;
 import com.fivucsas.identity.repository.UserEnrollmentRepository;
 import com.fivucsas.identity.security.RbacAuthorizationService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -46,7 +46,6 @@ public class EnrollmentController {
     private final UserEnrollmentRepository enrollmentRepository;
     private final ManageEnrollmentUseCase manageEnrollmentUseCase;
     private final BiometricServicePort biometricService;
-    private final BiometricDataRepository biometricDataRepository;
     private final RbacAuthorizationService rbacService;
     private final EnrollmentHealthService enrollmentHealthService;
 
@@ -181,7 +180,14 @@ public class EnrollmentController {
         User currentUser = rbacService.getCurrentUser()
                 .orElseThrow(() -> new UnauthorizedException());
 
-        boolean enrolled = biometricDataRepository.findByUserId(currentUser.getId()).isPresent();
+        // biometric_data table was removed (V43 dead-code cleanup). The real face
+        // embedding lives in biometric-processor's biometric_db. Here we only need
+        // the boolean "is this user enrolled for FACE?" — that signal is in
+        // user_enrollments (status=ENROLLED).
+        boolean enrolled = enrollmentRepository
+                .findByUserIdAndAuthMethodType(currentUser.getId(), AuthMethodType.FACE)
+                .map(e -> e.getStatus() == EnrollmentStatus.ENROLLED)
+                .orElse(false);
 
         Map<String, Object> response = new LinkedHashMap<>();
         response.put("status", enrolled ? "COMPLETED" : "NOT_STARTED");

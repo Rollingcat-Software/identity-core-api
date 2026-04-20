@@ -49,6 +49,9 @@ public class RateLimitService {
     private final ConcurrentHashMap<String, TimedBucket> biometricBuckets = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, TimedBucket> apiBuckets = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, TimedBucket> exportBuckets = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, TimedBucket> mfaStepBuckets = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, TimedBucket> mfaOtpSendBuckets = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, TimedBucket> mfaQrBuckets = new ConcurrentHashMap<>();
 
     /**
      * Checks if a login attempt is allowed for the given identifier (usually IP address).
@@ -155,6 +158,63 @@ public class RateLimitService {
     }
 
     /**
+     * Checks if an MFA step submission is allowed.
+     * Applies to {@code POST /auth/mfa/step}. Session-scoped bucket: 10 attempts per 10 minutes.
+     * Defends against brute-force attacks on the MFA session token + OTP/TOTP inputs.
+     *
+     * @param identifier MFA session ID (preferred) or IP
+     * @return true if allowed, false if rate limit exceeded
+     */
+    public boolean allowMfaStepAttempt(String identifier) {
+        Bucket bucket = getOrCreateBucket(mfaStepBuckets, identifier, this::createMfaStepBucket, Duration.ofMinutes(10));
+        boolean allowed = bucket.tryConsume(1);
+
+        if (!allowed) {
+            log.warn("Rate limit exceeded for MFA step from: {}", identifier);
+        }
+
+        return allowed;
+    }
+
+    /**
+     * Checks if an MFA OTP-send request is allowed.
+     * Applies to {@code POST /auth/mfa/send-otp}. 3 per 10 minutes per session/IP —
+     * low cap protects against SMS/email fan-out abuse (cost + user inbox spam).
+     *
+     * @param identifier MFA session ID or IP
+     * @return true if allowed, false if rate limit exceeded
+     */
+    public boolean allowMfaOtpSend(String identifier) {
+        Bucket bucket = getOrCreateBucket(mfaOtpSendBuckets, identifier, this::createMfaOtpSendBucket, Duration.ofMinutes(10));
+        boolean allowed = bucket.tryConsume(1);
+
+        if (!allowed) {
+            log.warn("Rate limit exceeded for MFA OTP send from: {}", identifier);
+        }
+
+        return allowed;
+    }
+
+    /**
+     * Checks if an MFA TOTP QR-generation request is allowed.
+     * Applies to {@code POST /auth/mfa/qr-generate}. 5 per 10 minutes per user/IP —
+     * QR generation is a one-time enrollment path; repeated calls indicate scripted abuse.
+     *
+     * @param identifier user ID or IP
+     * @return true if allowed, false if rate limit exceeded
+     */
+    public boolean allowMfaQrGenerate(String identifier) {
+        Bucket bucket = getOrCreateBucket(mfaQrBuckets, identifier, this::createMfaQrBucket, Duration.ofMinutes(10));
+        boolean allowed = bucket.tryConsume(1);
+
+        if (!allowed) {
+            log.warn("Rate limit exceeded for MFA QR generate from: {}", identifier);
+        }
+
+        return allowed;
+    }
+
+    /**
      * Gets remaining time until next token is available (in seconds).
      *
      * @param identifier unique identifier
@@ -198,6 +258,9 @@ public class RateLimitService {
         cleaned += evictExpired(biometricBuckets, now, Duration.ofMinutes(1).toMillis());
         cleaned += evictExpired(apiBuckets, now, Duration.ofMinutes(1).toMillis());
         cleaned += evictExpired(exportBuckets, now, Duration.ofHours(1).toMillis());
+        cleaned += evictExpired(mfaStepBuckets, now, Duration.ofMinutes(10).toMillis());
+        cleaned += evictExpired(mfaOtpSendBuckets, now, Duration.ofMinutes(10).toMillis());
+        cleaned += evictExpired(mfaQrBuckets, now, Duration.ofMinutes(10).toMillis());
         if (cleaned > 0) {
             log.debug("Evicted {} expired rate limit bucket entries", cleaned);
         }
@@ -283,6 +346,30 @@ public class RateLimitService {
             .build();
     }
 
+    private Bucket createMfaStepBucket() {
+        // 10 step attempts per 10 minutes — brute-force guard on OTP/TOTP/session tokens
+        Bandwidth limit = Bandwidth.classic(10, Refill.intervally(10, Duration.ofMinutes(10)));
+        return Bucket.builder()
+            .addLimit(limit)
+            .build();
+    }
+
+    private Bucket createMfaOtpSendBucket() {
+        // 3 OTP sends per 10 minutes — SMS/email cost + inbox-spam guard
+        Bandwidth limit = Bandwidth.classic(3, Refill.intervally(3, Duration.ofMinutes(10)));
+        return Bucket.builder()
+            .addLimit(limit)
+            .build();
+    }
+
+    private Bucket createMfaQrBucket() {
+        // 5 QR generations per 10 minutes — enrollment path abuse guard
+        Bandwidth limit = Bandwidth.classic(5, Refill.intervally(5, Duration.ofMinutes(10)));
+        return Bucket.builder()
+            .addLimit(limit)
+            .build();
+    }
+
     private ConcurrentHashMap<String, TimedBucket> getBucketMap(RateLimitType bucketType) {
         return switch (bucketType) {
             case LOGIN -> loginBuckets;
@@ -291,6 +378,9 @@ public class RateLimitService {
             case BIOMETRIC -> biometricBuckets;
             case API -> apiBuckets;
             case EXPORT -> exportBuckets;
+            case MFA_STEP -> mfaStepBuckets;
+            case MFA_OTP_SEND -> mfaOtpSendBuckets;
+            case MFA_QR -> mfaQrBuckets;
         };
     }
 
@@ -308,6 +398,9 @@ public class RateLimitService {
         PASSWORD_RESET,
         BIOMETRIC,
         API,
-        EXPORT
+        EXPORT,
+        MFA_STEP,
+        MFA_OTP_SEND,
+        MFA_QR
     }
 }

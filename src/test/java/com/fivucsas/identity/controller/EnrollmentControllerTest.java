@@ -15,7 +15,6 @@ import com.fivucsas.identity.entity.UserEnrollment;
 import com.fivucsas.identity.infrastructure.email.EmailService;
 import com.fivucsas.identity.infrastructure.otp.OtpService;
 import com.fivucsas.identity.infrastructure.sms.SmsService;
-import com.fivucsas.identity.repository.BiometricDataRepository;
 import com.fivucsas.identity.repository.UserEnrollmentRepository;
 import com.fivucsas.identity.security.JwtAuthenticationFilter;
 import com.fivucsas.identity.security.RateLimitService;
@@ -60,7 +59,6 @@ class EnrollmentControllerTest {
     @MockBean private UserEnrollmentRepository enrollmentRepository;
     @MockBean private ManageEnrollmentUseCase manageEnrollmentUseCase;
     @MockBean private BiometricServicePort biometricService;
-    @MockBean private BiometricDataRepository biometricDataRepository;
     @MockBean private RbacAuthorizationService rbacService;
     @MockBean private EnrollmentHealthService enrollmentHealthService;
 
