@@ -1,5 +1,38 @@
 # Changelog - Identity Core API
 
+## [Unreleased]
+
+### Added
+- **IN-H5 — `audit_logs` range-partitioned by `created_at` (monthly).**
+  New Flyway migrations `V40__partition_audit_logs.sql` and
+  `V41__audit_logs_partition_maintenance.sql` address AUDIT_2026-04-19 finding
+  IN-H5 (unpartitioned audit_logs growing without bound). V40 renames the
+  existing table to `audit_logs_legacy`, creates a new `audit_logs`
+  partitioned by range on `created_at`, pre-creates monthly partitions
+  2026-01..2026-06, and attaches the legacy table as a historical partition
+  bounded by its `min(created_at)` and `2026-01-01`. V41 adds the
+  `ensure_audit_logs_partition(target_month date)` helper for monthly cron.
+  **Semantic change:** primary key becomes `(id, created_at)` — required by
+  Postgres for partitioned tables; application treats `id` as the logical
+  key so no code change needed. Views `v_recent_audit_logs`,
+  `v_slow_operations`, `mv_audit_statistics`, and the V8 request-id trigger
+  are recreated against the new root.
+
+### Deploy checklist — V40/V41 (maintenance window required)
+- Staging validation:
+  1. `docker compose exec postgres psql -U $DB_USER $DB_NAME -c "SELECT COUNT(*) FROM audit_logs;"` (record row count).
+  2. Run Flyway against staging DB with production-parity data.
+  3. Verify: `\d+ audit_logs` shows `Partitioned table` and 7 partitions (6 monthly + `audit_logs_legacy`).
+  4. Verify row count unchanged; sample `INSERT` into `audit_logs` lands in the correct monthly partition.
+  5. Check RLS still blocks cross-tenant reads; `v_recent_audit_logs` returns rows.
+- Production rollout:
+  1. Schedule a maintenance window (RENAME takes ACCESS EXCLUSIVE — expect a brief write stall on audit writes).
+  2. Deploy the identity-core-api container; Flyway will apply V40 + V41 on startup.
+  3. Monitor logs for `RAISE NOTICE` outputs from the DO blocks.
+  4. Add cron on the Postgres host:
+     `0 3 25 * * psql "$PG_URL" -c "SELECT ensure_audit_logs_partition(date_trunc('month', now() + interval '2 months')::date);"`
+- Rollback (pre-deploy only): delete V40/V41 files; post-deploy rollback requires detach + rename back (document only).
+
 ## [2026-04-19] Audit remediation
 
 Targeted backend + infra fixes from the 2026-04-19 comprehensive audit
