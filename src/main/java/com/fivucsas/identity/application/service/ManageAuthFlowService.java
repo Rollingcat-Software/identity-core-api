@@ -69,9 +69,17 @@ public class ManageAuthFlowService implements ManageAuthFlowUseCase {
                 .isDefault(command.isDefault())
                 .build();
 
+        // Reject requests that try to create a flow with no steps at all.
+        // Copilot review (PR #18): previously `if (command.steps() != null)` allowed
+        // a null steps list through, persisting an unusable empty flow.
+        if (command.steps() == null || command.steps().isEmpty()) {
+            throw new IllegalArgumentException(
+                    "Auth flow must declare at least one step (stepOrder=1 required)");
+        }
+
         AuthFlow savedFlow = authFlowRepository.save(flow);
 
-        if (command.steps() != null) {
+        {
             validateFirstStepStructure(command.steps());
             validateNoRequiredUnsupportedMethods(command.steps());
             for (CreateAuthFlowCommand.FlowStepSpec stepSpec : command.steps()) {
