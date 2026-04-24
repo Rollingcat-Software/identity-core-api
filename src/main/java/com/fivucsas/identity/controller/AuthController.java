@@ -671,13 +671,54 @@ public class AuthController {
             return ResponseEntity.ok(challengeData);
         }
 
-        // Reject if this method was already used in a previous step (same-method prevention).
-        // Compare by AuthMethodType.name() so EMAIL_OTP and TOTP (which share AMR "otp") are
-        // treated as distinct for reuse purposes while still emitting the correct AMR in the JWT.
+        // Same-method prevention (substitution guard, NOT a retry guard).
+        //
+        // The intent of this check is to prevent a user from satisfying step N with the
+        // same method they already used at step <N (e.g. "PASSWORD twice" must not count
+        // as real 2FA). It MUST NOT fire when the user is retrying the current in-progress
+        // step — a failed attempt (wrong password, wrong OTP, biometric rejection) does
+        // not add the method to `completedMethods`, but the user may still be on the step
+        // whose expected method matches a method completed earlier in the same flow (if
+        // the flow config legitimately repeats that method at this step).
+        //
+        // Rule: only reject when the submitted method was previously completed AND the
+        // current step's configured method list does NOT include it (true substitution
+        // attempt — user is trying to skip ahead / reuse a completed factor for a
+        // different step).
+        //
+        // Compare by AuthMethodType.name() so EMAIL_OTP and TOTP (which share AMR "otp")
+        // are treated as distinct for reuse purposes while still emitting the correct
+        // AMR in the JWT.
         String newAmrValue = AMR_VALUES.getOrDefault(methodType, method.toLowerCase());
         String reuseKey = methodType.name();
         List<String> completedMethods = mfaSession.getCompletedMethods();
-        if (completedMethods.contains(reuseKey)) {
+
+        // Resolve the current step's configured method(s). If the flow or step cannot be
+        // loaded, fall back to the prior (strict) behaviour so we never silently allow a
+        // real substitution attempt due to a lookup failure.
+        java.util.Set<String> currentStepMethodNames = java.util.Collections.emptySet();
+        try {
+            AuthFlow currentFlow = authFlowRepository.findById(mfaSession.getFlowId()).orElse(null);
+            if (currentFlow != null) {
+                int currentStepOrder = mfaSession.getCurrentStep();
+                AuthFlowStep currentStep = currentFlow.getSteps().stream()
+                    .filter(s -> s.getStepOrder() == currentStepOrder)
+                    .findFirst()
+                    .orElse(null);
+                if (currentStep != null) {
+                    currentStepMethodNames = currentStep.getAvailableMethods().stream()
+                        .filter(java.util.Objects::nonNull)
+                        .map(m -> m.getType().name())
+                        .collect(java.util.stream.Collectors.toSet());
+                }
+            }
+        } catch (Exception e) {
+            log.warn("Failed to resolve current MFA step for reuse check (sessionId={}): {}",
+                    mfaSession.getId(), e.getMessage());
+        }
+
+        boolean submittedMethodIsExpectedAtCurrentStep = currentStepMethodNames.contains(reuseKey);
+        if (completedMethods.contains(reuseKey) && !submittedMethodIsExpectedAtCurrentStep) {
             log.warn("AUDIT: MFA same-method reuse attempt — method: {}, userId={}, ip={}, userAgent={}",
                     method, user.getId(), getClientIP(httpRequest), getUserAgent(httpRequest));
             return ResponseEntity.badRequest().body(Map.of(
