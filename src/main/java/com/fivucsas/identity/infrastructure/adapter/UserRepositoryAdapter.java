@@ -80,8 +80,23 @@ public class UserRepositoryAdapter implements com.fivucsas.identity.domain.repos
     }
 
     @Override
+    public List<User> findAllByTenantId(UUID tenantId, int page, int size) {
+        return jpaRepository.findAllByTenantIdWithRoles(tenantId, PageRequest.of(page, size)).getContent();
+    }
+
+    @Override
     public long count() {
         return jpaRepository.count();
+    }
+
+    @Override
+    public long countByTenantId(UUID tenantId) {
+        return jpaRepository.countByTenantId(tenantId);
+    }
+
+    @Override
+    public List<User> searchUsersByTenant(UUID tenantId, String query) {
+        return jpaRepository.searchUsersByTenant(tenantId, query);
     }
 
     @Override

@@ -87,6 +87,16 @@ public interface UserRepository extends JpaRepository<User, UUID> {
     @Query("SELECT u FROM User u")
     Page<User> findAllWithRoles(Pageable pageable);
 
+    @EntityGraph(attributePaths = {"userRoles", "userRoles.role", "userRoles.role.permissions"})
+    @Query("SELECT u FROM User u WHERE u.tenant.id = :tenantId")
+    Page<User> findAllByTenantIdWithRoles(@Param("tenantId") UUID tenantId, Pageable pageable);
+
+    @Query("SELECT u FROM User u WHERE u.tenant.id = :tenantId AND (" +
+            "LOWER(CONCAT(u.firstName, ' ', u.lastName)) LIKE LOWER(CONCAT('%', :query, '%')) OR " +
+            "LOWER(u.email) LIKE LOWER(CONCAT('%', :query, '%')) OR " +
+            "u.idNumber LIKE CONCAT('%', :query, '%'))")
+    List<User> searchUsersByTenant(@Param("tenantId") UUID tenantId, @Param("query") String query);
+
     /**
      * Finds users soft-deleted before the given cutoff — candidates for permanent
      * purge under the 30-day retention window (GDPR Art. 17 / KVKK).

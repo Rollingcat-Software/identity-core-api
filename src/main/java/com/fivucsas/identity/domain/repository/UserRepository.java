@@ -106,10 +106,30 @@ public interface UserRepository {
     List<User> findAll(int page, int size);
 
     /**
+     * Finds users in a given tenant with pagination.
+     * Used by {@code ManageUserService.getAllUsers} when the caller is not
+     * SUPER_ADMIN — prevents cross-tenant user leakage.
+     */
+    List<User> findAllByTenantId(UUID tenantId, int page, int size);
+
+    /**
      * Counts all users.
      * @return total count of users
      */
     long count();
+
+    /**
+     * Counts users in a given tenant. Used with {@link #findAllByTenantId} to
+     * paginate scoped lists.
+     */
+    long countByTenantId(UUID tenantId);
+
+    /**
+     * Searches users within a tenant by name, email, or id number.
+     * Tenant-scoped variant of {@link #searchUsers(String)} — used when the
+     * caller is not SUPER_ADMIN.
+     */
+    List<User> searchUsersByTenant(UUID tenantId, String query);
 
     /**
      * Deletes a user.
