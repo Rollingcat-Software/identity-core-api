@@ -12,7 +12,6 @@ import com.fivucsas.identity.domain.exception.UserNotFoundException;
 import com.fivucsas.identity.domain.repository.UserRepository;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.entity.UserStatus;
-import com.fivucsas.identity.security.AuthorizationService;
 import com.fivucsas.identity.security.RbacAuthorizationService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -49,9 +48,6 @@ class ManageUserServiceTest {
 
     @Mock
     private PasswordEncoderPort passwordEncoder;
-
-    @Mock
-    private AuthorizationService authorizationService;
 
     @Mock
     private RbacAuthorizationService rbacService;
