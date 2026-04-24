@@ -157,6 +157,25 @@ BEGIN
         RAISE NOTICE 'Relocated audit_logs_legacy rows >= 2026-01-01 into monthly partitions.';
     END IF;
 
+    -- If legacy is now empty (all rows were recent and got relocated) OR was
+    -- empty to begin with with all lower_bound >= 2026-01-01, there is no
+    -- historical data worth preserving. Drop the rename'd table and skip
+    -- the ATTACH. Partition bound "FROM (2026-04-01) TO (2026-01-01)" would
+    -- be an empty range, which Postgres rejects with:
+    --     ERROR: empty range bound specified for partition
+    IF NOT EXISTS (SELECT 1 FROM audit_logs_legacy LIMIT 1) THEN
+        RAISE NOTICE 'audit_logs_legacy is empty after relocation — dropping instead of attaching.';
+        DROP TABLE audit_logs_legacy;
+        RETURN;
+    END IF;
+
+    -- Safety: if after relocation the lower_bound is still >= 2026-01-01
+    -- (can happen if legacy had only post-2026 rows that were relocated but
+    -- the sentinel was never reset), fall back to the epoch-safe bound.
+    IF lower_bound >= TIMESTAMP '2026-01-01' THEN
+        lower_bound := TIMESTAMP '2000-01-01';
+    END IF;
+
     -- Add a CHECK constraint matching the partition bound to skip the full
     -- table scan during ATTACH (PG optimization).
     EXECUTE format(
