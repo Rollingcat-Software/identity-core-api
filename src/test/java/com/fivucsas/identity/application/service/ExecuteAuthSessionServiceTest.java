@@ -82,8 +82,50 @@ class ExecuteAuthSessionServiceTest {
     }
 
     @Test
-    void startSession_WhenAppLoginWithoutPasswordFirst_ShouldThrowIllegalState() {
-        // given
+    void startSession_WhenAppLoginWithNonPasswordFirstStep_ShouldSucceed() {
+        // After removing the PASSWORD-first constraint (2026-04-24), tenants are
+        // free to configure ANY AuthMethodType as step[0] for every OperationType.
+        // A flow starting with FACE_LIVENESS must now create a session cleanly.
+        Tenant tenant = mock(Tenant.class);
+        UUID tenantId = UUID.randomUUID();
+        when(tenant.getId()).thenReturn(tenantId);
+        when(tenant.getSlug()).thenReturn("test-tenant");
+        when(tenantRepository.findBySlug("test-tenant")).thenReturn(Optional.of(tenant));
+
+        AuthFlow flow = mock(AuthFlow.class);
+        UUID flowId = UUID.randomUUID();
+        when(flow.getId()).thenReturn(flowId);
+        when(authFlowRepository.findByTenantIdAndIsDefaultTrueAndIsActiveTrueAndOperationType(tenantId, OperationType.APP_LOGIN))
+                .thenReturn(Optional.of(flow));
+
+        // First step is FACE — should now be accepted.
+        AuthFlowStep step = mock(AuthFlowStep.class);
+        AuthMethod authMethod = mock(AuthMethod.class);
+        when(authMethod.getType()).thenReturn(AuthMethodType.FACE);
+        when(step.getAuthMethod()).thenReturn(authMethod);
+        when(authFlowStepRepository.findAllByAuthFlowIdOrderByStepOrderAsc(flowId))
+                .thenReturn(List.of(step));
+
+        AuthSession savedSession = mock(AuthSession.class);
+        UUID sessionId = UUID.randomUUID();
+        when(savedSession.getId()).thenReturn(sessionId);
+        when(savedSession.getAuthFlow()).thenReturn(flow);
+        when(flow.getStepCount()).thenReturn(1);
+        when(authSessionRepository.save(any())).thenReturn(savedSession);
+        when(authSessionRepository.findById(sessionId)).thenReturn(Optional.of(savedSession));
+
+        StartAuthSessionCommand command = new StartAuthSessionCommand(
+                "test-tenant", OperationType.APP_LOGIN, "WEB", null, null, "127.0.0.1", "agent");
+
+        AuthSessionResponse response = service.startSession(command);
+
+        assertThat(response).isNotNull();
+        verify(authSessionStepRepository).save(any());
+    }
+
+    @Test
+    void startSession_WhenFirstStepHasNoAuthMethod_ShouldThrowIllegalState() {
+        // Structural check: a step with null AuthMethod is a corrupt flow and must fail loud.
         Tenant tenant = mock(Tenant.class);
         UUID tenantId = UUID.randomUUID();
         when(tenant.getId()).thenReturn(tenantId);
@@ -95,21 +137,40 @@ class ExecuteAuthSessionServiceTest {
         when(authFlowRepository.findByTenantIdAndIsDefaultTrueAndIsActiveTrueAndOperationType(tenantId, OperationType.APP_LOGIN))
                 .thenReturn(Optional.of(flow));
 
-        // First step is FACE, not PASSWORD
         AuthFlowStep step = mock(AuthFlowStep.class);
-        AuthMethod authMethod = mock(AuthMethod.class);
-        when(authMethod.getType()).thenReturn(AuthMethodType.FACE);
-        when(step.getAuthMethod()).thenReturn(authMethod);
+        when(step.getAuthMethod()).thenReturn(null);
         when(authFlowStepRepository.findAllByAuthFlowIdOrderByStepOrderAsc(flowId))
                 .thenReturn(List.of(step));
 
         StartAuthSessionCommand command = new StartAuthSessionCommand(
                 "test-tenant", OperationType.APP_LOGIN, "WEB", null, null, "127.0.0.1", "agent");
 
-        // when/then
         assertThatThrownBy(() -> service.startSession(command))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("PASSWORD as the first step");
+                .hasMessageContaining("no valid AuthMethod");
+    }
+
+    @Test
+    void startSession_WhenFlowHasNoSteps_ShouldThrowIllegalState() {
+        Tenant tenant = mock(Tenant.class);
+        UUID tenantId = UUID.randomUUID();
+        when(tenant.getId()).thenReturn(tenantId);
+        when(tenantRepository.findBySlug("test-tenant")).thenReturn(Optional.of(tenant));
+
+        AuthFlow flow = mock(AuthFlow.class);
+        UUID flowId = UUID.randomUUID();
+        when(flow.getId()).thenReturn(flowId);
+        when(authFlowRepository.findByTenantIdAndIsDefaultTrueAndIsActiveTrueAndOperationType(tenantId, OperationType.APP_LOGIN))
+                .thenReturn(Optional.of(flow));
+        when(authFlowStepRepository.findAllByAuthFlowIdOrderByStepOrderAsc(flowId))
+                .thenReturn(List.of());
+
+        StartAuthSessionCommand command = new StartAuthSessionCommand(
+                "test-tenant", OperationType.APP_LOGIN, "WEB", null, null, "127.0.0.1", "agent");
+
+        assertThatThrownBy(() -> service.startSession(command))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("no steps configured");
     }
 
     @Test

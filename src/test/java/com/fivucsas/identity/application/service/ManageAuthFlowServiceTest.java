@@ -40,23 +40,86 @@ class ManageAuthFlowServiceTest {
     private ManageAuthFlowService service;
 
     @Test
-    void createFlow_WhenAppLoginWithoutPasswordFirst_ShouldThrow() {
+    void createFlow_WhenAppLoginWithFaceFirst_ShouldSucceed() {
+        // After removing the PASSWORD-first constraint (2026-04-24) tenants can
+        // configure APP_LOGIN flows that start with any AuthMethod (e.g. FACE).
         UUID tenantId = UUID.randomUUID();
+        UUID flowId = UUID.randomUUID();
         Tenant tenant = mock(Tenant.class);
+        when(tenant.getId()).thenReturn(tenantId);
+        AuthFlow flow = mock(AuthFlow.class);
+        AuthMethod faceMethod = mock(AuthMethod.class);
+
         when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
-        when(authFlowRepository.save(any())).thenReturn(AuthFlow.builder()
-                .tenant(tenant).name("test").operationType(OperationType.APP_LOGIN).build());
+        when(flow.getId()).thenReturn(flowId);
+        when(flow.getTenant()).thenReturn(tenant);
+        when(flow.getName()).thenReturn("Face-First Login");
+        when(flow.getDescription()).thenReturn("desc");
+        when(flow.getOperationType()).thenReturn(OperationType.APP_LOGIN);
+        when(flow.isDefault()).thenReturn(false);
+        when(flow.isActive()).thenReturn(true);
+        when(flow.getStepCount()).thenReturn(0);
+        when(flow.getSteps()).thenReturn(new ArrayList<>());
+        when(flow.getCreatedAt()).thenReturn(Instant.now());
+        when(flow.getUpdatedAt()).thenReturn(Instant.now());
+        when(authFlowRepository.save(any())).thenReturn(flow);
+        when(authFlowRepository.findById(flowId)).thenReturn(Optional.of(flow));
+        when(authMethodRepository.findByType(AuthMethodType.FACE)).thenReturn(Optional.of(faceMethod));
 
         var steps = List.of(
                 new CreateAuthFlowCommand.FlowStepSpec(
                         "FACE", 1, true, 120, 3, null, false, null
                 )
         );
-        var command = new CreateAuthFlowCommand("Test Flow", "desc", OperationType.APP_LOGIN, false, steps);
+        var command = new CreateAuthFlowCommand("Face-First Login", "desc", OperationType.APP_LOGIN, false, steps);
 
-        assertThatThrownBy(() -> service.createFlow(tenantId, command))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("PASSWORD as the first step");
+        service.createFlow(tenantId, command);
+
+        verify(authFlowStepRepository).save(any());
+    }
+
+    @Test
+    void createFlow_WhenNoPasswordAnywhere_ShouldSucceed() {
+        // Two-step FACE -> TOTP flow, no PASSWORD anywhere — explicitly
+        // supported by the new customizable-auth-flow model.
+        UUID tenantId = UUID.randomUUID();
+        UUID flowId = UUID.randomUUID();
+        Tenant tenant = mock(Tenant.class);
+        when(tenant.getId()).thenReturn(tenantId);
+        AuthFlow flow = mock(AuthFlow.class);
+        AuthMethod faceMethod = mock(AuthMethod.class);
+        AuthMethod totpMethod = mock(AuthMethod.class);
+
+        when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+        when(flow.getId()).thenReturn(flowId);
+        when(flow.getTenant()).thenReturn(tenant);
+        when(flow.getName()).thenReturn("Passwordless Login");
+        when(flow.getDescription()).thenReturn("desc");
+        when(flow.getOperationType()).thenReturn(OperationType.APP_LOGIN);
+        when(flow.isDefault()).thenReturn(false);
+        when(flow.isActive()).thenReturn(true);
+        when(flow.getStepCount()).thenReturn(0);
+        when(flow.getSteps()).thenReturn(new ArrayList<>());
+        when(flow.getCreatedAt()).thenReturn(Instant.now());
+        when(flow.getUpdatedAt()).thenReturn(Instant.now());
+        when(authFlowRepository.save(any())).thenReturn(flow);
+        when(authFlowRepository.findById(flowId)).thenReturn(Optional.of(flow));
+        when(authMethodRepository.findByType(AuthMethodType.FACE)).thenReturn(Optional.of(faceMethod));
+        when(authMethodRepository.findByType(AuthMethodType.TOTP)).thenReturn(Optional.of(totpMethod));
+
+        var steps = List.of(
+                new CreateAuthFlowCommand.FlowStepSpec(
+                        "FACE", 1, true, 120, 3, null, false, null
+                ),
+                new CreateAuthFlowCommand.FlowStepSpec(
+                        "TOTP", 2, true, 120, 3, null, false, null
+                )
+        );
+        var command = new CreateAuthFlowCommand("Passwordless Login", "desc", OperationType.APP_LOGIN, false, steps);
+
+        service.createFlow(tenantId, command);
+
+        verify(authFlowStepRepository, times(2)).save(any());
     }
 
     @Test
@@ -134,12 +197,30 @@ class ManageAuthFlowServiceTest {
     }
 
     @Test
-    void createFlow_WhenApiAccessWithoutPasswordFirst_ShouldThrow() {
+    void createFlow_WhenApiAccessWithTotpFirst_ShouldSucceed() {
+        // API_ACCESS no longer requires PASSWORD-first — TOTP as step[0] is valid.
         UUID tenantId = UUID.randomUUID();
+        UUID flowId = UUID.randomUUID();
         Tenant tenant = mock(Tenant.class);
+        when(tenant.getId()).thenReturn(tenantId);
+        AuthFlow flow = mock(AuthFlow.class);
+        AuthMethod totpMethod = mock(AuthMethod.class);
+
         when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
-        when(authFlowRepository.save(any())).thenReturn(AuthFlow.builder()
-                .tenant(tenant).name("test").operationType(OperationType.API_ACCESS).build());
+        when(flow.getId()).thenReturn(flowId);
+        when(flow.getTenant()).thenReturn(tenant);
+        when(flow.getName()).thenReturn("API Flow");
+        when(flow.getDescription()).thenReturn("desc");
+        when(flow.getOperationType()).thenReturn(OperationType.API_ACCESS);
+        when(flow.isDefault()).thenReturn(false);
+        when(flow.isActive()).thenReturn(true);
+        when(flow.getStepCount()).thenReturn(0);
+        when(flow.getSteps()).thenReturn(new ArrayList<>());
+        when(flow.getCreatedAt()).thenReturn(Instant.now());
+        when(flow.getUpdatedAt()).thenReturn(Instant.now());
+        when(authFlowRepository.save(any())).thenReturn(flow);
+        when(authFlowRepository.findById(flowId)).thenReturn(Optional.of(flow));
+        when(authMethodRepository.findByType(AuthMethodType.TOTP)).thenReturn(Optional.of(totpMethod));
 
         var steps = List.of(
                 new CreateAuthFlowCommand.FlowStepSpec(
@@ -148,8 +229,53 @@ class ManageAuthFlowServiceTest {
         );
         var command = new CreateAuthFlowCommand("API Flow", "desc", OperationType.API_ACCESS, false, steps);
 
+        service.createFlow(tenantId, command);
+
+        verify(authFlowStepRepository).save(any());
+    }
+
+    @Test
+    void createFlow_WhenNoStepOneDefined_ShouldThrow() {
+        // Structural check still in force: must define stepOrder=1.
+        UUID tenantId = UUID.randomUUID();
+        Tenant tenant = mock(Tenant.class);
+        when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+        when(authFlowRepository.save(any())).thenReturn(AuthFlow.builder()
+                .tenant(tenant).name("test").operationType(OperationType.APP_LOGIN).build());
+
+        var steps = List.of(
+                new CreateAuthFlowCommand.FlowStepSpec(
+                        "PASSWORD", 2, true, 120, 3, null, false, null
+                )
+        );
+        var command = new CreateAuthFlowCommand("Broken", "desc", OperationType.APP_LOGIN, false, steps);
+
         assertThatThrownBy(() -> service.createFlow(tenantId, command))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("PASSWORD as the first step");
+                .hasMessageContaining("stepOrder=1");
+    }
+
+    @Test
+    void createFlow_WhenDuplicateStepOrders_ShouldThrow() {
+        // Structural check: stepOrder values must be unique across the flow.
+        UUID tenantId = UUID.randomUUID();
+        Tenant tenant = mock(Tenant.class);
+        when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+        when(authFlowRepository.save(any())).thenReturn(AuthFlow.builder()
+                .tenant(tenant).name("test").operationType(OperationType.APP_LOGIN).build());
+
+        var steps = List.of(
+                new CreateAuthFlowCommand.FlowStepSpec(
+                        "PASSWORD", 1, true, 120, 3, null, false, null
+                ),
+                new CreateAuthFlowCommand.FlowStepSpec(
+                        "TOTP", 1, true, 120, 3, null, false, null
+                )
+        );
+        var command = new CreateAuthFlowCommand("Broken", "desc", OperationType.APP_LOGIN, false, steps);
+
+        assertThatThrownBy(() -> service.createFlow(tenantId, command))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("multiple steps with stepOrder=1");
     }
 }
