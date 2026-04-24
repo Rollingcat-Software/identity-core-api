@@ -516,6 +516,16 @@ class AuthControllerTest {
         com.fivucsas.identity.entity.User user = mock(com.fivucsas.identity.entity.User.class);
         when(user.getId()).thenReturn(userId);
         when(user.getEmail()).thenReturn(TEST_EMAIL);
+        // Populate defaults the post-MFA UserResponse mapping reads. Without
+        // these, `legitimateRepeatedMethod` hit NPE in AuthController because
+        // the final step completion path calls into user.getStatus().name().
+        when(user.getStatus()).thenReturn(com.fivucsas.identity.entity.UserStatus.ACTIVE);
+        when(user.getFirstName()).thenReturn("Test");
+        when(user.getLastName()).thenReturn("User");
+        when(user.isEmailVerified()).thenReturn(true);
+        when(user.isPhoneVerified()).thenReturn(false);
+        when(user.isBiometricEnrolled()).thenReturn(false);
+        when(user.getVerificationCount()).thenReturn(0);
         return user;
     }
 
