@@ -23,6 +23,8 @@ import com.fivucsas.identity.entity.UserStatus;
 import com.fivucsas.identity.repository.JpaTenantRepository;
 import com.fivucsas.identity.application.port.output.RoleRepositoryPort;
 import com.fivucsas.identity.application.port.output.UserRoleRepositoryPort;
+import com.fivucsas.identity.security.AuthorizationService;
+import com.fivucsas.identity.security.RbacAuthorizationService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -51,6 +53,8 @@ public class ManageUserService implements ManageUserUseCase {
     private final RoleRepositoryPort roleRepository;
     private final UserRoleRepositoryPort userRoleRepository;
     private final AuditLogQueryPort auditLogQueryPort;
+    private final AuthorizationService authorizationService;
+    private final RbacAuthorizationService rbacService;
 
     @Override
     @Transactional
@@ -132,9 +136,19 @@ public class ManageUserService implements ManageUserUseCase {
     @Override
     @Transactional(readOnly = true)
     public List<UserResponse> getAllUsers(GetAllUsersQuery query) {
-        log.info("Fetching all users (page={}, size={})", query.getPage(), query.getSize());
+        // Tenant admins and below see only their own tenant's users.
+        // SUPER_ADMIN sees everything. Callers without a tenant (shouldn't happen
+        // for authenticated requests) get empty to fail closed.
+        UUID scopeTenantId = resolveTenantScope();
+        log.info("Fetching users (page={}, size={}, tenantScope={})",
+                query.getPage(), query.getSize(),
+                scopeTenantId == null ? "ALL" : scopeTenantId);
 
-        return userRepository.findAll(query.getPage(), query.getSize()).stream()
+        List<User> users = scopeTenantId == null
+                ? userRepository.findAll(query.getPage(), query.getSize())
+                : userRepository.findAllByTenantId(scopeTenantId, query.getPage(), query.getSize());
+
+        return users.stream()
             .map(this::mapToUserResponse)
             .map(this::enrichWithLoginInfo)
             .collect(Collectors.toList());
@@ -143,9 +157,15 @@ public class ManageUserService implements ManageUserUseCase {
     @Override
     @Transactional(readOnly = true)
     public List<UserResponse> searchUsers(SearchUsersQuery query) {
-        log.info("Searching users with query: {}", query.getSearchQuery());
+        UUID scopeTenantId = resolveTenantScope();
+        log.info("Searching users with query: {} (tenantScope={})",
+                query.getSearchQuery(), scopeTenantId == null ? "ALL" : scopeTenantId);
 
-        return userRepository.searchUsers(query.getSearchQuery()).stream()
+        List<User> users = scopeTenantId == null
+                ? userRepository.searchUsers(query.getSearchQuery())
+                : userRepository.searchUsersByTenant(scopeTenantId, query.getSearchQuery());
+
+        return users.stream()
             .map(this::mapToUserResponse)
             .map(this::enrichWithLoginInfo)
             .collect(Collectors.toList());
@@ -154,7 +174,25 @@ public class ManageUserService implements ManageUserUseCase {
     @Override
     @Transactional(readOnly = true)
     public long countAllUsers() {
-        return userRepository.count();
+        UUID scopeTenantId = resolveTenantScope();
+        return scopeTenantId == null
+                ? userRepository.count()
+                : userRepository.countByTenantId(scopeTenantId);
+    }
+
+    /**
+     * Returns the tenant the current caller is allowed to enumerate, or
+     * {@code null} if the caller is SUPER_ADMIN (no scope restriction).
+     *
+     * <p>Prevents TENANT_ADMIN from listing users in other tenants via
+     * {@code /api/v1/users} — the @PreAuthorize check only verifies the
+     * {@code user:read} permission, not tenant scope.</p>
+     */
+    private UUID resolveTenantScope() {
+        if (rbacService.isSuperAdmin()) {
+            return null;
+        }
+        return authorizationService.getCurrentTenantId();
     }
 
     @Override

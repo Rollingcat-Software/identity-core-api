@@ -12,6 +12,8 @@ import com.fivucsas.identity.domain.exception.UserNotFoundException;
 import com.fivucsas.identity.domain.repository.UserRepository;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.entity.UserStatus;
+import com.fivucsas.identity.security.AuthorizationService;
+import com.fivucsas.identity.security.RbacAuthorizationService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -47,6 +49,12 @@ class ManageUserServiceTest {
 
     @Mock
     private PasswordEncoderPort passwordEncoder;
+
+    @Mock
+    private AuthorizationService authorizationService;
+
+    @Mock
+    private RbacAuthorizationService rbacService;
 
     @InjectMocks
     private ManageUserService manageUserService;
@@ -269,6 +277,7 @@ class ManageUserServiceTest {
                 .updatedAt(Instant.now())
                 .build();
 
+            when(rbacService.isSuperAdmin()).thenReturn(true);
             when(userRepository.findAll(0, 20)).thenReturn(Arrays.asList(existingUser, user2));
 
             // When
@@ -286,6 +295,7 @@ class ManageUserServiceTest {
         @DisplayName("Should return empty list when no users")
         void shouldReturnEmptyListWhenNoUsers() {
             // Given
+            when(rbacService.isSuperAdmin()).thenReturn(true);
             when(userRepository.findAll(0, 20)).thenReturn(Collections.emptyList());
 
             // When
@@ -308,6 +318,7 @@ class ManageUserServiceTest {
                 .searchQuery("john")
                 .build();
 
+            when(rbacService.isSuperAdmin()).thenReturn(true);
             when(userRepository.searchUsers("john")).thenReturn(Arrays.asList(existingUser));
 
             // When
@@ -328,6 +339,7 @@ class ManageUserServiceTest {
                 .searchQuery("nonexistent")
                 .build();
 
+            when(rbacService.isSuperAdmin()).thenReturn(true);
             when(userRepository.searchUsers("nonexistent")).thenReturn(Collections.emptyList());
 
             // When
