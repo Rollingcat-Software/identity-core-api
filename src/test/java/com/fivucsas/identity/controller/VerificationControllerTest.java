@@ -59,6 +59,8 @@ class VerificationControllerTest {
     @Autowired private ObjectMapper objectMapper;
 
     @MockBean private ManageVerificationService verificationService;
+    // Controller now depends on TenantScopeResolver for tenant-scoped listing.
+    @MockBean private TenantScopeResolver tenantScopeResolver;
 
     // Security and infrastructure beans
     @MockBean private TenantRepository tenantRepository;

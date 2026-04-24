@@ -88,7 +88,10 @@ class EnrollmentControllerTest {
                 .authMethodType("PASSWORD")
                 .status("ENROLLED")
                 .build();
-        when(enrollmentQueryService.getAllEnrollments()).thenReturn(List.of(dto));
+        // Controller now calls getAllEnrollments(tenantScopeId) with null when
+        // the caller is SUPER_ADMIN (resolver returns null). Match any UUID.
+        when(enrollmentQueryService.getAllEnrollments(org.mockito.ArgumentMatchers.<java.util.UUID>any()))
+                .thenReturn(List.of(dto));
 
         mockMvc.perform(get("/api/v1/enrollments"))
                 .andExpect(status().isOk())
