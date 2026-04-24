@@ -188,7 +188,7 @@ public class ManageUserService implements ManageUserUseCase {
      *
      * <p>Source of truth is the DB lookup in {@link RbacAuthorizationService}
      * — the Spring principal is a plain {@code UserDetails} (not
-     * {@code CustomUserDetails}) so {@link AuthorizationService#getCurrentTenantId()}
+     * {@code CustomUserDetails}) so {@code AuthorizationService.getCurrentTenantId()}
      * cannot be used here; it silently returns null and would re-open the
      * leak.</p>
      *
