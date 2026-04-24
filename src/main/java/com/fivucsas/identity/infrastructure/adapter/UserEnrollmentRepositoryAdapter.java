@@ -28,6 +28,11 @@ public class UserEnrollmentRepositoryAdapter implements UserEnrollmentRepository
     }
 
     @Override
+    public List<UserEnrollment> findAllByTenantId(UUID tenantId) {
+        return jpaRepository.findAllByTenantId(tenantId);
+    }
+
+    @Override
     public Optional<UserEnrollment> findById(UUID id) {
         return jpaRepository.findById(id);
     }

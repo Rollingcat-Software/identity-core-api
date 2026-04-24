@@ -11,6 +11,7 @@ import com.fivucsas.identity.application.port.input.ManageUserRoleUseCase;
 import com.fivucsas.identity.dto.AssignRoleRequest;
 import com.fivucsas.identity.dto.CreateRoleRequest;
 import com.fivucsas.identity.dto.UpdateRoleRequest;
+import com.fivucsas.identity.security.RbacAuthorizationService;
 import com.fivucsas.identity.security.UserSecurityService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -39,6 +40,7 @@ public class RoleController {
     private final ManageUserRoleUseCase manageUserRoleUseCase;
     private final ManagePermissionUseCase managePermissionUseCase;
     private final UserSecurityService userSecurityService;
+    private final RbacAuthorizationService rbacService;
 
     @GetMapping("/api/v1/roles")
     @Operation(summary = "Get all roles")
@@ -245,9 +247,16 @@ public class RoleController {
 
     @GetMapping("/api/v1/permissions")
     @Operation(summary = "Get all permissions")
-    @PreAuthorize("@rbac.hasPermission('permission:read')")
+    @PreAuthorize("isAuthenticated()")
     public ResponseEntity<List<PermissionResponse>> getAllPermissions() {
         log.info("GET /api/v1/permissions - Get all permissions");
+        // Enumerating ALL system-wide permissions is a SUPER_ADMIN operation.
+        // For non-SUPER_ADMIN callers we return an empty list so the dashboard
+        // renders (rather than 403'ing and breaking the page). No data leak —
+        // permission metadata is only visible to the platform owner.
+        if (!rbacService.isSuperAdmin()) {
+            return ResponseEntity.ok(List.of());
+        }
         return ResponseEntity.ok(managePermissionUseCase.getAllPermissions());
     }
 

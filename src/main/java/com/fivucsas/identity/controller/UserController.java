@@ -332,12 +332,18 @@ public class UserController {
 
     @GetMapping("/api/v1/guests")
     @Operation(summary = "List guest invitations for current tenant")
-    @PreAuthorize("@rbac.hasPermission('guest:read')")
+    @PreAuthorize("@rbac.isTenantAdmin() or @rbac.hasPermission('guest:read')")
     public ResponseEntity<List<GuestInvitationResponse>> listInvitations(
             @RequestParam(required = false) String status) {
 
         User currentUser = rbacService.getCurrentUser()
                 .orElseThrow(() -> new UnauthorizedException());
+
+        // SUPER_ADMIN / ROOT has no tenant, so fall back to empty list rather
+        // than NPE. (Cross-tenant guest listing is not a product need.)
+        if (currentUser.getTenant() == null) {
+            return ResponseEntity.ok(List.of());
+        }
 
         UUID tenantId = currentUser.getTenant().getId();
 
@@ -358,10 +364,15 @@ public class UserController {
 
     @GetMapping("/api/v1/guests/count")
     @Operation(summary = "Count active guests in tenant")
-    @PreAuthorize("@rbac.hasPermission('guest:read')")
+    @PreAuthorize("@rbac.isTenantAdmin() or @rbac.hasPermission('guest:read')")
     public ResponseEntity<Long> countActiveGuests() {
         User currentUser = rbacService.getCurrentUser()
                 .orElseThrow(() -> new UnauthorizedException());
+
+        if (currentUser.getTenant() == null) {
+            // SUPER_ADMIN / ROOT: no tenant scope — return 0 rather than NPE.
+            return ResponseEntity.ok(0L);
+        }
 
         long count = invitationRepository.countActiveGuestsInTenant(
                 currentUser.getTenant().getId(), Instant.now());

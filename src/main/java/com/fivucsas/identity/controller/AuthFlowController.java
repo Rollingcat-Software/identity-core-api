@@ -23,7 +23,7 @@ public class AuthFlowController {
     private final ManageAuthFlowUseCase manageAuthFlowUseCase;
 
     @GetMapping
-    @PreAuthorize("hasPermission(#tenantId, 'Tenant', 'auth_flow:read')")
+    @PreAuthorize("@rbac.canAccessTenant(#tenantId)")
     public ResponseEntity<List<AuthFlowResponse>> getFlows(
             @PathVariable UUID tenantId,
             @RequestParam(required = false) OperationType operationType) {
@@ -31,7 +31,7 @@ public class AuthFlowController {
     }
 
     @GetMapping("/{flowId}")
-    @PreAuthorize("hasPermission(#tenantId, 'Tenant', 'auth_flow:read')")
+    @PreAuthorize("@rbac.canAccessTenant(#tenantId)")
     public ResponseEntity<AuthFlowResponse> getFlow(
             @PathVariable UUID tenantId,
             @PathVariable UUID flowId) {
@@ -39,7 +39,7 @@ public class AuthFlowController {
     }
 
     @PostMapping
-    @PreAuthorize("hasPermission(#tenantId, 'Tenant', 'auth_flow:create')")
+    @PreAuthorize("@rbac.canAccessTenant(#tenantId)")
     public ResponseEntity<AuthFlowResponse> createFlow(
             @PathVariable UUID tenantId,
             @Valid @RequestBody CreateAuthFlowCommand command) {
@@ -48,7 +48,7 @@ public class AuthFlowController {
     }
 
     @PutMapping("/{flowId}")
-    @PreAuthorize("hasPermission(#tenantId, 'Tenant', 'auth_flow:update')")
+    @PreAuthorize("@rbac.canAccessTenant(#tenantId)")
     public ResponseEntity<AuthFlowResponse> updateFlow(
             @PathVariable UUID tenantId,
             @PathVariable UUID flowId,
@@ -57,7 +57,7 @@ public class AuthFlowController {
     }
 
     @DeleteMapping("/{flowId}")
-    @PreAuthorize("hasPermission(#tenantId, 'Tenant', 'auth_flow:delete')")
+    @PreAuthorize("@rbac.canAccessTenant(#tenantId)")
     public ResponseEntity<Void> deleteFlow(
             @PathVariable UUID tenantId,
             @PathVariable UUID flowId) {
