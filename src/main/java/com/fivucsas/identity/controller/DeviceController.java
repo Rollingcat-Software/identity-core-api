@@ -12,6 +12,7 @@ import com.fivucsas.identity.domain.repository.UserRepository;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.entity.WebAuthnCredential;
 import com.fivucsas.identity.infrastructure.webauthn.WebAuthnService;
+import com.fivucsas.identity.security.TenantScopeResolver;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -46,21 +47,43 @@ public class DeviceController {
     private final WebAuthnCredentialRepositoryPort credentialRepository;
     private final UserRepository userRepository;
     private final ManageEnrollmentUseCase manageEnrollmentUseCase;
+    private final TenantScopeResolver tenantScopeResolver;
 
     // --- /api/v1/devices endpoints ---
 
     @GetMapping("/api/v1/devices")
-    @PreAuthorize("hasPermission(null, 'Device', 'device:read')")
+    @PreAuthorize("@rbac.isTenantAdmin() or hasAuthority('device:read')")
     public ResponseEntity<List<DeviceResponse>> getDevices(
             @RequestParam(required = false) UUID userId,
             @RequestParam(required = false) UUID tenantId) {
+        // Determine the scope to enforce:
+        //   - SUPER_ADMIN → callerScope=null → no restriction.
+        //   - TENANT_ADMIN / below → callerScope=caller's tenant id.
+        // If the caller asks for a tenantId different from their own scope we
+        // coerce to the caller's scope (fail-closed), so the dashboard can
+        // omit the tenantId param and still get a sensible tenant-scoped
+        // list instead of 403.
+        UUID callerScope = tenantScopeResolver.currentScope();
+
         if (userId != null) {
             return ResponseEntity.ok(manageDeviceUseCase.listUserDevices(userId));
         }
-        if (tenantId != null) {
-            return ResponseEntity.ok(manageDeviceUseCase.listTenantDevices(tenantId));
+        UUID effectiveTenantId;
+        if (callerScope == null) {
+            // SUPER_ADMIN: must supply tenantId explicitly to avoid dumping
+            // every device in the system.
+            if (tenantId == null) {
+                throw new IllegalArgumentException("Either 'userId' or 'tenantId' query parameter is required.");
+            }
+            effectiveTenantId = tenantId;
+        } else {
+            // Tenant-scoped caller: ignore any tenantId that isn't theirs.
+            effectiveTenantId = callerScope;
         }
-        throw new IllegalArgumentException("Either 'userId' or 'tenantId' query parameter is required.");
+        if (TenantScopeResolver.FAIL_CLOSED_EMPTY_SCOPE.equals(effectiveTenantId)) {
+            return ResponseEntity.ok(List.of());
+        }
+        return ResponseEntity.ok(manageDeviceUseCase.listTenantDevices(effectiveTenantId));
     }
 
     @PostMapping("/api/v1/devices")

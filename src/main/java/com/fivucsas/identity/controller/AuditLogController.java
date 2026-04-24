@@ -8,6 +8,7 @@ import com.fivucsas.identity.entity.AuditLog;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.repository.AuditLogRepository;
 import com.fivucsas.identity.security.RbacAuthorizationService;
+import com.fivucsas.identity.security.TenantScopeResolver;
 import com.fivucsas.identity.domain.exception.UnauthorizedException;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -39,27 +40,59 @@ public class AuditLogController {
     private final AuditLogRepository auditLogRepository;
     private final GetStatisticsUseCase getStatisticsUseCase;
     private final RbacAuthorizationService rbacService;
+    private final TenantScopeResolver tenantScopeResolver;
 
     @GetMapping("/api/v1/audit-logs")
     @Operation(summary = "Get audit logs with pagination")
-    @PreAuthorize("hasPermission(null, 'audit', 'read')")
+    @PreAuthorize("@rbac.isTenantAdmin() or hasAuthority('audit:read')")
     public ResponseEntity<Map<String, Object>> getAuditLogs(
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size,
             @RequestParam(required = false) String action,
             @RequestParam(required = false) String userId) {
 
-        log.info("GET /api/v1/audit-logs - page={}, size={}", page, size);
+        // TENANT_ADMIN sees only their tenant's audit logs; SUPER_ADMIN (null
+        // scope) sees everything; users without a resolvable tenant get empty
+        // (zero-UUID sentinel matches no tenant).
+        UUID scopeTenantId = tenantScopeResolver.currentScope();
+        log.info("GET /api/v1/audit-logs - page={}, size={}, tenantScope={}",
+                page, size, scopeTenantId == null ? "ALL" : scopeTenantId);
 
         PageRequest pageRequest = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
         Page<AuditLog> auditLogs;
 
-        if (action != null && !action.isBlank()) {
-            auditLogs = auditLogRepository.findByActionOrderByCreatedAtDesc(action, pageRequest);
-        } else if (userId != null && !userId.isBlank()) {
-            auditLogs = auditLogRepository.findByUserIdOrderByCreatedAtDesc(UUID.fromString(userId), pageRequest);
+        if (scopeTenantId == null) {
+            // SUPER_ADMIN — no tenant restriction
+            if (action != null && !action.isBlank()) {
+                auditLogs = auditLogRepository.findByActionOrderByCreatedAtDesc(action, pageRequest);
+            } else if (userId != null && !userId.isBlank()) {
+                auditLogs = auditLogRepository.findByUserIdOrderByCreatedAtDesc(UUID.fromString(userId), pageRequest);
+            } else {
+                auditLogs = auditLogRepository.findAll(pageRequest);
+            }
         } else {
-            auditLogs = auditLogRepository.findAll(pageRequest);
+            // Tenant-scoped — only this tenant's rows. Action filter applied
+            // via tenant-scoped repo method; userId filter is intersected at
+            // the page layer (repo lacks a combined tenant+user query).
+            if (action != null && !action.isBlank()) {
+                auditLogs = auditLogRepository.findByTenantIdAndActionOrderByCreatedAtDesc(
+                        scopeTenantId, action, pageRequest);
+            } else {
+                auditLogs = auditLogRepository.findByTenantIdOrderByCreatedAtDesc(scopeTenantId, pageRequest);
+            }
+            if (userId != null && !userId.isBlank()) {
+                UUID targetUserId = UUID.fromString(userId);
+                List<AuditLog> filtered = auditLogs.getContent().stream()
+                        .filter(al -> targetUserId.equals(al.getUserId()))
+                        .toList();
+                Map<String, Object> response = new HashMap<>();
+                response.put("content", filtered.stream().map(this::mapToDto).toList());
+                response.put("totalElements", (long) filtered.size());
+                response.put("totalPages", filtered.isEmpty() ? 0 : 1);
+                response.put("page", 0);
+                response.put("size", size);
+                return ResponseEntity.ok(response);
+            }
         }
 
         Map<String, Object> response = new HashMap<>();
@@ -100,7 +133,7 @@ public class AuditLogController {
 
     @GetMapping("/api/v1/audit-logs/action-types")
     @Operation(summary = "Get available audit log action types")
-    @PreAuthorize("hasPermission(null, 'audit', 'read')")
+    @PreAuthorize("@rbac.isTenantAdmin() or hasAuthority('audit:read')")
     public ResponseEntity<List<String>> getActionTypes() {
         return ResponseEntity.ok(List.of(
             "USER_CREATED", "USER_UPDATED", "USER_DELETED",
@@ -122,12 +155,19 @@ public class AuditLogController {
 
     @GetMapping("/api/v1/audit-logs/{id}")
     @Operation(summary = "Get audit log by ID")
-    @PreAuthorize("hasPermission(null, 'audit', 'read')")
+    @PreAuthorize("@rbac.isTenantAdmin() or hasAuthority('audit:read')")
     public ResponseEntity<AuditLogDto> getAuditLogById(@PathVariable String id) {
         log.info("GET /api/v1/audit-logs/{}", id);
 
         AuditLog auditLog = auditLogRepository.findById(UUID.fromString(id))
                 .orElseThrow(() -> new com.fivucsas.identity.exception.ResourceNotFoundException("AuditLog not found: " + id));
+
+        // Tenant-scope check: non-SUPER_ADMIN may only view their own tenant's
+        // entries. 404 rather than 403 to avoid leaking existence of log IDs.
+        UUID scopeTenantId = tenantScopeResolver.currentScope();
+        if (scopeTenantId != null && !scopeTenantId.equals(auditLog.getTenantId())) {
+            throw new com.fivucsas.identity.exception.ResourceNotFoundException("AuditLog not found: " + id);
+        }
 
         return ResponseEntity.ok(mapToDto(auditLog));
     }

@@ -14,6 +14,7 @@ import com.fivucsas.identity.exception.ResourceNotFoundException;
 import com.fivucsas.identity.repository.BiometricDataRepository;
 import com.fivucsas.identity.repository.UserEnrollmentRepository;
 import com.fivucsas.identity.security.RbacAuthorizationService;
+import com.fivucsas.identity.security.TenantScopeResolver;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
@@ -49,23 +50,38 @@ public class EnrollmentController {
     private final BiometricDataRepository biometricDataRepository;
     private final RbacAuthorizationService rbacService;
     private final EnrollmentHealthService enrollmentHealthService;
+    private final TenantScopeResolver tenantScopeResolver;
 
     // --- /api/v1/enrollments endpoints ---
 
     @GetMapping("/api/v1/enrollments")
     @Operation(summary = "Get all enrollments")
-    @PreAuthorize("hasPermission(null, 'enrollment', 'read')")
+    @PreAuthorize("@rbac.isTenantAdmin() or hasAuthority('enrollment:read')")
     public ResponseEntity<List<EnrollmentDto>> getAllEnrollments() {
-        log.info("GET /api/v1/enrollments");
-        return ResponseEntity.ok(enrollmentQueryService.getAllEnrollments());
+        // TENANT_ADMIN sees only their tenant's enrollments; SUPER_ADMIN sees
+        // everything; users without a resolvable tenant get empty.
+        UUID scopeTenantId = tenantScopeResolver.currentScope();
+        log.info("GET /api/v1/enrollments - tenantScope={}",
+                scopeTenantId == null ? "ALL" : scopeTenantId);
+        if (TenantScopeResolver.FAIL_CLOSED_EMPTY_SCOPE.equals(scopeTenantId)) {
+            return ResponseEntity.ok(List.of());
+        }
+        return ResponseEntity.ok(enrollmentQueryService.getAllEnrollments(scopeTenantId));
     }
 
     @GetMapping("/api/v1/enrollments/{id}")
     @Operation(summary = "Get enrollment by ID")
-    @PreAuthorize("hasPermission(null, 'enrollment', 'read')")
+    @PreAuthorize("@rbac.isTenantAdmin() or hasAuthority('enrollment:read')")
     public ResponseEntity<EnrollmentDto> getEnrollmentById(@PathVariable String id) {
         log.info("GET /api/v1/enrollments/{}", id);
-        return ResponseEntity.ok(enrollmentQueryService.getEnrollmentById(UUID.fromString(id)));
+        EnrollmentDto dto = enrollmentQueryService.getEnrollmentById(UUID.fromString(id));
+        UUID scopeTenantId = tenantScopeResolver.currentScope();
+        if (scopeTenantId != null && dto.getTenantId() != null
+                && !scopeTenantId.toString().equals(dto.getTenantId())) {
+            // Non-SUPER_ADMIN may not peek at other tenants' enrollments.
+            throw new ResourceNotFoundException("Enrollment not found: " + id);
+        }
+        return ResponseEntity.ok(dto);
     }
 
     @PostMapping("/api/v1/enrollments/{id}/retry")

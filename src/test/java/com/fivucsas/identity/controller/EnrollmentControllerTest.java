@@ -20,6 +20,7 @@ import com.fivucsas.identity.repository.UserEnrollmentRepository;
 import com.fivucsas.identity.security.JwtAuthenticationFilter;
 import com.fivucsas.identity.security.RateLimitService;
 import com.fivucsas.identity.security.RbacAuthorizationService;
+import com.fivucsas.identity.security.TenantScopeResolver;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -63,6 +64,7 @@ class EnrollmentControllerTest {
     @MockBean private BiometricDataRepository biometricDataRepository;
     @MockBean private RbacAuthorizationService rbacService;
     @MockBean private EnrollmentHealthService enrollmentHealthService;
+    @MockBean private TenantScopeResolver tenantScopeResolver;
 
     // Security and infrastructure beans
     @MockBean private TenantRepository tenantRepository;

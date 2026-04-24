@@ -187,6 +187,70 @@ public class ManageVerificationService {
         return INDUSTRY_TEMPLATES;
     }
 
+    /**
+     * Returns all VERIFICATION-type auth flows for a tenant. Used by the
+     * dashboard {@code GET /api/v1/verification/flows?tenantId=…} endpoint.
+     *
+     * <p>Returns an empty list if the tenant has no verification flows
+     * configured; never throws so the dashboard can render gracefully.</p>
+     */
+    public List<com.fivucsas.identity.application.dto.response.AuthFlowResponse> getVerificationFlows(UUID tenantId) {
+        if (tenantId == null) return List.of();
+        return authFlowRepository.findAllByTenantId(tenantId).stream()
+                .filter(f -> f.getFlowType() == FlowType.VERIFICATION)
+                .map(com.fivucsas.identity.application.dto.response.AuthFlowResponse::from)
+                .toList();
+    }
+
+    /**
+     * Returns aggregate verification stats for a tenant, or platform-wide
+     * when {@code tenantId} is {@code null}. Used by {@code GET /api/v1/verification/stats}.
+     *
+     * <p>Shape is a simple map rather than a dedicated DTO so the frontend
+     * can render partial sections without a strict schema contract.</p>
+     */
+    public Map<String, Object> getVerificationStats(UUID tenantId) {
+        List<VerificationSession> sessions = tenantId == null
+                ? sessionRepository.findAll()
+                : sessionRepository.findAllByTenantIdOrderByCreatedAtDesc(tenantId);
+
+        long total = sessions.size();
+        long completed = sessions.stream()
+                .filter(s -> s.getStatus() == VerificationSessionStatus.COMPLETED).count();
+        long failed = sessions.stream()
+                .filter(s -> s.getStatus() == VerificationSessionStatus.FAILED).count();
+        long inProgress = sessions.stream()
+                .filter(s -> s.getStatus() == VerificationSessionStatus.IN_PROGRESS
+                        || s.getStatus() == VerificationSessionStatus.PENDING).count();
+        long expired = sessions.stream()
+                .filter(s -> s.getStatus() == VerificationSessionStatus.EXPIRED).count();
+        double successRate = total == 0 ? 0.0 : (double) completed / total;
+
+        Map<String, Object> stats = new HashMap<>();
+        stats.put("tenantId", tenantId != null ? tenantId.toString() : null);
+        stats.put("total", total);
+        stats.put("completed", completed);
+        stats.put("failed", failed);
+        stats.put("inProgress", inProgress);
+        stats.put("expired", expired);
+        stats.put("successRate", successRate);
+        return stats;
+    }
+
+    /**
+     * Lists verification sessions for a tenant (or all tenants when
+     * {@code tenantId} is {@code null}). Results are in reverse-chronological
+     * order. Used by {@code GET /api/v1/verification/sessions}.
+     */
+    public List<VerificationSessionResponse> listSessions(UUID tenantId) {
+        List<VerificationSession> sessions = tenantId == null
+                ? sessionRepository.findAll()
+                : sessionRepository.findAllByTenantIdOrderByCreatedAtDesc(tenantId);
+        return sessions.stream()
+                .map(VerificationSessionResponse::from)
+                .toList();
+    }
+
     public VerificationStatusResponse getUserVerificationStatus(UUID userId) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new EntityNotFoundException("User not found: " + userId));

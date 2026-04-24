@@ -3,11 +3,13 @@ package com.fivucsas.identity.controller;
 import com.fivucsas.identity.application.dto.command.CreateVerificationSessionCommand;
 import com.fivucsas.identity.application.dto.command.ReviewVerificationStepCommand;
 import com.fivucsas.identity.application.dto.command.SubmitVerificationStepCommand;
+import com.fivucsas.identity.application.dto.response.AuthFlowResponse;
 import com.fivucsas.identity.application.dto.response.IndustryTemplateResponse;
 import com.fivucsas.identity.application.dto.response.VerificationSessionResponse;
 import com.fivucsas.identity.application.dto.response.VerificationStatusResponse;
 import com.fivucsas.identity.application.dto.response.VerificationStepResultResponse;
 import com.fivucsas.identity.application.service.ManageVerificationService;
+import com.fivucsas.identity.security.TenantScopeResolver;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -16,6 +18,7 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @RestController
@@ -24,6 +27,7 @@ import java.util.UUID;
 public class VerificationController {
 
     private final ManageVerificationService verificationService;
+    private final TenantScopeResolver tenantScopeResolver;
 
     @PostMapping("/sessions")
     public ResponseEntity<VerificationSessionResponse> createSession(
@@ -53,6 +57,74 @@ public class VerificationController {
     @GetMapping("/templates")
     public ResponseEntity<List<IndustryTemplateResponse>> getTemplates() {
         return ResponseEntity.ok(verificationService.getTemplates());
+    }
+
+    /**
+     * Lists VERIFICATION-type auth flows for a tenant. Tenant-scoped: a
+     * TENANT_ADMIN may only query their own tenant; SUPER_ADMIN may query any.
+     * Unknown/unauthorized tenantId → empty list (dashboard-friendly) rather
+     * than 403 so the page renders.
+     */
+    @GetMapping("/flows")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<List<AuthFlowResponse>> listFlows(
+            @RequestParam(required = false) UUID tenantId) {
+        UUID callerScope = tenantScopeResolver.currentScope();
+        UUID effectiveTenantId;
+        if (callerScope == null) {
+            // SUPER_ADMIN — honor the query param; empty list if omitted.
+            effectiveTenantId = tenantId;
+        } else if (TenantScopeResolver.FAIL_CLOSED_EMPTY_SCOPE.equals(callerScope)) {
+            return ResponseEntity.ok(List.of());
+        } else {
+            // Tenant-scoped caller: always pin to their own tenant.
+            effectiveTenantId = callerScope;
+        }
+        if (effectiveTenantId == null) {
+            return ResponseEntity.ok(List.of());
+        }
+        return ResponseEntity.ok(verificationService.getVerificationFlows(effectiveTenantId));
+    }
+
+    /**
+     * Aggregate verification stats. Same scoping rule as {@code /flows}.
+     */
+    @GetMapping("/stats")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<Map<String, Object>> stats(
+            @RequestParam(required = false) UUID tenantId) {
+        UUID callerScope = tenantScopeResolver.currentScope();
+        UUID effectiveTenantId;
+        if (callerScope == null) {
+            // SUPER_ADMIN — if no tenantId param, aggregate platform-wide.
+            effectiveTenantId = tenantId;
+        } else if (TenantScopeResolver.FAIL_CLOSED_EMPTY_SCOPE.equals(callerScope)) {
+            // Fail-closed: empty stats
+            return ResponseEntity.ok(verificationService.getVerificationStats(
+                    TenantScopeResolver.FAIL_CLOSED_EMPTY_SCOPE));
+        } else {
+            effectiveTenantId = callerScope;
+        }
+        return ResponseEntity.ok(verificationService.getVerificationStats(effectiveTenantId));
+    }
+
+    /**
+     * Lists verification sessions. Tenant-scoped.
+     */
+    @GetMapping("/sessions")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<List<VerificationSessionResponse>> listSessions(
+            @RequestParam(required = false) UUID tenantId) {
+        UUID callerScope = tenantScopeResolver.currentScope();
+        UUID effectiveTenantId;
+        if (callerScope == null) {
+            effectiveTenantId = tenantId;
+        } else if (TenantScopeResolver.FAIL_CLOSED_EMPTY_SCOPE.equals(callerScope)) {
+            return ResponseEntity.ok(List.of());
+        } else {
+            effectiveTenantId = callerScope;
+        }
+        return ResponseEntity.ok(verificationService.listSessions(effectiveTenantId));
     }
 
     @GetMapping("/results/{userId}")

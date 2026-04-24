@@ -14,6 +14,12 @@ public interface UserEnrollmentRepositoryPort {
 
     List<UserEnrollment> findAll();
 
+    /**
+     * Returns all enrollments for a given tenant. Used for tenant-scoped
+     * listings so TENANT_ADMIN callers never see other tenants' data.
+     */
+    List<UserEnrollment> findAllByTenantId(UUID tenantId);
+
     List<UserEnrollment> findAllByUserId(UUID userId);
 
     Optional<UserEnrollment> findById(UUID id);

@@ -4,6 +4,8 @@ import com.fivucsas.identity.application.dto.command.CreateTenantCommand;
 import com.fivucsas.identity.application.dto.command.UpdateTenantCommand;
 import com.fivucsas.identity.application.dto.response.TenantResponse;
 import com.fivucsas.identity.application.port.input.ManageTenantUseCase;
+import com.fivucsas.identity.security.RbacAuthorizationService;
+import com.fivucsas.identity.security.TenantScopeResolver;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.Min;
@@ -19,6 +21,7 @@ import org.springframework.web.bind.annotation.*;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 /**
  * REST controller for tenant management.
@@ -33,6 +36,8 @@ import java.util.Map;
 public class TenantController {
 
     private final ManageTenantUseCase manageTenantUseCase;
+    private final RbacAuthorizationService rbacService;
+    private final TenantScopeResolver tenantScopeResolver;
 
     @PostMapping
     @PreAuthorize("@rbac.isRoot()")
@@ -57,32 +62,70 @@ public class TenantController {
     }
 
     @GetMapping("/{tenantId}")
-    @PreAuthorize("@rbac.hasPermission('tenant:read')")
+    @PreAuthorize("isAuthenticated()")
     public ResponseEntity<TenantResponse> getTenantById(@PathVariable String tenantId) {
+        // Non-SUPER_ADMIN callers may only fetch their own tenant. 404 rather
+        // than 403 to avoid leaking which tenant IDs exist.
+        UUID target;
+        try {
+            target = UUID.fromString(tenantId);
+        } catch (IllegalArgumentException e) {
+            throw new com.fivucsas.identity.exception.ResourceNotFoundException("Tenant not found: " + tenantId);
+        }
+        if (!tenantScopeResolver.canAccessTenant(target)) {
+            throw new com.fivucsas.identity.exception.ResourceNotFoundException("Tenant not found: " + tenantId);
+        }
         TenantResponse response = manageTenantUseCase.getTenantById(tenantId);
         return ResponseEntity.ok(response);
     }
 
     @GetMapping("/slug/{slug}")
-    @PreAuthorize("@rbac.hasPermission('tenant:read')")
+    @PreAuthorize("isAuthenticated()")
     public ResponseEntity<TenantResponse> getTenantBySlug(@PathVariable String slug) {
         TenantResponse response = manageTenantUseCase.getTenantBySlug(slug);
+        // Tenant-scope check — non-SUPER_ADMIN may only resolve their own.
+        try {
+            UUID target = UUID.fromString(response.getId());
+            if (!tenantScopeResolver.canAccessTenant(target)) {
+                throw new com.fivucsas.identity.exception.ResourceNotFoundException("Tenant not found: " + slug);
+            }
+        } catch (IllegalArgumentException e) {
+            throw new com.fivucsas.identity.exception.ResourceNotFoundException("Tenant not found: " + slug);
+        }
         return ResponseEntity.ok(response);
     }
 
     @GetMapping
-    @PreAuthorize("@rbac.hasPermission('tenant:read')")
+    @PreAuthorize("isAuthenticated()")
     public ResponseEntity<Map<String, Object>> getAllTenants(
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
-        List<TenantResponse> allTenants = manageTenantUseCase.getAllTenants();
+        // Listing ALL tenants system-wide is a SUPER_ADMIN operation. For
+        // non-SUPER_ADMIN callers we return only the caller's own tenant so
+        // the dashboard renders a usable list (rather than 403'ing and
+        // breaking the page). This never leaks other tenants' data.
+        List<TenantResponse> visible;
+        if (tenantScopeResolver.isUnrestricted()) {
+            visible = manageTenantUseCase.getAllTenants();
+        } else {
+            UUID scope = tenantScopeResolver.currentScope();
+            if (scope == null || scope.equals(TenantScopeResolver.FAIL_CLOSED_EMPTY_SCOPE)) {
+                visible = List.of();
+            } else {
+                try {
+                    visible = List.of(manageTenantUseCase.getTenantById(scope.toString()));
+                } catch (Exception e) {
+                    visible = List.of();
+                }
+            }
+        }
 
-        int totalElements = allTenants.size();
-        int totalPages = (int) Math.ceil((double) totalElements / size);
+        int totalElements = visible.size();
+        int totalPages = size == 0 ? 0 : (int) Math.ceil((double) totalElements / size);
         int fromIndex = Math.min(page * size, totalElements);
         int toIndex = Math.min(fromIndex + size, totalElements);
 
-        List<TenantResponse> pagedTenants = allTenants.subList(fromIndex, toIndex);
+        List<TenantResponse> pagedTenants = visible.subList(fromIndex, toIndex);
 
         Map<String, Object> response = new HashMap<>();
         response.put("content", pagedTenants);

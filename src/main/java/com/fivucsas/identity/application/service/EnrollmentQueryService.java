@@ -31,14 +31,32 @@ public class EnrollmentQueryService {
     private final UserEnrollmentRepositoryPort userEnrollmentRepository;
 
     public List<EnrollmentDto> getAllEnrollments() {
-        List<EnrollmentDto> enrollments = userEnrollmentRepository.findAll().stream()
+        return getAllEnrollments(null);
+    }
+
+    /**
+     * Returns all enrollments, optionally restricted to a tenant.
+     *
+     * @param tenantScopeId the tenant to scope by; {@code null} means
+     *                      "no scope restriction" (SUPER_ADMIN).
+     */
+    public List<EnrollmentDto> getAllEnrollments(UUID tenantScopeId) {
+        List<EnrollmentDto> enrollments = (tenantScopeId == null
+                ? userEnrollmentRepository.findAll()
+                : userEnrollmentRepository.findAllByTenantId(tenantScopeId)
+        ).stream()
                 .map(this::mapEnrollmentToDto)
                 .toList();
         if (!enrollments.isEmpty()) {
             return enrollments;
         }
-        // Fall back to legacy BiometricData if no UserEnrollment records exist
+        // Fall back to legacy BiometricData if no UserEnrollment records exist.
+        // BiometricData is not tenant-tagged; filter post-load when a scope is set.
         return biometricDataRepository.findAll().stream()
+                .filter(d -> tenantScopeId == null
+                        || (d.getUser() != null
+                            && d.getUser().getTenant() != null
+                            && tenantScopeId.equals(d.getUser().getTenant().getId())))
                 .map(this::mapBiometricToDto)
                 .toList();
     }
