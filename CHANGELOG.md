@@ -2,6 +2,22 @@
 
 ## [Unreleased]
 
+### Changed
+- **Auth flows: any AuthMethod can be step[0].** Removed the hardcoded
+  `PASSWORD_MANDATORY_OPERATIONS = {APP_LOGIN, API_ACCESS}` rule from
+  `ManageAuthFlowService` and `ExecuteAuthSessionService`. Tenants can now
+  configure any `AuthMethodType` as the first step of any operation type
+  (e.g. a passwordless `FACE -> TOTP` APP_LOGIN flow). Structural validation
+  is retained: a flow must have ≥1 step, exactly one step with
+  `stepOrder == 1`, a non-null `AuthMethod` on that step, and unique
+  `stepOrder` values. **Backward-compat note:** existing tenants are
+  unaffected because the V29 seed still provisions `PASSWORD`-first flows.
+  The legacy `/auth/login` endpoint continues to enforce PASSWORD-first
+  internally (it is a password-specific endpoint by design); flexible flows
+  must be consumed via `/auth/sessions/start` + `/auth/sessions/{id}/steps/{n}`.
+  Files: `application/service/ExecuteAuthSessionService.java`,
+  `application/service/ManageAuthFlowService.java` and matching unit tests.
+
 ### Security
 - **BE-H1 — JWT signing: dual-algorithm coexistence (HS512 + RS256).**
   OIDC best practice is asymmetric (RS256) so relying parties can verify ID

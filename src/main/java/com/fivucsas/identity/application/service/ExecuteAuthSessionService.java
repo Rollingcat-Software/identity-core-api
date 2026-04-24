@@ -28,7 +28,6 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.UUID;
 
 @Service
@@ -49,10 +48,6 @@ public class ExecuteAuthSessionService implements ExecuteAuthSessionUseCase {
     private final RefreshTokenService refreshTokenService;
 
     private static final int SESSION_TIMEOUT_MINUTES = 10;
-    private static final Set<OperationType> PASSWORD_MANDATORY_OPERATIONS = Set.of(
-            OperationType.APP_LOGIN,
-            OperationType.API_ACCESS
-    );
 
     @Override
     public AuthSessionResponse startSession(StartAuthSessionCommand command) {
@@ -82,7 +77,7 @@ public class ExecuteAuthSessionService implements ExecuteAuthSessionUseCase {
                 .expiresAt(Instant.now().plus(SESSION_TIMEOUT_MINUTES, ChronoUnit.MINUTES))
                 .build();
 
-        validateFlowIntegrity(flow, command.operationType());
+        validateFlowIntegrity(flow);
 
         AuthSession savedSession = authSessionRepository.save(session);
 
@@ -245,19 +240,33 @@ public class ExecuteAuthSessionService implements ExecuteAuthSessionUseCase {
                 .orElse(null);
     }
 
-    private void validateFlowIntegrity(AuthFlow flow, OperationType operationType) {
-        if (!PASSWORD_MANDATORY_OPERATIONS.contains(operationType)) {
-            return;
-        }
+    /**
+     * Structural integrity check for a configured {@link AuthFlow}.
+     *
+     * <p>Tenants are free to pick ANY {@link AuthMethodType} as step[0] — the
+     * product premise is a customizable flow. This method therefore only
+     * enforces that the flow is well-formed:
+     *
+     * <ul>
+     *   <li>has at least one step;
+     *   <li>step[0] (lowest stepOrder) references a non-null, persisted
+     *       {@link AuthMethod}.
+     * </ul>
+     *
+     * Step-order uniqueness and valid method references for the REMAINING
+     * steps are enforced at write time by {@link ManageAuthFlowService} and
+     * by DB constraints (V16 + V30 {@code chk_step_order}).
+     */
+    private void validateFlowIntegrity(AuthFlow flow) {
         List<AuthFlowStep> steps = authFlowStepRepository
                 .findAllByAuthFlowIdOrderByStepOrderAsc(flow.getId());
         if (steps.isEmpty()) {
             throw new IllegalStateException("Auth flow has no steps configured");
         }
         AuthFlowStep firstStep = steps.getFirst();
-        if (firstStep.getAuthMethod().getType() != AuthMethodType.PASSWORD) {
+        if (firstStep.getAuthMethod() == null || firstStep.getAuthMethod().getType() == null) {
             throw new IllegalStateException(
-                    operationType + " flows must have PASSWORD as the first step");
+                    "First step of auth flow " + flow.getId() + " has no valid AuthMethod");
         }
     }
 

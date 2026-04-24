@@ -28,11 +28,6 @@ import java.util.UUID;
 @Transactional(readOnly = true)
 public class ManageAuthFlowService implements ManageAuthFlowUseCase {
 
-    private static final Set<OperationType> PASSWORD_MANDATORY_OPERATIONS = Set.of(
-            OperationType.APP_LOGIN,
-            OperationType.API_ACCESS
-    );
-
     private static final Set<String> REQUIRED_UNSUPPORTED_METHODS = Set.of(
             "NFC_DOCUMENT",
             "FINGERPRINT",
@@ -77,7 +72,7 @@ public class ManageAuthFlowService implements ManageAuthFlowUseCase {
         AuthFlow savedFlow = authFlowRepository.save(flow);
 
         if (command.steps() != null) {
-            validatePasswordConstraint(command.operationType(), command.steps());
+            validateFirstStepStructure(command.steps());
             validateNoRequiredUnsupportedMethods(command.steps());
             for (CreateAuthFlowCommand.FlowStepSpec stepSpec : command.steps()) {
                 AuthMethodType methodType = AuthMethodType.valueOf(stepSpec.authMethodType());
@@ -139,22 +134,59 @@ public class ManageAuthFlowService implements ManageAuthFlowUseCase {
         authFlowRepository.delete(flow);
     }
 
-    private void validatePasswordConstraint(OperationType operationType,
-                                             List<CreateAuthFlowCommand.FlowStepSpec> steps) {
-        if (!PASSWORD_MANDATORY_OPERATIONS.contains(operationType)) {
-            return;
+    /**
+     * Structural validation for the first step of a customizable auth flow.
+     *
+     * <p>A tenant may choose ANY {@link AuthMethodType} as step[0]; this
+     * method no longer enforces PASSWORD-first. What it DOES enforce is that
+     * the submitted step list is well-formed:
+     *
+     * <ul>
+     *   <li>non-empty,
+     *   <li>contains exactly one step whose {@code stepOrder == 1},
+     *   <li>that step declares a parseable {@link AuthMethodType},
+     *   <li>and every step has a unique {@code stepOrder}.
+     * </ul>
+     *
+     * Per-step references to concrete {@link AuthMethod} rows and fallbacks
+     * are resolved (and validated for existence) in {@link #createFlow}
+     * below. DB-level range constraints live in V16/V30.
+     */
+    private void validateFirstStepStructure(List<CreateAuthFlowCommand.FlowStepSpec> steps) {
+        if (steps.isEmpty()) {
+            throw new IllegalArgumentException("Auth flow must define at least one step");
         }
 
-        boolean hasPasswordFirst = steps.stream()
+        long stepOneCount = steps.stream().filter(s -> s.stepOrder() == 1).count();
+        if (stepOneCount == 0) {
+            throw new IllegalArgumentException("Auth flow must define a step with stepOrder=1");
+        }
+        if (stepOneCount > 1) {
+            throw new IllegalArgumentException("Auth flow has multiple steps with stepOrder=1");
+        }
+
+        CreateAuthFlowCommand.FlowStepSpec firstStep = steps.stream()
                 .filter(s -> s.stepOrder() == 1)
-                .anyMatch(s -> "PASSWORD".equals(s.authMethodType()));
+                .findFirst()
+                .orElseThrow();
 
-        if (!hasPasswordFirst) {
+        if (firstStep.authMethodType() == null || firstStep.authMethodType().isBlank()) {
+            throw new IllegalArgumentException("First step must reference an AuthMethod");
+        }
+        try {
+            AuthMethodType.valueOf(firstStep.authMethodType());
+        } catch (IllegalArgumentException ex) {
             throw new IllegalArgumentException(
-                    operationType + " flows must have PASSWORD as the first step");
+                    "First step references unknown AuthMethod: " + firstStep.authMethodType(), ex);
         }
 
-        log.debug("Password constraint validated for {} flow", operationType);
+        long uniqueOrders = steps.stream().map(CreateAuthFlowCommand.FlowStepSpec::stepOrder).distinct().count();
+        if (uniqueOrders != steps.size()) {
+            throw new IllegalArgumentException("Auth flow steps must have unique stepOrder values");
+        }
+
+        log.debug("First-step structural check passed (method={}, {} step(s))",
+                firstStep.authMethodType(), steps.size());
     }
 
     private void validateNoRequiredUnsupportedMethods(List<CreateAuthFlowCommand.FlowStepSpec> steps) {
