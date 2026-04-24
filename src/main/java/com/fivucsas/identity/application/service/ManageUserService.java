@@ -23,7 +23,6 @@ import com.fivucsas.identity.entity.UserStatus;
 import com.fivucsas.identity.repository.JpaTenantRepository;
 import com.fivucsas.identity.application.port.output.RoleRepositoryPort;
 import com.fivucsas.identity.application.port.output.UserRoleRepositoryPort;
-import com.fivucsas.identity.security.AuthorizationService;
 import com.fivucsas.identity.security.RbacAuthorizationService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -53,7 +52,6 @@ public class ManageUserService implements ManageUserUseCase {
     private final RoleRepositoryPort roleRepository;
     private final UserRoleRepositoryPort userRoleRepository;
     private final AuditLogQueryPort auditLogQueryPort;
-    private final AuthorizationService authorizationService;
     private final RbacAuthorizationService rbacService;
 
     @Override
@@ -182,17 +180,31 @@ public class ManageUserService implements ManageUserUseCase {
 
     /**
      * Returns the tenant the current caller is allowed to enumerate, or
-     * {@code null} if the caller is SUPER_ADMIN (no scope restriction).
+     * {@code null} if the caller is SUPER_ADMIN / ROOT (no scope restriction).
      *
-     * <p>Prevents TENANT_ADMIN from listing users in other tenants via
-     * {@code /api/v1/users} — the @PreAuthorize check only verifies the
-     * {@code user:read} permission, not tenant scope.</p>
+     * <p>Prevents TENANT_ADMIN and below from listing users in other tenants
+     * via {@code /api/v1/users}. The {@code @PreAuthorize("user:read")} check
+     * verifies the permission exists, not the tenant scope.</p>
+     *
+     * <p>Source of truth is the DB lookup in {@link RbacAuthorizationService}
+     * — the Spring principal is a plain {@code UserDetails} (not
+     * {@code CustomUserDetails}) so {@link AuthorizationService#getCurrentTenantId()}
+     * cannot be used here; it silently returns null and would re-open the
+     * leak.</p>
+     *
+     * <p>Fail-closed: if the current user cannot be resolved to a tenant,
+     * return a zero-UUID sentinel that matches no tenant, so the query
+     * produces an empty list rather than an unbounded one.</p>
      */
+    private static final UUID FAIL_CLOSED_EMPTY_SCOPE = new UUID(0L, 0L);
+
     private UUID resolveTenantScope() {
         if (rbacService.isSuperAdmin()) {
             return null;
         }
-        return authorizationService.getCurrentTenantId();
+        return rbacService.getCurrentUser()
+                .map(u -> u.getTenant() != null ? u.getTenant().getId() : FAIL_CLOSED_EMPTY_SCOPE)
+                .orElse(FAIL_CLOSED_EMPTY_SCOPE);
     }
 
     @Override
