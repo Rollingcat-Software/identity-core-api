@@ -12,10 +12,13 @@ import com.fivucsas.identity.application.dto.response.DeviceResponse;
 import com.fivucsas.identity.application.dto.response.StepUpChallengeResponse;
 import com.fivucsas.identity.application.dto.response.StepUpVerifyResponse;
 import com.fivucsas.identity.application.port.input.EnrollBiometricUseCase;
+import com.fivucsas.identity.application.port.input.ManageEnrollmentUseCase;
 import com.fivucsas.identity.application.port.input.StepUpAuthUseCase;
 import com.fivucsas.identity.application.port.input.VerifyBiometricUseCase;
 import com.fivucsas.identity.application.port.output.BiometricServicePort;
+import com.fivucsas.identity.application.service.EnrollBiometricService;
 import com.fivucsas.identity.domain.exception.UnauthorizedException;
+import com.fivucsas.identity.domain.model.auth.AuthMethodType;
 import com.fivucsas.identity.domain.model.auth.DevicePlatform;
 import com.fivucsas.identity.dto.BiometricVerificationResponse;
 import com.fivucsas.identity.entity.User;
@@ -32,6 +35,7 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -53,6 +57,7 @@ public class BiometricController {
     private final VerifyBiometricUseCase verifyBiometricUseCase;
     private final BiometricServicePort biometricServicePort;
     private final StepUpAuthUseCase stepUpAuthUseCase;
+    private final ManageEnrollmentUseCase manageEnrollmentUseCase;
     private final RbacAuthorizationService rbacService;
 
     @GetMapping("/api/v1/biometric/health")
@@ -97,6 +102,7 @@ public class BiometricController {
 
         log.info("Multi-image face enrollment for user: {}, images: {}", userId, files.size());
         Map<String, Object> result = biometricServicePort.enrollFaceMulti(userId, files);
+        recordEnrollmentScores(userId, AuthMethodType.FACE, result);
         return ResponseEntity.ok(result);
     }
 
@@ -139,6 +145,10 @@ public class BiometricController {
         Map<String, Object> result = biometricServicePort.enrollFingerprint(userId, fingerprintData);
         boolean success = Boolean.TRUE.equals(result.get("success"))
                 || "true".equalsIgnoreCase(String.valueOf(result.get("success")));
+
+        if (success) {
+            recordEnrollmentScores(userId, AuthMethodType.FINGERPRINT, result);
+        }
 
         return ResponseEntity.ok(BiometricVerificationResponse.builder()
             .verified(success)
@@ -195,6 +205,10 @@ public class BiometricController {
         Map<String, Object> result = biometricServicePort.enrollVoice(userId, voiceData);
         boolean success = Boolean.TRUE.equals(result.get("success"))
                 || "true".equalsIgnoreCase(String.valueOf(result.get("success")));
+
+        if (success) {
+            recordEnrollmentScores(userId, AuthMethodType.VOICE, result);
+        }
 
         return ResponseEntity.ok(BiometricVerificationResponse.builder()
             .verified(success)
@@ -386,5 +400,21 @@ public class BiometricController {
             .confidence(response.getConfidence() != null ? response.getConfidence() : 0.0)
             .message(response.getMessage())
             .build();
+    }
+
+    /**
+     * Best-effort: extract quality + liveness scores from the biometric-processor
+     * response and persist them on the matching user_enrollments row. Wrapped
+     * defensively so the upload itself never fails because of admin bookkeeping.
+     */
+    private void recordEnrollmentScores(UUID userId, AuthMethodType methodType, Map<String, Object> response) {
+        try {
+            BigDecimal quality = EnrollBiometricService.extractScore(response, "quality_score");
+            BigDecimal liveness = EnrollBiometricService.extractScore(response, "liveness_score");
+            manageEnrollmentUseCase.recordBiometricScores(userId, methodType, quality, liveness);
+        } catch (Exception e) {
+            log.warn("Failed to persist enrollment scores for user {} method {}: {}",
+                    userId, methodType, e.getMessage());
+        }
     }
 }

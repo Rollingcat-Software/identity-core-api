@@ -15,16 +15,19 @@ import com.fivucsas.identity.repository.JpaTenantRepository;
 import jakarta.persistence.EntityNotFoundException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentCaptor.forClass;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
@@ -141,8 +144,8 @@ class ManageEnrollmentServiceTest {
         // when
         EnrollmentResponse result = service.completeEnrollment(userId, AuthMethodType.FACE, "{\"quality\":0.9}");
 
-        // then
-        verify(enrollment).completeEnrollment("{\"quality\":0.9}");
+        // then — 3-arg path now delegates to the 5-arg overload with null scores
+        verify(enrollment).completeEnrollment("{\"quality\":0.9}", null, null);
         verify(userEnrollmentRepository).save(enrollment);
     }
 
@@ -218,6 +221,80 @@ class ManageEnrollmentServiceTest {
         // then - enrollment should still be revoked even though biometric delete failed
         verify(enrollment).revoke();
         verify(userEnrollmentRepository).save(enrollment);
+    }
+
+    @Test
+    void completeEnrollmentWithScores_ShouldPersistQualityAndLiveness() {
+        // given — biometric flow returns quality + liveness scores; the writer
+        // must capture them onto the user_enrollments row so the admin
+        // Enrollments table can render real numbers instead of "-".
+        UserEnrollment enrollment = UserEnrollment.builder()
+                .authMethodType(AuthMethodType.FACE)
+                .status(EnrollmentStatus.PENDING)
+                .build();
+        when(userEnrollmentRepository.findByUserIdAndAuthMethodType(userId, AuthMethodType.FACE))
+                .thenReturn(Optional.of(enrollment));
+        when(userEnrollmentRepository.save(enrollment)).thenReturn(enrollment);
+
+        // when
+        EnrollmentResponse result = service.completeEnrollment(
+                userId, AuthMethodType.FACE, "{}",
+                new BigDecimal("0.9234"), new BigDecimal("0.9501"));
+
+        // then
+        ArgumentCaptor<UserEnrollment> captor = forClass(UserEnrollment.class);
+        verify(userEnrollmentRepository).save(captor.capture());
+        UserEnrollment saved = captor.getValue();
+        assertThat(saved.getQualityScore()).isEqualByComparingTo(new BigDecimal("0.9234"));
+        assertThat(saved.getLivenessScore()).isEqualByComparingTo(new BigDecimal("0.9501"));
+        assertThat(saved.getStatus()).isEqualTo(EnrollmentStatus.ENROLLED);
+        assertThat(result.qualityScore()).isEqualTo(0.9234);
+        assertThat(result.livenessScore()).isEqualTo(0.9501);
+    }
+
+    @Test
+    void recordBiometricScores_WhenEnrollmentExists_ShouldUpdateScoresOnly() {
+        // given — pre-existing ENROLLED row with a fixed enrolledAt that must
+        // not be re-stamped when scores are recorded after the fact.
+        java.time.Instant originalEnrolledAt = java.time.Instant.parse("2026-01-01T00:00:00Z");
+        UserEnrollment enrollment = UserEnrollment.builder()
+                .authMethodType(AuthMethodType.FACE)
+                .status(EnrollmentStatus.ENROLLED)
+                .enrolledAt(originalEnrolledAt)
+                .build();
+        when(userEnrollmentRepository.findByUserIdAndAuthMethodType(userId, AuthMethodType.FACE))
+                .thenReturn(Optional.of(enrollment));
+
+        // when
+        service.recordBiometricScores(userId, AuthMethodType.FACE,
+                new BigDecimal("0.8800"), new BigDecimal("0.9100"));
+
+        // then — scores updated, status / enrolledAt unchanged
+        ArgumentCaptor<UserEnrollment> captor = forClass(UserEnrollment.class);
+        verify(userEnrollmentRepository).save(captor.capture());
+        UserEnrollment saved = captor.getValue();
+        assertThat(saved.getQualityScore()).isEqualByComparingTo(new BigDecimal("0.8800"));
+        assertThat(saved.getLivenessScore()).isEqualByComparingTo(new BigDecimal("0.9100"));
+        assertThat(saved.getStatus()).isEqualTo(EnrollmentStatus.ENROLLED);
+        assertThat(saved.getEnrolledAt()).isEqualTo(originalEnrolledAt);
+    }
+
+    @Test
+    void recordBiometricScores_WhenNoEnrollment_ShouldNoOp() {
+        when(userEnrollmentRepository.findByUserIdAndAuthMethodType(userId, AuthMethodType.FACE))
+                .thenReturn(Optional.empty());
+
+        service.recordBiometricScores(userId, AuthMethodType.FACE,
+                new BigDecimal("0.5"), new BigDecimal("0.5"));
+
+        verify(userEnrollmentRepository, never()).save(any());
+    }
+
+    @Test
+    void recordBiometricScores_WhenBothScoresNull_ShouldNoOp() {
+        service.recordBiometricScores(userId, AuthMethodType.FACE, null, null);
+
+        verifyNoInteractions(userEnrollmentRepository);
     }
 
     @Test

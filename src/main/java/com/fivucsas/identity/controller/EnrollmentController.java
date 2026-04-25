@@ -181,6 +181,22 @@ public class EnrollmentController {
 
         boolean success = Boolean.TRUE.equals(enrollResult.get("success"));
 
+        // Persist scores onto the matching user_enrollments row (if one exists)
+        // so the admin Enrollments table can show real numbers. Best-effort:
+        // never fail enrollment because of admin bookkeeping.
+        if (success) {
+            try {
+                java.math.BigDecimal quality = com.fivucsas.identity.application.service.EnrollBiometricService
+                        .extractScore(enrollResult, "quality_score");
+                java.math.BigDecimal liveness = parseLivenessScoreToBigDecimal(livenessScore);
+                manageEnrollmentUseCase.recordBiometricScores(
+                        currentUser.getId(), AuthMethodType.FACE, quality, liveness);
+            } catch (Exception e) {
+                log.warn("Failed to persist enrollment scores for user {}: {}",
+                        currentUser.getId(), e.getMessage());
+            }
+        }
+
         Map<String, Object> response = new LinkedHashMap<>();
         response.put("status", success ? "COMPLETED" : "FAILED");
         response.put("qualityScore", enrollResult.getOrDefault("quality_score", 0.0));
@@ -189,6 +205,32 @@ public class EnrollmentController {
         response.put("errorMessage", success ? null : enrollResult.getOrDefault("message", "Enrollment failed"));
 
         return ResponseEntity.ok(response);
+    }
+
+    /**
+     * Convert the liveness score string from the multipart form into a 0..1
+     * BigDecimal compatible with the user_enrollments.liveness_score column.
+     */
+    private java.math.BigDecimal parseLivenessScoreToBigDecimal(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        try {
+            java.math.BigDecimal parsed = new java.math.BigDecimal(value.trim());
+            if (parsed.compareTo(java.math.BigDecimal.ONE) > 0
+                    && parsed.compareTo(java.math.BigDecimal.valueOf(100)) <= 0) {
+                parsed = parsed.divide(java.math.BigDecimal.valueOf(100), 4, java.math.RoundingMode.HALF_UP);
+            }
+            if (parsed.compareTo(java.math.BigDecimal.ZERO) < 0) {
+                return java.math.BigDecimal.ZERO;
+            }
+            if (parsed.compareTo(java.math.BigDecimal.ONE) > 0) {
+                return java.math.BigDecimal.ONE;
+            }
+            return parsed.setScale(4, java.math.RoundingMode.HALF_UP);
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     @GetMapping("/api/v1/enrollment/status")
@@ -288,6 +330,8 @@ public class EnrollmentController {
                 .enrolledAt(enrollment.getEnrolledAt())
                 .createdAt(enrollment.getCreatedAt())
                 .updatedAt(enrollment.getUpdatedAt())
+                .qualityScore(enrollment.getQualityScore() != null ? enrollment.getQualityScore().doubleValue() : null)
+                .livenessScore(enrollment.getLivenessScore() != null ? enrollment.getLivenessScore().doubleValue() : null)
                 .completedAt(enrollment.isEnrolled() ? enrollment.getEnrolledAt() : null)
                 .build();
     }

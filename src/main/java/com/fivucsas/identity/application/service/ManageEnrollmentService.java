@@ -19,6 +19,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -77,12 +78,46 @@ public class ManageEnrollmentService implements ManageEnrollmentUseCase {
     @Override
     @Transactional
     public EnrollmentResponse completeEnrollment(UUID userId, AuthMethodType methodType, String enrollmentData) {
+        return completeEnrollment(userId, methodType, enrollmentData, null, null);
+    }
+
+    @Override
+    @Transactional
+    public EnrollmentResponse completeEnrollment(UUID userId,
+                                                 AuthMethodType methodType,
+                                                 String enrollmentData,
+                                                 BigDecimal qualityScore,
+                                                 BigDecimal livenessScore) {
         UserEnrollment enrollment = userEnrollmentRepository
                 .findByUserIdAndAuthMethodType(userId, methodType)
                 .orElseThrow(() -> new EntityNotFoundException("Enrollment not found for user: " + userId + " method: " + methodType));
 
-        enrollment.completeEnrollment(enrollmentData);
+        enrollment.completeEnrollment(enrollmentData, qualityScore, livenessScore);
         return EnrollmentResponse.from(userEnrollmentRepository.save(enrollment));
+    }
+
+    /**
+     * Best-effort score update: persists biometric quality + liveness scores on
+     * an existing enrollment row when one exists. Used by biometric enrollment
+     * endpoints (face/voice) to record scores even when the row was already
+     * marked ENROLLED via a separate /complete call. Silently no-ops when no
+     * enrollment exists yet, so the biometric upload itself never fails because
+     * of bookkeeping.
+     */
+    @Override
+    @Transactional
+    public void recordBiometricScores(UUID userId,
+                                       AuthMethodType methodType,
+                                       BigDecimal qualityScore,
+                                       BigDecimal livenessScore) {
+        if (qualityScore == null && livenessScore == null) {
+            return;
+        }
+        userEnrollmentRepository.findByUserIdAndAuthMethodType(userId, methodType)
+                .ifPresent(enrollment -> {
+                    enrollment.recordScores(qualityScore, livenessScore);
+                    userEnrollmentRepository.save(enrollment);
+                });
     }
 
     @Override

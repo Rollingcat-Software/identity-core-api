@@ -2,6 +2,7 @@ package com.fivucsas.identity.application.service;
 
 import com.fivucsas.identity.application.dto.command.EnrollBiometricCommand;
 import com.fivucsas.identity.application.dto.response.BiometricResponse;
+import com.fivucsas.identity.application.port.input.ManageEnrollmentUseCase;
 import com.fivucsas.identity.application.port.output.BiometricServicePort;
 import com.fivucsas.identity.application.port.output.EventPublisherPort;
 import com.fivucsas.identity.domain.exception.BiometricEnrollmentException;
@@ -36,6 +37,31 @@ import static org.mockito.Mockito.*;
 @DisplayName("EnrollBiometricService Tests")
 class EnrollBiometricServiceTest {
 
+    @Test
+    @DisplayName("extractScore parses and clamps numeric scores to [0, 1]")
+    void extractScoreParsesAndClamps() {
+        java.util.Map<String, Object> raw = java.util.Map.of(
+                "quality_score", 0.9234,
+                "liveness_score", "0.95",
+                "ratio_score", 87.5,           // 0..100 percent style → rescaled
+                "negative_score", -0.5,        // clamped to 0
+                "huge_score", 5_000_000.0      // out of range → clamped to 1
+        );
+        assertThat(EnrollBiometricService.extractScore(raw, "quality_score"))
+                .isEqualByComparingTo(new java.math.BigDecimal("0.9234"));
+        assertThat(EnrollBiometricService.extractScore(raw, "liveness_score"))
+                .isEqualByComparingTo(new java.math.BigDecimal("0.9500"));
+        assertThat(EnrollBiometricService.extractScore(raw, "ratio_score"))
+                .isEqualByComparingTo(new java.math.BigDecimal("0.8750"));
+        assertThat(EnrollBiometricService.extractScore(raw, "negative_score"))
+                .isEqualByComparingTo(java.math.BigDecimal.ZERO);
+        assertThat(EnrollBiometricService.extractScore(raw, "huge_score"))
+                .isEqualByComparingTo(java.math.BigDecimal.ONE);
+        assertThat(EnrollBiometricService.extractScore(raw, "missing_score")).isNull();
+        assertThat(EnrollBiometricService.extractScore(null, "quality_score")).isNull();
+    }
+
+
     // Valid BCrypt hash for testing
     private static final String VALID_BCRYPT_HASH = "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy";
 
@@ -47,6 +73,9 @@ class EnrollBiometricServiceTest {
 
     @Mock
     private EventPublisherPort eventPublisher;
+
+    @Mock
+    private ManageEnrollmentUseCase manageEnrollmentUseCase;
 
     @Mock
     private MultipartFile faceImage;
@@ -107,6 +136,58 @@ class EnrollBiometricServiceTest {
 
             verify(userRepository).findById(userId);
             verify(biometricService).enrollFace(userId, faceImage);
+            verify(userRepository).save(any(User.class));
+        }
+
+        @Test
+        @DisplayName("Should persist quality + liveness scores from biometric-processor response")
+        void shouldPersistScoresFromBiometricProcessorResponse() {
+            // Given — biometric-processor returns quality_score + liveness_score
+            // alongside success. The writer must surface them onto the
+            // user_enrollments row so the admin Enrollments table renders
+            // real numbers instead of "-".
+            when(userRepository.findById(userId)).thenReturn(Optional.of(existingUser));
+            when(biometricService.enrollFace(eq(userId), eq(faceImage)))
+                .thenReturn(Map.of(
+                    "success", true,
+                    "message", "Face enrolled",
+                    "quality_score", 0.9234,
+                    "liveness_score", 0.9501
+                ));
+            when(userRepository.save(any(User.class))).thenReturn(existingUser);
+
+            // When
+            enrollBiometricService.execute(validCommand);
+
+            // Then — scores parsed from raw response and forwarded to writer
+            verify(manageEnrollmentUseCase).recordBiometricScores(
+                eq(userId),
+                eq(com.fivucsas.identity.domain.model.auth.AuthMethodType.FACE),
+                eq(new java.math.BigDecimal("0.9234")),
+                eq(new java.math.BigDecimal("0.9501"))
+            );
+        }
+
+        @Test
+        @DisplayName("Score-writer failure must not fail the enrollment itself")
+        void scoreWriterFailureShouldNotFailEnrollment() {
+            // Given
+            when(userRepository.findById(userId)).thenReturn(Optional.of(existingUser));
+            when(biometricService.enrollFace(eq(userId), eq(faceImage)))
+                .thenReturn(Map.of(
+                    "success", true,
+                    "quality_score", 0.91
+                ));
+            when(userRepository.save(any(User.class))).thenReturn(existingUser);
+            doThrow(new RuntimeException("DB hiccup"))
+                .when(manageEnrollmentUseCase)
+                .recordBiometricScores(any(), any(), any(), any());
+
+            // When — must not throw
+            BiometricResponse response = enrollBiometricService.execute(validCommand);
+
+            // Then
+            assertThat(response.isSuccess()).isTrue();
             verify(userRepository).save(any(User.class));
         }
 
