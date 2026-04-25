@@ -11,9 +11,11 @@ import com.fivucsas.identity.domain.exception.InvalidEmailException;
 import com.fivucsas.identity.infrastructure.email.EmailService;
 import com.fivucsas.identity.infrastructure.otp.OtpService;
 import com.fivucsas.identity.repository.JpaTenantRepository;
+import com.fivucsas.identity.repository.TenantEmailDomainRepository;
 import com.fivucsas.identity.domain.repository.UserRepository;
 import com.fivucsas.identity.entity.RefreshToken;
 import com.fivucsas.identity.entity.Tenant;
+import com.fivucsas.identity.entity.TenantEmailDomain;
 import com.fivucsas.identity.entity.TenantStatus;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.entity.UserStatus;
@@ -38,6 +40,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 import static org.mockito.Mockito.lenient;
@@ -54,6 +57,9 @@ class RegisterUserServiceTest {
 
     @Mock
     private JpaTenantRepository tenantRepository;
+
+    @Mock
+    private TenantEmailDomainRepository tenantEmailDomainRepository;
 
     @Mock
     private PasswordEncoderPort passwordEncoder;
@@ -343,6 +349,141 @@ class RegisterUserServiceTest {
             // Then
             assertThat(response.getUser().getFirstName()).isEqualTo("José-María");
             assertThat(response.getUser().getLastName()).isEqualTo("O'Connor");
+        }
+    }
+
+    /**
+     * Wire-up tests for V44 {@code tenant_email_domains}.
+     *
+     * <p>Asserts that on registration the user's tenant is resolved by the
+     * email-domain lookup table when present, falls back to the legacy
+     * {@code tenants.domain} column when the new table has no row, and
+     * finally falls back to the default tenant when neither path matches.</p>
+     */
+    @Nested
+    @DisplayName("Tenant resolution by email domain (V44 wire-up)")
+    class TenantResolutionByEmailDomain {
+
+        private static final UUID MARMARA_TENANT_ID =
+            UUID.fromString("11111111-1111-1111-1111-111111111111");
+
+        private Tenant marmaraTenant;
+
+        @BeforeEach
+        void setUpMarmaraTenant() {
+            marmaraTenant = Tenant.builder()
+                .id(MARMARA_TENANT_ID)
+                .name("Marmara University")
+                .slug("marmara")
+                .contactEmail("admin@marmara.edu.tr")
+                .status(TenantStatus.ACTIVE)
+                .build();
+        }
+
+        private RegisterUserCommand registrationFor(String emailAddress) {
+            return RegisterUserCommand.builder()
+                .email(emailAddress)
+                .password("Password123!")
+                .firstName("Ada")
+                .lastName("Lovelace")
+                .ipAddress("10.0.0.1")
+                .userAgent("JUnit")
+                .build();
+        }
+
+        private void stubCommonRegistrationCollaborators(String emailAddress) {
+            when(userRepository.existsByEmail(emailAddress)).thenReturn(false);
+            when(passwordEncoder.encode(anyString())).thenReturn(VALID_BCRYPT_HASH);
+            // Ensure the persisted User has an ID — RegisterUserService.execute()
+            // immediately calls savedUser.getId().toString() for audit logging.
+            when(userRepository.save(any(User.class))).thenAnswer(inv -> {
+                User input = inv.getArgument(0);
+                return User.builder()
+                    .id(UUID.randomUUID())
+                    .email(input.getEmail())
+                    .passwordHash(input.getPasswordHash())
+                    .firstName(input.getFirstName())
+                    .lastName(input.getLastName())
+                    .tenant(input.getTenant())
+                    .status(input.getStatus())
+                    .isBiometricEnrolled(input.isBiometricEnrolled())
+                    .verificationCount(input.getVerificationCount())
+                    .createdAt(Instant.now())
+                    .updatedAt(Instant.now())
+                    .build();
+            });
+            when(tokenGenerator.generateAccessToken(emailAddress)).thenReturn("access-token");
+            when(refreshTokenService.createRefreshToken(any(), any(), any())).thenReturn(refreshToken);
+        }
+
+        @Test
+        @DisplayName("marun.edu.tr resolves to Marmara tenant via tenant_email_domains")
+        void marunResolvesToMarmaraTenant() {
+            // Given — V44 backfill seeds (Marmara, marun.edu.tr, is_primary=false)
+            String emailAddress = "ahmet@marun.edu.tr";
+            TenantEmailDomain marunRow = TenantEmailDomain.create(MARMARA_TENANT_ID, "marun.edu.tr", false);
+            when(tenantEmailDomainRepository.findByIdEmailDomainIgnoreCase("marun.edu.tr"))
+                .thenReturn(Optional.of(marunRow));
+            when(tenantRepository.findById(MARMARA_TENANT_ID)).thenReturn(Optional.of(marmaraTenant));
+            stubCommonRegistrationCollaborators(emailAddress);
+
+            // When
+            registerUserService.execute(registrationFor(emailAddress));
+
+            // Then — saved user is on the Marmara tenant
+            ArgumentCaptor<User> userCaptor = ArgumentCaptor.forClass(User.class);
+            verify(userRepository).save(userCaptor.capture());
+            assertThat(userCaptor.getValue().getTenant().getId()).isEqualTo(MARMARA_TENANT_ID);
+
+            // Legacy fall-back must NOT be consulted when new-table lookup hits.
+            verify(tenantRepository, never()).findByLegacyDomainIgnoreCase(anyString());
+            // Default-slug fall-back must NOT be used either.
+            verify(tenantRepository, never()).findBySlug(anyString());
+        }
+
+        @Test
+        @DisplayName("marmara.edu.tr resolves to the same Marmara tenant")
+        void marmaraResolvesToSameTenant() {
+            // Given — primary domain row backfilled by V44
+            String emailAddress = "student@marmara.edu.tr";
+            TenantEmailDomain primaryRow = TenantEmailDomain.create(MARMARA_TENANT_ID, "marmara.edu.tr", true);
+            when(tenantEmailDomainRepository.findByIdEmailDomainIgnoreCase("marmara.edu.tr"))
+                .thenReturn(Optional.of(primaryRow));
+            when(tenantRepository.findById(MARMARA_TENANT_ID)).thenReturn(Optional.of(marmaraTenant));
+            stubCommonRegistrationCollaborators(emailAddress);
+
+            // When
+            registerUserService.execute(registrationFor(emailAddress));
+
+            // Then
+            ArgumentCaptor<User> userCaptor = ArgumentCaptor.forClass(User.class);
+            verify(userRepository).save(userCaptor.capture());
+            assertThat(userCaptor.getValue().getTenant().getId()).isEqualTo(MARMARA_TENANT_ID);
+            assertThat(userCaptor.getValue().getTenant().getSlug()).isEqualTo("marmara");
+        }
+
+        @Test
+        @DisplayName("Unknown domain falls through legacy lookup, then to default tenant")
+        void unknownDomainFallsThroughToDefault() {
+            // Given — neither path returns a tenant
+            String emailAddress = "stranger@unknown.edu.tr";
+            when(tenantEmailDomainRepository.findByIdEmailDomainIgnoreCase("unknown.edu.tr"))
+                .thenReturn(Optional.empty());
+            when(tenantRepository.findByLegacyDomainIgnoreCase("unknown.edu.tr"))
+                .thenReturn(Optional.empty());
+            // Default tenant fall-back (testTenant is wired up by parent setUp())
+            stubCommonRegistrationCollaborators(emailAddress);
+
+            // When
+            registerUserService.execute(registrationFor(emailAddress));
+
+            // Then — legacy was consulted (verifying the fall-through chain)
+            verify(tenantEmailDomainRepository).findByIdEmailDomainIgnoreCase("unknown.edu.tr");
+            verify(tenantRepository).findByLegacyDomainIgnoreCase("unknown.edu.tr");
+            // And the user landed on the default tenant resolved via slug.
+            ArgumentCaptor<User> userCaptor = ArgumentCaptor.forClass(User.class);
+            verify(userRepository).save(userCaptor.capture());
+            assertThat(userCaptor.getValue().getTenant().getSlug()).isEqualTo("test-tenant");
         }
     }
 }
