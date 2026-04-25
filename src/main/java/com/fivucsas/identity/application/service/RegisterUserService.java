@@ -12,9 +12,11 @@ import com.fivucsas.identity.domain.model.user.Email;
 import com.fivucsas.identity.domain.model.user.FullName;
 import com.fivucsas.identity.domain.model.user.HashedPassword;
 import com.fivucsas.identity.repository.JpaTenantRepository;
+import com.fivucsas.identity.repository.TenantEmailDomainRepository;
 import com.fivucsas.identity.domain.repository.UserRepository;
 import com.fivucsas.identity.entity.RefreshToken;
 import com.fivucsas.identity.entity.Tenant;
+import com.fivucsas.identity.entity.TenantEmailDomain;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.entity.UserStatus;
 import com.fivucsas.identity.service.RefreshTokenService;
@@ -43,6 +45,7 @@ public class RegisterUserService implements RegisterUserUseCase {
 
     private final com.fivucsas.identity.domain.repository.UserRepository userRepository;
     private final JpaTenantRepository tenantRepository;
+    private final TenantEmailDomainRepository tenantEmailDomainRepository;
     private final PasswordEncoderPort passwordEncoder;
     private final TokenGenerationPort tokenGenerator;
     private final RefreshTokenService refreshTokenService;
@@ -72,17 +75,29 @@ public class RegisterUserService implements RegisterUserUseCase {
         String hashedPasswordString = passwordEncoder.encode(command.getPassword());
         HashedPassword hashedPassword = HashedPassword.of(hashedPasswordString);
 
-        // Resolve tenant from request context (TenantContext), fallback to default
+        // Resolve tenant. Order of precedence:
+        //   1. Explicit TenantContext (e.g. invitation flow, multi-tenant header).
+        //   2. tenant_email_domains (V44) — multi-domain lookup keyed on the
+        //      domain part of the user's email; this is the canonical path.
+        //   3. Legacy tenants.domain column — single-domain fall-back during
+        //      V44 rollout so tenants whose admin has not yet migrated to
+        //      tenant_email_domains continue to resolve correctly.
+        //   4. Default tenant (configurable slug) — last-resort fall-back.
         Tenant defaultTenant;
         java.util.UUID contextTenantId = com.fivucsas.identity.infrastructure.multitenancy.TenantContext.getCurrentTenant();
         if (contextTenantId != null) {
             defaultTenant = tenantRepository.findById(contextTenantId)
                 .orElseThrow(() -> new com.fivucsas.identity.domain.exception.TenantNotFoundException(contextTenantId.toString()));
         } else {
-            defaultTenant = tenantRepository.findBySlug(defaultTenantSlug)
-                .orElseGet(() -> tenantRepository.findAll().stream().findFirst()
-                    .orElseThrow(() -> new IllegalStateException("No tenant found in the system")));
-            log.warn("No tenant context set during registration, falling back to default tenant: {}", defaultTenant.getSlug());
+            defaultTenant = resolveTenantByEmailDomain(email.getDomain())
+                .orElseGet(() -> {
+                    Tenant fallback = tenantRepository.findBySlug(defaultTenantSlug)
+                        .orElseGet(() -> tenantRepository.findAll().stream().findFirst()
+                            .orElseThrow(() -> new IllegalStateException("No tenant found in the system")));
+                    log.warn("No tenant context or email-domain match for {}, falling back to default tenant: {}",
+                        email.getValue(), fallback.getSlug());
+                    return fallback;
+                });
         }
 
         // Create user entity
@@ -124,5 +139,38 @@ public class RegisterUserService implements RegisterUserUseCase {
         UserResponse userResponse = com.fivucsas.identity.application.mapper.UserResponseMapper.toResponse(savedUser);
 
         return AuthenticationResponse.of(accessToken, refreshToken.getToken(), tokenGenerator.getExpirationMillis(), userResponse);
+    }
+
+    /**
+     * Resolve a tenant from the domain part of the user's email.
+     *
+     * <p>First consults the V44 {@code tenant_email_domains} table, which
+     * supports the multi-domain case (a single tenant can claim several
+     * domains, e.g. Marmara University owns both {@code marmara.edu.tr}
+     * and {@code marun.edu.tr}). If no row matches, falls back to the
+     * legacy {@code tenants.domain} column for tenants whose admin has
+     * not yet migrated to the new table.</p>
+     *
+     * @param emailDomain the domain part of the registering user's email
+     * @return the resolved tenant, or empty if no tenant claims the domain
+     *         via either path
+     */
+    private java.util.Optional<Tenant> resolveTenantByEmailDomain(String emailDomain) {
+        if (emailDomain == null || emailDomain.isBlank()) {
+            return java.util.Optional.empty();
+        }
+        java.util.Optional<TenantEmailDomain> mapped =
+            tenantEmailDomainRepository.findByIdEmailDomainIgnoreCase(emailDomain);
+        if (mapped.isPresent()) {
+            java.util.UUID tenantId = mapped.get().getTenantId();
+            log.info("Resolved tenant {} for email domain '{}' via tenant_email_domains", tenantId, emailDomain);
+            return tenantRepository.findById(tenantId);
+        }
+        java.util.Optional<Tenant> legacy =
+            tenantRepository.findByLegacyDomainIgnoreCase(emailDomain);
+        legacy.ifPresent(t -> log.info(
+            "Resolved tenant {} for email domain '{}' via legacy tenants.domain (consider backfilling tenant_email_domains)",
+            t.getId(), emailDomain));
+        return legacy;
     }
 }
