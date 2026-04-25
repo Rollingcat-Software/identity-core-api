@@ -9,6 +9,7 @@ import com.fivucsas.identity.application.port.output.AuthFlowRepositoryPort;
 import com.fivucsas.identity.application.port.output.PasswordEncoderPort;
 import com.fivucsas.identity.application.port.output.TokenGenerationPort;
 import com.fivucsas.identity.domain.exception.InvalidCredentialsException;
+import com.fivucsas.identity.domain.exception.NeedsEnrollmentException;
 import com.fivucsas.identity.domain.model.auth.AuthMethodType;
 import com.fivucsas.identity.domain.model.auth.OperationType;
 import com.fivucsas.identity.domain.model.auth.StepType;
@@ -145,6 +146,13 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
                     .toList();
 
                 if (!remainingSteps.isEmpty()) {
+                    // Post-audit 2026-04-24 login edge case #5 — dead-end prevention.
+                    // Before committing the user to a multi-step flow, verify every
+                    // REQUIRED step has either a method the user is enrolled in or
+                    // a configured fallback. Otherwise we would authenticate PASSWORD
+                    // and then strand them mid-flow with no way to proceed.
+                    verifyUserCanCompleteFlow(user, remainingSteps);
+
                     // MFA required — DO NOT issue JWT yet. Only create MFA session.
                     AuthFlowStep nextStep = remainingSteps.get(0);
                     List<AvailableMfaMethod> availableMethods = buildAvailableMethods(nextStep, user);
@@ -182,6 +190,17 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
                     );
                 }
             }
+        } catch (NeedsEnrollmentException e) {
+            // Propagate dead-end detection to the client (login edge case #5).
+            // We deliberately let this bubble past the generic catch so the
+            // GlobalExceptionHandler can render a structured 400 with method +
+            // enrollmentUrl. The password has been verified at this point so
+            // re-auth is not required, but we DO NOT issue a token.
+            log.warn("AUDIT: Login blocked — user {} cannot complete flow (needs {} enrollment)",
+                    user.getId(), e.getMethod());
+            auditLogPort.logAuthenticationFailed(command.getEmail(), command.getIpAddress(),
+                    "needs_enrollment:" + e.getMethod());
+            throw e;
         } catch (Exception e) {
             log.warn("Failed to check tenant auth flow for user {}: {}", user.getId(), e.getMessage(), e);
         }
@@ -218,6 +237,78 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
                 .requiresEnrollment(m.isRequiresEnrollment())
                 .build())
             .collect(Collectors.toList());
+    }
+
+    /**
+     * Post-audit 2026-04-24 login edge case #5.
+     *
+     * <p>Iterates the remaining flow steps and ensures each REQUIRED step has
+     * at least one enrolled, usable method (either the primary/alternatives OR
+     * a configured fallback). Throws {@link NeedsEnrollmentException} on the
+     * first dead-end found — the client can then route the user to the named
+     * enrollment URL before retrying login.
+     *
+     * <p>A step is satisfied if:
+     * <ol>
+     *   <li>It is not required (optional step, can be skipped),
+     *   <li>OR any of its available methods is enrolled by the user
+     *       (or does not require enrollment in the first place, e.g. PASSWORD,
+     *       QR_CODE once we're past step-0),
+     *   <li>OR its configured {@code fallbackMethod} is enrolled.
+     * </ol>
+     */
+    private void verifyUserCanCompleteFlow(User user, List<AuthFlowStep> remainingSteps) {
+        Map<AuthMethodType, Boolean> healthStatus =
+                enrollmentHealthService.validateEnrollments(user.getId());
+
+        for (AuthFlowStep step : remainingSteps) {
+            if (!step.isRequired()) {
+                continue;
+            }
+
+            boolean hasEnrolledMethod = step.getAvailableMethods().stream()
+                    .filter(Objects::nonNull)
+                    .anyMatch(m -> isMethodUsable(m, healthStatus));
+
+            if (hasEnrolledMethod) {
+                continue;
+            }
+
+            AuthMethod fallback = step.getFallbackMethod();
+            if (fallback != null && isMethodUsable(fallback, healthStatus)) {
+                // Fallback covers the gap — the MFA flow will route through it.
+                continue;
+            }
+
+            // Pick the first NOT-usable method to report as the enrollment target.
+            // CHOICE steps report the primary available method (first non-null
+            // entry). Consumers render "enroll $method to continue".
+            AuthMethodType missing = step.getAvailableMethods().stream()
+                    .filter(Objects::nonNull)
+                    .map(AuthMethod::getType)
+                    .findFirst()
+                    .orElse(fallback != null ? fallback.getType() : null);
+
+            String methodName = missing != null ? missing.name() : "UNKNOWN";
+            String enrollmentUrl = missing != null
+                    ? "/enroll/" + missing.name().toLowerCase()
+                    : "/enroll";
+            throw new NeedsEnrollmentException(methodName, enrollmentUrl);
+        }
+    }
+
+    /**
+     * A method is usable if it either does not require enrollment, or the user
+     * is enrolled according to {@link EnrollmentHealthService}.
+     */
+    private boolean isMethodUsable(AuthMethod method, Map<AuthMethodType, Boolean> healthStatus) {
+        if (method == null || method.getType() == null) {
+            return false;
+        }
+        if (!method.isRequiresEnrollment()) {
+            return true;
+        }
+        return Boolean.TRUE.equals(healthStatus.get(method.getType()));
     }
 
     /**

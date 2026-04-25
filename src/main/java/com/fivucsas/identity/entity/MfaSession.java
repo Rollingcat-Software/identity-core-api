@@ -99,6 +99,20 @@ public class MfaSession {
         return completedAt != null;
     }
 
+    /**
+     * Cancels this MFA session by forcing it to expired state.
+     *
+     * <p>We don't have a dedicated CANCELLED column (avoiding a migration for
+     * this edge-case fix); instead {@code expiresAt} is fast-forwarded to now
+     * so any subsequent {@code isExpired()} check returns true. The calling
+     * code is responsible for writing the audit trail entry that captures
+     * user-initiated cancellation as the reason. Post-audit 2026-04-24
+     * login edge case #3.
+     */
+    public void cancel() {
+        this.expiresAt = Instant.now().minusSeconds(1);
+    }
+
     /** True once consume() has been called — session is single-use. */
     public boolean isConsumed() {
         return consumedAt != null;

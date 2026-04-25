@@ -923,6 +923,16 @@ public class AuthController {
                 .orElseThrow(() -> new RuntimeException("Step " + nextStepOrder + " not found in flow"));
 
             List<AvailableMfaMethod> availableMethods = buildMfaAvailableMethods(nextStep, user);
+            // Primary for the next step: the step's first non-null AuthMethod
+            // (SEQUENTIAL) or the first CHOICE entry. Alternatives = rest.
+            AuthMethodType nextPrimary = nextStep.getAvailableMethods().stream()
+                .filter(java.util.Objects::nonNull)
+                .map(AuthMethod::getType)
+                .findFirst()
+                .orElse(null);
+            List<AvailableMfaMethod> alternativeMethods = nextPrimary == null
+                ? List.of()
+                : computeAlternativeMethods(nextStep, availableMethods, nextPrimary);
 
             {
                 String stepIp = getClientIP(httpRequest);
@@ -939,6 +949,7 @@ public class AuthController {
                 "currentStep", nextStepOrder,
                 "totalSteps", mfaSession.getTotalSteps(),
                 "availableMethods", availableMethods,
+                "alternativeMethods", alternativeMethods,
                 "completedMethods", mfaSession.getCompletedMethods()
             ));
 
@@ -972,6 +983,269 @@ public class AuthController {
                 .requiresEnrollment(m.isRequiresEnrollment())
                 .build())
             .collect(java.util.stream.Collectors.toList());
+    }
+
+    /**
+     * Cancel a half-complete MFA session. Post-audit 2026-04-24 login edge case #3.
+     *
+     * <p>Rationale: the hosted login UI needs a "never mind" button for users
+     * trapped in a multi-step flow (e.g. lost their TOTP device mid-flow, or
+     * realised they wanted a different account). Without this endpoint their
+     * only recourse was to wait 10 minutes for {@code expiresAt} to pass.
+     *
+     * <p>Anonymous (pre-JWT) — the MFA session token itself is the
+     * authentication: whoever holds it started the flow and may end it.
+     * Rate-limited by the existing login bucket via {@link RateLimitInterceptor}
+     * path match on {@code /auth/mfa/}.
+     */
+    @DeleteMapping("/mfa/session/{sessionToken}")
+    @Operation(summary = "Cancel an in-flight MFA session (public — no JWT, uses session token)")
+    public ResponseEntity<Void> cancelMfaSession(
+            @PathVariable String sessionToken,
+            HttpServletRequest httpRequest) {
+        if (sessionToken == null || sessionToken.isBlank()) {
+            return ResponseEntity.badRequest().build();
+        }
+
+        String clientIp = getClientIP(httpRequest);
+        String ua = getUserAgent(httpRequest);
+
+        // Rate limit using the login bucket so a stuck client cannot spam
+        // cancel requests as a proxy for session discovery. Shares
+        // bucket with /auth/login and /auth/mfa/step.
+        if (!rateLimitService.allowLoginAttempt(clientIp)) {
+            long retryAfter = rateLimitService.getSecondsUntilRefill(
+                    clientIp, RateLimitService.RateLimitType.LOGIN);
+            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                    .header("Retry-After", String.valueOf(retryAfter))
+                    .build();
+        }
+
+        Optional<MfaSession> sessionOpt = mfaSessionRepository.findBySessionToken(sessionToken);
+        if (sessionOpt.isEmpty()) {
+            // Do not leak whether the token was ever valid. 204 is safe: the
+            // caller wanted the session gone, and it is gone.
+            log.info("AUDIT: MFA session cancel — token not found (treated as success), ip={}, userAgent={}",
+                    clientIp, ua);
+            return ResponseEntity.noContent().build();
+        }
+
+        MfaSession session = sessionOpt.get();
+        if (session.isCompleted()) {
+            // A completed session has already minted its token elsewhere;
+            // cancelling it is a no-op (the JWT is already in the wild).
+            log.warn("AUDIT: MFA session cancel — session already completed, userId={}, ip={}, userAgent={}",
+                    session.getUserId(), clientIp, ua);
+            return ResponseEntity.noContent().build();
+        }
+
+        session.cancel();
+        mfaSessionRepository.save(session);
+
+        log.info("AUDIT: MFA session cancelled by user — userId={}, currentStep={}/{}, ip={}, userAgent={}",
+                session.getUserId(), session.getCurrentStep(), session.getTotalSteps(), clientIp, ua);
+        auditLogPort.logSecurityEvent(
+                session.getUserId().toString(),
+                "MFA_SESSION_CANCELLED",
+                clientIp,
+                "cancelled_by_user: step=" + session.getCurrentStep() + "/" + session.getTotalSteps()
+        );
+
+        return ResponseEntity.noContent()
+                .header("X-Cancelled-By", "user")
+                .build();
+    }
+
+    /**
+     * Switch the current MFA step to use a different enrolled method, provided the
+     * step's configuration allows it. Post-audit 2026-04-24 login edge case #6.
+     *
+     * <p>Typical use: user started a TOTP step but realised their authenticator
+     * is on another device — switch to EMAIL_OTP (if the flow's step lists
+     * EMAIL_OTP as an available/alternative method and the user has email
+     * enrolled).
+     *
+     * <p>Request body: {@code {"sessionToken": "...", "method": "EMAIL_OTP"}}.
+     * Response: {@code {"status":"METHOD_SWITCHED", "currentStep":N,
+     * "expectedMethod":"EMAIL_OTP", "availableMethods":[...]}}.
+     */
+    @PostMapping("/mfa/switch-method")
+    @Operation(summary = "Switch the current MFA step to an alternative method (public — no JWT, uses session token)")
+    public ResponseEntity<Map<String, Object>> switchMfaMethod(
+            @RequestBody Map<String, String> request,
+            HttpServletRequest httpRequest) {
+        String sessionToken = request.get("sessionToken");
+        String newMethod = request.get("method");
+
+        if (sessionToken == null || sessionToken.isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of(
+                    "status", "ERROR", "message", "sessionToken is required"));
+        }
+        if (newMethod == null || newMethod.isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of(
+                    "status", "ERROR", "message", "method is required"));
+        }
+
+        String clientIp = getClientIP(httpRequest);
+        String ua = getUserAgent(httpRequest);
+
+        Optional<MfaSession> sessionOpt = mfaSessionRepository.findBySessionToken(sessionToken);
+        if (sessionOpt.isEmpty() || sessionOpt.get().isExpired()) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of(
+                    "status", "ERROR", "message", "Invalid or expired MFA session"));
+        }
+        MfaSession mfaSession = sessionOpt.get();
+        if (mfaSession.isCompleted()) {
+            return ResponseEntity.badRequest().body(Map.of(
+                    "status", "ERROR", "message", "MFA session already completed"));
+        }
+
+        AuthMethodType requestedType;
+        try {
+            requestedType = AuthMethodType.valueOf(newMethod);
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of(
+                    "status", "ERROR", "message", "Unknown auth method: " + newMethod));
+        }
+
+        AuthFlow flow = authFlowRepository.findById(mfaSession.getFlowId()).orElse(null);
+        if (flow == null) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of(
+                    "status", "ERROR", "message", "Auth flow not found for session"));
+        }
+        int currentStepOrder = mfaSession.getCurrentStep();
+        AuthFlowStep currentStep = flow.getSteps().stream()
+                .filter(s -> s.getStepOrder() == currentStepOrder)
+                .findFirst()
+                .orElse(null);
+        if (currentStep == null) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of(
+                    "status", "ERROR", "message", "Current step " + currentStepOrder + " not found in flow"));
+        }
+
+        User user = userRepository.findById(mfaSession.getUserId())
+                .orElseThrow(() -> new UserNotFoundException("User not found for MFA session"));
+
+        // Permitted methods for this step: the explicit available set (CHOICE
+        // steps) plus the configured fallback (SEQUENTIAL steps w/ fallback).
+        java.util.Set<AuthMethodType> permitted = new java.util.HashSet<>();
+        for (AuthMethod m : currentStep.getAvailableMethods()) {
+            if (m != null && m.getType() != null) {
+                permitted.add(m.getType());
+            }
+        }
+        if (currentStep.getFallbackMethod() != null && currentStep.getFallbackMethod().getType() != null) {
+            permitted.add(currentStep.getFallbackMethod().getType());
+        }
+
+        if (!permitted.contains(requestedType)) {
+            log.warn("AUDIT: MFA switch-method rejected — method {} not permitted on step {}, userId={}, ip={}",
+                    requestedType, currentStepOrder, user.getId(), clientIp);
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of(
+                    "status", "ERROR",
+                    "error", "METHOD_NOT_PERMITTED",
+                    "message", "Method " + requestedType + " is not an alternative for the current step",
+                    "permittedMethods", permitted.stream().map(Enum::name).sorted().toList()
+            ));
+        }
+
+        // Block substitution: user cannot switch to a method they've already
+        // completed earlier in the flow unless that method is explicitly the
+        // method configured for the current step (legitimate repetition).
+        String requestedName = requestedType.name();
+        java.util.Set<String> currentStepMethodNames = currentStep.getAvailableMethods().stream()
+                .filter(java.util.Objects::nonNull)
+                .map(m -> m.getType().name())
+                .collect(java.util.stream.Collectors.toSet());
+        if (mfaSession.getCompletedMethods().contains(requestedName)
+                && !currentStepMethodNames.contains(requestedName)) {
+            log.warn("AUDIT: MFA switch-method rejected — method {} already completed earlier, userId={}, ip={}",
+                    requestedType, user.getId(), clientIp);
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of(
+                    "status", "ERROR",
+                    "error", "METHOD_ALREADY_USED",
+                    "message", "Method " + requestedType + " was already completed earlier in this flow"
+            ));
+        }
+
+        // Verify the user is enrolled in the requested method. Otherwise switching
+        // would just trap them again on a new method.
+        Map<AuthMethodType, Boolean> healthStatus = enrollmentHealthService.validateEnrollments(user.getId());
+        AuthMethod requestedMethod = currentStep.getAvailableMethods().stream()
+                .filter(m -> m != null && m.getType() == requestedType)
+                .findFirst()
+                .orElse(currentStep.getFallbackMethod() != null
+                        && currentStep.getFallbackMethod().getType() == requestedType
+                        ? currentStep.getFallbackMethod() : null);
+        boolean requiresEnrollment = requestedMethod == null || requestedMethod.isRequiresEnrollment();
+        boolean isEnrolled = !requiresEnrollment || Boolean.TRUE.equals(healthStatus.get(requestedType));
+        if (!isEnrolled) {
+            String enrollmentPath = "/enroll/" + requestedType.name().toLowerCase();
+            log.warn("AUDIT: MFA switch-method blocked — user not enrolled for {}, userId={}, ip={}",
+                    requestedType, user.getId(), clientIp);
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of(
+                    "status", "ERROR",
+                    "error", "NEEDS_ENROLLMENT",
+                    "method", requestedType.name(),
+                    "enrollmentUrl", enrollmentPath,
+                    "message", "You are not enrolled in " + requestedType + ". Please enroll first."
+            ));
+        }
+
+        // Pre-send OTP for methods that require an async out-of-band delivery, so
+        // the next /mfa/step POST can validate the code the user received.
+        try {
+            if (requestedType == AuthMethodType.EMAIL_OTP) {
+                String code = otpService.generate(TWO_FA_OTP_PREFIX + user.getId());
+                emailService.sendOtp(user.getEmail(), code);
+            } else if (requestedType == AuthMethodType.SMS_OTP) {
+                String phone = user.getPhoneNumber();
+                if (phone != null && !phone.isBlank()) {
+                    String code = otpService.generate("2fa-sms:" + user.getId());
+                    smsService.sendOtp(phone, code);
+                }
+            }
+        } catch (Exception e) {
+            log.warn("Failed to dispatch OTP for switched MFA method {} userId={}: {}",
+                    requestedType, user.getId(), e.getMessage());
+        }
+
+        List<AvailableMfaMethod> availableMethods = buildMfaAvailableMethods(currentStep, user);
+
+        log.info("AUDIT: MFA switch-method — userId={}, step={}, to={}, ip={}, userAgent={}",
+                user.getId(), currentStepOrder, requestedType, clientIp, ua);
+        auditLogPort.logSecurityEvent(
+                user.getId().toString(),
+                "MFA_METHOD_SWITCHED",
+                clientIp,
+                "step=" + currentStepOrder + " newMethod=" + requestedType
+        );
+
+        return ResponseEntity.ok(Map.of(
+                "status", "METHOD_SWITCHED",
+                "mfaSessionToken", sessionToken,
+                "currentStep", currentStepOrder,
+                "totalSteps", mfaSession.getTotalSteps(),
+                "expectedMethod", requestedType.name(),
+                "availableMethods", availableMethods,
+                "alternativeMethods", computeAlternativeMethods(currentStep, availableMethods, requestedType),
+                "completedMethods", mfaSession.getCompletedMethods()
+        ));
+    }
+
+    /**
+     * Returns the methods the user could switch to at the current step, minus
+     * the one they're currently attempting. Used by {@code /mfa/switch-method}
+     * and the enriched {@code /mfa/step} response.
+     */
+    private List<AvailableMfaMethod> computeAlternativeMethods(
+            AuthFlowStep step, List<AvailableMfaMethod> available, AuthMethodType primary) {
+        if (available == null || available.isEmpty()) {
+            return List.of();
+        }
+        return available.stream()
+                .filter(m -> !m.getMethodType().equals(primary.name()))
+                .collect(java.util.stream.Collectors.toList());
     }
 
     @PostMapping("/mfa/qr-generate")

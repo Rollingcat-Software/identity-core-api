@@ -139,6 +139,31 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.PRECONDITION_FAILED).body(error);
     }
 
+    /**
+     * Post-audit 2026-04-24 login edge case #5. Returns a bespoke JSON body
+     * carrying {@code method} + {@code enrollmentUrl} alongside the standard
+     * error envelope — the frontend depends on these to route the user to the
+     * correct enrollment screen.
+     */
+    @ExceptionHandler(NeedsEnrollmentException.class)
+    public ResponseEntity<java.util.Map<String, Object>> handleNeedsEnrollment(
+            NeedsEnrollmentException ex,
+            HttpServletRequest request) {
+        log.warn("Login blocked — user needs to enroll: method={}, path={}",
+                ex.getMethod(), request.getRequestURI());
+
+        java.util.Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("timestamp", java.time.Instant.now().toString());
+        body.put("status", HttpStatus.BAD_REQUEST.value());
+        body.put("error", ex.getErrorCode());
+        body.put("message", ex.getMessage());
+        body.put("method", ex.getMethod());
+        body.put("enrollmentUrl", ex.getEnrollmentUrl());
+        body.put("path", request.getRequestURI());
+
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(body);
+    }
+
     @ExceptionHandler({DuplicateRoleException.class, DuplicateRoleAssignmentException.class, DuplicateTenantException.class})
     public ResponseEntity<ErrorResponse> handleDuplicateResource(
             DomainException ex,
