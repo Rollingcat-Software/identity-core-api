@@ -81,6 +81,10 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/mfa/step").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/mfa/send-otp").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/mfa/qr-generate").permitAll()
+                        // Post-audit 2026-04-24: #3 cancel + #6 switch (pre-JWT state,
+                        // MFA session token is the authenticator).
+                        .requestMatchers(HttpMethod.DELETE, "/api/v1/auth/mfa/session/*").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/v1/auth/mfa/switch-method").permitAll()
 
                         // OAuth 2.0 / OIDC public endpoints
                         .requestMatchers(
