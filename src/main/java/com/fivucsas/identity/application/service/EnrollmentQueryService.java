@@ -102,6 +102,8 @@ public class EnrollmentQueryService {
                 .enrolledAt(enrollment.getEnrolledAt())
                 .createdAt(enrollment.getCreatedAt())
                 .updatedAt(enrollment.getUpdatedAt())
+                .qualityScore(enrollment.getQualityScore() != null ? enrollment.getQualityScore().doubleValue() : null)
+                .livenessScore(enrollment.getLivenessScore() != null ? enrollment.getLivenessScore().doubleValue() : null)
                 .completedAt(enrollment.isEnrolled() ? enrollment.getEnrolledAt() : null)
                 .build();
     }

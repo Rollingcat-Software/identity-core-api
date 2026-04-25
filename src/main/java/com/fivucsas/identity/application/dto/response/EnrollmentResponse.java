@@ -36,8 +36,8 @@ public record EnrollmentResponse(
             entity.getUser() != null ? entity.getUser().getFullName() : null,
             entity.getUser() != null ? entity.getUser().getEmail() : null,
             entity.getTenant() != null ? entity.getTenant().getId().toString() : null,
-            null, // qualityScore - populated by biometric service
-            null, // livenessScore - populated by biometric service
+            entity.getQualityScore() != null ? entity.getQualityScore().doubleValue() : null,
+            entity.getLivenessScore() != null ? entity.getLivenessScore().doubleValue() : null,
             null, // errorCode
             null, // errorMessage
             entity.getStatus() == EnrollmentStatus.ENROLLED ? entity.getEnrolledAt() : null

@@ -54,6 +54,7 @@ class BiometricControllerTest {
     @MockBean private VerifyBiometricUseCase verifyBiometricUseCase;
     @MockBean private BiometricServicePort biometricServicePort;
     @MockBean private StepUpAuthUseCase stepUpAuthUseCase;
+    @MockBean private com.fivucsas.identity.application.port.input.ManageEnrollmentUseCase manageEnrollmentUseCase;
     @MockBean private RbacAuthorizationService rbacService;
 
     // Security and infrastructure beans

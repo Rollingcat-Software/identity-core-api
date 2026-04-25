@@ -9,6 +9,7 @@ import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.annotations.UpdateTimestamp;
 import org.hibernate.type.SqlTypes;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
 
@@ -55,6 +56,20 @@ public class UserEnrollment {
     @Column(name = "revoked_at")
     private Instant revokedAt;
 
+    /**
+     * Image quality score 0..1 from biometric-processor (e.g., DeepFace face_confidence).
+     * NULL until enrollment completes via biometric flow. NUMERIC(5,4) in DB.
+     */
+    @Column(name = "quality_score", precision = 5, scale = 4)
+    private BigDecimal qualityScore;
+
+    /**
+     * Liveness score 0..1 from biometric-processor anti-spoof pipeline.
+     * NULL until enrollment completes via biometric flow. NUMERIC(5,4) in DB.
+     */
+    @Column(name = "liveness_score", precision = 5, scale = 4)
+    private BigDecimal livenessScore;
+
     @CreationTimestamp
     @Column(nullable = false, updatable = false)
     private Instant createdAt;
@@ -71,6 +86,32 @@ public class UserEnrollment {
         this.status = EnrollmentStatus.ENROLLED;
         this.enrolledAt = Instant.now();
         this.enrollmentData = enrollmentData != null ? enrollmentData : "{}";
+    }
+
+    /**
+     * Mark enrollment complete and capture quality + liveness scores from the
+     * biometric-processor response. Either score may be {@code null} when the
+     * underlying method does not produce one (e.g. PASSWORD, EMAIL_OTP). The
+     * DB CHECK constraint enforces 0..1.
+     */
+    public void completeEnrollment(String enrollmentData, BigDecimal qualityScore, BigDecimal livenessScore) {
+        completeEnrollment(enrollmentData);
+        this.qualityScore = qualityScore;
+        this.livenessScore = livenessScore;
+    }
+
+    /**
+     * Update biometric scores without changing status / enrolledAt. Used by the
+     * best-effort writer that records biometric-processor scores after the
+     * enrollment row was already marked ENROLLED via a separate /complete call.
+     */
+    public void recordScores(BigDecimal qualityScore, BigDecimal livenessScore) {
+        if (qualityScore != null) {
+            this.qualityScore = qualityScore;
+        }
+        if (livenessScore != null) {
+            this.livenessScore = livenessScore;
+        }
     }
 
     public void failEnrollment() {
