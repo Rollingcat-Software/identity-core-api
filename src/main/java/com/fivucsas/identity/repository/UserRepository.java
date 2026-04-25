@@ -30,6 +30,20 @@ public interface UserRepository extends JpaRepository<User, UUID> {
 
     boolean existsByEmail(String email);
 
+    /**
+     * Lightweight lookup of a user's tenant ID by user ID.
+     *
+     * Used by the audit-log writer (AuditLogAdapter) to populate
+     * {@code audit_logs.tenant_id} without loading the full User aggregate
+     * for every audit row. This is on the hot path for every authenticated
+     * request, so we avoid initializing the tenant proxy.
+     *
+     * @param userId the user ID
+     * @return the tenant ID, or empty if the user does not exist or has no tenant
+     */
+    @Query("SELECT u.tenant.id FROM User u WHERE u.id = :userId")
+    Optional<UUID> findTenantIdById(@Param("userId") UUID userId);
+
     List<User> findByStatus(UserStatus status);
 
     long countByStatus(UserStatus status);

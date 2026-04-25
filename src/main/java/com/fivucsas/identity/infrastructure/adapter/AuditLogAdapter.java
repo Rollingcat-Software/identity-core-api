@@ -3,6 +3,7 @@ package com.fivucsas.identity.infrastructure.adapter;
 import com.fivucsas.identity.application.port.output.AuditLogPort;
 import com.fivucsas.identity.entity.AuditLog;
 import com.fivucsas.identity.repository.AuditLogRepository;
+import com.fivucsas.identity.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -31,6 +32,7 @@ import java.util.UUID;
 public class AuditLogAdapter implements AuditLogPort {
 
     private final AuditLogRepository auditLogRepository;
+    private final UserRepository userRepository;
 
     @Override
     @Transactional(propagation = Propagation.REQUIRED)
@@ -154,11 +156,15 @@ public class AuditLogAdapter implements AuditLogPort {
     private void saveAuditLog(String action, String resourceType, String userId,
                               boolean success, String ipAddress, String userAgent, Map<String, Object> metadata) {
         try {
+            UUID userUuid = userId != null ? UUID.fromString(userId) : null;
+            UUID tenantUuid = resolveTenantId(userUuid);
+
             AuditLog auditLog = AuditLog.builder()
                     .action(action)
                     .resourceType(resourceType)
-                    .userId(userId != null ? UUID.fromString(userId) : null)
-                    .resourceId(userId != null ? UUID.fromString(userId) : null)
+                    .tenantId(tenantUuid)
+                    .userId(userUuid)
+                    .resourceId(userUuid)
                     .success(success)
                     .ipAddress(ipAddress)
                     .userAgent(userAgent)
@@ -168,6 +174,40 @@ public class AuditLogAdapter implements AuditLogPort {
             auditLogRepository.save(auditLog);
         } catch (Exception e) {
             log.error("Failed to persist audit log: action={}, error={}", action, e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Resolves the tenant_id to stamp on an audit row.
+     *
+     * <p>Background: tenant-admin's {@code /api/v1/audit-logs} endpoint filters
+     * by {@code tenant_id = X}. Audit rows with NULL tenant_id are invisible to
+     * every tenant admin, even though they describe activity inside a tenant.
+     * Prior to this fix the writer never set tenant_id, so ~99% of rows were
+     * NULL. See V46 backfill migration.</p>
+     *
+     * <p>Resolution rules:</p>
+     * <ul>
+     *   <li>If a {@code userId} is supplied, look up the user's tenant_id via
+     *       {@link UserRepository#findTenantIdById}. This covers USER_LOGIN,
+     *       USER_LOGOUT, MFA_*, BIOMETRIC_*, USER_CREATED, etc.</li>
+     *   <li>If no {@code userId} is supplied (anonymous failed login,
+     *       scheduled job, system event), tenant_id stays NULL. The audit row
+     *       is intentionally cross-tenant.</li>
+     *   <li>If the user lookup fails for any reason (deleted user, transient
+     *       DB error), tenant_id stays NULL — we never let an audit write fail
+     *       because of a tenant-resolution problem.</li>
+     * </ul>
+     */
+    private UUID resolveTenantId(UUID userId) {
+        if (userId == null) {
+            return null;
+        }
+        try {
+            return userRepository.findTenantIdById(userId).orElse(null);
+        } catch (Exception e) {
+            log.warn("Failed to resolve tenant_id for audit row userId={}: {}", userId, e.getMessage());
+            return null;
         }
     }
 }
