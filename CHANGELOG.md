@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Docs — 2026-04-26 (iOS / macOS scope dropped)
+- Forward-looking "Sign in with Apple" social auth dropped from `README.md` Future section. iOS / iPadOS / macOS permanently out of scope — Sign in with Apple requires Apple Developer Program enrollment, and no Apple hardware/account is available. Google social auth remains in scope. macOS dev-environment Redis install instructions are unaffected (developer environment guidance, not product scope).
+
 ### Changed
 - **Auth flows: any AuthMethod can be step[0].** Removed the hardcoded
   `PASSWORD_MANDATORY_OPERATIONS = {APP_LOGIN, API_ACCESS}` rule from
