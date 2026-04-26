@@ -983,7 +983,7 @@ The system supports 10 authentication methods via pluggable handlers. **All 10 a
 
 ### Future
 
-- [ ] Social authentication (Google, Apple)
+- [ ] Social authentication (Google). (Sign in with Apple dropped 2026-04-26 — requires Apple Developer Program enrollment, no Apple hardware/account available.)
 - [ ] Risk-based adaptive authentication
 - [ ] Kubernetes deployment
 - [ ] Production penetration test
