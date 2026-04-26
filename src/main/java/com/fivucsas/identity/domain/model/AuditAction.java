@@ -45,5 +45,12 @@ public enum AuditAction {
     SETTINGS_UPDATED,
     SECURITY_SETTINGS_UPDATED,
     NOTIFICATION_SETTINGS_UPDATED,
-    APPEARANCE_SETTINGS_UPDATED
+    APPEARANCE_SETTINGS_UPDATED,
+
+    // OAuth2 / OIDC (Phase D5)
+    // Recorded for every code_verifier mismatch, code reuse, or expired/unknown
+    // authorization code at /oauth2/token. Carries clientId + actorIp + a
+    // PkceFailureReason in metadata. Does NOT log the verifier or challenge —
+    // those are the secret being attacked.
+    PKCE_FAILURE
 }

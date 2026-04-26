@@ -1,6 +1,8 @@
 package com.fivucsas.identity.application.service;
 
 import com.fivucsas.identity.application.port.output.OAuth2ClientRepositoryPort;
+import com.fivucsas.identity.domain.exception.PkceVerificationException;
+import com.fivucsas.identity.domain.model.PkceFailureReason;
 import com.fivucsas.identity.domain.repository.UserRepository;
 import com.fivucsas.identity.entity.OAuth2Client;
 import com.fivucsas.identity.entity.Tenant;
@@ -187,15 +189,17 @@ class OAuth2ServiceTest {
     }
 
     @Test
-    void exchangeCode_WhenCodeNotFound_ShouldThrowIllegalArgument() {
+    void exchangeCode_WhenCodeNotFound_ShouldThrowPkceVerification() {
         // given
         ValueOperations<String, String> valueOps = mock(ValueOperations.class);
         when(redisTemplate.opsForValue()).thenReturn(valueOps);
         when(valueOps.get(anyString())).thenReturn(null);
 
-        // when/then
+        // when/then — Phase D5a: classifies as CODE_NOT_FOUND so the controller
+        // can audit-log + rate-limit by clientId. Wire-format response is still
+        // invalid_grant in the controller layer.
         assertThatThrownBy(() -> service.exchangeCode("invalid", "client-1", "https://cb.com", null))
-                .isInstanceOf(IllegalArgumentException.class)
+                .isInstanceOf(PkceVerificationException.class)
                 .hasMessageContaining("Invalid or expired authorization code");
     }
 
@@ -269,22 +273,24 @@ class OAuth2ServiceTest {
     }
 
     @Test
-    void exchangeCode_WhenPkceInvalid_ShouldThrowIllegalArgument() {
+    void exchangeCode_WhenPkceInvalid_ShouldThrowPkceVerification() {
         // given
         ValueOperations<String, String> valueOps = mock(ValueOperations.class);
         when(redisTemplate.opsForValue()).thenReturn(valueOps);
         when(valueOps.get("oauth2:code:pkce-code"))
                 .thenReturn("user@test.com|client-1|https://cb.com|openid||validChallenge|S256");
 
-        // when/then
+        // when/then — Phase D5a: VERIFIER_MISMATCH carries clientId so the
+        // controller can audit + rate-limit. Verifier value itself is NOT
+        // attached to the exception.
         assertThatThrownBy(() -> service.exchangeCode(
                 "pkce-code", "client-1", "https://cb.com", null, "wrong-verifier"))
-                .isInstanceOf(IllegalArgumentException.class)
+                .isInstanceOf(PkceVerificationException.class)
                 .hasMessageContaining("Invalid code_verifier");
     }
 
     @Test
-    void exchangeCode_WhenPkceMissingVerifier_ShouldThrowIllegalArgument() {
+    void exchangeCode_WhenPkceMissingVerifier_ShouldThrowPkceVerification() {
         // given
         ValueOperations<String, String> valueOps = mock(ValueOperations.class);
         when(redisTemplate.opsForValue()).thenReturn(valueOps);
@@ -294,7 +300,7 @@ class OAuth2ServiceTest {
         // when/then
         assertThatThrownBy(() -> service.exchangeCode(
                 "pkce-code", "client-1", "https://cb.com", null, null))
-                .isInstanceOf(IllegalArgumentException.class)
+                .isInstanceOf(PkceVerificationException.class)
                 .hasMessageContaining("code_verifier is required");
     }
 

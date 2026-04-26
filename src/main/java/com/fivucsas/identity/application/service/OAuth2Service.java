@@ -4,6 +4,8 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fivucsas.identity.application.port.output.OAuth2ClientRepositoryPort;
 import com.fivucsas.identity.domain.exception.OAuth2Exception;
+import com.fivucsas.identity.domain.exception.PkceVerificationException;
+import com.fivucsas.identity.domain.model.PkceFailureReason;
 import com.fivucsas.identity.domain.repository.UserRepository;
 import com.fivucsas.identity.entity.OAuth2Client;
 import com.fivucsas.identity.entity.User;
@@ -151,7 +153,14 @@ public class OAuth2Service {
         String stored = redisTemplate.opsForValue().get(key);
 
         if (stored == null) {
-            throw new IllegalArgumentException("Invalid or expired authorization code");
+            // Phase D5a: distinguish "never issued / TTL expired" from "already
+            // consumed". Both manifest as Redis null because the consume path
+            // deletes the key, so we cannot tell from this side which it was.
+            // We classify as CODE_NOT_FOUND — the controller's audit row will
+            // show clientId, and a spike of these from the same clientId still
+            // surfaces a replay/brute-force pattern even without the finer split.
+            throw new PkceVerificationException(clientId, PkceFailureReason.CODE_NOT_FOUND,
+                    "Invalid or expired authorization code");
         }
 
         // Consume the code immediately (single-use per RFC 6749 Section 4.1.2)
@@ -179,14 +188,16 @@ public class OAuth2Service {
                 storedCodeChallenge = payload.getOrDefault("codeChallenge", "");
                 storedCodeChallengeMethod = payload.getOrDefault("codeChallengeMethod", "");
             } catch (JsonProcessingException e) {
-                throw new IllegalArgumentException("Corrupted authorization code data");
+                throw new PkceVerificationException(clientId, PkceFailureReason.CORRUPT_DATA,
+                        "Corrupted authorization code data");
             }
         } else {
             // Legacy path — log once and re-encode next mint will land as JSON.
             log.warn("OAuth2 auth-code using legacy pipe encoding — remove fallback after deploy +15m");
             String[] parts = stored.split("\\|", -1);
             if (parts.length < 3) {
-                throw new IllegalArgumentException("Corrupted authorization code data");
+                throw new PkceVerificationException(clientId, PkceFailureReason.CORRUPT_DATA,
+                        "Corrupted authorization code data");
             }
             userEmail = parts[0];
             storedClientId = parts[1];
@@ -210,10 +221,12 @@ public class OAuth2Service {
         // PKCE validation (RFC 7636 Section 4.6)
         if (!storedCodeChallenge.isEmpty()) {
             if (codeVerifier == null || codeVerifier.isEmpty()) {
-                throw new IllegalArgumentException("code_verifier is required (PKCE)");
+                throw new PkceVerificationException(clientId, PkceFailureReason.MISSING_VERIFIER,
+                        "code_verifier is required (PKCE)");
             }
             if (!verifyCodeChallenge(codeVerifier, storedCodeChallenge, storedCodeChallengeMethod)) {
-                throw new IllegalArgumentException("Invalid code_verifier (PKCE)");
+                throw new PkceVerificationException(clientId, PkceFailureReason.VERIFIER_MISMATCH,
+                        "Invalid code_verifier (PKCE)");
             }
         }
 
