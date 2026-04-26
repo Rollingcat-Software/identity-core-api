@@ -39,7 +39,7 @@ public class AuthFlowController {
     }
 
     @PostMapping
-    @PreAuthorize("@rbac.canAccessTenant(#tenantId)")
+    @PreAuthorize("@rbac.isTenantAdmin() and @rbac.canAccessTenant(#tenantId)")
     public ResponseEntity<AuthFlowResponse> createFlow(
             @PathVariable UUID tenantId,
             @Valid @RequestBody CreateAuthFlowCommand command) {
@@ -48,7 +48,7 @@ public class AuthFlowController {
     }
 
     @PutMapping("/{flowId}")
-    @PreAuthorize("@rbac.canAccessTenant(#tenantId)")
+    @PreAuthorize("@rbac.isTenantAdmin() and @rbac.canAccessTenant(#tenantId)")
     public ResponseEntity<AuthFlowResponse> updateFlow(
             @PathVariable UUID tenantId,
             @PathVariable UUID flowId,
@@ -57,7 +57,7 @@ public class AuthFlowController {
     }
 
     @DeleteMapping("/{flowId}")
-    @PreAuthorize("@rbac.canAccessTenant(#tenantId)")
+    @PreAuthorize("@rbac.isTenantAdmin() and @rbac.canAccessTenant(#tenantId)")
     public ResponseEntity<Void> deleteFlow(
             @PathVariable UUID tenantId,
             @PathVariable UUID flowId) {
