@@ -2,7 +2,6 @@ package com.fivucsas.identity.application.service;
 
 import com.fivucsas.identity.application.port.output.UserEnrollmentRepositoryPort;
 import com.fivucsas.identity.domain.model.auth.EnrollmentStatus;
-import com.fivucsas.identity.domain.repository.BiometricDataRepository;
 import com.fivucsas.identity.entity.Tenant;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.entity.UserEnrollment;
@@ -31,9 +30,6 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 @DisplayName("EnrollmentQueryService — tenant-scoped listing")
 class EnrollmentQueryServiceTenantScopeTest {
-
-    @Mock
-    private BiometricDataRepository biometricDataRepository;
 
     @Mock
     private UserEnrollmentRepositoryPort userEnrollmentRepository;
@@ -93,7 +89,6 @@ class EnrollmentQueryServiceTenantScopeTest {
     void failClosedSentinelReturnsEmpty() {
         UUID sentinel = new UUID(0L, 0L);
         when(userEnrollmentRepository.findAllByTenantId(sentinel)).thenReturn(List.of());
-        when(biometricDataRepository.findAll()).thenReturn(List.of());
 
         var result = service.getAllEnrollments(sentinel);
 

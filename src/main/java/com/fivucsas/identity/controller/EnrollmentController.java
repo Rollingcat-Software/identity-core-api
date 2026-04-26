@@ -11,7 +11,6 @@ import com.fivucsas.identity.dto.EnrollmentDto;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.entity.UserEnrollment;
 import com.fivucsas.identity.exception.ResourceNotFoundException;
-import com.fivucsas.identity.repository.BiometricDataRepository;
 import com.fivucsas.identity.repository.UserEnrollmentRepository;
 import com.fivucsas.identity.security.RbacAuthorizationService;
 import com.fivucsas.identity.security.TenantScopeResolver;
@@ -47,7 +46,6 @@ public class EnrollmentController {
     private final UserEnrollmentRepository enrollmentRepository;
     private final ManageEnrollmentUseCase manageEnrollmentUseCase;
     private final BiometricServicePort biometricService;
-    private final BiometricDataRepository biometricDataRepository;
     private final RbacAuthorizationService rbacService;
     private final EnrollmentHealthService enrollmentHealthService;
     private final TenantScopeResolver tenantScopeResolver;
@@ -239,12 +237,26 @@ public class EnrollmentController {
         User currentUser = rbacService.getCurrentUser()
                 .orElseThrow(() -> new UnauthorizedException());
 
-        boolean enrolled = biometricDataRepository.findByUserId(currentUser.getId()).isPresent();
+        // Read FACE enrollment status from the canonical user_enrollments table
+        // (replaces the legacy biometric_data lookup dropped in V48). When an
+        // enrollment row exists we surface the real quality/liveness scores
+        // captured by V47 instead of the previous hard-coded 85.0/1.0.
+        var enrollmentOpt = enrollmentRepository
+                .findByUserIdAndAuthMethodType(currentUser.getId(), AuthMethodType.FACE);
 
         Map<String, Object> response = new LinkedHashMap<>();
-        response.put("status", enrolled ? "COMPLETED" : "NOT_STARTED");
-        response.put("qualityScore", enrolled ? 85.0 : null);
-        response.put("livenessScore", enrolled ? 1.0 : null);
+        if (enrollmentOpt.isPresent()) {
+            UserEnrollment enrollment = enrollmentOpt.get();
+            response.put("status", enrollment.getStatus().name());
+            response.put("qualityScore", enrollment.getQualityScore() != null
+                    ? enrollment.getQualityScore().doubleValue() : null);
+            response.put("livenessScore", enrollment.getLivenessScore() != null
+                    ? enrollment.getLivenessScore().doubleValue() : null);
+        } else {
+            response.put("status", "NOT_STARTED");
+            response.put("qualityScore", null);
+            response.put("livenessScore", null);
+        }
         response.put("errorMessage", null);
 
         return ResponseEntity.ok(response);

@@ -6,9 +6,11 @@ import com.fivucsas.identity.application.service.EnrollmentQueryService;
 import com.fivucsas.identity.domain.exception.UnauthorizedException;
 import com.fivucsas.identity.entity.Tenant;
 import com.fivucsas.identity.entity.TenantStatus;
+import com.fivucsas.identity.domain.model.auth.AuthMethodType;
+import com.fivucsas.identity.domain.model.auth.EnrollmentStatus;
 import com.fivucsas.identity.entity.User;
+import com.fivucsas.identity.entity.UserEnrollment;
 import com.fivucsas.identity.entity.UserStatus;
-import com.fivucsas.identity.repository.BiometricDataRepository;
 import com.fivucsas.identity.repository.UserEnrollmentRepository;
 import com.fivucsas.identity.security.RbacAuthorizationService;
 import org.junit.jupiter.api.BeforeEach;
@@ -39,7 +41,6 @@ class UserEnrollmentFlowControllerTest {
     @Mock private UserEnrollmentRepository enrollmentRepository;
     @Mock private ManageEnrollmentUseCase manageEnrollmentUseCase;
     @Mock private BiometricServicePort biometricService;
-    @Mock private BiometricDataRepository biometricDataRepository;
     @Mock private RbacAuthorizationService rbacService;
 
     @InjectMocks
@@ -147,28 +148,40 @@ class UserEnrollmentFlowControllerTest {
     class GetEnrollmentStatus {
 
         @Test
-        @DisplayName("Should return COMPLETED when enrolled")
+        @DisplayName("Should return ENROLLED with real scores when FACE enrollment exists")
         void shouldReturnCompletedWhenEnrolled() {
             when(rbacService.getCurrentUser()).thenReturn(Optional.of(testUser));
-            when(biometricDataRepository.findByUserId(userId)).thenReturn(Optional.of(mock()));
+            UserEnrollment faceEnrollment = UserEnrollment.builder()
+                    .id(UUID.randomUUID())
+                    .user(testUser)
+                    .authMethodType(AuthMethodType.FACE)
+                    .status(EnrollmentStatus.ENROLLED)
+                    .qualityScore(new java.math.BigDecimal("0.92"))
+                    .livenessScore(new java.math.BigDecimal("0.88"))
+                    .build();
+            when(enrollmentRepository.findByUserIdAndAuthMethodType(userId, AuthMethodType.FACE))
+                    .thenReturn(Optional.of(faceEnrollment));
 
             ResponseEntity<Map<String, Object>> response = controller.getEnrollmentStatus();
 
             assertThat(response.getStatusCode().value()).isEqualTo(200);
-            assertThat(response.getBody()).containsEntry("status", "COMPLETED");
-            assertThat(response.getBody()).containsEntry("qualityScore", 85.0);
+            assertThat(response.getBody()).containsEntry("status", "ENROLLED");
+            assertThat(response.getBody()).containsEntry("qualityScore", 0.92);
+            assertThat(response.getBody()).containsEntry("livenessScore", 0.88);
         }
 
         @Test
-        @DisplayName("Should return NOT_STARTED when not enrolled")
+        @DisplayName("Should return NOT_STARTED when no FACE enrollment exists")
         void shouldReturnNotStartedWhenNotEnrolled() {
             when(rbacService.getCurrentUser()).thenReturn(Optional.of(testUser));
-            when(biometricDataRepository.findByUserId(userId)).thenReturn(Optional.empty());
+            when(enrollmentRepository.findByUserIdAndAuthMethodType(userId, AuthMethodType.FACE))
+                    .thenReturn(Optional.empty());
 
             ResponseEntity<Map<String, Object>> response = controller.getEnrollmentStatus();
 
             assertThat(response.getStatusCode().value()).isEqualTo(200);
             assertThat(response.getBody()).containsEntry("status", "NOT_STARTED");
+            assertThat(response.getBody()).containsEntry("qualityScore", null);
         }
 
         @Test
