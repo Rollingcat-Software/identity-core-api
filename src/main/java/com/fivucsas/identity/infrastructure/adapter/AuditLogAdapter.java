@@ -148,6 +148,21 @@ public class AuditLogAdapter implements AuditLogPort {
                 Map.of("method", method));
     }
 
+    @Override
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void logPkceFailure(String clientId, String actorIp, String failureReason) {
+        // Phase D5a — never include code_verifier or code_challenge here. The
+        // metadata Map below is what surfaces in tenant audit-log views; if a
+        // verifier value lands here, every brute-force guess is replayed back
+        // to anyone with audit-log read on the tenant.
+        log.warn("AUDIT: PKCE failure — clientId={}, ip={}, reason={}",
+                clientId, actorIp, failureReason);
+        Map<String, Object> metadata = new java.util.LinkedHashMap<>();
+        metadata.put("clientId", clientId != null ? clientId : "");
+        metadata.put("failureReason", failureReason != null ? failureReason : "UNKNOWN");
+        saveAuditLog("PKCE_FAILURE", "OAUTH2", null, false, actorIp, null, metadata);
+    }
+
     private void saveAuditLog(String action, String resourceType, String userId,
                               boolean success, String ipAddress, Map<String, Object> metadata) {
         saveAuditLog(action, resourceType, userId, success, ipAddress, null, metadata);

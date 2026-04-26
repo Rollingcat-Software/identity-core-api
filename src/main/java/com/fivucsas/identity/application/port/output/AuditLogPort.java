@@ -146,4 +146,24 @@ public interface AuditLogPort {
      */
     void logTwoFactorVerified(String userId, String method,
                               String ipAddress, String userAgent);
+
+    /**
+     * Logs an OAuth2 PKCE / authorization-code verification failure at the
+     * token endpoint (Phase D5a).
+     *
+     * <p>Recorded for every {@code code_verifier} mismatch, missing verifier,
+     * code reuse, or expired/unknown authorization code. The audit row never
+     * carries the verifier or challenge — those are the secret being attacked.
+     * It carries the {@code clientId} (so SOC can trace which integration is
+     * under attack), the actor IP (network-level attribution), and a
+     * {@code failureReason} string drawn from {@link com.fivucsas.identity.domain.model.PkceFailureReason}.</p>
+     *
+     * <p>The action stamped on the audit row is
+     * {@link com.fivucsas.identity.domain.model.AuditAction#PKCE_FAILURE}.</p>
+     *
+     * @param clientId the OAuth2 client_id present in the failed token request
+     * @param actorIp  the client IP that made the token request
+     * @param failureReason categorisation drawn from {@code PkceFailureReason.name()}
+     */
+    void logPkceFailure(String clientId, String actorIp, String failureReason);
 }

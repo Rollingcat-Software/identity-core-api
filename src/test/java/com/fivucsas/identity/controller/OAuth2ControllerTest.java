@@ -55,6 +55,7 @@ class OAuth2ControllerTest {
     @MockBean private OAuth2ClientRepositoryPort oAuth2ClientRepository;
     @MockBean private MfaSessionRepository mfaSessionRepository;
     @MockBean private com.fivucsas.identity.domain.repository.UserRepository domainUserRepository;
+    @MockBean private com.fivucsas.identity.application.port.output.AuditLogPort auditLogPort;
 
     // Security and infrastructure beans
     @MockBean private TenantRepository tenantRepository;
@@ -179,8 +180,15 @@ class OAuth2ControllerTest {
     @Test
     @DisplayName("POST /api/v1/oauth2/token - Invalid code")
     void token_WhenInvalidCode_ShouldReturn400() throws Exception {
+        // Phase D5a: service now throws PkceVerificationException for missing/
+        // expired codes so the controller can audit + rate-limit. Wire format
+        // remains invalid_grant (RFC 6749 §5.2) so SDK behaviour is unchanged.
         when(oAuth2Service.exchangeCode(anyString(), anyString(), anyString(), any(), any()))
-                .thenThrow(new IllegalArgumentException("Invalid or expired authorization code"));
+                .thenThrow(new com.fivucsas.identity.domain.exception.PkceVerificationException(
+                        "test-client",
+                        com.fivucsas.identity.domain.model.PkceFailureReason.CODE_NOT_FOUND,
+                        "Invalid or expired authorization code"));
+        when(rateLimitService.recordAndAllowPkceFailure("test-client")).thenReturn(true);
 
         mockMvc.perform(post("/api/v1/oauth2/token")
                         .param("grant_type", "authorization_code")
@@ -189,6 +197,8 @@ class OAuth2ControllerTest {
                         .param("client_id", "test-client"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error").value("invalid_grant"));
+
+        verify(auditLogPort).logPkceFailure(eq("test-client"), any(), eq("CODE_NOT_FOUND"));
     }
 
     @Test
@@ -509,5 +519,92 @@ class OAuth2ControllerTest {
                 .andExpect(jsonPath("$.error").value("invalid_request"))
                 .andExpect(jsonPath("$.error_description",
                         org.hamcrest.Matchers.containsString("already used")));
+    }
+
+    // ------------------------------------------------------------------
+    // Phase D5 — PKCE failure audit logging + per-clientId rate-limit
+    // ------------------------------------------------------------------
+
+    @Test
+    @DisplayName("Phase D5a — PKCE verifier mismatch writes PKCE_FAILURE audit row")
+    void token_WhenPkceVerifierMismatch_ShouldAuditPkceFailure() throws Exception {
+        when(oAuth2Service.exchangeCode(anyString(), eq("test-client"), anyString(), any(), any()))
+                .thenThrow(new com.fivucsas.identity.domain.exception.PkceVerificationException(
+                        "test-client",
+                        com.fivucsas.identity.domain.model.PkceFailureReason.VERIFIER_MISMATCH,
+                        "Invalid code_verifier (PKCE)"));
+        when(rateLimitService.recordAndAllowPkceFailure("test-client")).thenReturn(true);
+
+        mockMvc.perform(post("/api/v1/oauth2/token")
+                        .header("X-Forwarded-For", "203.0.113.7")
+                        .param("grant_type", "authorization_code")
+                        .param("code", "good-code")
+                        .param("redirect_uri", "https://example.com/cb")
+                        .param("client_id", "test-client")
+                        .param("code_verifier", "wrong-verifier"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("invalid_grant"));
+
+        // Audit row must carry clientId, IP from X-Forwarded-For, and the
+        // VERIFIER_MISMATCH failureReason. Verifier value itself MUST NOT
+        // be passed in (test verifies this implicitly — only 3 args exist).
+        verify(auditLogPort).logPkceFailure(
+                eq("test-client"), eq("203.0.113.7"), eq("VERIFIER_MISMATCH"));
+    }
+
+    @Test
+    @DisplayName("Phase D5a — code reuse (consume twice) writes PKCE_FAILURE audit row")
+    void token_WhenCodeReused_ShouldAuditPkceFailure() throws Exception {
+        // Simulate a second /token call with a code that was already consumed:
+        // OAuth2Service throws PkceVerificationException(CODE_NOT_FOUND, …)
+        // because Redis returned null on the second lookup.
+        when(oAuth2Service.exchangeCode(anyString(), eq("test-client"), anyString(), any(), any()))
+                .thenThrow(new com.fivucsas.identity.domain.exception.PkceVerificationException(
+                        "test-client",
+                        com.fivucsas.identity.domain.model.PkceFailureReason.CODE_NOT_FOUND,
+                        "Invalid or expired authorization code"));
+        when(rateLimitService.recordAndAllowPkceFailure("test-client")).thenReturn(true);
+
+        mockMvc.perform(post("/api/v1/oauth2/token")
+                        .param("grant_type", "authorization_code")
+                        .param("code", "already-consumed-code")
+                        .param("redirect_uri", "https://example.com/cb")
+                        .param("client_id", "test-client")
+                        .param("code_verifier", "any-verifier"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("invalid_grant"));
+
+        verify(auditLogPort).logPkceFailure(
+                eq("test-client"), any(), eq("CODE_NOT_FOUND"));
+    }
+
+    @Test
+    @DisplayName("Phase D5b — repeated PKCE failures from one clientId return 429 with Retry-After")
+    void token_WhenPkceFailureBudgetExhausted_ShouldReturn429() throws Exception {
+        when(oAuth2Service.exchangeCode(anyString(), eq("hot-client"), anyString(), any(), any()))
+                .thenThrow(new com.fivucsas.identity.domain.exception.PkceVerificationException(
+                        "hot-client",
+                        com.fivucsas.identity.domain.model.PkceFailureReason.VERIFIER_MISMATCH,
+                        "Invalid code_verifier (PKCE)"));
+        // Budget exhausted on this attempt — recordAndAllowPkceFailure returns false.
+        when(rateLimitService.recordAndAllowPkceFailure("hot-client")).thenReturn(false);
+        when(rateLimitService.getSecondsUntilRefill(
+                eq("hot-client"),
+                eq(RateLimitService.RateLimitType.PKCE_FAILURE))).thenReturn(120L);
+
+        mockMvc.perform(post("/api/v1/oauth2/token")
+                        .param("grant_type", "authorization_code")
+                        .param("code", "any-code")
+                        .param("redirect_uri", "https://example.com/cb")
+                        .param("client_id", "hot-client")
+                        .param("code_verifier", "wrong"))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(header().string("Retry-After", "120"))
+                .andExpect(jsonPath("$.error").value("invalid_grant"));
+
+        // Audit row STILL written even when rate-limited — SOC needs to see
+        // the full attack pattern, not just the first 30 attempts.
+        verify(auditLogPort).logPkceFailure(
+                eq("hot-client"), any(), eq("VERIFIER_MISMATCH"));
     }
 }

@@ -1,12 +1,15 @@
 package com.fivucsas.identity.controller;
 
+import com.fivucsas.identity.application.port.output.AuditLogPort;
 import com.fivucsas.identity.application.port.output.OAuth2ClientRepositoryPort;
 import com.fivucsas.identity.application.service.OAuth2Service;
+import com.fivucsas.identity.domain.exception.PkceVerificationException;
 import com.fivucsas.identity.entity.MfaSession;
 import com.fivucsas.identity.entity.OAuth2Client;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.domain.repository.UserRepository;
 import com.fivucsas.identity.repository.MfaSessionRepository;
+import com.fivucsas.identity.security.RateLimitService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
@@ -52,6 +55,8 @@ public class OAuth2Controller {
     private final OAuth2ClientRepositoryPort clientRepository;
     private final MfaSessionRepository mfaSessionRepository;
     private final UserRepository userRepository;
+    private final AuditLogPort auditLogPort;
+    private final RateLimitService rateLimitService;
 
     @Value("${app.hosted-login-url:https://verify.fivucsas.com/login}")
     private String hostedLoginUrl;
@@ -389,6 +394,21 @@ public class OAuth2Controller {
         return s == null || s.isBlank();
     }
 
+    /**
+     * Resolve the request's actor IP, honoring an upstream X-Forwarded-For
+     * proxy header (Traefik in prod). Mirrors the helper in
+     * {@code RateLimitInterceptor} — kept local to avoid widening the
+     * interceptor's API surface for an unrelated callsite.
+     */
+    private String getClientIP(HttpServletRequest request) {
+        if (request == null) return null;
+        String xfHeader = request.getHeader("X-Forwarded-For");
+        if (xfHeader == null || xfHeader.isBlank()) {
+            return request.getRemoteAddr();
+        }
+        return xfHeader.split(",")[0].trim();
+    }
+
     /** Request body for POST /oauth2/authorize/complete. */
     public static class HostedAuthorizeCompleteRequest {
         public String mfaSessionToken;
@@ -435,6 +455,34 @@ public class OAuth2Controller {
                     .header("Cache-Control", "no-store")
                     .header("Pragma", "no-cache")
                     .body(tokens);
+        } catch (PkceVerificationException e) {
+            // Phase D5a + D5b: audit-log every PKCE/code failure with clientId +
+            // actorIp + reason, then bump the per-clientId failure bucket. If the
+            // bucket is now empty, return 429 with Retry-After instead of the
+            // standard invalid_grant body — but ONLY after we've audited the
+            // attempt, so SOC sees the full attack pattern.
+            String actorIp = getClientIP(httpRequest);
+            auditLogPort.logPkceFailure(e.getClientId(), actorIp, e.getReason().name());
+
+            boolean withinBudget = rateLimitService.recordAndAllowPkceFailure(e.getClientId());
+            if (!withinBudget) {
+                long retryAfter = rateLimitService.getSecondsUntilRefill(
+                        e.getClientId(), RateLimitService.RateLimitType.PKCE_FAILURE);
+                Map<String, Object> body = new LinkedHashMap<>();
+                body.put("error", "invalid_grant");
+                body.put("error_description",
+                        "Too many PKCE failures for this client. Please slow down.");
+                return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                        .header("Retry-After", String.valueOf(retryAfter))
+                        .body(body);
+            }
+
+            log.warn("OAuth2 PKCE failure: clientId={}, reason={}, ip={}",
+                    e.getClientId(), e.getReason(), actorIp);
+            // RFC 6749 §5.2: PKCE failures map to invalid_grant — wire format
+            // unchanged from previous build, so existing clients see the same
+            // response shape.
+            return errorResponse(400, "invalid_grant", e.getMessage(), null);
         } catch (com.fivucsas.identity.domain.exception.OAuth2Exception e) {
             // BE-M2 (2026-04-19): explicit status (e.g. 401 for missing
             // confidential-client secret) rather than blanket 400.

@@ -49,6 +49,11 @@ public class RateLimitService {
     private final ConcurrentHashMap<String, TimedBucket> biometricBuckets = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, TimedBucket> apiBuckets = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, TimedBucket> exportBuckets = new ConcurrentHashMap<>();
+    // Phase D5b — per-clientId PKCE failure throttling at /oauth2/token. Only
+    // FAILURES are counted (success path never hits this bucket), so legitimate
+    // high-traffic clients never get throttled; an attacker hammering one
+    // clientId with bad code_verifiers does.
+    private final ConcurrentHashMap<String, TimedBucket> pkceFailureBuckets = new ConcurrentHashMap<>();
 
     /**
      * Checks if a login attempt is allowed for the given identifier (usually IP address).
@@ -155,6 +160,44 @@ public class RateLimitService {
     }
 
     /**
+     * Records a PKCE / authorization-code-exchange failure for the given
+     * {@code clientId} and reports whether the client is now over the
+     * failure-rate threshold (Phase D5b).
+     *
+     * <p>Threshold: 30 failures per 5 minutes per clientId. Rationale:</p>
+     * <ul>
+     *   <li>Legitimate confidential clients only fail when a user fat-fingers
+     *       a verifier in a custom integration — single-digit per minute at
+     *       worst even for a popular tenant.</li>
+     *   <li>30/5min leaves enough headroom that no genuine integration trips,
+     *       while limiting an attacker to ~360 verifier guesses per hour per
+     *       intercepted code (codes expire after 10 min anyway, so the
+     *       practical guess budget is ~60 per code).</li>
+     *   <li>Aligns with login-attempt bucket cadence (10/5min) — same window
+     *       for SOC dashboards.</li>
+     * </ul>
+     *
+     * <p>Only failures consume tokens. Success paths never call this method,
+     * so a busy production client minting thousands of tokens an hour is
+     * unaffected.</p>
+     *
+     * @param clientId OAuth2 client_id from the failed /oauth2/token request
+     * @return true if the failure is allowed (within budget), false if the
+     *         client is now over the threshold and the response should be 429
+     */
+    public boolean recordAndAllowPkceFailure(String clientId) {
+        Bucket bucket = getOrCreateBucket(pkceFailureBuckets, clientId,
+                this::createPkceFailureBucket, Duration.ofMinutes(5));
+        boolean allowed = bucket.tryConsume(1);
+
+        if (!allowed) {
+            log.warn("Rate limit exceeded for PKCE failures from clientId: {}", clientId);
+        }
+
+        return allowed;
+    }
+
+    /**
      * Gets remaining time until next token is available (in seconds).
      *
      * @param identifier unique identifier
@@ -198,6 +241,7 @@ public class RateLimitService {
         cleaned += evictExpired(biometricBuckets, now, Duration.ofMinutes(1).toMillis());
         cleaned += evictExpired(apiBuckets, now, Duration.ofMinutes(1).toMillis());
         cleaned += evictExpired(exportBuckets, now, Duration.ofHours(1).toMillis());
+        cleaned += evictExpired(pkceFailureBuckets, now, Duration.ofMinutes(5).toMillis());
         if (cleaned > 0) {
             log.debug("Evicted {} expired rate limit bucket entries", cleaned);
         }
@@ -283,6 +327,15 @@ public class RateLimitService {
             .build();
     }
 
+    private Bucket createPkceFailureBucket() {
+        // 30 PKCE/code-exchange failures per 5 minutes per clientId (Phase D5b).
+        // See recordAndAllowPkceFailure() Javadoc for threshold rationale.
+        Bandwidth limit = Bandwidth.classic(30, Refill.intervally(30, Duration.ofMinutes(5)));
+        return Bucket.builder()
+            .addLimit(limit)
+            .build();
+    }
+
     private ConcurrentHashMap<String, TimedBucket> getBucketMap(RateLimitType bucketType) {
         return switch (bucketType) {
             case LOGIN -> loginBuckets;
@@ -291,6 +344,7 @@ public class RateLimitService {
             case BIOMETRIC -> biometricBuckets;
             case API -> apiBuckets;
             case EXPORT -> exportBuckets;
+            case PKCE_FAILURE -> pkceFailureBuckets;
         };
     }
 
@@ -308,6 +362,7 @@ public class RateLimitService {
         PASSWORD_RESET,
         BIOMETRIC,
         API,
-        EXPORT
+        EXPORT,
+        PKCE_FAILURE
     }
 }
