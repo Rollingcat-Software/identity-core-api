@@ -1,11 +1,8 @@
 package com.fivucsas.identity.application.service;
 
 import com.fivucsas.identity.dto.EnrollmentDto;
-import com.fivucsas.identity.entity.BiometricData;
-import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.entity.UserEnrollment;
 import com.fivucsas.identity.exception.ResourceNotFoundException;
-import com.fivucsas.identity.domain.repository.BiometricDataRepository;
 import com.fivucsas.identity.application.port.output.UserEnrollmentRepositoryPort;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -18,8 +15,11 @@ import java.util.UUID;
 /**
  * Application service for enrollment query operations.
  *
- * Uses UserEnrollmentRepository as the primary source for enrollment data,
- * falling back to BiometricDataRepository for legacy records.
+ * <p>Reads {@code user_enrollments} as the single source of truth. The legacy
+ * {@code biometric_data} table was empty in production for the entire lifetime
+ * of the new pipeline (biometric-processor pgvector + user_enrollments scores)
+ * and was dropped by V48; the previous fallback path that read from it has
+ * therefore been removed.
  */
 @Service
 @RequiredArgsConstructor
@@ -27,7 +27,6 @@ import java.util.UUID;
 @Transactional(readOnly = true)
 public class EnrollmentQueryService {
 
-    private final BiometricDataRepository biometricDataRepository;
     private final UserEnrollmentRepositoryPort userEnrollmentRepository;
 
     public List<EnrollmentDto> getAllEnrollments() {
@@ -41,53 +40,27 @@ public class EnrollmentQueryService {
      *                      "no scope restriction" (SUPER_ADMIN).
      */
     public List<EnrollmentDto> getAllEnrollments(UUID tenantScopeId) {
-        List<EnrollmentDto> enrollments = (tenantScopeId == null
+        return (tenantScopeId == null
                 ? userEnrollmentRepository.findAll()
                 : userEnrollmentRepository.findAllByTenantId(tenantScopeId)
         ).stream()
                 .map(this::mapEnrollmentToDto)
-                .toList();
-        if (!enrollments.isEmpty()) {
-            return enrollments;
-        }
-        // Fall back to legacy BiometricData if no UserEnrollment records exist.
-        // BiometricData is not tenant-tagged; filter post-load when a scope is set.
-        return biometricDataRepository.findAll().stream()
-                .filter(d -> tenantScopeId == null
-                        || (d.getUser() != null
-                            && d.getUser().getTenant() != null
-                            && tenantScopeId.equals(d.getUser().getTenant().getId())))
-                .map(this::mapBiometricToDto)
                 .toList();
     }
 
     public EnrollmentDto getEnrollmentById(UUID id) {
         return userEnrollmentRepository.findById(id)
                 .map(this::mapEnrollmentToDto)
-                .orElseGet(() -> {
-                    BiometricData data = biometricDataRepository.findById(id)
-                            .orElseThrow(() -> new ResourceNotFoundException("Enrollment not found: " + id));
-                    return mapBiometricToDto(data);
-                });
+                .orElseThrow(() -> new ResourceNotFoundException("Enrollment not found: " + id));
     }
 
     @Transactional
     public void deleteEnrollment(UUID id) {
-        if (userEnrollmentRepository.existsById(id)) {
-            userEnrollmentRepository.deleteById(id);
-            log.info("UserEnrollment deleted: {}", id);
-            return;
+        if (!userEnrollmentRepository.existsById(id)) {
+            throw new ResourceNotFoundException("Enrollment not found: " + id);
         }
-
-        BiometricData data = biometricDataRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Enrollment not found: " + id));
-
-        User user = data.getUser();
-        if (user != null) {
-            user.unenrollBiometric();
-        }
-        biometricDataRepository.deleteRecord(data);
-        log.info("BiometricData enrollment deleted: {}", id);
+        userEnrollmentRepository.deleteById(id);
+        log.info("UserEnrollment deleted: {}", id);
     }
 
     private EnrollmentDto mapEnrollmentToDto(UserEnrollment enrollment) {
@@ -105,21 +78,6 @@ public class EnrollmentQueryService {
                 .qualityScore(enrollment.getQualityScore() != null ? enrollment.getQualityScore().doubleValue() : null)
                 .livenessScore(enrollment.getLivenessScore() != null ? enrollment.getLivenessScore().doubleValue() : null)
                 .completedAt(enrollment.isEnrolled() ? enrollment.getEnrolledAt() : null)
-                .build();
-    }
-
-    private EnrollmentDto mapBiometricToDto(BiometricData data) {
-        User user = data.getUser();
-        return EnrollmentDto.builder()
-                .id(data.getId().toString())
-                .userId(user != null ? user.getId().toString() : null)
-                .userName(user != null ? user.getFullName() : null)
-                .userEmail(user != null ? user.getEmail() : null)
-                .tenantId(user != null && user.getTenant() != null ? user.getTenant().getId().toString() : null)
-                .status(user != null && user.isBiometricEnrolled() ? "ENROLLED" : "PENDING")
-                .enrolledAt(data.getEnrolledAt())
-                .createdAt(data.getEnrolledAt())
-                .completedAt(user != null && user.isBiometricEnrolled() ? data.getEnrolledAt() : null)
                 .build();
     }
 }
