@@ -80,6 +80,45 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
             }
         }
 
+        // Tenant lock — when the login originates from an OAuth client that is
+        // bound to a specific tenant (e.g. demo.fivucsas.com → marmara-bys-demo
+        // → Marmara University), refuse the login if the user belongs to a
+        // different tenant. Without this gate any user from any tenant could
+        // sign in on a tenant-branded surface (the user reported logging into
+        // demo.fivucsas.com with their Fivucsas-tenant account on 2026-04-28).
+        // Reject BEFORE the password check so we don't leak whether the email
+        // exists; surface the same InvalidCredentialsException.
+        if (command.getClientId() != null && !command.getClientId().isBlank()) {
+            try {
+                Optional<OAuth2Client> tenantBoundClient =
+                        oAuth2ClientRepository.findByClientId(command.getClientId());
+                if (tenantBoundClient.isPresent() && tenantBoundClient.get().getTenant() != null) {
+                    UUID clientTenantId = tenantBoundClient.get().getTenant().getId();
+                    UUID systemTenantId = UUID.fromString("00000000-0000-0000-0000-000000000000");
+                    // Only enforce on tenant-scoped clients (system-tenant clients are
+                    // intentionally cross-tenant — e.g. fivucsas-web-dashboard).
+                    if (clientTenantId != null
+                            && !clientTenantId.equals(systemTenantId)
+                            && user.getTenant() != null
+                            && !clientTenantId.equals(user.getTenant().getId())) {
+                        log.warn("AUDIT: Login refused — tenant mismatch, email={}, " +
+                                        "userTenant={}, clientTenant={}, clientId={}, ip={}",
+                                command.getEmail(), user.getTenant().getId(), clientTenantId,
+                                command.getClientId(), command.getIpAddress());
+                        auditLogPort.logAuthenticationFailed(command.getEmail(),
+                                command.getIpAddress(),
+                                "Tenant mismatch for OAuth client " + command.getClientId());
+                        throw new InvalidCredentialsException();
+                    }
+                }
+            } catch (InvalidCredentialsException e) {
+                throw e;
+            } catch (Exception e) {
+                log.warn("Tenant-lock check failed for client '{}': {}",
+                        command.getClientId(), e.getMessage());
+            }
+        }
+
         if (!passwordEncoder.matches(command.getPassword(), user.getPasswordHash())) {
             // Increment failed attempts and potentially lock account
             user.incrementFailedLoginAttempts();
