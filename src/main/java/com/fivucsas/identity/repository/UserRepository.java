@@ -26,9 +26,11 @@ public interface UserRepository extends JpaRepository<User, UUID> {
 
     // JPA-specific query methods
 
-    Optional<User> findByEmail(String email);
+    @Query("SELECT u FROM User u WHERE u.email = :email AND u.deletedAt IS NULL")
+    Optional<User> findByEmail(@Param("email") String email);
 
-    boolean existsByEmail(String email);
+    @Query("SELECT COUNT(u) > 0 FROM User u WHERE u.email = :email AND u.deletedAt IS NULL")
+    boolean existsByEmail(@Param("email") String email);
 
     /**
      * Lightweight lookup of a user's tenant ID by user ID.
@@ -89,9 +91,11 @@ public interface UserRepository extends JpaRepository<User, UUID> {
     @Query("SELECT COUNT(u) FROM User u WHERE u.tenant.id = :tenantId")
     long countByTenantId(@Param("tenantId") UUID tenantId);
 
-    Optional<User> findByPasswordResetToken(String token);
+    @Query("SELECT u FROM User u WHERE u.passwordResetToken = :token AND u.deletedAt IS NULL")
+    Optional<User> findByPasswordResetToken(@Param("token") String token);
 
-    Optional<User> findByEmailVerificationToken(String token);
+    @Query("SELECT u FROM User u WHERE u.emailVerificationToken = :token AND u.deletedAt IS NULL")
+    Optional<User> findByEmailVerificationToken(@Param("token") String token);
 
     /**
      * Find all users with roles eagerly fetched (avoids N+1 query).
