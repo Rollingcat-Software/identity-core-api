@@ -922,12 +922,19 @@ public class AuthController {
                 .findFirst()
                 .orElseThrow(() -> new RuntimeException("Step " + nextStepOrder + " not found in flow"));
 
-            List<AvailableMfaMethod> availableMethods = buildMfaAvailableMethods(nextStep, user);
+            // Exclude methods already completed earlier in this MFA session so
+            // the next step never re-offers the just-completed method (e.g.
+            // FINGERPRINT appearing in both step-2 and step-3 CHOICE lists).
+            java.util.Set<String> completedSoFar =
+                new java.util.HashSet<>(mfaSession.getCompletedMethods());
+            List<AvailableMfaMethod> availableMethods =
+                buildMfaAvailableMethods(nextStep, user, completedSoFar);
             // Primary for the next step: the step's first non-null AuthMethod
-            // (SEQUENTIAL) or the first CHOICE entry. Alternatives = rest.
+            // (SEQUENTIAL) or the first CHOICE entry NOT already completed.
             AuthMethodType nextPrimary = nextStep.getAvailableMethods().stream()
                 .filter(java.util.Objects::nonNull)
                 .map(AuthMethod::getType)
+                .filter(t -> !completedSoFar.contains(t.name()))
                 .findFirst()
                 .orElse(null);
             List<AvailableMfaMethod> alternativeMethods = nextPrimary == null
@@ -966,6 +973,18 @@ public class AuthController {
 
     /** Build available methods for an MFA step, validated against actual backing data */
     private List<AvailableMfaMethod> buildMfaAvailableMethods(AuthFlowStep step, User user) {
+        return buildMfaAvailableMethods(step, user, java.util.Collections.emptySet());
+    }
+
+    /**
+     * Build available methods for an MFA step, excluding any method already used
+     * earlier in this MFA session. Without this filter, a 3-step CHOICE flow
+     * where the same method appears in multiple steps (e.g. FINGERPRINT in both
+     * step 2 and step 3) would re-offer the just-completed method as the next
+     * step's primary, causing the same step to run twice.
+     */
+    private List<AvailableMfaMethod> buildMfaAvailableMethods(
+            AuthFlowStep step, User user, java.util.Set<String> alreadyCompleted) {
         List<AuthMethod> methods = step.getAvailableMethods();
 
         // Validate enrollments against actual backing data (auto-revokes stale ones)
@@ -974,6 +993,7 @@ public class AuthController {
         String preferred = user.getPreferred2faMethod();
         return methods.stream()
             .filter(Objects::nonNull)
+            .filter(m -> !alreadyCompleted.contains(m.getType().name()))
             .map(m -> AvailableMfaMethod.builder()
                 .methodType(m.getType().name())
                 .name(m.getName())
