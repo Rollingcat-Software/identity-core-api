@@ -128,7 +128,31 @@ public class ManageUserService implements ManageUserUseCase {
         User user = userRepository.findById(uuid)
             .orElseThrow(() -> new UserNotFoundException(query.getUserId()));
 
+        // Tenant-scope guard: list endpoints filter by resolveTenantScope(),
+        // but the by-id endpoint relied on @PreAuthorize alone, letting a
+        // TENANT_ADMIN of tenant A read users in tenant B by direct UUID.
+        // Closes audit-edge 2026-04-28 P0 #2. SUPER_ADMIN (null scope) and
+        // self-reads (already permitted by @PreAuthorize) bypass.
+        enforceTenantScope(user, query.getUserId());
+
         return enrichWithLoginInfo(mapToUserResponse(user));
+    }
+
+    private void enforceTenantScope(User user, String requestedId) {
+        UUID scopeTenantId = resolveTenantScope();
+        if (scopeTenantId == null) {
+            return; // SUPER_ADMIN — cross-tenant reads allowed by design
+        }
+        if (user.getTenant() == null) {
+            log.warn("User {} has no tenant; rejecting cross-tenant access", requestedId);
+            throw new UserNotFoundException(requestedId);
+        }
+        if (!scopeTenantId.equals(user.getTenant().getId())) {
+            log.warn("Cross-tenant by-id access refused: caller scope={}, target user tenant={}",
+                    scopeTenantId, user.getTenant().getId());
+            // 404 not 403 — don't leak existence of users in other tenants
+            throw new UserNotFoundException(requestedId);
+        }
     }
 
     @Override
@@ -216,6 +240,8 @@ public class ManageUserService implements ManageUserUseCase {
         User user = userRepository.findById(uuid)
             .orElseThrow(() -> new UserNotFoundException(command.getUserId()));
 
+        enforceTenantScope(user, command.getUserId());
+
         // Use value objects for validation
         if (command.getFirstName() != null && command.getLastName() != null) {
             FullName fullName = FullName.of(command.getFirstName(), command.getLastName());
@@ -254,6 +280,8 @@ public class ManageUserService implements ManageUserUseCase {
         UUID uuid = UUID.fromString(userId);
         User user = userRepository.findById(uuid)
             .orElseThrow(() -> new UserNotFoundException(userId));
+
+        enforceTenantScope(user, userId);
 
         userRepository.delete(user);
         log.info("User deleted successfully: {}", userId);

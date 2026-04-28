@@ -595,6 +595,7 @@ public class AuthController {
 
     @SuppressWarnings("unchecked")
     @PostMapping("/mfa/step")
+    @org.springframework.transaction.annotation.Transactional
     @Operation(summary = "Verify an MFA step (public — no JWT required, uses session token)")
     public ResponseEntity<Map<String, Object>> verifyMfaStep(
             @RequestBody Map<String, Object> request,
@@ -611,8 +612,12 @@ public class AuthController {
             return ResponseEntity.badRequest().body(Map.of("status", "ERROR", "message", "method is required"));
         }
 
-        // Find and validate MFA session
-        Optional<MfaSession> sessionOpt = mfaSessionRepository.findBySessionToken(sessionToken);
+        // Pessimistic-lock the MFA session row for the duration of this step.
+        // Without it, two parallel correct OTP submissions in the same window
+        // would both pass the read → validate → save block and double-credit
+        // completedMethods, advancing currentStep twice in one race. Closes
+        // audit-edge 2026-04-28 P0 #1.
+        Optional<MfaSession> sessionOpt = mfaSessionRepository.findBySessionTokenForUpdate(sessionToken);
         if (sessionOpt.isEmpty()) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                 .body(Map.of("status", "ERROR", "message", "Invalid or expired MFA session"));
