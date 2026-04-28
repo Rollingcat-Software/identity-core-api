@@ -264,16 +264,25 @@ public class ManageUserService implements ManageUserUseCase {
     }
 
     private UserResponse enrichWithLoginInfo(UserResponse response) {
+        // Prefer the audit log because it survives even if `users.last_login_at`
+        // is reset by an admin tool, but fall back to the value from the User
+        // entity when audit lookup is empty. The audit-log action emitted by
+        // AuthenticateUserService is `USER_LOGIN` (see AuditLogAdapter); the
+        // previous code queried for the wrong constant `USER_AUTHENTICATED`
+        // and so always returned null, displaying "Never" on the Users list
+        // for users who had logged in many times.
+        Instant auditLastLogin = getLastLoginAt(response.getId());
+        String auditLastIp = getLastLoginIp(response.getId());
         return response.toBuilder()
-            .lastLoginAt(getLastLoginAt(response.getId()))
-            .lastLoginIp(getLastLoginIp(response.getId()))
+            .lastLoginAt(auditLastLogin != null ? auditLastLogin : response.getLastLoginAt())
+            .lastLoginIp(auditLastIp != null ? auditLastIp : response.getLastLoginIp())
             .build();
     }
 
     private Instant getLastLoginAt(String userId) {
         try {
             var page = auditLogQueryPort.findByUserIdAndActionOrderByCreatedAtDesc(
-                    UUID.fromString(userId), "USER_AUTHENTICATED",
+                    UUID.fromString(userId), "USER_LOGIN",
                     PageRequest.of(0, 1));
             return page.hasContent() ? page.getContent().getFirst().getCreatedAt() : null;
         } catch (Exception e) {
@@ -284,7 +293,7 @@ public class ManageUserService implements ManageUserUseCase {
     private String getLastLoginIp(String userId) {
         try {
             var page = auditLogQueryPort.findByUserIdAndActionOrderByCreatedAtDesc(
-                    UUID.fromString(userId), "USER_AUTHENTICATED",
+                    UUID.fromString(userId), "USER_LOGIN",
                     PageRequest.of(0, 1));
             return page.hasContent() ? page.getContent().getFirst().getIpAddress() : null;
         } catch (Exception e) {
