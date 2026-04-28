@@ -41,10 +41,49 @@ public class ManageEnrollmentService implements ManageEnrollmentUseCase {
     private final WebAuthnCredentialRepositoryPort webAuthnCredentialRepository;
 
     @Override
+    @Transactional
     public List<EnrollmentResponse> getUserEnrollments(UUID userId) {
+        ensureEmailOtpEnrollment(userId);
         return userEnrollmentRepository.findAllByUserId(userId).stream()
                 .map(EnrollmentResponse::from)
                 .toList();
+    }
+
+    /**
+     * EMAIL_OTP is not really an "enrollable" method — every user has an
+     * email bound at registration, so the auth-methods UI should always show
+     * EMAIL_OTP as enrolled. Lazily upsert a status=ENROLLED row the first
+     * time a user's enrollments are listed so the UI doesn't have to special-
+     * case it. Idempotent: existing rows (including REVOKED) are left alone.
+     */
+    private void ensureEmailOtpEnrollment(UUID userId) {
+        if (userEnrollmentRepository
+                .findByUserIdAndAuthMethodType(userId, AuthMethodType.EMAIL_OTP)
+                .isPresent()) {
+            return;
+        }
+        userRepository.findById(userId).ifPresent(user -> {
+            if (user.getEmail() == null || user.getEmail().isBlank()) {
+                return;
+            }
+            if (user.getTenant() == null) {
+                return;
+            }
+            UserEnrollment enrollment = UserEnrollment.builder()
+                    .user(user)
+                    .tenant(user.getTenant())
+                    .authMethodType(AuthMethodType.EMAIL_OTP)
+                    .build();
+            enrollment.completeEnrollment("{}");
+            try {
+                userEnrollmentRepository.save(enrollment);
+            } catch (Exception e) {
+                // Race: another concurrent request already inserted the row.
+                // Safe to swallow — next read will see it.
+                log.debug("EMAIL_OTP auto-enrollment skipped for user {}: {}",
+                        userId, e.getMessage());
+            }
+        });
     }
 
     @Override
