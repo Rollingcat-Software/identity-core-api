@@ -43,27 +43,35 @@ public class ManageEnrollmentService implements ManageEnrollmentUseCase {
     @Override
     @Transactional
     public List<EnrollmentResponse> getUserEnrollments(UUID userId) {
-        ensureEmailOtpEnrollment(userId);
+        ensureSessionBoundEnrollments(userId);
         return userEnrollmentRepository.findAllByUserId(userId).stream()
                 .map(EnrollmentResponse::from)
                 .toList();
     }
 
     /**
-     * EMAIL_OTP is not really an "enrollable" method — every user has an
-     * email bound at registration, so the auth-methods UI should always show
-     * EMAIL_OTP as enrolled. Lazily upsert a status=ENROLLED row the first
-     * time a user's enrollments are listed so the UI doesn't have to special-
-     * case it. Idempotent: existing rows (including REVOKED) are left alone.
+     * EMAIL_OTP and QR_CODE are not really "enrollable" methods — they have
+     * no per-user secret to bind. EMAIL_OTP is bound to the account email at
+     * registration; QR_CODE is session-scoped (the auth flow's QR step issues
+     * a fresh server-side session at sign-in time, so any account can use it).
+     * Lazily upsert a status=ENROLLED row the first time a user's enrollments
+     * are listed so the UI doesn't have to special-case them. Idempotent:
+     * existing rows (including REVOKED) are left alone.
      */
-    private void ensureEmailOtpEnrollment(UUID userId) {
+    private void ensureSessionBoundEnrollments(UUID userId) {
+        ensureAutoBoundEnrollment(userId, AuthMethodType.EMAIL_OTP);
+        ensureAutoBoundEnrollment(userId, AuthMethodType.QR_CODE);
+    }
+
+    private void ensureAutoBoundEnrollment(UUID userId, AuthMethodType methodType) {
         if (userEnrollmentRepository
-                .findByUserIdAndAuthMethodType(userId, AuthMethodType.EMAIL_OTP)
+                .findByUserIdAndAuthMethodType(userId, methodType)
                 .isPresent()) {
             return;
         }
         userRepository.findById(userId).ifPresent(user -> {
-            if (user.getEmail() == null || user.getEmail().isBlank()) {
+            if (methodType == AuthMethodType.EMAIL_OTP
+                    && (user.getEmail() == null || user.getEmail().isBlank())) {
                 return;
             }
             if (user.getTenant() == null) {
@@ -72,16 +80,14 @@ public class ManageEnrollmentService implements ManageEnrollmentUseCase {
             UserEnrollment enrollment = UserEnrollment.builder()
                     .user(user)
                     .tenant(user.getTenant())
-                    .authMethodType(AuthMethodType.EMAIL_OTP)
+                    .authMethodType(methodType)
                     .build();
             enrollment.completeEnrollment("{}");
             try {
                 userEnrollmentRepository.save(enrollment);
             } catch (Exception e) {
-                // Race: another concurrent request already inserted the row.
-                // Safe to swallow — next read will see it.
-                log.debug("EMAIL_OTP auto-enrollment skipped for user {}: {}",
-                        userId, e.getMessage());
+                log.debug("{} auto-enrollment skipped for user {}: {}",
+                        methodType, userId, e.getMessage());
             }
         });
     }
