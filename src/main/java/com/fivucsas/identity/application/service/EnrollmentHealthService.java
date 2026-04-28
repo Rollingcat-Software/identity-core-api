@@ -40,12 +40,26 @@ public class EnrollmentHealthService {
             AuthMethodType.QR_CODE
     );
 
-    /** Methods that can be auto-completed on startEnrollment (no async external flow). */
+    /**
+     * Methods that can be auto-completed on startEnrollment (no async external flow).
+     *
+     * SMS_OTP and QR_CODE were intentionally REMOVED here on 2026-04-28 — they were
+     * being silently flipped to ENROLLED without any real verification of the user's
+     * phone number / QR session. They now require an actual verify step (OTP code
+     * for SMS, approved session for QR) before the row is marked complete.
+     *
+     * EMAIL_OTP is also removed: every user has a NOT NULL email column, so the row
+     * is now auto-created as ENROLLED in ManageEnrollmentService.getUserEnrollments
+     * rather than via this auto-complete path.
+     *
+     * NFC_DOCUMENT remains here because the NfcController.enrollCard endpoint already
+     * verifies the card (NDEFReader scan + cardSerial persistence) before calling
+     * startEnrollment — by that point the backing data is real.
+     *
+     * PASSWORD remains here because it's set during user creation, not via this flow.
+     */
     public static final Set<AuthMethodType> AUTO_COMPLETE_TYPES = Set.of(
             AuthMethodType.PASSWORD,
-            AuthMethodType.EMAIL_OTP,
-            AuthMethodType.SMS_OTP,
-            AuthMethodType.QR_CODE,
             AuthMethodType.NFC_DOCUMENT
     );
 
