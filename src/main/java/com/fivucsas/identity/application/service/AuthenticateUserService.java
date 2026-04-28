@@ -139,10 +139,17 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
             if (defaultLoginFlow.isPresent()) {
                 AuthFlow flow = defaultLoginFlow.get();
 
-                // Find steps beyond step 1 (password was already verified above)
+                // Find steps beyond step 1 (password was already verified above).
+                // Optional steps are skipped when the user has no enrollment in any
+                // enrollment-requiring method for that step — avoids forcing repeated
+                // EMAIL_OTP loops on users who haven't set up biometric MFA yet.
+                Map<AuthMethodType, Boolean> healthStatus =
+                    enrollmentHealthService.validateEnrollments(user.getId());
+
                 List<AuthFlowStep> remainingSteps = flow.getSteps().stream()
                     .filter(step -> step.getStepOrder() > 1)
                     .sorted(Comparator.comparingInt(AuthFlowStep::getStepOrder))
+                    .filter(step -> step.isRequired() || stepHasBiometricEnrollment(step, healthStatus))
                     .toList();
 
                 if (!remainingSteps.isEmpty()) {
@@ -237,6 +244,18 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
                 .requiresEnrollment(m.isRequiresEnrollment())
                 .build())
             .collect(Collectors.toList());
+    }
+
+    /**
+     * Returns true if the step has at least one enrollment-requiring method
+     * that the user is actually enrolled in. Used to skip optional steps when
+     * the user hasn't set up any biometric/hardware MFA for that step yet.
+     */
+    private boolean stepHasBiometricEnrollment(AuthFlowStep step, Map<AuthMethodType, Boolean> healthStatus) {
+        return step.getAvailableMethods().stream()
+            .filter(Objects::nonNull)
+            .filter(AuthMethod::isRequiresEnrollment)
+            .anyMatch(m -> Boolean.TRUE.equals(healthStatus.get(m.getType())));
     }
 
     /**
