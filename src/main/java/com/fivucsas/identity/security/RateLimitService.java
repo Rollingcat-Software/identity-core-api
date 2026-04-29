@@ -54,6 +54,12 @@ public class RateLimitService {
     // high-traffic clients never get throttled; an attacker hammering one
     // clientId with bad code_verifiers does.
     private final ConcurrentHashMap<String, TimedBucket> pkceFailureBuckets = new ConcurrentHashMap<>();
+    // AUDIT_2026-04-28_SECURITY.md SEC-P1 #4 — POST /auth/mfa/step bucket.
+    // Cherry-picks the design from the unmerged security/phase-1-auth-hardening
+    // branch (commit 3eb0161) into main: 30 attempts per minute per IP. Defends
+    // against per-step OTP/biometric brute-force without throttling a legitimate
+    // user re-trying an OTP they fat-fingered (which is single-digit per minute).
+    private final ConcurrentHashMap<String, TimedBucket> mfaStepBuckets = new ConcurrentHashMap<>();
 
     /**
      * Checks if a login attempt is allowed for the given identifier (usually IP address).
@@ -160,6 +166,31 @@ public class RateLimitService {
     }
 
     /**
+     * Checks if an {@code /auth/mfa/step} attempt is allowed for the given
+     * client IP. Closes AUDIT_2026-04-28_SECURITY.md SEC-P1 #4.
+     *
+     * <p>Threshold: 30 per minute per IP. Rationale: a real user
+     * occasionally re-enters an OTP they fat-fingered — single-digit per
+     * minute. An attacker hammering /auth/mfa/step with an MFA session
+     * token tries to brute-force a 6-digit numeric OTP (1M space) — at
+     * 30/min that takes ~23 days, well past any session-token lifetime.</p>
+     *
+     * @param identifier client IP (X-Forwarded-For or remote-addr)
+     * @return true if attempt is allowed, false if rate limit exceeded
+     */
+    public boolean allowMfaStepAttempt(String identifier) {
+        Bucket bucket = getOrCreateBucket(mfaStepBuckets, identifier,
+                this::createMfaStepBucket, Duration.ofMinutes(1));
+        boolean allowed = bucket.tryConsume(1);
+
+        if (!allowed) {
+            log.warn("Rate limit exceeded for MFA step from: {}", identifier);
+        }
+
+        return allowed;
+    }
+
+    /**
      * Records a PKCE / authorization-code-exchange failure for the given
      * {@code clientId} and reports whether the client is now over the
      * failure-rate threshold (Phase D5b).
@@ -242,6 +273,7 @@ public class RateLimitService {
         cleaned += evictExpired(apiBuckets, now, Duration.ofMinutes(1).toMillis());
         cleaned += evictExpired(exportBuckets, now, Duration.ofHours(1).toMillis());
         cleaned += evictExpired(pkceFailureBuckets, now, Duration.ofMinutes(5).toMillis());
+        cleaned += evictExpired(mfaStepBuckets, now, Duration.ofMinutes(1).toMillis());
         if (cleaned > 0) {
             log.debug("Evicted {} expired rate limit bucket entries", cleaned);
         }
@@ -327,6 +359,14 @@ public class RateLimitService {
             .build();
     }
 
+    private Bucket createMfaStepBucket() {
+        // 30 attempts per minute per IP (SEC-P1 #4).
+        Bandwidth limit = Bandwidth.classic(30, Refill.intervally(30, Duration.ofMinutes(1)));
+        return Bucket.builder()
+            .addLimit(limit)
+            .build();
+    }
+
     private Bucket createPkceFailureBucket() {
         // 30 PKCE/code-exchange failures per 5 minutes per clientId (Phase D5b).
         // See recordAndAllowPkceFailure() Javadoc for threshold rationale.
@@ -345,6 +385,7 @@ public class RateLimitService {
             case API -> apiBuckets;
             case EXPORT -> exportBuckets;
             case PKCE_FAILURE -> pkceFailureBuckets;
+            case MFA_STEP -> mfaStepBuckets;
         };
     }
 
@@ -363,6 +404,7 @@ public class RateLimitService {
         BIOMETRIC,
         API,
         EXPORT,
-        PKCE_FAILURE
+        PKCE_FAILURE,
+        MFA_STEP
     }
 }
