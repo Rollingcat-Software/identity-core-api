@@ -79,13 +79,19 @@ public class BiometricController {
     @PreAuthorize("hasAuthority('biometric:enroll') or @userSecurityService.isCurrentUser(#userId)")
     public ResponseEntity<BiometricVerificationResponse> enrollFace(
             @PathVariable UUID userId,
-            @RequestParam("image") MultipartFile image) {
+            @RequestParam("image") MultipartFile image,
+            @RequestParam(value = "tenant_id", required = false) String tenantId,
+            @RequestParam(value = "client_embedding", required = false) String clientEmbedding,
+            @RequestParam(value = "client_embeddings", required = false) String clientEmbeddings) {
 
-        log.info("Face enrollment request for user: {}", userId);
+        log.info("Face enrollment request for user: {} (tenant: {})", userId, tenantId);
 
         EnrollBiometricCommand command = EnrollBiometricCommand.builder()
             .userId(userId.toString())
             .faceImage(image)
+            .tenantId(tenantId)
+            .clientEmbedding(clientEmbedding)
+            .clientEmbeddings(clientEmbeddings)
             .build();
 
         BiometricResponse response = enrollBiometricUseCase.execute(command);
@@ -98,10 +104,15 @@ public class BiometricController {
     @PreAuthorize("hasAuthority('biometric:enroll') or @userSecurityService.isCurrentUser(#userId)")
     public ResponseEntity<Map<String, Object>> enrollFaceMulti(
             @PathVariable UUID userId,
-            @RequestParam("files") List<MultipartFile> files) {
+            @RequestParam("files") List<MultipartFile> files,
+            @RequestParam(value = "tenant_id", required = false) String tenantId,
+            @RequestParam(value = "client_embedding", required = false) String clientEmbedding,
+            @RequestParam(value = "client_embeddings", required = false) String clientEmbeddings) {
 
-        log.info("Multi-image face enrollment for user: {}, images: {}", userId, files.size());
-        Map<String, Object> result = biometricServicePort.enrollFaceMulti(userId, files);
+        log.info("Multi-image face enrollment for user: {}, images: {}, tenant: {}",
+                userId, files.size(), tenantId);
+        Map<String, Object> result = biometricServicePort.enrollFaceMulti(
+                userId, files, tenantId, clientEmbedding, clientEmbeddings);
         recordEnrollmentScores(userId, AuthMethodType.FACE, result);
         return ResponseEntity.ok(result);
     }
@@ -111,13 +122,19 @@ public class BiometricController {
     @PreAuthorize("hasAuthority('biometric:verify') or @userSecurityService.isCurrentUser(#userId)")
     public ResponseEntity<BiometricVerificationResponse> verifyFace(
             @PathVariable UUID userId,
-            @RequestParam("image") MultipartFile image) {
+            @RequestParam("image") MultipartFile image,
+            @RequestParam(value = "tenant_id", required = false) String tenantId,
+            @RequestParam(value = "client_embedding", required = false) String clientEmbedding,
+            @RequestParam(value = "client_embeddings", required = false) String clientEmbeddings) {
 
-        log.info("Face verification request for user: {}", userId);
+        log.info("Face verification request for user: {} (tenant: {})", userId, tenantId);
 
         VerifyBiometricCommand command = VerifyBiometricCommand.builder()
             .userId(userId.toString())
             .faceImage(image)
+            .tenantId(tenantId)
+            .clientEmbedding(clientEmbedding)
+            .clientEmbeddings(clientEmbeddings)
             .build();
 
         BiometricResponse response = verifyBiometricUseCase.execute(command);
@@ -299,9 +316,14 @@ public class BiometricController {
     @PostMapping(value = "/api/v1/biometric/search", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @Operation(summary = "Search for a face in enrolled database (1:N identification)")
     @PreAuthorize("isAuthenticated()")
-    public ResponseEntity<Map<String, Object>> searchFace(@RequestParam("file") MultipartFile image) {
-        log.info("Face search request");
-        Map<String, Object> result = biometricServicePort.searchFace(image);
+    public ResponseEntity<Map<String, Object>> searchFace(
+            @RequestParam("file") MultipartFile image,
+            @RequestParam(value = "tenant_id", required = false) String tenantId,
+            @RequestParam(value = "client_embedding", required = false) String clientEmbedding,
+            @RequestParam(value = "client_embeddings", required = false) String clientEmbeddings) {
+        log.info("Face search request (tenant: {})", tenantId);
+        Map<String, Object> result = biometricServicePort.searchFace(
+                image, tenantId, clientEmbedding, clientEmbeddings);
         return ResponseEntity.ok(result);
     }
 

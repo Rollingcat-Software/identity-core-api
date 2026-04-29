@@ -44,8 +44,15 @@ public class VerifyBiometricService implements VerifyBiometricUseCase {
             throw new BiometricNotEnrolledException(command.getUserId());
         }
 
-        // Call external biometric service
-        Map<String, Object> response = biometricService.verifyFace(userId, command.getFaceImage());
+        // Call external biometric service. Forward tenant_id +
+        // client_embedding(s) for tenant-scoped pgvector matching and
+        // D2 log-only client telemetry.
+        Map<String, Object> response = biometricService.verifyFace(
+                userId,
+                command.getFaceImage(),
+                command.getTenantId(),
+                command.getClientEmbedding(),
+                command.getClientEmbeddings());
 
         // biometric-processor returns "verified" (boolean) and "confidence" (double)
         Boolean verified = response.get("verified") != null

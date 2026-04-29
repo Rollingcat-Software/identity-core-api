@@ -23,4 +23,21 @@ public class VerifyBiometricCommand {
 
     private String userId;
     private MultipartFile faceImage;
+
+    /**
+     * Optional tenant identifier — required by the biometric processor for
+     * pgvector tenant-scoped match queries. When null, bio falls back to
+     * non-scoped matching.
+     */
+    private String tenantId;
+
+    /**
+     * Optional single client-side pre-filter embedding (D2 log-only).
+     */
+    private String clientEmbedding;
+
+    /**
+     * Optional array-of-arrays of client-side embeddings (D2 log-only).
+     */
+    private String clientEmbeddings;
 }

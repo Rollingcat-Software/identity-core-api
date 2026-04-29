@@ -44,8 +44,15 @@ public class EnrollBiometricService implements EnrollBiometricUseCase {
         User user = userRepository.findById(userId)
             .orElseThrow(() -> new UserNotFoundException(command.getUserId()));
 
-        // Call external biometric service
-        Map<String, Object> response = biometricService.enrollFace(userId, command.getFaceImage());
+        // Call external biometric service. Forward tenant_id +
+        // client_embedding(s) so pgvector queries can be tenant-scoped and
+        // D2 log-only client telemetry survives the proxy hop.
+        Map<String, Object> response = biometricService.enrollFace(
+                userId,
+                command.getFaceImage(),
+                command.getTenantId(),
+                command.getClientEmbedding(),
+                command.getClientEmbeddings());
 
         Boolean success = (Boolean) response.get("success");
         String message = (String) response.get("message");

@@ -35,7 +35,30 @@ public interface BiometricServicePort {
      * @return Map containing enrollment response data
      * @throws com.fivucsas.identity.domain.exception.BiometricEnrollmentException if enrollment fails
      */
-    Map<String, Object> enrollFace(UUID userId, MultipartFile faceImage);
+    default Map<String, Object> enrollFace(UUID userId, MultipartFile faceImage) {
+        return enrollFace(userId, faceImage, null, null, null);
+    }
+
+    /**
+     * Enrolls a user's face with tenant scoping and optional client-side
+     * pre-filter embedding telemetry (D2 log-only).
+     *
+     * @param userId the user ID
+     * @param faceImage the face image file
+     * @param tenantId optional tenant identifier — required for pgvector tenant
+     *                 scoping on the bio side
+     * @param clientEmbedding optional single 512-dim client embedding (JSON
+     *                        array string). D2 architectural decision: log-only,
+     *                        not used for auth.
+     * @param clientEmbeddings optional array-of-arrays of client embeddings
+     *                         (JSON string). Either field may be null/empty.
+     * @return Map containing enrollment response data
+     */
+    Map<String, Object> enrollFace(UUID userId,
+                                   MultipartFile faceImage,
+                                   String tenantId,
+                                   String clientEmbedding,
+                                   String clientEmbeddings);
 
     /**
      * Verifies a user's face against enrolled biometric data.
@@ -45,7 +68,19 @@ public interface BiometricServicePort {
      * @return Map containing verification response data
      * @throws com.fivucsas.identity.domain.exception.BiometricVerificationException if verification fails
      */
-    Map<String, Object> verifyFace(UUID userId, MultipartFile faceImage);
+    default Map<String, Object> verifyFace(UUID userId, MultipartFile faceImage) {
+        return verifyFace(userId, faceImage, null, null, null);
+    }
+
+    /**
+     * Verifies a user's face with tenant scoping and optional client-side
+     * pre-filter embedding telemetry (D2 log-only).
+     */
+    Map<String, Object> verifyFace(UUID userId,
+                                   MultipartFile faceImage,
+                                   String tenantId,
+                                   String clientEmbedding,
+                                   String clientEmbeddings);
 
     /**
      * Enrolls a user's fingerprint in the biometric system.
@@ -115,9 +150,33 @@ public interface BiometricServicePort {
      * @param faceImage the face image to search
      * @return Map containing search results with matched user IDs and distances
      */
-    Map<String, Object> searchFace(MultipartFile faceImage);
+    default Map<String, Object> searchFace(MultipartFile faceImage) {
+        return searchFace(faceImage, null, null, null);
+    }
 
-    Map<String, Object> enrollFaceMulti(UUID userId, List<MultipartFile> images);
+    /**
+     * Searches for a face with tenant scoping (required by bio side as of
+     * 2026-04 — defense-in-depth tenant isolation) and optional client
+     * embedding telemetry.
+     */
+    Map<String, Object> searchFace(MultipartFile faceImage,
+                                   String tenantId,
+                                   String clientEmbedding,
+                                   String clientEmbeddings);
+
+    default Map<String, Object> enrollFaceMulti(UUID userId, List<MultipartFile> images) {
+        return enrollFaceMulti(userId, images, null, null, null);
+    }
+
+    /**
+     * Multi-image face enrollment with tenant scoping and optional client
+     * embedding telemetry (D2 log-only).
+     */
+    Map<String, Object> enrollFaceMulti(UUID userId,
+                                        List<MultipartFile> images,
+                                        String tenantId,
+                                        String clientEmbedding,
+                                        String clientEmbeddings);
 
     Map<String, Object> searchVoice(String voiceData);
 
