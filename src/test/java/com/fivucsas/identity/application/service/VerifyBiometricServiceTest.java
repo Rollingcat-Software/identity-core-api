@@ -91,7 +91,7 @@ class VerifyBiometricServiceTest {
         void shouldVerifyBiometricSuccessfully() {
             // Given
             when(userRepository.findById(userId)).thenReturn(Optional.of(enrolledUser));
-            when(biometricService.verifyFace(eq(userId), eq(faceImage)))
+            when(biometricService.verifyFace(eq(userId), eq(faceImage), eq(null), eq(null), eq(null)))
                 .thenReturn(Map.of(
                     "success", true,
                     "message", "Face verified successfully",
@@ -110,7 +110,7 @@ class VerifyBiometricServiceTest {
             assertThat(response.getUserId()).isEqualTo(userId.toString());
 
             verify(userRepository).findById(userId);
-            verify(biometricService).verifyFace(userId, faceImage);
+            verify(biometricService).verifyFace(userId, faceImage, null, null, null);
             verify(userRepository).save(any(User.class));
         }
 
@@ -120,7 +120,7 @@ class VerifyBiometricServiceTest {
             // Given
             int initialCount = enrolledUser.getVerificationCount();
             when(userRepository.findById(userId)).thenReturn(Optional.of(enrolledUser));
-            when(biometricService.verifyFace(eq(userId), eq(faceImage)))
+            when(biometricService.verifyFace(eq(userId), eq(faceImage), eq(null), eq(null), eq(null)))
                 .thenReturn(Map.of("success", true, "confidence", 0.9));
             when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
@@ -138,7 +138,7 @@ class VerifyBiometricServiceTest {
         void shouldHandleIntegerConfidenceValue() {
             // Given
             when(userRepository.findById(userId)).thenReturn(Optional.of(enrolledUser));
-            when(biometricService.verifyFace(eq(userId), eq(faceImage)))
+            when(biometricService.verifyFace(eq(userId), eq(faceImage), eq(null), eq(null), eq(null)))
                 .thenReturn(Map.of(
                     "success", true,
                     "confidence", 1  // Integer instead of Double
@@ -157,7 +157,7 @@ class VerifyBiometricServiceTest {
         void shouldReturnDefaultMessageWhenNoneProvided() {
             // Given
             when(userRepository.findById(userId)).thenReturn(Optional.of(enrolledUser));
-            when(biometricService.verifyFace(eq(userId), eq(faceImage)))
+            when(biometricService.verifyFace(eq(userId), eq(faceImage), eq(null), eq(null), eq(null)))
                 .thenReturn(Map.of("success", true, "confidence", 0.9));
             when(userRepository.save(any(User.class))).thenReturn(enrolledUser);
 
@@ -190,7 +190,7 @@ class VerifyBiometricServiceTest {
                 .isInstanceOf(UserNotFoundException.class)
                 .hasMessageContaining(nonExistentId.toString());
 
-            verify(biometricService, never()).verifyFace(any(), any());
+            verify(biometricService, never()).verifyFace(any(), any(), any(), any(), any());
         }
 
         @Test
@@ -217,7 +217,7 @@ class VerifyBiometricServiceTest {
                 .isInstanceOf(BiometricNotEnrolledException.class)
                 .hasMessageContaining(userId.toString());
 
-            verify(biometricService, never()).verifyFace(any(), any());
+            verify(biometricService, never()).verifyFace(any(), any(), any(), any(), any());
             verify(userRepository, never()).save(any());
         }
 
@@ -226,7 +226,7 @@ class VerifyBiometricServiceTest {
         void shouldThrowBiometricVerificationExceptionWhenServiceFails() {
             // Given
             when(userRepository.findById(userId)).thenReturn(Optional.of(enrolledUser));
-            when(biometricService.verifyFace(eq(userId), eq(faceImage)))
+            when(biometricService.verifyFace(eq(userId), eq(faceImage), eq(null), eq(null), eq(null)))
                 .thenReturn(Map.of(
                     "success", false,
                     "message", "Face does not match"
@@ -264,7 +264,7 @@ class VerifyBiometricServiceTest {
         void shouldHandleNullConfidenceValue() {
             // Given
             when(userRepository.findById(userId)).thenReturn(Optional.of(enrolledUser));
-            when(biometricService.verifyFace(eq(userId), eq(faceImage)))
+            when(biometricService.verifyFace(eq(userId), eq(faceImage), eq(null), eq(null), eq(null)))
                 .thenReturn(Map.of("success", true, "message", "Verified"));
             when(userRepository.save(any(User.class))).thenReturn(enrolledUser);
 
@@ -283,7 +283,7 @@ class VerifyBiometricServiceTest {
                 enrolledUser.incrementVerificationCount();
             }
             when(userRepository.findById(userId)).thenReturn(Optional.of(enrolledUser));
-            when(biometricService.verifyFace(eq(userId), eq(faceImage)))
+            when(biometricService.verifyFace(eq(userId), eq(faceImage), eq(null), eq(null), eq(null)))
                 .thenReturn(Map.of("success", true, "confidence", 0.98));
             when(userRepository.save(any(User.class))).thenReturn(enrolledUser);
 

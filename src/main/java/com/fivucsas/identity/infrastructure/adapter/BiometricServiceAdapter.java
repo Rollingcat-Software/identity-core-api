@@ -83,12 +83,17 @@ public class BiometricServiceAdapter implements BiometricServicePort {
 
     @Override
     @SuppressWarnings("unchecked")
-    public Map<String, Object> enrollFace(UUID userId, MultipartFile faceImage) {
-        log.info("Calling biometric service to enroll face for user: {}", userId);
+    public Map<String, Object> enrollFace(UUID userId,
+                                          MultipartFile faceImage,
+                                          String tenantId,
+                                          String clientEmbedding,
+                                          String clientEmbeddings) {
+        log.info("Calling biometric service to enroll face for user: {} (tenant: {})", userId, tenantId);
         try {
             MultipartBodyBuilder bodyBuilder = new MultipartBodyBuilder();
             bodyBuilder.part("file", faceImage.getResource()).contentType(MediaType.IMAGE_JPEG);
             bodyBuilder.part("user_id", userId.toString());
+            addOptionalTenantAndEmbeddingParts(bodyBuilder, tenantId, clientEmbedding, clientEmbeddings);
 
             Map<String, Object> response = postMultipart("/enroll", bodyBuilder.build());
             log.info("Biometric enrollment response received for user: {}", userId);
@@ -110,12 +115,17 @@ public class BiometricServiceAdapter implements BiometricServicePort {
 
     @Override
     @SuppressWarnings("unchecked")
-    public Map<String, Object> verifyFace(UUID userId, MultipartFile faceImage) {
-        log.info("Calling biometric service to verify face for user: {}", userId);
+    public Map<String, Object> verifyFace(UUID userId,
+                                          MultipartFile faceImage,
+                                          String tenantId,
+                                          String clientEmbedding,
+                                          String clientEmbeddings) {
+        log.info("Calling biometric service to verify face for user: {} (tenant: {})", userId, tenantId);
         try {
             MultipartBodyBuilder bodyBuilder = new MultipartBodyBuilder();
             bodyBuilder.part("file", faceImage.getResource()).contentType(MediaType.IMAGE_JPEG);
             bodyBuilder.part("user_id", userId.toString());
+            addOptionalTenantAndEmbeddingParts(bodyBuilder, tenantId, clientEmbedding, clientEmbeddings);
 
             Map<String, Object> response = postMultipart("/verify", bodyBuilder.build());
             log.info("Biometric verification response received for user: {}", userId);
@@ -251,8 +261,13 @@ public class BiometricServiceAdapter implements BiometricServicePort {
 
     @Override
     @SuppressWarnings("unchecked")
-    public Map<String, Object> enrollFaceMulti(UUID userId, List<MultipartFile> images) {
-        log.info("Calling biometric service for multi-image enrollment: userId={}, images={}", userId, images.size());
+    public Map<String, Object> enrollFaceMulti(UUID userId,
+                                               List<MultipartFile> images,
+                                               String tenantId,
+                                               String clientEmbedding,
+                                               String clientEmbeddings) {
+        log.info("Calling biometric service for multi-image enrollment: userId={}, images={}, tenant={}",
+                userId, images.size(), tenantId);
         try {
             MultipartBodyBuilder bodyBuilder = new MultipartBodyBuilder();
             bodyBuilder.part("user_id", userId.toString());
@@ -263,6 +278,7 @@ public class BiometricServiceAdapter implements BiometricServicePort {
                         .contentType(MediaType.IMAGE_JPEG)
                         .filename(filename);
             }
+            addOptionalTenantAndEmbeddingParts(bodyBuilder, tenantId, clientEmbedding, clientEmbeddings);
             return postMultipart("/enroll/multi", bodyBuilder.build());
         } catch (HttpClientErrorException e) {
             return errorResponse("Multi-enrollment rejected: " + e.getResponseBodyAsString());
@@ -275,11 +291,15 @@ public class BiometricServiceAdapter implements BiometricServicePort {
 
     @Override
     @SuppressWarnings("unchecked")
-    public Map<String, Object> searchFace(MultipartFile faceImage) {
-        log.info("Calling biometric service to search face");
+    public Map<String, Object> searchFace(MultipartFile faceImage,
+                                          String tenantId,
+                                          String clientEmbedding,
+                                          String clientEmbeddings) {
+        log.info("Calling biometric service to search face (tenant: {})", tenantId);
         try {
             MultipartBodyBuilder bodyBuilder = new MultipartBodyBuilder();
             bodyBuilder.part("file", faceImage.getResource()).contentType(MediaType.IMAGE_JPEG);
+            addOptionalTenantAndEmbeddingParts(bodyBuilder, tenantId, clientEmbedding, clientEmbeddings);
 
             return postMultipart("/search", bodyBuilder.build());
         } catch (HttpClientErrorException e) {
@@ -291,6 +311,34 @@ public class BiometricServiceAdapter implements BiometricServicePort {
         } catch (RestClientException e) {
             log.error("Biometric service error for search: {}", e.getMessage());
             return errorResponse("Search service error");
+        }
+    }
+
+    /**
+     * Forwards optional tenant_id, client_embedding and client_embeddings
+     * multipart parts when present. Kept centralized so all four face
+     * endpoints (/enroll, /enroll/multi, /verify, /search) share identical
+     * forwarding behavior.
+     *
+     * <p>Background: 2026-04-28 web-app reroute (Sec-P0b) eliminated
+     * VITE_BIOMETRIC_API_KEY from the SPA, routing all browser-originated
+     * face calls through this proxy. Without forwarding {@code tenant_id} the
+     * bio side cannot scope pgvector queries; without forwarding
+     * {@code client_embedding(s)} the D2 log-only telemetry channel is
+     * silently dropped.</p>
+     */
+    private void addOptionalTenantAndEmbeddingParts(MultipartBodyBuilder bodyBuilder,
+                                                    String tenantId,
+                                                    String clientEmbedding,
+                                                    String clientEmbeddings) {
+        if (tenantId != null && !tenantId.isBlank()) {
+            bodyBuilder.part("tenant_id", tenantId);
+        }
+        if (clientEmbedding != null && !clientEmbedding.isBlank()) {
+            bodyBuilder.part("client_embedding", clientEmbedding);
+        }
+        if (clientEmbeddings != null && !clientEmbeddings.isBlank()) {
+            bodyBuilder.part("client_embeddings", clientEmbeddings);
         }
     }
 

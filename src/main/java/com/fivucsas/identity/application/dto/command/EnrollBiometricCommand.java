@@ -23,4 +23,25 @@ public class EnrollBiometricCommand {
 
     private String userId;
     private MultipartFile faceImage;
+
+    /**
+     * Optional tenant identifier — required by the biometric processor for
+     * pgvector tenant scoping. When null, bio falls back to non-scoped
+     * matching (legacy behavior).
+     */
+    private String tenantId;
+
+    /**
+     * Optional single client-side pre-filter embedding (JSON-encoded array,
+     * 512-dim landmark-geometry vector). D2 architectural decision: log-only,
+     * never used for auth.
+     */
+    private String clientEmbedding;
+
+    /**
+     * Optional array-of-arrays of client-side embeddings (JSON string), used
+     * when more than one client view is captured. Either embedding field may
+     * be null/empty.
+     */
+    private String clientEmbeddings;
 }
