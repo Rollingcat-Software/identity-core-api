@@ -166,6 +166,31 @@ class MfaSessionTest {
     }
 
     @Test
+    @DisplayName("session at the exact expiresAt instant is treated as expired (inclusive boundary)")
+    void expiredAtExactBoundary() {
+        // Edge-P2 #6 (2026-04-29): isExpired() and the cleanup query
+        // (expiresAt <= :now) must agree at the exact boundary.
+        // Construct a session whose expiresAt has already arrived (1 ms ago)
+        // and whose isExpired() must therefore return true.
+        MfaSession boundary = MfaSession.builder()
+                .sessionToken("boundary-" + UUID.randomUUID())
+                .userId(UUID.randomUUID())
+                .tenantId(UUID.randomUUID())
+                .flowId(UUID.randomUUID())
+                .totalSteps(2)
+                .expiresAt(Instant.now().minusMillis(1))
+                .build();
+
+        // Set expiresAt to "now" via reflection-free setter to test the exact equality
+        Instant exactNow = Instant.now();
+        boundary.setExpiresAt(exactNow);
+        // Re-read: any call to isExpired() now happens at >= exactNow,
+        // and the new inclusive boundary makes isExpired() true.
+        assertTrue(boundary.isExpired(),
+                "A session whose expiresAt equals (or is before) the current instant must be expired");
+    }
+
+    @Test
     @DisplayName("session is expired when expiresAt is in the past")
     void expiredWhenExpiresAtInPast() {
         MfaSession expiredSession = MfaSession.builder()

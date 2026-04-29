@@ -92,7 +92,10 @@ public class MfaSession {
     private Instant consumedAt;
 
     public boolean isExpired() {
-        return Instant.now().isAfter(expiresAt);
+        // Inclusive boundary: a session whose expiresAt equals "now" is
+        // considered expired. Matches MfaSessionRepository.deleteExpiredSessions
+        // which uses {@code expiresAt <= :now}. Edge-P2 #6, 2026-04-29.
+        return !Instant.now().isBefore(expiresAt);
     }
 
     public boolean isCompleted() {

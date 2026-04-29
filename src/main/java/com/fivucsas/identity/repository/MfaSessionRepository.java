@@ -30,7 +30,15 @@ public interface MfaSessionRepository extends JpaRepository<MfaSession, UUID> {
     @Query("SELECT m FROM MfaSession m WHERE m.sessionToken = :sessionToken")
     Optional<MfaSession> findBySessionTokenForUpdate(@Param("sessionToken") String sessionToken);
 
+    /**
+     * Cleanup query for expired, never-completed MFA sessions.
+     *
+     * <p>Uses {@code <= :now} (inclusive) to match the boundary semantics of
+     * {@link com.fivucsas.identity.entity.MfaSession#isExpired()}, which uses
+     * {@code !expiresAt.isAfter(now)} — i.e. a session whose expiresAt equals
+     * the current instant is treated as expired. Edge-P2 #6, 2026-04-29.
+     */
     @Modifying
-    @Query("DELETE FROM MfaSession m WHERE m.expiresAt < :now AND m.completedAt IS NULL")
+    @Query("DELETE FROM MfaSession m WHERE m.expiresAt <= :now AND m.completedAt IS NULL")
     int deleteExpiredSessions(Instant now);
 }
