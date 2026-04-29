@@ -208,6 +208,7 @@ class ManageUserServiceTest {
                 .userId(userId.toString())
                 .build();
 
+            when(rbacService.isSuperAdmin()).thenReturn(true);
             when(userRepository.findById(userId)).thenReturn(Optional.of(existingUser));
 
             // When
@@ -362,6 +363,7 @@ class ManageUserServiceTest {
                 .address("999 New St")
                 .build();
 
+            when(rbacService.isSuperAdmin()).thenReturn(true);
             when(userRepository.findById(userId)).thenReturn(Optional.of(existingUser));
             when(userRepository.save(any(User.class))).thenReturn(existingUser);
 
@@ -406,6 +408,7 @@ class ManageUserServiceTest {
                 .address(null)
                 .build();
 
+            when(rbacService.isSuperAdmin()).thenReturn(true);
             when(userRepository.findById(userId)).thenReturn(Optional.of(existingUser));
             when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
@@ -430,6 +433,7 @@ class ManageUserServiceTest {
         @DisplayName("Should delete user successfully")
         void shouldDeleteUserSuccessfully() {
             // Given
+            when(rbacService.isSuperAdmin()).thenReturn(true);
             when(userRepository.findById(userId)).thenReturn(Optional.of(existingUser));
             doNothing().when(userRepository).delete(existingUser);
 

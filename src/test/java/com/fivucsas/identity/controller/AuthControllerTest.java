@@ -554,7 +554,7 @@ class AuthControllerTest {
 
         com.fivucsas.identity.entity.User user = userWithEmailOtp(userId);
 
-        when(mfaSessionRepository.findBySessionToken(sessionToken))
+        when(mfaSessionRepository.findBySessionTokenForUpdate(sessionToken))
                 .thenReturn(java.util.Optional.of(session));
         when(userRepository.findById(userId)).thenReturn(java.util.Optional.of(user));
         when(authFlowRepository.findById(flowId)).thenReturn(java.util.Optional.of(flow));
@@ -613,7 +613,7 @@ class AuthControllerTest {
 
         com.fivucsas.identity.entity.User user = userWithEmailOtp(userId);
 
-        when(mfaSessionRepository.findBySessionToken(sessionToken))
+        when(mfaSessionRepository.findBySessionTokenForUpdate(sessionToken))
                 .thenReturn(java.util.Optional.of(session));
         when(userRepository.findById(userId)).thenReturn(java.util.Optional.of(user));
         when(authFlowRepository.findById(flowId)).thenReturn(java.util.Optional.of(flow));
@@ -648,7 +648,7 @@ class AuthControllerTest {
 
         com.fivucsas.identity.entity.User user = userWithEmailOtp(userId);
 
-        when(mfaSessionRepository.findBySessionToken(sessionToken))
+        when(mfaSessionRepository.findBySessionTokenForUpdate(sessionToken))
                 .thenReturn(java.util.Optional.of(session));
         when(userRepository.findById(userId)).thenReturn(java.util.Optional.of(user));
         when(authFlowRepository.findById(flowId)).thenReturn(java.util.Optional.of(flow));
