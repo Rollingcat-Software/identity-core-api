@@ -14,9 +14,11 @@ import org.springframework.web.servlet.HandlerInterceptor;
  * Interceptor for applying rate limiting to authentication endpoints.
  *
  * Applied to:
- * - /api/v1/auth/login
+ * - /api/v1/auth/login (+ /oauth2/authorize/complete)
  * - /api/v1/auth/register
- * - /api/v1/auth/refresh
+ * - /api/v1/auth/mfa/qr-generate
+ * - /api/v1/auth/mfa/step (SEC-P1 #4 — closes per-step OTP brute-force gap)
+ * - /api/v1/oauth2/clients/{id}/public
  *
  * @author FIVUCSAS Team
  * @since 1.0.0
@@ -90,6 +92,23 @@ public class RateLimitInterceptor implements HandlerInterceptor {
                 response.setHeader("Retry-After", String.valueOf(retryAfter));
                 throw new RateLimitExceededException(
                     "Too many QR generation requests. Please wait and try again.",
+                    retryAfter
+                );
+            }
+        } else if (path.contains("/auth/mfa/step")) {
+            // AUDIT_2026-04-28_SECURITY.md SEC-P1 #4: prior to this commit
+            // /auth/mfa/step had no rate-limit bucket, so an attacker holding
+            // a stolen MFA session token could brute-force a 6-digit OTP at
+            // line-rate. 30/min/IP closes that without throttling legitimate
+            // re-entry of fat-fingered codes.
+            if (!rateLimitService.allowMfaStepAttempt(clientIp)) {
+                long retryAfter = rateLimitService.getSecondsUntilRefill(
+                    clientIp,
+                    RateLimitService.RateLimitType.MFA_STEP
+                );
+                response.setHeader("Retry-After", String.valueOf(retryAfter));
+                throw new RateLimitExceededException(
+                    "Too many MFA step attempts. Please wait and try again.",
                     retryAfter
                 );
             }

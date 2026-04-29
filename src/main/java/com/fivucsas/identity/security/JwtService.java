@@ -7,9 +7,11 @@ import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.Locator;
 import io.jsonwebtoken.io.Decoders;
 import io.jsonwebtoken.security.Keys;
+import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Primary;
+import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Service;
 
 import javax.crypto.SecretKey;
@@ -41,6 +43,7 @@ public class JwtService implements TokenGenerationPort {
 
     private final JwtSecretProvider jwtSecretProvider;
     private final RsaKeyProvider rsaKeyProvider;
+    private final Environment environment;
 
     @Value("${jwt.expiration}")
     private long jwtExpiration;
@@ -48,9 +51,47 @@ public class JwtService implements TokenGenerationPort {
     @Value("${fivucsas.jwt.default-algo:HS512}")
     private String defaultAlgo;
 
-    public JwtService(JwtSecretProvider jwtSecretProvider, RsaKeyProvider rsaKeyProvider) {
+    public JwtService(JwtSecretProvider jwtSecretProvider,
+                      RsaKeyProvider rsaKeyProvider,
+                      Environment environment) {
         this.jwtSecretProvider = jwtSecretProvider;
         this.rsaKeyProvider = rsaKeyProvider;
+        this.environment = environment;
+    }
+
+    /**
+     * AUDIT_2026-04-28_SECURITY.md SEC-P1 #3: when the {@code prod} profile
+     * is active the signing algorithm MUST be RS256. application-prod.yml
+     * pins it but a misconfigured deploy could still flip it via the
+     * {@code JWT_DEFAULT_ALGO} env var or a stray {@code @PropertySource}.
+     * Fail fast at startup rather than silently mint HS512 tokens in prod.
+     */
+    @PostConstruct
+    void assertProdAlgoIsRs256() {
+        if (environment == null) {
+            return;
+        }
+        boolean prodActive = false;
+        for (String p : environment.getActiveProfiles()) {
+            if ("prod".equals(p)) {
+                prodActive = true;
+                break;
+            }
+        }
+        if (!prodActive) {
+            return;
+        }
+        String alg = defaultAlgo == null ? "HS512" : defaultAlgo.trim().toUpperCase();
+        if (!"RS256".equals(alg)) {
+            String msg = String.format(
+                    "CRITICAL SECURITY ERROR: prod profile is active but " +
+                            "fivucsas.jwt.default-algo=%s. Production MUST sign with RS256. " +
+                            "Check application-prod.yml and the JWT_DEFAULT_ALGO env var.",
+                    alg);
+            log.error(msg);
+            throw new IllegalStateException(msg);
+        }
+        log.info("JWT signing algo locked to RS256 (prod profile)");
     }
 
     public String extractEmail(String token) {

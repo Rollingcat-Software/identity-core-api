@@ -62,6 +62,16 @@ jwt:
   expiration: ${JWT_EXPIRATION:3600000}  # Default 1 hour, override via env var
   refresh-expiration: ${JWT_REFRESH_EXPIRATION:86400000}  # Default 24 hours
 
+# AUDIT_2026-04-28_SECURITY.md SEC-P1 #3: lock prod signing algorithm to
+# RS256. The base application.yml defaults to ${JWT_DEFAULT_ALGO:HS512},
+# leaving prod posture dependent on whether .env.prod overrides correctly.
+# Hard-code RS256 here so the prod profile is RS256 even if the env var
+# is missing. JwtService also asserts this on startup when "prod" is
+# active — see JwtService#assertProdAlgoIsRs256.
+fivucsas:
+  jwt:
+    default-algo: RS256
+
 # FastAPI Integration (Production)
 # IMPORTANT: Configure via environment variables
 biometric:

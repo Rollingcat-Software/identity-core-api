@@ -1,0 +1,37 @@
+-- V43__noop_reserved_v43_ships_as_V48.sql
+--
+-- AUDIT_2026-04-28_EDGE.md finding #8: the migration chain skipped from
+-- V42 to V44 because the work intended for V43 (drop legacy biometric_data
+-- table) shipped under V48 instead. With Flyway's `out-of-order=false`
+-- default in production, any future PR that submits a real V43 would fail
+-- at boot ("non-resolved migration detected"), gating the deploy.
+--
+-- This file reserves the V43 slot with a non-destructive no-op so the
+-- chain is contiguous (V42 → V43 → V44 → ...). It MUST stay in place
+-- forever; do not repurpose this slot. Real new migrations belong at the
+-- next free version (V49+ as of 2026-04-28).
+--
+-- Operator note: on environments where Flyway has already applied V44+
+-- (i.e. prod and any CI cache that ran before this commit), Flyway will
+-- refuse to insert V43 retroactively unless out-of-order is enabled, OR
+-- the row is inserted manually into flyway_schema_history. Use the same
+-- pattern as the V42 restore (commit bad7262), e.g.:
+--
+--   INSERT INTO flyway_schema_history (
+--     installed_rank, version, description, type, script,
+--     checksum, installed_by, installed_on, execution_time, success)
+--   VALUES (
+--     (SELECT MAX(installed_rank)+1 FROM flyway_schema_history),
+--     '43', 'noop reserved v43 ships as V48', 'SQL',
+--     'V43__noop_reserved_v43_ships_as_V48.sql',
+--     NULL,  -- skip checksum check; matches pattern used for V42 restore
+--     CURRENT_USER, NOW(), 0, true);
+--
+-- Verify with:
+--   SELECT version, description, success FROM flyway_schema_history ORDER BY installed_rank;
+--
+-- A pure SQL comment is technically a valid Flyway script but some Flyway
+-- versions complain about "no statements"; emit a harmless SELECT 1 so
+-- every parser accepts it.
+
+SELECT 1 WHERE FALSE;

@@ -12,6 +12,8 @@ import com.fivucsas.identity.security.TenantScopeResolver;
 import com.fivucsas.identity.domain.exception.UnauthorizedException;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
@@ -19,6 +21,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.HashMap;
@@ -33,6 +36,7 @@ import java.util.UUID;
  */
 @RestController
 @RequiredArgsConstructor
+@Validated
 @Slf4j
 @Tag(name = "Audit Logs", description = "Audit log and statistics endpoints")
 public class AuditLogController {
@@ -46,8 +50,8 @@ public class AuditLogController {
     @Operation(summary = "Get audit logs with pagination")
     @PreAuthorize("@rbac.isTenantAdmin() or hasAuthority('audit:read')")
     public ResponseEntity<Map<String, Object>> getAuditLogs(
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(defaultValue = "0") @Min(0) int page,
+            @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size,
             @RequestParam(required = false) String action,
             @RequestParam(required = false) String userId) {
 
@@ -112,8 +116,8 @@ public class AuditLogController {
     @Operation(summary = "Get current user's own activity logs")
     @PreAuthorize("isAuthenticated()")
     public ResponseEntity<Map<String, Object>> getMyActivity(
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size) {
+            @RequestParam(defaultValue = "0") @Min(0) int page,
+            @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size) {
 
         User currentUser = rbacService.getCurrentUser()
                 .orElseThrow(UnauthorizedException::new);

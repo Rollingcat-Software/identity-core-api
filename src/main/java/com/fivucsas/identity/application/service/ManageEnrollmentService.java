@@ -16,6 +16,7 @@ import com.fivucsas.identity.domain.repository.UserRepository;
 import jakarta.persistence.EntityNotFoundException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -117,7 +118,21 @@ public class ManageEnrollmentService implements ManageEnrollmentUseCase {
         } else {
             enrollment.startEnrollment();
         }
-        return EnrollmentResponse.from(userEnrollmentRepository.save(enrollment));
+        // AUDIT_2026-04-28 EDGE-P1 #3: two parallel callers can both reach save()
+        // here, the second hitting the (user_id, auth_method_type) unique
+        // constraint and surfacing as a 500. Catch the conflict, re-fetch the
+        // committed row from the winner and return that — idempotent semantics,
+        // matches the "first call wins" intent.
+        try {
+            return EnrollmentResponse.from(userEnrollmentRepository.save(enrollment));
+        } catch (DataIntegrityViolationException conflict) {
+            log.info("startEnrollment race detected for user={} method={} — re-fetching winner",
+                    userId, methodType);
+            UserEnrollment winner = userEnrollmentRepository
+                    .findByUserIdAndAuthMethodType(userId, methodType)
+                    .orElseThrow(() -> conflict);
+            return EnrollmentResponse.from(winner);
+        }
     }
 
     @Override
