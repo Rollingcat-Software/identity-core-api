@@ -198,6 +198,8 @@ class AuthControllerTest {
         // Configure rate limit service to allow all requests in tests
         when(rateLimitService.allowLoginAttempt(anyString())).thenReturn(true);
         when(rateLimitService.allowRegistrationAttempt(anyString())).thenReturn(true);
+        // SEC-P1 #4: /auth/mfa/step now flows through RateLimitInterceptor.
+        when(rateLimitService.allowMfaStepAttempt(anyString())).thenReturn(true);
     }
 
     // ============== REGISTRATION TESTS ==============
