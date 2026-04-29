@@ -47,4 +47,22 @@ public interface RefreshTokenRepository extends
     @Modifying
     @Query("UPDATE RefreshToken rt SET rt.isRevoked = true, rt.revokedAt = :revokedAt WHERE rt.user = :user AND rt.id != :currentTokenId AND rt.isRevoked = false")
     int revokeAllUserTokensExceptCurrent(User user, UUID currentTokenId, Instant revokedAt);
+
+    /**
+     * Bulk-revoke every refresh token belonging to the given rotation family.
+     *
+     * <p>Reuse-detection path (Sec-P2 #6): when the rotation endpoint sees a
+     * presented token that is already revoked, every token in the family —
+     * including any active descendant minted by the attacker who "won" the
+     * race — must be revoked at once. RFC 6749 §10.4 + OAuth 2.0 Security
+     * BCP §4.13.
+     *
+     * <p>Returns the number of rows updated. Already-revoked rows are
+     * skipped by the {@code rt.isRevoked = false} guard so this is safe to
+     * call repeatedly.
+     */
+    @Modifying
+    @Query("UPDATE RefreshToken rt SET rt.isRevoked = true, rt.revokedAt = :revokedAt " +
+            "WHERE rt.familyId = :familyId AND rt.isRevoked = false")
+    int revokeFamily(UUID familyId, Instant revokedAt);
 }

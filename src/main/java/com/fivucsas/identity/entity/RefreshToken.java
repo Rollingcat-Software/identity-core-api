@@ -29,6 +29,18 @@ public class RefreshToken {
     @Column(nullable = false, unique = true, length = 500)
     private String token;
 
+    /**
+     * Rotation-family identifier (Sec-P2 #6, 2026-04-29).
+     *
+     * <p>All refresh tokens minted from a single initial login share one
+     * family_id, propagated through every rotation. When the application
+     * detects replay of a revoked token, every row sharing this family_id
+     * is revoked at once — RFC 6749 §10.4 + OAuth 2.0 Security BCP §4.13.
+     * See {@code RefreshTokenService.rotateRefreshToken}.
+     */
+    @Column(name = "family_id", nullable = false)
+    private UUID familyId;
+
     @Column(nullable = false)
     private Instant expiryDate;
 

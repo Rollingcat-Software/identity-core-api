@@ -1,5 +1,6 @@
 package com.fivucsas.identity.service;
 
+import com.fivucsas.identity.application.port.output.AuditLogPort;
 import com.fivucsas.identity.domain.exception.TokenExpiredException;
 import com.fivucsas.identity.domain.exception.TokenRevokedException;
 import com.fivucsas.identity.domain.exception.UserNotFoundException;
@@ -21,13 +22,25 @@ import java.util.UUID;
 public class RefreshTokenService implements com.fivucsas.identity.application.port.output.RefreshTokenPort {
 
     private final RefreshTokenRepository refreshTokenRepository;
+    private final AuditLogPort auditLogPort;
 
     @Value("${jwt.refresh-expiration:604800000}") // 7 days in milliseconds
     private long refreshTokenDurationMs;
 
     @Transactional
     public RefreshToken createRefreshToken(User user, String ipAddress, String userAgent) {
-        log.info("Creating refresh token for user: {}", user.getEmail());
+        // Initial login mints a fresh family — no parent to inherit from.
+        return createRefreshTokenInFamily(user, UUID.randomUUID(), ipAddress, userAgent);
+    }
+
+    /**
+     * Internal helper: mint a refresh token attached to a specific rotation
+     * family. Used by both initial login (fresh family) and rotation
+     * (parent family inherited).
+     */
+    private RefreshToken createRefreshTokenInFamily(User user, UUID familyId,
+                                                    String ipAddress, String userAgent) {
+        log.info("Creating refresh token for user: {} (family={})", user.getEmail(), familyId);
 
         // BE-M5 (2026-04-19): do NOT revoke all existing tokens here. Previously
         // this path unconditionally called revokeAllUserTokens(user), which broke
@@ -43,6 +56,7 @@ public class RefreshTokenService implements com.fivucsas.identity.application.po
         RefreshToken refreshToken = RefreshToken.builder()
                 .user(user)
                 .token(UUID.randomUUID().toString())
+                .familyId(familyId)
                 .expiryDate(Instant.now().plusMillis(refreshTokenDurationMs))
                 .ipAddress(ipAddress)
                 .userAgent(userAgent)
@@ -59,6 +73,20 @@ public class RefreshTokenService implements com.fivucsas.identity.application.po
         }
 
         if (token.isRevoked()) {
+            // Reuse-detection (Sec-P2 #6): a presented-but-revoked token means
+            // either the user resubmitted an old proof OR an attacker captured
+            // it before rotation. RFC 6749 §10.4 + OAuth 2.0 Security BCP §4.13
+            // require revoking every descendant in the rotation family so the
+            // attacker's "winning" token is killed even if the legitimate
+            // client races ahead.
+            int killed = refreshTokenRepository.revokeFamily(token.getFamilyId(), Instant.now());
+            log.warn("Refresh-token reuse detected for user={} family={} — revoked {} family member(s)",
+                    token.getUser().getEmail(), token.getFamilyId(), killed);
+            auditLogPort.logSecurityEvent(
+                    token.getUser().getId().toString(),
+                    "REFRESH_TOKEN_REUSE_DETECTED",
+                    token.getIpAddress(),
+                    "family=" + token.getFamilyId() + " revoked=" + killed);
             throw new TokenRevokedException();
         }
 
@@ -87,14 +115,16 @@ public class RefreshTokenService implements com.fivucsas.identity.application.po
 
     @Transactional
     public RefreshToken rotateRefreshToken(RefreshToken oldToken, String ipAddress, String userAgent) {
-        log.info("Rotating refresh token for user: {}", oldToken.getUser().getEmail());
+        log.info("Rotating refresh token for user: {} (family={})",
+                oldToken.getUser().getEmail(), oldToken.getFamilyId());
 
-        // Revoke old token
+        // Revoke old token, then mint a successor that inherits the rotation
+        // family — every token derived from a single login shares one family
+        // so reuse-detection can revoke them all at once (Sec-P2 #6).
         oldToken.revoke();
         refreshTokenRepository.save(oldToken);
-
-        // Create new token
-        return createRefreshToken(oldToken.getUser(), ipAddress, userAgent);
+        return createRefreshTokenInFamily(oldToken.getUser(), oldToken.getFamilyId(),
+                ipAddress, userAgent);
     }
 
     @Transactional
