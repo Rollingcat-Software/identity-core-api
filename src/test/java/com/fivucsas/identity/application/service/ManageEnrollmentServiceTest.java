@@ -19,6 +19,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.dao.DataIntegrityViolationException;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -295,6 +296,63 @@ class ManageEnrollmentServiceTest {
         service.recordBiometricScores(userId, AuthMethodType.FACE, null, null);
 
         verifyNoInteractions(userEnrollmentRepository);
+    }
+
+    @Test
+    void startEnrollment_WhenSaveRacesUniqueConstraint_ShouldReFetchWinner() {
+        // AUDIT_2026-04-28 EDGE-P1 #3: parallel startEnrollment calls collide on the
+        // (user_id, auth_method_type) unique constraint. The loser must catch the
+        // DataIntegrityViolationException, re-fetch the row committed by the winner,
+        // and return idempotently — never surface a 500.
+        User user = mock(User.class);
+        Tenant tenant = mock(Tenant.class);
+        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+        when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+
+        UserEnrollment winner = mock(UserEnrollment.class);
+        when(winner.getId()).thenReturn(UUID.randomUUID());
+        when(winner.getAuthMethodType()).thenReturn(AuthMethodType.TOTP);
+        when(winner.getStatus()).thenReturn(EnrollmentStatus.PENDING);
+        when(winner.getUser()).thenReturn(null);
+        when(winner.getTenant()).thenReturn(null);
+
+        // first findBy returns empty (loser proceeds to build new row),
+        // save() throws DataIntegrityViolationException (winner already committed),
+        // second findBy returns the winner row.
+        when(userEnrollmentRepository.findByUserIdAndAuthMethodType(userId, AuthMethodType.TOTP))
+                .thenReturn(Optional.empty())
+                .thenReturn(Optional.of(winner));
+        when(userEnrollmentRepository.save(any(UserEnrollment.class)))
+                .thenThrow(new DataIntegrityViolationException(
+                        "duplicate key value violates unique constraint"));
+
+        EnrollmentResponse result = service.startEnrollment(userId, tenantId, AuthMethodType.TOTP);
+
+        assertThat(result).isNotNull();
+        // findByUserIdAndAuthMethodType called twice: initial lookup + winner re-fetch
+        verify(userEnrollmentRepository, times(2))
+                .findByUserIdAndAuthMethodType(userId, AuthMethodType.TOTP);
+    }
+
+    @Test
+    void startEnrollment_WhenSaveRacesAndWinnerVanishes_ShouldRethrow() {
+        // Defensive: if the constraint fires but no row is then visible (e.g. row
+        // was created and rolled back, or repo bug), we must NOT swallow the
+        // exception — surface it so the operator sees a real 500 they can debug.
+        User user = mock(User.class);
+        Tenant tenant = mock(Tenant.class);
+        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+        when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+
+        when(userEnrollmentRepository.findByUserIdAndAuthMethodType(userId, AuthMethodType.TOTP))
+                .thenReturn(Optional.empty())
+                .thenReturn(Optional.empty());
+        DataIntegrityViolationException conflict =
+                new DataIntegrityViolationException("duplicate key");
+        when(userEnrollmentRepository.save(any(UserEnrollment.class))).thenThrow(conflict);
+
+        assertThatThrownBy(() -> service.startEnrollment(userId, tenantId, AuthMethodType.TOTP))
+                .isSameAs(conflict);
     }
 
     @Test
