@@ -314,7 +314,50 @@ class OAuth2ControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{}"))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.error").value("invalid_request"));
+                .andExpect(jsonPath("$.error").value("invalid_request"))
+                .andExpect(jsonPath("$.error_description").exists());
+    }
+
+    @Test
+    @DisplayName("POST /authorize/complete - invalid redirectUri pattern returns OAuth2 400 invalid_request")
+    void authorizeComplete_WhenRedirectUriMalformed_ShouldReturn400() throws Exception {
+        // Sec-P2 #7 (2026-04-29): Bean Validation rejects junk redirect_uri
+        // before the controller body runs. Local exception handler must rewrite
+        // the standard Spring 400 into the OAuth 2.0 error shape so RFC 6749 §5.2
+        // is preserved (error + error_description, optional state echo).
+        String body = "{" +
+                "\"mfaSessionToken\":\"abc-token\"," +
+                "\"clientId\":\"some-client\"," +
+                "\"redirectUri\":\"not a url\"," +
+                "\"state\":\"echo-me-back-please\"" +
+                "}";
+
+        mockMvc.perform(post("/api/v1/oauth2/authorize/complete")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("invalid_request"))
+                .andExpect(jsonPath("$.error_description").exists())
+                .andExpect(jsonPath("$.state").value("echo-me-back-please"));
+    }
+
+    @Test
+    @DisplayName("POST /authorize/complete - blank mfaSessionToken returns OAuth2 400 with state echo")
+    void authorizeComplete_WhenMfaSessionTokenBlank_ShouldReturn400() throws Exception {
+        String body = "{" +
+                "\"mfaSessionToken\":\"   \"," +
+                "\"clientId\":\"some-client\"," +
+                "\"redirectUri\":\"https://example.com/cb\"," +
+                "\"state\":\"my-state\"" +
+                "}";
+
+        mockMvc.perform(post("/api/v1/oauth2/authorize/complete")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("invalid_request"))
+                .andExpect(jsonPath("$.error_description").exists())
+                .andExpect(jsonPath("$.state").value("my-state"));
     }
 
     @Test

@@ -15,6 +15,10 @@ import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.Size;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -196,10 +200,16 @@ public class OAuth2Controller {
     @PostMapping("/authorize/complete")
     @Operation(summary = "Mint an OAuth2 authorization code after hosted-login MFA completes")
     @Transactional
-    public ResponseEntity<?> authorizeComplete(@RequestBody HostedAuthorizeCompleteRequest body) {
-        if (body == null || isBlank(body.mfaSessionToken) || isBlank(body.clientId) || isBlank(body.redirectUri)) {
+    public ResponseEntity<?> authorizeComplete(@Valid @RequestBody HostedAuthorizeCompleteRequest body) {
+        // Bean Validation (@NotBlank/@Pattern/@Size on the request DTO) enforces
+        // structural correctness before this body runs. The local
+        // MethodArgumentNotValidException handler returns the OAuth2 error shape
+        // ({error, error_description, [state]}) so RFC 6749 §5.2 is preserved.
+        // The body == null guard remains for defense-in-depth — Spring should
+        // already reject empty bodies via HttpMessageNotReadableException.
+        if (body == null) {
             return errorResponse(400, "invalid_request",
-                    "mfaSessionToken, clientId, and redirectUri are required", body == null ? null : body.state);
+                    "Request body is required", null);
         }
 
         MfaSession session = mfaSessionRepository.findBySessionToken(body.mfaSessionToken).orElse(null);
@@ -409,16 +419,73 @@ public class OAuth2Controller {
         return xfHeader.split(",")[0].trim();
     }
 
-    /** Request body for POST /oauth2/authorize/complete. */
+    /**
+     * Request body for POST /oauth2/authorize/complete.
+     *
+     * <p>Bean Validation constraints (Sec-P2 #7, 2026-04-29) enforce structural
+     * correctness so the controller body can focus on protocol semantics. On
+     * violation, the controller-scoped {@link #handleValidationOnAuthorizeComplete}
+     * adapter rewrites the standard Spring 400 into the OAuth 2.0 error shape
+     * (RFC 6749 §5.2) — {@code {error, error_description, state?}}.
+     */
     public static class HostedAuthorizeCompleteRequest {
+        @NotBlank(message = "mfaSessionToken is required")
+        @Size(max = 256, message = "mfaSessionToken too long")
         public String mfaSessionToken;
+
+        @NotBlank(message = "clientId is required")
+        @Size(max = 128, message = "clientId too long")
         public String clientId;
+
+        @NotBlank(message = "redirectUri is required")
+        @Pattern(
+            regexp = "^https?://[\\w.-]+(:\\d+)?(/[\\w./?%&=#:+~,@!$'()*;\\[\\]-]*)?$",
+            message = "redirectUri must be a valid http(s) URL"
+        )
+        @Size(max = 2048, message = "redirectUri too long")
         public String redirectUri;
+
+        @Size(max = 512, message = "scope too long")
         public String scope;
+
+        @Size(max = 512, message = "state too long")
         public String state;
+
+        @Size(max = 512, message = "nonce too long")
         public String nonce;
+
+        @Size(max = 256, message = "codeChallenge too long")
         public String codeChallenge;
+
+        @Size(max = 16, message = "codeChallengeMethod too long")
         public String codeChallengeMethod;
+    }
+
+    /**
+     * Local override of the global {@link MethodArgumentNotValidException}
+     * handler. The OAuth 2.0 error shape (RFC 6749 §5.2) requires
+     * {@code {error, error_description, [state]}} — not the generic
+     * {@link com.fivucsas.identity.dto.ErrorResponse} envelope used by the
+     * rest of the API. We extract the first field error's message as the
+     * {@code error_description} and echo {@code state} when present.
+     *
+     * <p>Sec-P2 #7, 2026-04-29.
+     */
+    @ExceptionHandler(org.springframework.web.bind.MethodArgumentNotValidException.class)
+    public ResponseEntity<Map<String, Object>> handleValidationOnAuthorizeComplete(
+            org.springframework.web.bind.MethodArgumentNotValidException ex,
+            HttpServletRequest request) {
+        String description = ex.getBindingResult().getFieldErrors().stream()
+                .map(org.springframework.validation.FieldError::getDefaultMessage)
+                .findFirst()
+                .orElse("Invalid request");
+        String state = null;
+        Object target = ex.getBindingResult().getTarget();
+        if (target instanceof HostedAuthorizeCompleteRequest req) {
+            state = req.state;
+        }
+        log.warn("OAuth2 authorize/complete — request body validation failed: {}", description);
+        return errorResponse(400, "invalid_request", description, state);
     }
 
     /**
