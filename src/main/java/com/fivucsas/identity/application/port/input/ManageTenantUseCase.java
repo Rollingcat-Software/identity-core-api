@@ -49,7 +49,28 @@ public interface ManageTenantUseCase {
     TenantResponse suspendTenant(String tenantId);
 
     /**
-     * Deletes a tenant.
+     * Deletes a tenant. Implemented as a SOFT delete (sets
+     * {@code tenants.deleted_at = NOW()}) — see
+     * {@link #softDeleteTenant(java.util.UUID)}.
+     *
+     * <p>Hard delete is forbidden because {@code tenants.id} is referenced by
+     * ~13 child tables, most with {@code ON DELETE CASCADE}; a hard delete
+     * would silently wipe ~10 dependent tables. Hibernate's
+     * {@code @SQLDelete} on the entity transparently routes
+     * {@code deleteById} through the soft path, so this method is safe.
      */
     void deleteTenant(String tenantId);
+
+    /**
+     * Soft-deletes a tenant by id (sets {@code tenants.deleted_at = NOW()}).
+     * The row remains in the database but is invisible to default JPA
+     * finds via the entity's {@code @SQLRestriction}. Cascade chains are
+     * NOT triggered. Use this in preference to {@link #deleteTenant(String)}
+     * when calling code already has a {@code UUID} in hand.
+     *
+     * @param tenantId the tenant to soft-delete
+     * @throws com.fivucsas.identity.domain.exception.TenantNotFoundException
+     *         if no live tenant matches {@code tenantId}
+     */
+    void softDeleteTenant(java.util.UUID tenantId);
 }
