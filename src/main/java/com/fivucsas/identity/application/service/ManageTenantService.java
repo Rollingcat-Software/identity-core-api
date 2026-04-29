@@ -173,14 +173,32 @@ public class ManageTenantService implements ManageTenantUseCase {
     @Override
     @Transactional
     public void deleteTenant(String tenantId) {
-        log.info("Deleting tenant: {}", tenantId);
-
+        // Routes through softDeleteTenant — Hibernate's @SQLDelete on the
+        // Tenant entity rewrites the SQL to UPDATE...SET deleted_at = NOW()
+        // regardless of which path callers take. This wrapper exists so the
+        // String-based API stays compatible with existing controllers while
+        // the soft-delete contract is documented in one place.
         UUID uuid = UUID.fromString(tenantId);
-        tenantRepository.findById(uuid)
-            .orElseThrow(() -> new TenantNotFoundException(tenantId));
+        softDeleteTenant(uuid);
+    }
 
-        tenantRepository.deleteById(uuid);
-        log.info("Tenant deleted successfully: {}", tenantId);
+    @Override
+    @Transactional
+    public void softDeleteTenant(UUID tenantId) {
+        log.info("Soft-deleting tenant: {}", tenantId);
+
+        // Verify the tenant exists and is not already soft-deleted. The
+        // findById() call goes through the @SQLRestriction filter, so a
+        // soft-deleted row is reported as "not found" (which is the
+        // semantically correct behaviour for callers).
+        tenantRepository.findById(tenantId)
+            .orElseThrow(() -> new TenantNotFoundException(tenantId.toString()));
+
+        // deleteById triggers @SQLDelete (UPDATE tenants SET deleted_at = NOW()).
+        // No CASCADE is fired because no row is removed.
+        tenantRepository.deleteById(tenantId);
+        log.info("Tenant soft-deleted successfully: {} "
+            + "(child tables intact — cascade chain not triggered)", tenantId);
     }
 
     private TenantResponse mapToResponse(Tenant tenant) {

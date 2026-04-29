@@ -149,7 +149,22 @@ public class User {
     @Builder.Default
     private boolean phoneVerified = false;
 
+    /**
+     * Shared TOTP secret. Encrypted at rest via
+     * {@link com.fivucsas.identity.infrastructure.persistence.converter.TotpSecretAttributeConverter}
+     * (AES-GCM-256 → {@code enc:v1:<base64>}). Setter accepts plaintext;
+     * the converter encrypts on write and decrypts on read.
+     *
+     * <p>Defense-in-depth (EDGE-P1 #7): the converter prevents accidental
+     * plaintext writes from new code paths bypassing
+     * {@link com.fivucsas.identity.security.TotpSecretCipher}. The V42
+     * CHECK constraint on the column enforces the same invariant at the DB.
+     *
+     * <p>{@code length = 512} on the column reflects the storage size of the
+     * base64 ciphertext envelope, not the plaintext secret.
+     */
     @Column(name = "two_factor_secret", length = 512)
+    @Convert(converter = com.fivucsas.identity.infrastructure.persistence.converter.TotpSecretAttributeConverter.class)
     private String twoFactorSecret;
 
     @Column(name = "two_factor_backup_codes", length = 1024)

@@ -5,6 +5,8 @@ import com.fivucsas.identity.domain.model.tenant.TenantId;
 import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.SQLDelete;
+import org.hibernate.annotations.SQLRestriction;
 import org.hibernate.annotations.UpdateTimestamp;
 
 import java.time.Instant;
@@ -15,6 +17,15 @@ import java.util.UUID;
 /**
  * Tenant aggregate root entity.
  * Represents an organization/company using the identity service.
+ *
+ * <p><b>Soft-delete contract (EDGE-P1 #5, V49):</b>
+ * {@code tenants.id} is referenced by ~13 child tables, most with
+ * {@code ON DELETE CASCADE}. A hard delete would silently wipe ~10
+ * dependent tables. This entity therefore intercepts {@code delete*} via
+ * {@link SQLDelete} (rewrites to {@code UPDATE tenants SET deleted_at = NOW()})
+ * and filters reads via {@link SQLRestriction} (skips tombstoned rows).
+ * Hard delete is FORBIDDEN at the application layer; use
+ * {@code ManageTenantService.softDeleteTenant(UUID)}.
  *
  * Following principles:
  * - Rich Domain Model: Business logic in entity
@@ -27,6 +38,8 @@ import java.util.UUID;
 @NoArgsConstructor(access = AccessLevel.PROTECTED) // For JPA
 @AllArgsConstructor(access = AccessLevel.PRIVATE) // For Builder
 @Builder
+@SQLDelete(sql = "UPDATE tenants SET deleted_at = NOW() WHERE id = ?")
+@SQLRestriction("deleted_at IS NULL")
 public class Tenant {
 
     @Id
@@ -81,6 +94,19 @@ public class Tenant {
     @UpdateTimestamp
     @Column(nullable = false)
     private Instant updatedAt;
+
+    /**
+     * Soft-delete tombstone. NULL = active row, NON-NULL = soft-deleted.
+     *
+     * <p>Set automatically by Hibernate via the {@code @SQLDelete} statement
+     * on this entity (UPDATE tenants SET deleted_at = NOW() ... ). All JPA
+     * finds are filtered by {@code @SQLRestriction("deleted_at IS NULL")}
+     * so soft-deleted rows are invisible to default queries.
+     *
+     * <p>Schema documented by Flyway V49.
+     */
+    @Column(name = "deleted_at")
+    private Instant deletedAt;
 
     // ========== Auth Flow Relationships ==========
 
@@ -213,5 +239,18 @@ public class Tenant {
      */
     public boolean hasBiometricFeatures() {
         return biometricEnabled && canAcceptUsers();
+    }
+
+    /**
+     * Returns true if this tenant has been soft-deleted
+     * (i.e. {@code deleted_at} is set).
+     *
+     * <p>Default JPA queries filter these rows out via
+     * {@code @SQLRestriction}, so callers will only see
+     * {@code isDeleted() == true} on rows fetched via native queries
+     * or admin restore screens.
+     */
+    public boolean isDeleted() {
+        return deletedAt != null;
     }
 }
