@@ -3,6 +3,7 @@ package com.fivucsas.identity.exception;
 import com.fivucsas.identity.domain.exception.*;
 import com.fivucsas.identity.dto.ErrorResponse;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.ConstraintViolationException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -332,6 +333,34 @@ public class GlobalExceptionHandler {
                 request.getRequestURI()
         );
         
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(error);
+    }
+
+    /**
+     * Bean Validation failures on @Validated controller method parameters
+     * (e.g. {@code @Min}/{@code @Max} on {@code @RequestParam}). Without this
+     * handler the default Spring path returns 500 and leaks the violation
+     * detail. We surface a clean 400 with the property+message pairs so
+     * clients can distinguish caller error from server fault. Closes
+     * AUDIT_2026-04-28_EDGE.md finding #4 for the audit-logs endpoint.
+     */
+    @ExceptionHandler(ConstraintViolationException.class)
+    public ResponseEntity<ErrorResponse> handleConstraintViolation(
+            ConstraintViolationException ex,
+            HttpServletRequest request) {
+        log.warn("Parameter validation failed: {}", ex.getMessage());
+
+        List<String> errors = ex.getConstraintViolations().stream()
+                .map(v -> v.getPropertyPath() + ": " + v.getMessage())
+                .collect(Collectors.toList());
+
+        ErrorResponse error = ErrorResponse.of(
+                HttpStatus.BAD_REQUEST.value(),
+                "Validation Failed",
+                errors,
+                request.getRequestURI()
+        );
+
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(error);
     }
 
