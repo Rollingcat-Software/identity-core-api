@@ -6,6 +6,7 @@ import io.jsonwebtoken.security.SignatureException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.mock.env.MockEnvironment;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import javax.crypto.SecretKey;
@@ -41,7 +42,7 @@ class JwtDualAlgoTest {
         hmacProvider = mock(JwtSecretProvider.class);
         when(hmacProvider.getSecret()).thenReturn(TEST_SECRET);
         rsa = JwtAlgoTestSupport.newRsaKeyProvider();
-        service = new JwtService(hmacProvider, rsa);
+        service = new JwtService(hmacProvider, rsa, new MockEnvironment());
         ReflectionTestUtils.setField(service, "jwtExpiration", 900_000L);
         ReflectionTestUtils.setField(service, "defaultAlgo", "HS512");
     }

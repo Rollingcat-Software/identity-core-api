@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.mock.env.MockEnvironment;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import static org.assertj.core.api.Assertions.*;
@@ -46,7 +47,7 @@ class JwtServiceTest {
         // (e.g. malformed-token parse failures). BE-H1 keeps HMAC still wired.
         org.mockito.Mockito.lenient().when(jwtSecretProvider.getSecret()).thenReturn(TEST_SECRET);
         rsaKeyProvider = JwtAlgoTestSupport.newRsaKeyProvider();
-        jwtService = new JwtService(jwtSecretProvider, rsaKeyProvider);
+        jwtService = new JwtService(jwtSecretProvider, rsaKeyProvider, new MockEnvironment());
         ReflectionTestUtils.setField(jwtService, "jwtExpiration", ACCESS_TOKEN_EXPIRATION);
         ReflectionTestUtils.setField(jwtService, "defaultAlgo", "HS512");
     }
@@ -129,7 +130,7 @@ class JwtServiceTest {
         JwtSecretProvider otherSecretProvider = org.mockito.Mockito.mock(JwtSecretProvider.class);
         // Different Base64-encoded secret
         when(otherSecretProvider.getSecret()).thenReturn("ZGlmZmVyZW50LXNlY3JldC1rZXktZm9yLXRlc3RpbmctcHVycG9zZXMtYXQtbGVhc3QtMjU2LWJpdHMtbG9uZw==");
-        JwtService otherJwtService = new JwtService(otherSecretProvider, rsaKeyProvider);
+        JwtService otherJwtService = new JwtService(otherSecretProvider, rsaKeyProvider, new MockEnvironment());
         ReflectionTestUtils.setField(otherJwtService, "jwtExpiration", ACCESS_TOKEN_EXPIRATION);
         ReflectionTestUtils.setField(otherJwtService, "defaultAlgo", "HS512");
         String tokenWithDifferentKey = otherJwtService.generateAccessToken(TEST_EMAIL);
@@ -143,7 +144,7 @@ class JwtServiceTest {
     @DisplayName("Validate token - should return false for expired token")
     void testIsTokenValid_ExpiredToken() {
         // Arrange - Create service with very short expiration
-        JwtService shortExpirationService = new JwtService(jwtSecretProvider, rsaKeyProvider);
+        JwtService shortExpirationService = new JwtService(jwtSecretProvider, rsaKeyProvider, new MockEnvironment());
         ReflectionTestUtils.setField(shortExpirationService, "jwtExpiration", 1L); // 1ms
         ReflectionTestUtils.setField(shortExpirationService, "defaultAlgo", "HS512");
         String token = shortExpirationService.generateAccessToken(TEST_EMAIL);
