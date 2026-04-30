@@ -38,6 +38,9 @@ class JwtServiceTest {
     // Base64-encoded secret that is at least 256 bits for HMAC-SHA256
     private static final String TEST_SECRET = "dGVzdC1zZWNyZXQta2V5LXRoYXQtaXMtYXQtbGVhc3QtMjU2LWJpdHMtbG9uZy1mb3ItaHMyNTYtYWxnb3JpdGhtLXNlY3VyaXR5LXJlcXVpcmVtZW50cw==";
     private static final long ACCESS_TOKEN_EXPIRATION = 900000L; // 15 minutes
+    // P1.6: iss/aud are now required claims on every JWT mint+parse.
+    static final String TEST_ISSUER = "https://api.fivucsas.com";
+    static final String TEST_AUDIENCE = "fivucsas-api";
 
     private RsaKeyProvider rsaKeyProvider;
 
@@ -50,6 +53,9 @@ class JwtServiceTest {
         jwtService = new JwtService(jwtSecretProvider, rsaKeyProvider, new MockEnvironment());
         ReflectionTestUtils.setField(jwtService, "jwtExpiration", ACCESS_TOKEN_EXPIRATION);
         ReflectionTestUtils.setField(jwtService, "defaultAlgo", "HS512");
+        // P1.6: @Value defaults are not applied via reflection construction, set explicitly.
+        ReflectionTestUtils.setField(jwtService, "issuer", TEST_ISSUER);
+        ReflectionTestUtils.setField(jwtService, "audience", TEST_AUDIENCE);
     }
 
     // ============== ACCESS TOKEN GENERATION TESTS ==============
@@ -133,6 +139,8 @@ class JwtServiceTest {
         JwtService otherJwtService = new JwtService(otherSecretProvider, rsaKeyProvider, new MockEnvironment());
         ReflectionTestUtils.setField(otherJwtService, "jwtExpiration", ACCESS_TOKEN_EXPIRATION);
         ReflectionTestUtils.setField(otherJwtService, "defaultAlgo", "HS512");
+        ReflectionTestUtils.setField(otherJwtService, "issuer", TEST_ISSUER);
+        ReflectionTestUtils.setField(otherJwtService, "audience", TEST_AUDIENCE);
         String tokenWithDifferentKey = otherJwtService.generateAccessToken(TEST_EMAIL);
 
         // Act & Assert
@@ -147,6 +155,8 @@ class JwtServiceTest {
         JwtService shortExpirationService = new JwtService(jwtSecretProvider, rsaKeyProvider, new MockEnvironment());
         ReflectionTestUtils.setField(shortExpirationService, "jwtExpiration", 1L); // 1ms
         ReflectionTestUtils.setField(shortExpirationService, "defaultAlgo", "HS512");
+        ReflectionTestUtils.setField(shortExpirationService, "issuer", TEST_ISSUER);
+        ReflectionTestUtils.setField(shortExpirationService, "audience", TEST_AUDIENCE);
         String token = shortExpirationService.generateAccessToken(TEST_EMAIL);
 
         // Act - Wait for token to expire

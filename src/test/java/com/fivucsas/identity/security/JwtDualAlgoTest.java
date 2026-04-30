@@ -32,6 +32,10 @@ class JwtDualAlgoTest {
     private static final String TEST_EMAIL = "dual@fivucsas.com";
     private static final String TEST_SECRET =
             "dGVzdC1zZWNyZXQta2V5LXRoYXQtaXMtYXQtbGVhc3QtMjU2LWJpdHMtbG9uZy1mb3ItaHMyNTYtYWxnb3JpdGhtLXNlY3VyaXR5LXJlcXVpcmVtZW50cw==";
+    // P1.6: iss/aud are required claims on every parse path, including the
+    // legacy HS512 null-kid backward-compat fallback.
+    private static final String TEST_ISSUER = "https://api.fivucsas.com";
+    private static final String TEST_AUDIENCE = "fivucsas-api";
 
     private RsaKeyProvider rsa;
     private JwtSecretProvider hmacProvider;
@@ -45,6 +49,8 @@ class JwtDualAlgoTest {
         service = new JwtService(hmacProvider, rsa, new MockEnvironment());
         ReflectionTestUtils.setField(service, "jwtExpiration", 900_000L);
         ReflectionTestUtils.setField(service, "defaultAlgo", "HS512");
+        ReflectionTestUtils.setField(service, "issuer", TEST_ISSUER);
+        ReflectionTestUtils.setField(service, "audience", TEST_AUDIENCE);
     }
 
     @Test
@@ -82,12 +88,17 @@ class JwtDualAlgoTest {
     }
 
     @Test
-    @DisplayName("Legacy HS512 tokens with NO kid still validate (backward compat)")
-    void legacyNoKidStillValidates() {
+    @DisplayName("Legacy HS512 tokens with NO kid validate ONLY when iss+aud present (P1.6)")
+    void legacyNoKidStillValidatesWhenIssAudCorrect() {
         byte[] bytes = io.jsonwebtoken.io.Decoders.BASE64.decode(TEST_SECRET);
         SecretKey key = Keys.hmacShaKeyFor(bytes);
+        // P1.6: legacy null-kid path is no longer a soft fallback. The token
+        // still has no kid (mirrors a token minted before BE-H1) but must
+        // carry iss + aud or it will be rejected.
         String legacy = Jwts.builder()
                 .subject(TEST_EMAIL)
+                .issuer(TEST_ISSUER)
+                .audience().add(TEST_AUDIENCE).and()
                 .issuedAt(new Date())
                 .expiration(new Date(System.currentTimeMillis() + 60_000))
                 .signWith(key, Jwts.SIG.HS512)

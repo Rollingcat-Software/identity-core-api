@@ -63,6 +63,15 @@ sms:
 jwt:
   expiration: ${JWT_EXPIRATION:86400000}  # 24 hours default
   refresh-expiration: ${JWT_REFRESH_EXPIRATION:604800000}  # 7 days default
+  # AUDIT_2026-04-30 P1.6: enforce RFC 7519 §4.1.1/§4.1.3 (iss + aud) on every
+  # JWT mint and parse. Tokens missing or mismatched on either claim are
+  # rejected. The HS512 null-kid backward-compat path is held to the same
+  # standard — no soft fallback. Operator caveat: rolling out this commit
+  # invalidates in-flight access tokens that were minted before the change
+  # (they lack iss/aud); plan the deploy during a low-traffic window or pre-
+  # drain refresh tokens so users re-authenticate cleanly.
+  issuer: ${JWT_ISSUER:https://api.fivucsas.com}
+  audience: ${JWT_AUDIENCE:fivucsas-api}
 
 # FIVUCSAS application-level knobs
 # BE-H1 dual-algo JWT coexistence:

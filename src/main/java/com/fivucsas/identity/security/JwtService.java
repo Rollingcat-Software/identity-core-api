@@ -51,6 +51,23 @@ public class JwtService implements TokenGenerationPort {
     @Value("${fivucsas.jwt.default-algo:HS512}")
     private String defaultAlgo;
 
+    /**
+     * AUDIT_2026-04-30 P1.6 — RFC 7519 §4.1.1 issuer claim. Every JWT minted by
+     * this service stamps {@code iss}; every JWT parsed by this service must
+     * present a matching {@code iss} or it is rejected. Defaulted in
+     * application.yml; profile-specific overrides via {@code JWT_ISSUER}.
+     */
+    @Value("${jwt.issuer:https://api.fivucsas.com}")
+    private String issuer;
+
+    /**
+     * AUDIT_2026-04-30 P1.6 — RFC 7519 §4.1.3 audience claim. Same contract as
+     * {@link #issuer}: stamped on mint, required on parse. Override via
+     * {@code JWT_AUDIENCE}.
+     */
+    @Value("${jwt.audience:fivucsas-api}")
+    private String audience;
+
     public JwtService(JwtSecretProvider jwtSecretProvider,
                       RsaKeyProvider rsaKeyProvider,
                       Environment environment) {
@@ -126,11 +143,17 @@ public class JwtService implements TokenGenerationPort {
             String email,
             long expiration
     ) {
+        // P1.6: stamp iss/aud BEFORE the (possibly-empty) claims map, otherwise
+        // a caller passing claims that include reserved names would clobber
+        // them. JJWT's builder applies setters in fluent order; iss/aud last
+        // win, so set them explicitly after .claims().
         var builder = Jwts
                 .builder()
                 .claims(extraClaims)
                 .id(UUID.randomUUID().toString())
                 .subject(email)
+                .issuer(issuer)
+                .audience().add(audience).and()
                 .issuedAt(new Date(System.currentTimeMillis()))
                 .expiration(new Date(System.currentTimeMillis() + expiration));
 
@@ -175,9 +198,17 @@ public class JwtService implements TokenGenerationPort {
     }
 
     private Claims extractAllClaims(String token) {
+        // P1.6: requireIssuer/requireAudience apply to BOTH the RS256 path and
+        // the HS512 null-kid backward-compat fallback inside keyLocator().
+        // Tokens missing/mismatched on either claim throw
+        // IncorrectClaimException or MissingClaimException (both extend
+        // JwtException) — our SecurityFilter already catches JwtException and
+        // returns 401, so no extra catch chain is required here.
         return Jwts
                 .parser()
                 .keyLocator(keyLocator())
+                .requireIssuer(issuer)
+                .requireAudience(audience)
                 .build()
                 .parseSignedClaims(token)
                 .getPayload();
