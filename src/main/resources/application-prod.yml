@@ -96,7 +96,10 @@ logging:
     org.springframework.security: WARN
     org.hibernate: WARN
   pattern:
-    console: "%d{yyyy-MM-dd HH:mm:ss} - %msg%n"
+    # %X{requestId} is populated by RequestIdFilter (P2.8b). Falls back to "-"
+    # when the log line is emitted off-thread (e.g. background task).
+    console: "%d{yyyy-MM-dd HH:mm:ss} [%X{requestId:--}] %-5level %logger{36} - %msg%n"
+    file: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%X{requestId:--}] %-5level %logger{36} - %msg%n"
   file:
     name: /var/log/fivucsas/identity-core-api.log
   logback:

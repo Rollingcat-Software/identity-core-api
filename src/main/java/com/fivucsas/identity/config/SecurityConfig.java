@@ -1,5 +1,6 @@
 package com.fivucsas.identity.config;
 
+import com.fivucsas.identity.infrastructure.web.RequestIdFilter;
 import com.fivucsas.identity.security.JwtAuthenticationFilter;
 import com.fivucsas.identity.security.RbacPermissionEvaluator;
 import lombok.RequiredArgsConstructor;
@@ -38,6 +39,7 @@ import java.util.List;
 public class SecurityConfig {
 
     private final JwtAuthenticationFilter jwtAuthFilter;
+    private final RequestIdFilter requestIdFilter;
     private final UserDetailsService userDetailsService;
     private final RbacPermissionEvaluator rbacPermissionEvaluator;
 
@@ -188,7 +190,10 @@ public class SecurityConfig {
                         .sessionCreationPolicy(SessionCreationPolicy.STATELESS)
                 )
                 .authenticationProvider(authenticationProvider())
-                .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
+                .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class)
+                // P2.8b: RequestIdFilter must run before auth so any log lines
+                // emitted by JwtAuthenticationFilter carry the requestId MDC.
+                .addFilterBefore(requestIdFilter, JwtAuthenticationFilter.class);
 
         // Only disable frame options for H2 console in non-prod profiles
         if (!isProductionProfile()) {
