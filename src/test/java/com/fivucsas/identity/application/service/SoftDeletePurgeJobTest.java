@@ -3,6 +3,8 @@ package com.fivucsas.identity.application.service;
 import com.fivucsas.identity.application.port.output.AuditLogPort;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.repository.UserRepository;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.Query;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -48,6 +50,8 @@ class SoftDeletePurgeJobTest {
 
     @Mock private UserRepository userRepository;
     @Mock private AuditLogPort auditLogPort;
+    @Mock private EntityManager entityManager;
+    @Mock private Query query;
 
     @InjectMocks
     private SoftDeletePurgeJob job;
@@ -56,6 +60,14 @@ class SoftDeletePurgeJobTest {
     void resetFlag() {
         // Default: disabled, matches app.purge.softDelete.enabled=false in application.yml
         ReflectionTestUtils.setField(job, "enabled", false);
+        // EntityManager is used by purgeBatch() to set the V51 trigger bypass GUC
+        // (`SET LOCAL app.allow_hard_delete = 'on'`). @InjectMocks does not populate
+        // @PersistenceContext-annotated fields, so wire it explicitly via reflection.
+        // Stub leniently — only the enabled path actually calls it, and Mockito
+        // strict-stubbing would otherwise complain.
+        ReflectionTestUtils.setField(job, "entityManager", entityManager);
+        org.mockito.Mockito.lenient().when(entityManager.createNativeQuery(anyString())).thenReturn(query);
+        org.mockito.Mockito.lenient().when(query.executeUpdate()).thenReturn(0);
     }
 
     // ── feature flag off ────────────────────────────────────────────────

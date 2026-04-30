@@ -3,6 +3,8 @@ package com.fivucsas.identity.application.service;
 import com.fivucsas.identity.application.port.output.AuditLogPort;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.repository.UserRepository;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -57,6 +59,9 @@ public class SoftDeletePurgeJob {
 
     private final UserRepository userRepository;
     private final AuditLogPort auditLogPort;
+
+    @PersistenceContext
+    private EntityManager entityManager;
 
     @Value("${app.purge.softDelete.enabled:false}")
     private boolean enabled;
@@ -125,6 +130,14 @@ public class SoftDeletePurgeJob {
      */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     protected int purgeBatch(List<User> users, List<UUID> purgedIdsOut) {
+        // Bypass V51 forbid_hard_delete trigger for this legitimate GDPR Art. 17 / KVKK
+        // hard-purge transaction. SET LOCAL is automatically reset at TX commit/rollback,
+        // so the bypass cannot leak into other sessions or other TXs in this thread.
+        // PostgreSQL SET does not accept parameters through prepared statements, so we
+        // use a hard-coded literal — no user input ever flows here.
+        entityManager.createNativeQuery("SET LOCAL app.allow_hard_delete = 'on'")
+                .executeUpdate();
+
         int purged = 0;
         for (User user : users) {
             try {
