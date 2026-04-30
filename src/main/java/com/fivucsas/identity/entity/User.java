@@ -49,6 +49,36 @@ public class User {
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;  // Keep as UUID for now, can refactor to UserId later
 
+    /**
+     * JPA-safe equality (P2.10).
+     *
+     * <p>Two User entities are equal iff both have a non-null id and their ids match.
+     * Transient (unsaved) users are equal only by identity reference. This avoids the
+     * common JPA pitfalls:</p>
+     * <ul>
+     *   <li>Lombok {@code @EqualsAndHashCode} on all fields would trigger lazy-association
+     *       initialization and StackOverflow on cyclic relations (e.g., {@code tenant}).</li>
+     *   <li>Using {@code getClass()} is incompatible with Hibernate CGLIB proxies — use
+     *       {@code instanceof} so a proxied User still equals its underlying entity.</li>
+     *   <li>Returning a hash based on id breaks the {@code Set} contract when an entity
+     *       transitions from transient (id=null) to persistent (id assigned). Constant
+     *       hash is acceptable for entities since lookups should use repositories,
+     *       not large in-memory hash sets.</li>
+     * </ul>
+     */
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (!(o instanceof User other)) return false;
+        return id != null && id.equals(other.id);
+    }
+
+    @Override
+    public int hashCode() {
+        // Constant hash — safe across the transient→persistent transition.
+        return User.class.hashCode();
+    }
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "tenant_id", nullable = false)
     private Tenant tenant;

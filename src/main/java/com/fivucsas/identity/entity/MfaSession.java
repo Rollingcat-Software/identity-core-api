@@ -29,6 +29,22 @@ public class MfaSession {
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
 
+    /**
+     * JPA-safe equality by immutable id (P2.10). See {@link User#equals(Object)}
+     * for full rationale.
+     */
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (!(o instanceof MfaSession other)) return false;
+        return id != null && id.equals(other.id);
+    }
+
+    @Override
+    public int hashCode() {
+        return MfaSession.class.hashCode();
+    }
+
     @Column(name = "session_token", nullable = false, unique = true, length = 128)
     private String sessionToken;
 
