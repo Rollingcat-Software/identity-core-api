@@ -65,7 +65,8 @@ public class RefreshTokenService implements com.fivucsas.identity.application.po
         return refreshTokenRepository.save(refreshToken);
     }
 
-    @Transactional
+    // noRollbackFor: family revoke + audit row must persist even when we throw TokenRevokedException
+    @Transactional(noRollbackFor = TokenRevokedException.class)
     public RefreshToken verifyExpiration(RefreshToken token) {
         if (token.isExpired()) {
             refreshTokenRepository.delete(token);
