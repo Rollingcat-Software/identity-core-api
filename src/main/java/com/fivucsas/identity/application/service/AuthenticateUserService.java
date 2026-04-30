@@ -23,6 +23,7 @@ import com.fivucsas.identity.service.RefreshTokenService;
 import com.fivucsas.identity.application.port.output.OAuth2ClientRepositoryPort;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -113,8 +114,13 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
                 }
             } catch (InvalidCredentialsException e) {
                 throw e;
-            } catch (Exception e) {
-                log.warn("Tenant-lock check failed for client '{}': {}",
+            } catch (DataAccessException e) {
+                // Narrowed from catch(Exception) — fail-CLOSED for non-DB errors.
+                // Transient DB issues (pool exhaustion, lock timeout) are logged and
+                // skipped so the user can still log in; any other Throwable (NPE,
+                // IllegalState, etc.) propagates and surfaces as a 5xx — preventing
+                // a tenant-mismatched login from silently succeeding (P0 fix).
+                log.warn("Tenant-lock check failed for client '{}' (DB issue, skipped): {}",
                         command.getClientId(), e.getMessage());
             }
         }
@@ -152,8 +158,10 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
             try {
                 Optional<OAuth2Client> oauthClient = oAuth2ClientRepository.findByClientId(command.getClientId());
                 oauthClientName = oauthClient.map(OAuth2Client::getClientName).orElse(null);
-            } catch (Exception e) {
-                log.warn("Failed to look up OAuth client '{}': {}", command.getClientId(), e.getMessage());
+            } catch (DataAccessException e) {
+                // Narrowed from catch(Exception) — purely informational lookup, DB
+                // hiccups should not break login. Other exception classes propagate.
+                log.warn("Failed to look up OAuth client '{}' (DB issue): {}", command.getClientId(), e.getMessage());
             }
         }
 
@@ -247,8 +255,18 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
             auditLogPort.logAuthenticationFailed(command.getEmail(), command.getIpAddress(),
                     "needs_enrollment:" + e.getMethod());
             throw e;
-        } catch (Exception e) {
-            log.warn("Failed to check tenant auth flow for user {}: {}", user.getId(), e.getMessage(), e);
+        } catch (DataAccessException e) {
+            // P0 FIX: Narrowed from catch(Exception). Previously ANY exception in
+            // the MFA-flow check (NPE, IllegalState, transient connection error,
+            // serialization failure, etc.) was log-and-continued — which silently
+            // downgraded a 2FA-required login to a single-factor JWT issuance
+            // (fail-OPEN). Now only DataAccessException is swallowed: real DB
+            // outages let the user fall through to single-factor PASSWORD login
+            // (the historical fallback intent), but every other Throwable
+            // propagates so the request 5xx's, the user retries, and MFA is
+            // enforced. Class is logged so ops can spot recurring patterns.
+            log.warn("MFA-flow lookup hit a DB error for user {} ({}): {}",
+                    user.getId(), e.getClass().getSimpleName(), e.getMessage(), e);
         }
 
         // No MFA required — single-factor login, issue JWT immediately

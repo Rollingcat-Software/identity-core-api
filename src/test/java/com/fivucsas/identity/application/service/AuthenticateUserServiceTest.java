@@ -11,6 +11,7 @@ import com.fivucsas.identity.application.port.output.TokenGenerationPort;
 import com.fivucsas.identity.domain.exception.InvalidCredentialsException;
 import com.fivucsas.identity.domain.repository.UserRepository;
 import com.fivucsas.identity.entity.RefreshToken;
+import com.fivucsas.identity.entity.Tenant;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.entity.UserStatus;
 import com.fivucsas.identity.repository.MfaSessionRepository;
@@ -94,6 +95,11 @@ class AuthenticateUserServiceTest {
             .userAgent("Mozilla/5.0")
             .build();
 
+        Tenant tenant = Tenant.builder()
+            .id(UUID.randomUUID())
+            .name("test-tenant")
+            .build();
+
         existingUser = User.builder()
             .id(UUID.randomUUID())
             .email("test@example.com")
@@ -101,6 +107,7 @@ class AuthenticateUserServiceTest {
             .firstName("John")
             .lastName("Doe")
             .status(UserStatus.ACTIVE)
+            .tenant(tenant)
             .isBiometricEnrolled(false)
             .verificationCount(0)
             .createdAt(Instant.now())
@@ -162,6 +169,7 @@ class AuthenticateUserServiceTest {
                 .address("123 Main St")
                 .idNumber("12345678901")
                 .status(UserStatus.ACTIVE)
+                .tenant(existingUser.getTenant())
                 .isBiometricEnrolled(true)
                 .verificationCount(5)
                                   .enrolledAt(Instant.now().minus(Duration.ofDays(10)))                  .lastVerifiedAt(Instant.now().minus(Duration.ofDays(1)))
@@ -292,6 +300,7 @@ class AuthenticateUserServiceTest {
                 .firstName("John")
                 .lastName("Doe")
                 .status(UserStatus.INACTIVE)
+                .tenant(existingUser.getTenant())
                 .createdAt(Instant.now())
                 .updatedAt(Instant.now())
                 .build();
