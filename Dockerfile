@@ -11,15 +11,17 @@ WORKDIR /app
 # Copy pom.xml first for dependency caching
 COPY pom.xml .
 
-# Pre-fetch all dependencies into the local Maven repo so Docker layer cache
-# can short-circuit incremental rebuilds when only src/ changes (P3.7).
+# Pre-fetch dependencies into a cached layer; subsequent src changes don't
+# redownload them. Plugin resolution may still hit the network on the
+# package step, so we deliberately avoid `--offline` to stay robust (P3.7).
 RUN mvn dependency:go-offline -B
 
 # Copy source code
 COPY src ./src
 
-# Build the application (offline since dependencies are already cached)
-RUN mvn package -DskipTests -B
+# Build the application. -Dmaven.test.skip=true skips both compile and run
+# of tests (faster than -DskipTests, which still compiles them).
+RUN mvn package -Dmaven.test.skip=true -B
 
 # =============================================================================
 # Stage 2: Runtime
