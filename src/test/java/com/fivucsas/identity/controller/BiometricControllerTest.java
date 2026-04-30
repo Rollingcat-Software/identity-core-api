@@ -92,31 +92,9 @@ class BiometricControllerTest {
                 .andExpect(jsonPath("$.status").value("unhealthy"));
     }
 
-    @Test
-    @DisplayName("POST /api/v1/biometric/fingerprint/enroll/{userId} - Missing data")
-    void enrollFingerprint_WhenMissingData_ShouldReturnBadRequest() throws Exception {
-        UUID userId = UUID.randomUUID();
-
-        mockMvc.perform(post("/api/v1/biometric/fingerprint/enroll/" + userId)
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"fingerprintData\":\"\"}"))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.verified").value(false))
-                .andExpect(jsonPath("$.message").value("fingerprintData is required"));
-    }
-
-    @Test
-    @DisplayName("POST /api/v1/biometric/fingerprint/verify/{userId} - Missing data")
-    void verifyFingerprint_WhenMissingData_ShouldReturnBadRequest() throws Exception {
-        UUID userId = UUID.randomUUID();
-
-        mockMvc.perform(post("/api/v1/biometric/fingerprint/verify/" + userId)
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"fingerprintData\":\"\"}"))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.verified").value(false))
-                .andExpect(jsonPath("$.message").value("fingerprintData is required"));
-    }
+    // Fingerprint enroll/verify tests removed (P1.4): the underlying endpoints
+    // were a SHA-256 hash placeholder, not a real biometric. Platform fingerprint
+    // is now WebAuthn-only — see WebAuthnControllerTest / FingerprintAuthHandlerTest.
 
     @Test
     @DisplayName("POST /api/v1/biometric/voice/enroll/{userId} - Missing data")
@@ -167,18 +145,5 @@ class BiometricControllerTest {
                 .andExpect(jsonPath("$.error").value("voiceData is required"));
     }
 
-    @Test
-    @DisplayName("POST /api/v1/biometric/fingerprint/enroll/{userId} - Success")
-    void enrollFingerprint_WhenValid_ShouldReturnSuccess() throws Exception {
-        UUID userId = UUID.randomUUID();
-        when(biometricServicePort.enrollFingerprint(any(UUID.class), any(String.class)))
-                .thenReturn(Map.of("success", true));
-
-        mockMvc.perform(post("/api/v1/biometric/fingerprint/enroll/" + userId)
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"fingerprintData\":\"base64encodeddata\"}"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.verified").value(true))
-                .andExpect(jsonPath("$.message").value("Fingerprint enrolled successfully"));
-    }
+    // P1.4: enrollFingerprint success test removed alongside the endpoint.
 }

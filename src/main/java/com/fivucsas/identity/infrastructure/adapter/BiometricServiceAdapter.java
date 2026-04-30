@@ -147,42 +147,6 @@ public class BiometricServiceAdapter implements BiometricServicePort {
 
     @Override
     @SuppressWarnings("unchecked")
-    public Map<String, Object> enrollFingerprint(UUID userId, String fingerprintData) {
-        log.info("Calling biometric service to enroll fingerprint for user: {}", userId);
-        try {
-            Map<String, Object> response = postJson("/fingerprint/enroll",
-                    Map.of("user_id", userId.toString(), "fingerprint_data", fingerprintData));
-            log.info("Fingerprint enrollment response received for user: {}", userId);
-            return response;
-        } catch (ResourceAccessException e) {
-            log.error("Biometric service unreachable for fingerprint enrollment: {}", e.getMessage());
-            return errorResponse("Fingerprint enrollment service unavailable");
-        } catch (RestClientException e) {
-            log.error("Biometric service error for fingerprint enrollment: {}", e.getMessage());
-            return errorResponse("Fingerprint enrollment service error");
-        }
-    }
-
-    @Override
-    @SuppressWarnings("unchecked")
-    public Map<String, Object> verifyFingerprint(UUID userId, String fingerprintData) {
-        log.info("Calling biometric service to verify fingerprint for user: {}", userId);
-        try {
-            Map<String, Object> response = postJson("/fingerprint/verify",
-                    Map.of("user_id", userId.toString(), "fingerprint_data", fingerprintData));
-            log.info("Fingerprint verification response received for user: {}", userId);
-            return response;
-        } catch (ResourceAccessException e) {
-            log.error("Biometric service unreachable for fingerprint verification: {}", e.getMessage());
-            return errorResponse("Fingerprint verification service unavailable");
-        } catch (RestClientException e) {
-            log.error("Biometric service error for fingerprint verification: {}", e.getMessage());
-            return errorResponse("Fingerprint verification service error");
-        }
-    }
-
-    @Override
-    @SuppressWarnings("unchecked")
     public Map<String, Object> enrollVoice(UUID userId, String voiceData) {
         log.info("Calling biometric service to enroll voice for user: {}", userId);
         try {
@@ -228,20 +192,6 @@ public class BiometricServiceAdapter implements BiometricServicePort {
         } catch (RestClientException e) {
             log.error("Biometric service error for face deletion: {}", e.getMessage());
             return errorResponse("Face deletion service error");
-        }
-    }
-
-    @Override
-    public Map<String, Object> deleteFingerprint(UUID userId) {
-        log.info("Calling biometric service to delete fingerprint data for user: {}", userId);
-        try {
-            return deleteResource("/fingerprint/" + userId);
-        } catch (ResourceAccessException e) {
-            log.error("Biometric service unreachable for fingerprint deletion: {}", e.getMessage());
-            return errorResponse("Fingerprint deletion service unavailable");
-        } catch (RestClientException e) {
-            log.error("Biometric service error for fingerprint deletion: {}", e.getMessage());
-            return errorResponse("Fingerprint deletion service error");
         }
     }
 

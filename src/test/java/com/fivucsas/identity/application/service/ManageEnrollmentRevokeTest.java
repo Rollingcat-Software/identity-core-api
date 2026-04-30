@@ -106,9 +106,9 @@ class ManageEnrollmentRevokeTest {
         when(webAuthnCredentialRepository.findAllByUserId(userId))
                 .thenReturn(List.of(platformCred, crossPlatformCred));
 
-        // Biometric delete may fail but should not block
-        doThrow(new RuntimeException("Connection refused"))
-                .when(biometricServicePort).deleteFingerprint(userId);
+        // P1.4: server-side fingerprint biometric was removed (SHA-256 placeholder).
+        // FINGERPRINT revocation now ONLY cleans WebAuthn platform credentials,
+        // never calls biometricServicePort.
 
         // when
         service.revokeEnrollment(userId, AuthMethodType.FINGERPRINT);
@@ -359,14 +359,13 @@ class ManageEnrollmentRevokeTest {
         when(webAuthnCredentialRepository.findAllByUserId(userId))
                 .thenThrow(new RuntimeException("WebAuthn service unavailable"));
 
-        // Biometric delete also fails
-        doThrow(new RuntimeException("Biometric service down"))
-                .when(biometricServicePort).deleteFingerprint(userId);
+        // P1.4: no biometricServicePort interaction expected (server-side
+        // fingerprint biometric was removed). Only WebAuthn cleanup is attempted.
 
         // when
         service.revokeEnrollment(userId, AuthMethodType.FINGERPRINT);
 
-        // then - enrollment should still be revoked despite both cleanup failures
+        // then - enrollment should still be revoked despite cleanup failure
         verify(enrollment).revoke();
         verify(userEnrollmentRepository).save(enrollment);
     }

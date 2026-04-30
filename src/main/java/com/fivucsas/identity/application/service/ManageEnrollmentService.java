@@ -246,8 +246,11 @@ public class ManageEnrollmentService implements ManageEnrollmentUseCase {
         try {
             switch (methodType) {
                 case FACE -> biometricServicePort.deleteFace(userId);
-                case FINGERPRINT -> biometricServicePort.deleteFingerprint(userId);
                 case VOICE -> biometricServicePort.deleteVoice(userId);
+                // FINGERPRINT intentionally omitted (P1.4): server-side fingerprint
+                // biometric was a SHA-256 placeholder and has been removed. Platform
+                // fingerprint is WebAuthn-only — credential cleanup happens in
+                // cleanupMethodData() above (internal-transport WebAuthnCredentials).
                 default -> { /* no-op for non-biometric types */ }
             }
             log.info("Biometric data deleted from external service for user: {} method: {}", userId, methodType);
