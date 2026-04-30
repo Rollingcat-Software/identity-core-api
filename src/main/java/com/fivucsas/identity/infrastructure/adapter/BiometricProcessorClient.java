@@ -1,6 +1,6 @@
 package com.fivucsas.identity.infrastructure.adapter;
 
-import com.fivucsas.identity.infrastructure.web.RequestIdFilter;
+import com.fivucsas.identity.infrastructure.web.CorrelationId;
 import lombok.extern.slf4j.Slf4j;
 import org.slf4j.MDC;
 import org.springframework.beans.factory.annotation.Value;
@@ -54,9 +54,9 @@ public class BiometricProcessorClient {
         // P2.8b: propagate inbound request-id to biometric-processor so logs on
         // both sides can be correlated. MDC is populated by RequestIdFilter.
         builder = builder.requestInterceptor((request, body, execution) -> {
-            String requestId = MDC.get(RequestIdFilter.MDC_KEY);
+            String requestId = MDC.get(CorrelationId.MDC_KEY);
             if (requestId != null && !requestId.isBlank()) {
-                request.getHeaders().set(RequestIdFilter.HEADER_NAME, requestId);
+                request.getHeaders().set(CorrelationId.HEADER_NAME, requestId);
             }
             return execution.execute(request, body);
         });

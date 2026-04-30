@@ -236,8 +236,11 @@ public class SecurityConfig {
         configuration.setAllowedOrigins(origins);
 
         configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"));
-        configuration.setAllowedHeaders(Arrays.asList("Authorization", "Content-Type", "X-Tenant-ID", "X-CSRF-Token"));
-        configuration.setExposedHeaders(List.of("Authorization"));
+        // X-Request-Id: clients may forward an inbound correlation id; the server
+        // also echoes it back in the response so JS can quote it in a bug report.
+        configuration.setAllowedHeaders(Arrays.asList(
+                "Authorization", "Content-Type", "X-Tenant-ID", "X-CSRF-Token", "X-Request-Id"));
+        configuration.setExposedHeaders(Arrays.asList("Authorization", "X-Request-Id"));
         configuration.setAllowCredentials(true);
         configuration.setMaxAge(3600L);
 

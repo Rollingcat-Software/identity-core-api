@@ -24,19 +24,19 @@ class RequestIdFilterTest {
     @Test
     void inboundRequestIdHeaderIsHonoredAndEchoed() throws Exception {
         MockHttpServletRequest request = new MockHttpServletRequest();
-        request.addHeader(RequestIdFilter.HEADER_NAME, "abc-123");
+        request.addHeader(CorrelationId.HEADER_NAME, "abc-123");
         MockHttpServletResponse response = new MockHttpServletResponse();
 
         // Capture the MDC value while the chain is executing.
         String[] inFlight = new String[1];
-        FilterChain chain = (req, res) -> inFlight[0] = MDC.get(RequestIdFilter.MDC_KEY);
+        FilterChain chain = (req, res) -> inFlight[0] = MDC.get(CorrelationId.MDC_KEY);
 
         filter.doFilter(request, response, chain);
 
         assertThat(inFlight[0]).isEqualTo("abc-123");
-        assertThat(response.getHeader(RequestIdFilter.HEADER_NAME)).isEqualTo("abc-123");
+        assertThat(response.getHeader(CorrelationId.HEADER_NAME)).isEqualTo("abc-123");
         // Cleared after the filter returns.
-        assertThat(MDC.get(RequestIdFilter.MDC_KEY)).isNull();
+        assertThat(MDC.get(CorrelationId.MDC_KEY)).isNull();
     }
 
     @Test
@@ -45,7 +45,7 @@ class RequestIdFilterTest {
         MockHttpServletResponse response = new MockHttpServletResponse();
 
         String[] inFlight = new String[1];
-        FilterChain chain = (req, res) -> inFlight[0] = MDC.get(RequestIdFilter.MDC_KEY);
+        FilterChain chain = (req, res) -> inFlight[0] = MDC.get(CorrelationId.MDC_KEY);
 
         filter.doFilter(request, response, chain);
 
@@ -53,20 +53,20 @@ class RequestIdFilterTest {
         // RFC 4122 UUID string: 36 chars, four hyphens.
         assertThat(inFlight[0]).hasSize(36);
         assertThat(inFlight[0].chars().filter(c -> c == '-').count()).isEqualTo(4L);
-        assertThat(response.getHeader(RequestIdFilter.HEADER_NAME)).isEqualTo(inFlight[0]);
+        assertThat(response.getHeader(CorrelationId.HEADER_NAME)).isEqualTo(inFlight[0]);
     }
 
     @Test
     void blankHeaderTriggersUuidGeneration() throws Exception {
         MockHttpServletRequest request = new MockHttpServletRequest();
-        request.addHeader(RequestIdFilter.HEADER_NAME, "   ");
+        request.addHeader(CorrelationId.HEADER_NAME, "   ");
         MockHttpServletResponse response = new MockHttpServletResponse();
 
         FilterChain chain = new MockFilterChain();
 
         filter.doFilter(request, response, chain);
 
-        String echoed = response.getHeader(RequestIdFilter.HEADER_NAME);
+        String echoed = response.getHeader(CorrelationId.HEADER_NAME);
         assertThat(echoed).isNotBlank();
         assertThat(echoed.trim()).isNotEqualTo("");
     }
@@ -85,7 +85,7 @@ class RequestIdFilterTest {
             // ignore
         }
 
-        assertThat(MDC.get(RequestIdFilter.MDC_KEY)).isNull();
+        assertThat(MDC.get(CorrelationId.MDC_KEY)).isNull();
     }
 
     @Test
@@ -97,5 +97,91 @@ class RequestIdFilterTest {
         filter.doFilter(request, response, chain);
 
         verify(chain).doFilter(request, response);
+    }
+
+    // -------------------------------------------------------------------
+    // Input-validation / log-forging defence
+    // -------------------------------------------------------------------
+
+    @Test
+    void crlfInjectionAttemptIsRejectedAndReplacedWithUuid() throws Exception {
+        // Classic HTTP response-splitting / log-forging payload.
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.addHeader(CorrelationId.HEADER_NAME, "abc\r\nSet-Cookie: pwn=1");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        String[] inFlight = new String[1];
+        FilterChain chain = (req, res) -> inFlight[0] = MDC.get(CorrelationId.MDC_KEY);
+
+        filter.doFilter(request, response, chain);
+
+        // The malicious value must NOT be echoed back or land in MDC.
+        assertThat(inFlight[0]).doesNotContain("\r", "\n", "Set-Cookie");
+        // Replaced with a fresh UUID (36 chars, 4 hyphens).
+        assertThat(inFlight[0]).hasSize(36);
+        assertThat(response.getHeader(CorrelationId.HEADER_NAME)).isEqualTo(inFlight[0]);
+    }
+
+    @Test
+    void overlongHeaderValueIsRejectedAndReplacedWithUuid() throws Exception {
+        String overlong = "a".repeat(CorrelationId.MAX_LENGTH + 1);
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.addHeader(CorrelationId.HEADER_NAME, overlong);
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        String[] inFlight = new String[1];
+        FilterChain chain = (req, res) -> inFlight[0] = MDC.get(CorrelationId.MDC_KEY);
+
+        filter.doFilter(request, response, chain);
+
+        assertThat(inFlight[0]).isNotEqualTo(overlong);
+        assertThat(inFlight[0]).hasSize(36);
+    }
+
+    @Test
+    void disallowedCharactersAreRejectedAndReplacedWithUuid() throws Exception {
+        // Spaces, dots, slashes, quotes — none are in the allow-list.
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.addHeader(CorrelationId.HEADER_NAME, "abc 123/../\"x\"");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        String[] inFlight = new String[1];
+        FilterChain chain = (req, res) -> inFlight[0] = MDC.get(CorrelationId.MDC_KEY);
+
+        filter.doFilter(request, response, chain);
+
+        assertThat(inFlight[0]).hasSize(36);
+        assertThat(inFlight[0].chars().filter(c -> c == '-').count()).isEqualTo(4L);
+    }
+
+    @Test
+    void uuidHeaderValueIsAcceptedUnchanged() throws Exception {
+        String inboundUuid = "11111111-2222-3333-4444-555555555555";
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.addHeader(CorrelationId.HEADER_NAME, inboundUuid);
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        String[] inFlight = new String[1];
+        FilterChain chain = (req, res) -> inFlight[0] = MDC.get(CorrelationId.MDC_KEY);
+
+        filter.doFilter(request, response, chain);
+
+        assertThat(inFlight[0]).isEqualTo(inboundUuid);
+        assertThat(response.getHeader(CorrelationId.HEADER_NAME)).isEqualTo(inboundUuid);
+    }
+
+    @Test
+    void shortAlphanumericIdIsAcceptedUnchanged() throws Exception {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.addHeader(CorrelationId.HEADER_NAME, "req_42-A");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        String[] inFlight = new String[1];
+        FilterChain chain = (req, res) -> inFlight[0] = MDC.get(CorrelationId.MDC_KEY);
+
+        filter.doFilter(request, response, chain);
+
+        assertThat(inFlight[0]).isEqualTo("req_42-A");
+        assertThat(response.getHeader(CorrelationId.HEADER_NAME)).isEqualTo("req_42-A");
     }
 }
