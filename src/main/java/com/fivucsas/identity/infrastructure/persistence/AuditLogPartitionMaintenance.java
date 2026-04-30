@@ -15,7 +15,7 @@ import java.time.format.DateTimeFormatter;
  * Runtime safety net for {@code audit_logs} partitions.
  *
  * <p><b>Why this exists:</b> {@code audit_logs} is partitioned by
- * {@code RANGE (created_at)} (V40). Static migrations (V40, V51, ...)
+ * {@code RANGE (created_at)} (V40). Static migrations (V40, V52, ...)
  * pre-create monthly partitions, but if a migration is forgotten the next
  * time the runway runs out, the very first audit INSERT past the last
  * partition fails with:
