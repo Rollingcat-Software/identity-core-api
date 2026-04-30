@@ -26,6 +26,15 @@ app:
     softDelete:
       enabled: ${APP_PURGE_SOFT_DELETE_ENABLED:false}
 
+# Audit-log partition runtime safety net (companion to V40/V41/V51).
+# When true, AuditLogPartitionMaintenance:
+#   - on @PostConstruct ensures current-month + next 2 months of audit_logs partitions exist.
+#   - on a monthly @Scheduled cron creates any missing partition for the same look-ahead window.
+# Set to false only when an external scheduler owns partition creation.
+audit-log:
+  partition:
+    auto-create: ${AUDIT_LOG_PARTITION_AUTO_CREATE:true}
+
 # Redis Configuration
 redis:
   host: ${REDIS_HOST:localhost}
