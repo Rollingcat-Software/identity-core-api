@@ -55,8 +55,15 @@ public class AuditLoggingAspect {
 
             HttpServletRequest request = getHttpRequest();
 
+            // Capture the tenant id on the calling (request-bound) thread.
+            // The async worker thread has its own empty ThreadLocal, so the
+            // value must be passed explicitly to the publisher and re-installed
+            // on the worker before the JPA save runs — otherwise RLS rejects
+            // the INSERT and the audit row is silently dropped.
+            UUID tenantId = TenantContext.getCurrentTenant();
+
             AuditLog auditLog = AuditLog.builder()
-                    .tenantId(TenantContext.getCurrentTenant())
+                    .tenantId(tenantId)
                     .userId(user != null ? user.getUserId() : null)
                     .action(audited.action().name())
                     .resourceType(audited.resourceType())
@@ -70,7 +77,7 @@ public class AuditLoggingAspect {
                     .metadata(extractMetadata(joinPoint, audited))
                     .build();
 
-            auditEventPublisher.publish(auditLog);
+            auditEventPublisher.publish(auditLog, tenantId);
         } catch (Exception e) {
             // Don't let audit logging failures affect business operations.
             log.error("Failed to assemble audit log: {}", e.getMessage(), e);
