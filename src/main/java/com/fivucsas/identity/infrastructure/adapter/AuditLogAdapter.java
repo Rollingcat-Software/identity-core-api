@@ -2,6 +2,7 @@ package com.fivucsas.identity.infrastructure.adapter;
 
 import com.fivucsas.identity.application.port.output.AuditLogPort;
 import com.fivucsas.identity.entity.AuditLog;
+import com.fivucsas.identity.infrastructure.audit.AuditEscape;
 import com.fivucsas.identity.repository.AuditLogRepository;
 import com.fivucsas.identity.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
@@ -182,14 +183,37 @@ public class AuditLogAdapter implements AuditLogPort {
                     .resourceId(userUuid)
                     .success(success)
                     .ipAddress(ipAddress)
-                    .userAgent(userAgent)
-                    .metadata(metadata)
+                    // userAgent and metadata can contain user-supplied data
+                    // (browser-reported UA strings, supplied display names, etc.).
+                    // Escape on the way in so a downstream renderer that drops
+                    // its escaping can never produce executable HTML from an
+                    // audit row. JSONB-encoded structured values pass through
+                    // unchanged via escapeMetadata's type-check.
+                    .userAgent(AuditEscape.escape(userAgent))
+                    .metadata(escapeMetadata(metadata))
                     .build();
 
             auditLogRepository.save(auditLog);
         } catch (Exception e) {
             log.error("Failed to persist audit log: action={}, error={}", action, e.getMessage(), e);
         }
+    }
+
+    /**
+     * Returns a copy of {@code metadata} with all {@link String} values
+     * HTML-escaped. Non-string values (numbers, lists, nested maps) pass
+     * through unchanged — the JSONB encoder handles their representation
+     * and they don't carry HTML-injection risk in their primitive form.
+     */
+    private Map<String, Object> escapeMetadata(Map<String, Object> metadata) {
+        if (metadata == null || metadata.isEmpty()) {
+            return metadata;
+        }
+        Map<String, Object> out = new java.util.LinkedHashMap<>(metadata.size());
+        for (Map.Entry<String, Object> e : metadata.entrySet()) {
+            out.put(e.getKey(), AuditEscape.escapeIfString(e.getValue()));
+        }
+        return out;
     }
 
     /**
