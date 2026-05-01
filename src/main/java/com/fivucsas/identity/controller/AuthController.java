@@ -103,6 +103,7 @@ public class AuthController {
     private final com.fivucsas.identity.infrastructure.qrcode.QrCodeService qrCodeService;
     private final com.fivucsas.identity.application.port.output.WebAuthnCredentialRepositoryPort webAuthnCredentialRepository;
     private final com.fivucsas.identity.application.port.output.AuditLogPort auditLogPort;
+    private final com.fivucsas.identity.application.service.mfa.VerifyMfaStepService verifyMfaStepService;
 
     private static final String EMAIL_VERIFY_OTP_PREFIX = "email-verify:";
     private static final String PHONE_VERIFY_OTP_PREFIX = "phone-verify:";
@@ -578,437 +579,41 @@ public class AuthController {
     }
 
     // ==================== N-STEP MFA FLOW (RFC 8176 compliant) ====================
-
-    /** RFC 8176 Authentication Methods References mapping */
-    private static final Map<AuthMethodType, String> AMR_VALUES = Map.of(
-        AuthMethodType.PASSWORD, "pwd",
-        AuthMethodType.EMAIL_OTP, "otp",
-        AuthMethodType.SMS_OTP, "sms",
-        AuthMethodType.TOTP, "otp",
-        AuthMethodType.FACE, "face",
-        AuthMethodType.VOICE, "voice",
-        AuthMethodType.FINGERPRINT, "fpt",
-        AuthMethodType.HARDWARE_KEY, "hwk",
-        AuthMethodType.QR_CODE, "mca",
-        AuthMethodType.NFC_DOCUMENT, "swk"
-    );
+    //
+    // The bulk of {@code verifyMfaStep} (per-method dispatch, audit logging,
+    // step accounting, JWT minting) was extracted to
+    // {@link com.fivucsas.identity.application.service.mfa.VerifyMfaStepService}
+    // in the P2.9 refactor (refactor/verify-mfa-step-extract). The controller
+    // now only parses the request envelope and translates the service's
+    // status hint into HTTP. The wire contract of POST /auth/mfa/step is
+    // unchanged.
 
     @SuppressWarnings("unchecked")
     @PostMapping("/mfa/step")
-    @org.springframework.transaction.annotation.Transactional
     @Operation(summary = "Verify an MFA step (public — no JWT required, uses session token)")
     public ResponseEntity<Map<String, Object>> verifyMfaStep(
             @RequestBody Map<String, Object> request,
             HttpServletRequest httpRequest) {
 
-        String sessionToken = (String) request.get("sessionToken");
-        String method = (String) request.get("method");
         Map<String, Object> data = (Map<String, Object>) request.getOrDefault("data", Map.of());
+        com.fivucsas.identity.application.service.mfa.VerifyMfaStepRequest serviceReq =
+                new com.fivucsas.identity.application.service.mfa.VerifyMfaStepRequest(
+                        (String) request.get("sessionToken"),
+                        (String) request.get("method"),
+                        data,
+                        getClientIP(httpRequest),
+                        getUserAgent(httpRequest));
 
-        if (sessionToken == null || sessionToken.isBlank()) {
-            return ResponseEntity.badRequest().body(Map.of("status", "ERROR", "message", "sessionToken is required"));
-        }
-        if (method == null || method.isBlank()) {
-            return ResponseEntity.badRequest().body(Map.of("status", "ERROR", "message", "method is required"));
-        }
+        com.fivucsas.identity.application.service.mfa.VerifyMfaStepResponse result =
+                verifyMfaStepService.execute(serviceReq);
 
-        // Pessimistic-lock the MFA session row for the duration of this step.
-        // Without it, two parallel correct OTP submissions in the same window
-        // would both pass the read → validate → save block and double-credit
-        // completedMethods, advancing currentStep twice in one race. Closes
-        // audit-edge 2026-04-28 P0 #1.
-        Optional<MfaSession> sessionOpt = mfaSessionRepository.findBySessionTokenForUpdate(sessionToken);
-        if (sessionOpt.isEmpty()) {
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                .body(Map.of("status", "ERROR", "message", "Invalid or expired MFA session"));
-        }
-
-        MfaSession mfaSession = sessionOpt.get();
-        if (mfaSession.isExpired()) {
-            mfaSessionRepository.delete(mfaSession);
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                .body(Map.of("status", "ERROR", "message", "MFA session expired. Please login again."));
-        }
-        if (mfaSession.isCompleted()) {
-            return ResponseEntity.badRequest()
-                .body(Map.of("status", "ERROR", "message", "MFA session already completed"));
-        }
-
-        // Find user
-        User user = userRepository.findById(mfaSession.getUserId())
-            .orElseThrow(() -> new UserNotFoundException("User not found for MFA session"));
-
-        // Parse method type
-        AuthMethodType methodType;
-        try {
-            methodType = AuthMethodType.valueOf(method);
-        } catch (IllegalArgumentException e) {
-            return ResponseEntity.badRequest().body(Map.of("status", "ERROR", "message", "Unknown auth method: " + method));
-        }
-
-        // WebAuthn challenge generation (must happen before switch expression)
-        if ((methodType == AuthMethodType.FINGERPRINT || methodType == AuthMethodType.HARDWARE_KEY)
-                && "challenge".equals(data.get("action"))) {
-            String challenge = webAuthnService.generateChallenge(mfaSession.getId());
-
-            // Include allowCredentials filtered by transport type so non-discoverable
-            // credentials are found on Android Chrome (passkey picker requires explicit IDs)
-            boolean wantPlatform = methodType == AuthMethodType.FINGERPRINT;
-            List<String> allowCredentials = webAuthnCredentialRepository
-                    .findAllByUserId(user.getId()).stream()
-                    .filter(c -> {
-                        String t = c.getTransports();
-                        if (t == null || t.isBlank()) return true;
-                        boolean isInternal = t.toLowerCase().contains("internal");
-                        return wantPlatform == isInternal;
-                    })
-                    .map(WebAuthnCredential::getCredentialId)
-                    .toList();
-
-            Map<String, Object> challengeData = new java.util.HashMap<>();
-            challengeData.put("status", "CHALLENGE");
-            challengeData.put("data", Map.of(
-                "challenge", challenge,
-                "rpId", webAuthnService.getRpId(),
-                "timeout", "60000",
-                "allowCredentials", allowCredentials
-            ));
-            return ResponseEntity.ok(challengeData);
-        }
-
-        // Same-method prevention (substitution guard, NOT a retry guard).
-        //
-        // The intent of this check is to prevent a user from satisfying step N with the
-        // same method they already used at step <N (e.g. "PASSWORD twice" must not count
-        // as real 2FA). It MUST NOT fire when the user is retrying the current in-progress
-        // step — a failed attempt (wrong password, wrong OTP, biometric rejection) does
-        // not add the method to `completedMethods`, but the user may still be on the step
-        // whose expected method matches a method completed earlier in the same flow (if
-        // the flow config legitimately repeats that method at this step).
-        //
-        // Rule: only reject when the submitted method was previously completed AND the
-        // current step's configured method list does NOT include it (true substitution
-        // attempt — user is trying to skip ahead / reuse a completed factor for a
-        // different step).
-        //
-        // Compare by AuthMethodType.name() so EMAIL_OTP and TOTP (which share AMR "otp")
-        // are treated as distinct for reuse purposes while still emitting the correct
-        // AMR in the JWT.
-        String newAmrValue = AMR_VALUES.getOrDefault(methodType, method.toLowerCase());
-        String reuseKey = methodType.name();
-        List<String> completedMethods = mfaSession.getCompletedMethods();
-
-        // Resolve the current step's configured method(s). If the flow or step cannot be
-        // loaded, fall back to the prior (strict) behaviour so we never silently allow a
-        // real substitution attempt due to a lookup failure.
-        java.util.Set<String> currentStepMethodNames = java.util.Collections.emptySet();
-        try {
-            AuthFlow currentFlow = authFlowRepository.findById(mfaSession.getFlowId()).orElse(null);
-            if (currentFlow != null) {
-                int currentStepOrder = mfaSession.getCurrentStep();
-                AuthFlowStep currentStep = currentFlow.getSteps().stream()
-                    .filter(s -> s.getStepOrder() == currentStepOrder)
-                    .findFirst()
-                    .orElse(null);
-                if (currentStep != null) {
-                    currentStepMethodNames = currentStep.getAvailableMethods().stream()
-                        .filter(java.util.Objects::nonNull)
-                        .map(m -> m.getType().name())
-                        .collect(java.util.stream.Collectors.toSet());
-                }
-            }
-        } catch (Exception e) {
-            log.warn("Failed to resolve current MFA step for reuse check (sessionId={}): {}",
-                    mfaSession.getId(), e.getMessage());
-        }
-
-        boolean submittedMethodIsExpectedAtCurrentStep = currentStepMethodNames.contains(reuseKey);
-        if (completedMethods.contains(reuseKey) && !submittedMethodIsExpectedAtCurrentStep) {
-            log.warn("AUDIT: MFA same-method reuse attempt — method: {}, userId={}, ip={}, userAgent={}",
-                    method, user.getId(), getClientIP(httpRequest), getUserAgent(httpRequest));
-            return ResponseEntity.badRequest().body(Map.of(
-                "status", "ERROR",
-                "error", "METHOD_ALREADY_USED",
-                "message", "You cannot use the same authentication method for multiple steps."
-            ));
-        }
-
-        // Verify the method using existing logic
-        try {
-            boolean valid = switch (methodType) {
-                case TOTP -> {
-                    String code = (String) data.get("code");
-                    if (code == null || code.isBlank()) yield false;
-                    String secret = resolveTotpSecret(user);
-                    yield secret != null && totpService.verifyCode(secret, code);
-                }
-                case SMS_OTP -> {
-                    String code = (String) data.get("code");
-                    if (code == null || code.isBlank()) yield false;
-                    if (smsService instanceof VerifiableSmsService verifiableSms) {
-                        String phone = user.getPhoneNumber();
-                        if (phone == null || phone.isBlank()) yield false;
-                        yield verifiableSms.verifyCode(phone, code);
-                    }
-                    yield otpService.validate("2fa-sms:" + user.getId(), code);
-                }
-                case FACE -> {
-                    String image = (String) data.get("image");
-                    if (image == null || image.isBlank()) yield false;
-                    byte[] imageBytes = java.util.Base64.getDecoder().decode(
-                            image.contains(",") ? image.substring(image.indexOf(",") + 1) : image);
-                    final byte[] bytes = imageBytes;
-                    MultipartFile faceFile = new MultipartFile() {
-                        public String getName() { return "file"; }
-                        public String getOriginalFilename() { return "face.jpg"; }
-                        public String getContentType() { return "image/jpeg"; }
-                        public boolean isEmpty() { return bytes.length == 0; }
-                        public long getSize() { return bytes.length; }
-                        public byte[] getBytes() { return bytes; }
-                        public InputStream getInputStream() { return new ByteArrayInputStream(bytes); }
-                        public void transferTo(java.io.File dest) throws java.io.IOException {
-                            java.nio.file.Files.write(dest.toPath(), bytes);
-                        }
-                    };
-                    Map<String, Object> faceResult = biometricService.verifyFace(user.getId(), faceFile);
-                    // Check spoof detection
-                    String errorCodeMfa = faceResult.get("error_code") instanceof String ec ? ec : null;
-                    if ("SPOOF_DETECTED".equals(errorCodeMfa)) {
-                        log.warn("AUDIT: MFA face spoof detected — userId={}, ip={}",
-                                user.getId(), getClientIP(httpRequest));
-                        yield false;
-                    }
-                    boolean faceVerifiedMfa = Boolean.TRUE.equals(faceResult.get("verified"))
-                            || "true".equalsIgnoreCase(String.valueOf(faceResult.get("verified")));
-                    // Confidence fallback (same threshold as FaceAuthHandler: 0.7)
-                    if (!faceVerifiedMfa) {
-                        Object confMfa = faceResult.get("confidence");
-                        if (confMfa instanceof Number num && num.doubleValue() >= 0.7) {
-                            faceVerifiedMfa = true;
-                        }
-                    }
-                    yield faceVerifiedMfa;
-                }
-                case VOICE -> {
-                    String voiceData = (String) data.get("voiceData");
-                    if (voiceData == null || voiceData.isBlank()) yield false;
-                    Map<String, Object> voiceResult = biometricService.verifyVoice(user.getId(), voiceData);
-                    yield Boolean.TRUE.equals(voiceResult.get("verified"));
-                }
-                case FINGERPRINT, HARDWARE_KEY -> {
-                    // Assertion verification
-                    String assertionRaw = (String) data.get("assertion");
-                    if (assertionRaw == null || assertionRaw.isBlank()) {
-                        log.warn("MFA {}: assertion field is null/blank. Data keys: {}", methodType, data.keySet());
-                        yield false;
-                    }
-
-                    try {
-                        // Decode the base64 JSON assertion
-                        String assertionJson = new String(java.util.Base64.getDecoder().decode(assertionRaw));
-                        var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
-                        var assertionNode = mapper.readTree(assertionJson);
-
-                        String credentialId = assertionNode.get("credentialId").asText();
-                        String authenticatorData = assertionNode.get("authenticatorData").asText();
-                        String clientDataJSON = assertionNode.get("clientDataJSON").asText();
-                        String signature = assertionNode.get("signature").asText();
-
-                        // Look up the credential
-                        var credentialOpt = webAuthnCredentialRepository.findByCredentialId(credentialId);
-                        if (credentialOpt.isEmpty()) {
-                            log.warn("WebAuthn credential not found: {}", credentialId);
-                            yield false;
-                        }
-                        var credential = credentialOpt.get();
-
-                        // Verify credential belongs to this user
-                        if (!credential.getUser().getId().equals(user.getId())) {
-                            log.warn("WebAuthn credential {} does not belong to user {}", credentialId, user.getId());
-                            yield false;
-                        }
-
-                        // Cryptographic verification
-                        boolean verified = webAuthnService.verifyAssertion(
-                            mfaSession.getId(), credentialId, authenticatorData,
-                            clientDataJSON, signature, credential.getPublicKey()
-                        );
-
-                        if (verified) {
-                            long signCount = webAuthnService.extractSignCount(authenticatorData);
-                            credential.updateSignCount(signCount);
-                            webAuthnCredentialRepository.save(credential);
-                        }
-
-                        yield verified;
-                    } catch (Exception e) {
-                        log.error("WebAuthn assertion verification failed", e);
-                        yield false;
-                    }
-                }
-                case QR_CODE -> {
-                    String token = (String) data.get("token");
-                    yield token != null && otpService.validate("2fa-qr:" + user.getId(), token);
-                }
-                case EMAIL_OTP -> {
-                    String code = (String) data.get("code");
-                    yield code != null && otpService.validate(TWO_FA_OTP_PREFIX + user.getId(), code);
-                }
-                case NFC_DOCUMENT -> {
-                    String nfcData = (String) data.get("nfcData");
-                    if (nfcData == null || nfcData.isBlank()) yield false;
-                    var cardOpt = nfcCardRepository.findByCardSerialAndUserIdAndIsActiveTrue(nfcData, user.getId());
-                    yield cardOpt.isPresent();
-                }
-                default -> false;
-            };
-
-            if (!valid) {
-                String reason = resolveFailureReason(methodType, data);
-                String clientIp = getClientIP(httpRequest);
-                String ua = getUserAgent(httpRequest);
-                log.warn("AUDIT: MFA step failed — method: {}, reason: {}, userId={}, step: {}/{}, ip={}, userAgent={}",
-                        method, reason, user.getId(), mfaSession.getCurrentStep(), mfaSession.getTotalSteps(),
-                        clientIp, ua);
-                auditLogPort.logMfaStepFailed(user.getId().toString(), method, reason, clientIp, ua);
-                return ResponseEntity.ok(Map.of("status", "FAILED", "message", "Verification failed for " + method));
-            }
-
-            // Step verified — advance session. Store reuseKey (AuthMethodType.name()) rather
-            // than the AMR value so TOTP vs EMAIL_OTP remain distinguishable.
-            mfaSession.addCompletedMethod(reuseKey);
-            mfaSession.advanceStep();
-
-            if (mfaSession.allStepsCompleted()) {
-                // ALL STEPS COMPLETE — issue JWT with amr claim
-                mfaSession.complete();
-                mfaSessionRepository.save(mfaSession);
-
-                List<String> amr = mfaSession.getCompletedMethods().stream()
-                    .map(m -> {
-                        try {
-                            return AMR_VALUES.getOrDefault(AuthMethodType.valueOf(m), m.toLowerCase());
-                        } catch (IllegalArgumentException e) {
-                            return m.toLowerCase();
-                        }
-                    })
-                    .distinct()
-                    .toList();
-                String accessToken = tokenGenerator.generateAccessToken(user.getEmail(), amr);
-                RefreshToken refreshToken = refreshTokenService.createRefreshToken(
-                    user, mfaSession.getIpAddress(), mfaSession.getUserAgent()
-                );
-
-                String mfaCompleteIp = getClientIP(httpRequest);
-                String mfaCompleteUa = getUserAgent(httpRequest);
-                log.info("AUDIT: MFA complete — methods: {}, userId={}, ip={}, userAgent={}",
-                        amr, user.getId(), mfaCompleteIp, mfaCompleteUa);
-                auditLogPort.logMfaComplete(user.getId().toString(), amr, mfaCompleteIp, mfaCompleteUa);
-
-                UserResponse userResponse = com.fivucsas.identity.application.mapper.UserResponseMapper.toResponse(user);
-                return ResponseEntity.ok(Map.of(
-                    "status", "AUTHENTICATED",
-                    "accessToken", accessToken,
-                    "refreshToken", refreshToken.getToken(),
-                    "expiresIn", tokenGenerator.getExpirationMillis(),
-                    "user", userResponse
-                ));
-            }
-
-            // More steps remain — return next step info
-            mfaSessionRepository.save(mfaSession);
-
-            // Load the flow to get next step's available methods
-            AuthFlow flow = authFlowRepository.findById(mfaSession.getFlowId())
-                .orElseThrow(() -> new RuntimeException("Auth flow not found"));
-            int nextStepOrder = mfaSession.getCurrentStep();
-            AuthFlowStep nextStep = flow.getSteps().stream()
-                .filter(s -> s.getStepOrder() == nextStepOrder)
-                .findFirst()
-                .orElseThrow(() -> new RuntimeException("Step " + nextStepOrder + " not found in flow"));
-
-            // Exclude methods already completed earlier in this MFA session so
-            // the next step never re-offers the just-completed method (e.g.
-            // FINGERPRINT appearing in both step-2 and step-3 CHOICE lists).
-            java.util.Set<String> completedSoFar =
-                new java.util.HashSet<>(mfaSession.getCompletedMethods());
-            List<AvailableMfaMethod> availableMethods =
-                buildMfaAvailableMethods(nextStep, user, completedSoFar);
-            // Primary for the next step: the step's first non-null AuthMethod
-            // (SEQUENTIAL) or the first CHOICE entry NOT already completed.
-            AuthMethodType nextPrimary = nextStep.getAvailableMethods().stream()
-                .filter(java.util.Objects::nonNull)
-                .map(AuthMethod::getType)
-                .filter(t -> !completedSoFar.contains(t.name()))
-                .findFirst()
-                .orElse(null);
-            List<AvailableMfaMethod> alternativeMethods = nextPrimary == null
-                ? List.of()
-                : computeAlternativeMethods(nextStep, availableMethods, nextPrimary);
-
-            {
-                String stepIp = getClientIP(httpRequest);
-                String stepUa = getUserAgent(httpRequest);
-                log.info("AUDIT: MFA step completed — method: {}, step: {}/{}, userId={}, ip={}, userAgent={}",
-                        method, nextStepOrder - 1, mfaSession.getTotalSteps(), user.getId(), stepIp, stepUa);
-                auditLogPort.logMfaStepCompleted(user.getId().toString(), method,
-                        nextStepOrder - 1, mfaSession.getTotalSteps(), stepIp, stepUa);
-            }
-
-            return ResponseEntity.ok(Map.of(
-                "status", "STEP_COMPLETED",
-                "mfaSessionToken", sessionToken,
-                "currentStep", nextStepOrder,
-                "totalSteps", mfaSession.getTotalSteps(),
-                "availableMethods", availableMethods,
-                "alternativeMethods", alternativeMethods,
-                "completedMethods", mfaSession.getCompletedMethods()
-            ));
-
-        } catch (Exception e) {
-            String errIp = getClientIP(httpRequest);
-            String errUa = getUserAgent(httpRequest);
-            log.error("AUDIT: MFA step error — method: {}, userId={}, error: {}, ip={}, userAgent={}",
-                    method, mfaSession.getUserId(), e.getMessage(), errIp, errUa, e);
-            auditLogPort.logMfaStepFailed(mfaSession.getUserId().toString(), method,
-                    "error: " + e.getMessage(), errIp, errUa);
-            return ResponseEntity.ok(Map.of("status", "ERROR", "message", "Verification error: " + e.getMessage()));
-        }
+        return switch (result.status()) {
+            case OK -> ResponseEntity.ok(result.body());
+            case BAD_REQUEST -> ResponseEntity.badRequest().body(result.body());
+            case UNAUTHORIZED -> ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(result.body());
+        };
     }
 
-    /** Build available methods for an MFA step, validated against actual backing data */
-    private List<AvailableMfaMethod> buildMfaAvailableMethods(AuthFlowStep step, User user) {
-        return buildMfaAvailableMethods(step, user, java.util.Collections.emptySet());
-    }
-
-    /**
-     * Build available methods for an MFA step, excluding any method already used
-     * earlier in this MFA session. Without this filter, a 3-step CHOICE flow
-     * where the same method appears in multiple steps (e.g. FINGERPRINT in both
-     * step 2 and step 3) would re-offer the just-completed method as the next
-     * step's primary, causing the same step to run twice.
-     */
-    private List<AvailableMfaMethod> buildMfaAvailableMethods(
-            AuthFlowStep step, User user, java.util.Set<String> alreadyCompleted) {
-        List<AuthMethod> methods = step.getAvailableMethods();
-
-        // Validate enrollments against actual backing data (auto-revokes stale ones)
-        Map<AuthMethodType, Boolean> healthStatus = enrollmentHealthService.validateEnrollments(user.getId());
-
-        String preferred = user.getPreferred2faMethod();
-        return methods.stream()
-            .filter(Objects::nonNull)
-            .filter(m -> !alreadyCompleted.contains(m.getType().name()))
-            .map(m -> AvailableMfaMethod.builder()
-                .methodType(m.getType().name())
-                .name(m.getName())
-                .category(m.getCategory().name())
-                .enrolled(Boolean.TRUE.equals(healthStatus.get(m.getType())) || !m.isRequiresEnrollment())
-                .preferred(m.getType().name().equals(preferred))
-                .requiresEnrollment(m.isRequiresEnrollment())
-                .build())
-            .collect(java.util.stream.Collectors.toList());
-    }
 
     /**
      * Cancel a half-complete MFA session. Post-audit 2026-04-24 login edge case #3.
@@ -1256,6 +861,37 @@ public class AuthController {
                 "alternativeMethods", computeAlternativeMethods(currentStep, availableMethods, requestedType),
                 "completedMethods", mfaSession.getCompletedMethods()
         ));
+    }
+
+    /** Build available methods for an MFA step, validated against actual backing data. */
+    private List<AvailableMfaMethod> buildMfaAvailableMethods(AuthFlowStep step, User user) {
+        return buildMfaAvailableMethods(step, user, java.util.Collections.emptySet());
+    }
+
+    /**
+     * Build available methods for an MFA step, excluding any method already used
+     * earlier in this MFA session. Without this filter, a 3-step CHOICE flow
+     * where the same method appears in multiple steps (e.g. FINGERPRINT in both
+     * step 2 and step 3) would re-offer the just-completed method as the next
+     * step's primary, causing the same step to run twice.
+     */
+    private List<AvailableMfaMethod> buildMfaAvailableMethods(
+            AuthFlowStep step, User user, java.util.Set<String> alreadyCompleted) {
+        List<AuthMethod> methods = step.getAvailableMethods();
+        Map<AuthMethodType, Boolean> healthStatus = enrollmentHealthService.validateEnrollments(user.getId());
+        String preferred = user.getPreferred2faMethod();
+        return methods.stream()
+            .filter(Objects::nonNull)
+            .filter(m -> !alreadyCompleted.contains(m.getType().name()))
+            .map(m -> AvailableMfaMethod.builder()
+                .methodType(m.getType().name())
+                .name(m.getName())
+                .category(m.getCategory().name())
+                .enrolled(Boolean.TRUE.equals(healthStatus.get(m.getType())) || !m.isRequiresEnrollment())
+                .preferred(m.getType().name().equals(preferred))
+                .requiresEnrollment(m.isRequiresEnrollment())
+                .build())
+            .collect(java.util.stream.Collectors.toList());
     }
 
     /**

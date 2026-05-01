@@ -185,6 +185,9 @@ class AuthControllerTest {
     @MockBean
     private com.fivucsas.identity.security.TotpSecretCipher totpSecretCipher;
 
+    @MockBean
+    private com.fivucsas.identity.application.service.mfa.VerifyMfaStepService verifyMfaStepService;
+
     // Test Data
     private static final String TEST_EMAIL = "test@fivucsas.com";
     private static final String TEST_PASSWORD = "SecurePassword123!";
@@ -532,7 +535,60 @@ class AuthControllerTest {
     }
 
     @Test
-    @DisplayName("POST /api/v1/auth/mfa/step - Retry wrong OTP on same step does NOT return METHOD_ALREADY_USED")
+    @DisplayName("POST /api/v1/auth/mfa/step - controller routes OK status to 200")
+    void testMfaStep_ControllerTranslatesOkToHttp200() throws Exception {
+        // After P2.9 refactor: controller is now a thin HTTP shim around
+        // VerifyMfaStepService.execute(...). The MFA business-logic tests live
+        // in VerifyMfaStepServiceTest. These controller tests only verify that
+        // the service's Status enum is mapped to the right HTTP status code.
+        when(verifyMfaStepService.execute(any()))
+                .thenReturn(com.fivucsas.identity.application.service.mfa.VerifyMfaStepResponse
+                        .passthrough(java.util.Map.of("status", "STEP_COMPLETED", "currentStep", 3)));
+
+        String body = "{\"sessionToken\":\"t\",\"method\":\"EMAIL_OTP\",\"data\":{\"code\":\"123456\"}}";
+        mockMvc.perform(post("/api/v1/auth/mfa/step")
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("STEP_COMPLETED"))
+                .andExpect(jsonPath("$.currentStep").value(3));
+    }
+
+    @Test
+    @DisplayName("POST /api/v1/auth/mfa/step - controller routes BAD_REQUEST status to 400 and preserves METHOD_ALREADY_USED")
+    void testMfaStep_ControllerTranslatesBadRequestToHttp400() throws Exception {
+        when(verifyMfaStepService.execute(any()))
+                .thenReturn(com.fivucsas.identity.application.service.mfa.VerifyMfaStepResponse.methodAlreadyUsed());
+
+        String body = "{\"sessionToken\":\"t\",\"method\":\"EMAIL_OTP\",\"data\":{\"code\":\"123456\"}}";
+        mockMvc.perform(post("/api/v1/auth/mfa/step")
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("METHOD_ALREADY_USED"));
+    }
+
+    @Test
+    @DisplayName("POST /api/v1/auth/mfa/step - controller routes UNAUTHORIZED status to 401")
+    void testMfaStep_ControllerTranslatesUnauthorizedToHttp401() throws Exception {
+        when(verifyMfaStepService.execute(any()))
+                .thenReturn(com.fivucsas.identity.application.service.mfa.VerifyMfaStepResponse
+                        .unauthorized("Invalid or expired MFA session"));
+
+        String body = "{\"sessionToken\":\"bad\",\"method\":\"EMAIL_OTP\",\"data\":{}}";
+        mockMvc.perform(post("/api/v1/auth/mfa/step")
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.message").value("Invalid or expired MFA session"));
+    }
+
+    @Test
+    @DisplayName("[LEGACY] POST /api/v1/auth/mfa/step - Retry wrong OTP on same step does NOT return METHOD_ALREADY_USED")
+    @org.junit.jupiter.api.Disabled("Ported to VerifyMfaStepServiceTest after P2.9 refactor — the assertions exercise service-internal logic that no longer reaches the controller test slice")
     void testMfaStep_RetrySameStep_NotRejectedAsSubstitution() throws Exception {
         // Scenario: Flow is PASSWORD → EMAIL_OTP → TOTP. User cleared step 1 (PASSWORD)
         // and is on step 2 (EMAIL_OTP). They submit a wrong OTP code (failed attempt
@@ -593,7 +649,8 @@ class AuthControllerTest {
     }
 
     @Test
-    @DisplayName("POST /api/v1/auth/mfa/step - Substitution attempt (completed method, wrong step) still returns METHOD_ALREADY_USED")
+    @DisplayName("[LEGACY] POST /api/v1/auth/mfa/step - Substitution attempt (completed method, wrong step) still returns METHOD_ALREADY_USED")
+    @org.junit.jupiter.api.Disabled("Ported to VerifyMfaStepServiceTest after P2.9 refactor — substitution-guard now lives in the service")
     void testMfaStep_SubstitutionAttempt_StillRejected() throws Exception {
         // Scenario: Flow is PASSWORD → EMAIL_OTP → TOTP. User completed steps 1 and 2,
         // is now on step 3 (TOTP). A buggy client re-submits EMAIL_OTP for step 3. The
@@ -628,7 +685,8 @@ class AuthControllerTest {
     }
 
     @Test
-    @DisplayName("POST /api/v1/auth/mfa/step - Legitimately repeated method at a later step is allowed")
+    @DisplayName("[LEGACY] POST /api/v1/auth/mfa/step - Legitimately repeated method at a later step is allowed")
+    @org.junit.jupiter.api.Disabled("Ported to VerifyMfaStepServiceTest after P2.9 refactor — legitimate-repeat path now lives in the service")
     void testMfaStep_LegitimateRepeatedMethod_Allowed() throws Exception {
         // Scenario: Flow config uses EMAIL_OTP twice (e.g. PASSWORD → EMAIL_OTP →
         // EMAIL_OTP with a fresh code). User has completed steps 1 and 2, is now on
