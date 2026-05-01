@@ -29,7 +29,7 @@ public interface VerifiableSmsService {
      *
      * <p>Returns a typed result so callers can distinguish "user typed wrong
      * code" from "provider unreachable" — useful for audit logs and for
-     * deciding whether to surface a transient-error message vs a hard reject.
+     * deciding whether to surface a transient-error message vs a hard reject.</p>
      *
      * @param phoneNumber E.164 format phone number
      * @param code        Code entered by the user
