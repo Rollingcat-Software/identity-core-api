@@ -66,5 +66,9 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
 # diagnosable artifact instead of a half-alive container.
 ENV JAVA_OPTS="-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0 -XX:InitialRAMPercentage=50.0 -XX:+UseG1GC -XX:MaxGCPauseMillis=200 -XX:+ExitOnOutOfMemoryError -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=/tmp/heapdump.hprof"
 
-# Run the application
-ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS -jar app.jar"]
+# Run the application.
+# `exec` makes the JVM replace `sh` as PID 1 so SIGTERM/SIGINT from `docker
+# stop` (and Kubernetes lifecycle hooks) are delivered straight to Java —
+# without it, the shell stays PID 1 and swallows the signals, forcing a
+# 10-second SIGKILL fallback and skipping graceful Spring shutdown.
+ENTRYPOINT ["sh", "-c", "exec java $JAVA_OPTS -jar app.jar"]
