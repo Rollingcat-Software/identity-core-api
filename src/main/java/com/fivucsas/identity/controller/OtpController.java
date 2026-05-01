@@ -49,20 +49,28 @@ public class OtpController {
     /**
      * Normalize an OTP code coming from a user-typed input or carrier-relayed
      * SMS. Strips zero-width / bidi formatting marks (some carriers and IMEs
-     * inject these), NFC-normalizes Unicode digits, and trims surrounding
-     * whitespace. Without this, a code visually identical to the stored value
+     * inject these), NFKC-normalizes Unicode digits (so e.g. fullwidth
+     * １２３４５６ collapses to 123456), then strips surrounding whitespace
+     * with the Unicode-aware {@link String#strip()} (Java 11+) — NFKC can
+     * yield leading/trailing whitespace from compatibility decompositions
+     * like U+3000 IDEOGRAPHIC SPACE which {@link String#trim()} (≤ U+0020)
+     * misses. Without this, a code visually identical to the stored value
      * compares non-equal because of an invisible U+200E / U+200F / U+FEFF.
      *
      * @return null if the input is null/blank after normalization
      */
     static String normalizeCode(String raw) {
         if (raw == null) return null;
-        String stripped = raw
-                // Zero-width + BOM + bidi formatting marks
-                .replaceAll("[\\u200B-\\u200F\\u202A-\\u202E\\u2060\\uFEFF]", "")
-                .trim();
-        if (stripped.isEmpty()) return null;
-        return Normalizer.normalize(stripped, Normalizer.Form.NFKC);
+        // 1) Strip zero-width + BOM + bidi formatting marks first — these are
+        // invisible and must not survive into the comparison.
+        String stripped = raw.replaceAll(
+                "[\\u200B-\\u200F\\u202A-\\u202E\\u2060\\uFEFF]", "");
+        // 2) NFKC-normalize so fullwidth/compat digits map to ASCII.
+        String normalized = Normalizer.normalize(stripped, Normalizer.Form.NFKC);
+        // 3) Strip Unicode-aware whitespace (catches U+3000 etc. that NFKC
+        // may have introduced from compatibility decomposition).
+        String result = normalized.strip();
+        return result.isEmpty() ? null : result;
     }
 
     // --- /api/v1/otp endpoints ---
@@ -161,13 +169,18 @@ public class OtpController {
             return ResponseEntity.badRequest().body(Map.of("success", false, "message", "code is required"));
         }
 
+        // Look up the user unconditionally so an unknown userId is rejected
+        // the same way regardless of which SmsService bean is wired. Without
+        // this, the local-OTP path would silently 200 `{success:false}` for a
+        // non-existent userId while the Verifiable path would 404 — a behavior
+        // skew Copilot flagged on PR #42.
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new UserNotFoundException(userId.toString()));
+
         boolean valid;
         if (smsService instanceof VerifiableSmsService verifiable) {
-            // Provider-side verification (e.g. Twilio Verify). Look up the
-            // phone number on the User record — that's the destination Twilio
-            // sent the code to, and Twilio matches by `to` + `code`.
-            User user = userRepository.findById(userId)
-                    .orElseThrow(() -> new UserNotFoundException(userId.toString()));
+            // Provider-side verification (e.g. Twilio Verify). Twilio matches
+            // by `to` + `code`, so we use the phone number on the User record.
             String phoneNumber = user.getPhoneNumber();
             if (phoneNumber == null || phoneNumber.isBlank()) {
                 log.warn("SMS OTP verify rejected for user: {} (reason=NO_PHONE)", userId);
@@ -176,9 +189,17 @@ public class OtpController {
                         "message", "User does not have a phone number configured"
                 ));
             }
-            valid = verifiable.verifyCode(phoneNumber, code);
+            VerifiableSmsService.VerifyResult result =
+                    verifiable.verifyCodeDetailed(phoneNumber, code);
+            valid = result.isApproved();
             if (!valid) {
-                log.warn("SMS OTP mismatch for user: {} via VerifiableSmsService (reason=PROVIDER_REJECTED)", userId);
+                // Distinguish "wrong code" from "provider unreachable" so audit
+                // logs reflect what actually happened.
+                String reason = result == VerifiableSmsService.VerifyResult.PROVIDER_ERROR
+                        ? "PROVIDER_ERROR"
+                        : "INVALID_CODE";
+                log.warn("SMS OTP mismatch for user: {} via VerifiableSmsService (reason={})",
+                        userId, reason);
             }
         } else {
             valid = otpService.validate(SMS_OTP_PREFIX + userId, code);

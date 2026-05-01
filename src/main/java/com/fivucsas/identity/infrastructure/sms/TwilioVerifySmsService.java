@@ -47,23 +47,25 @@ public class TwilioVerifySmsService implements SmsService, VerifiableSmsService 
     }
 
     /**
-     * Verifies the code the user entered against Twilio Verify.
-     *
-     * @return true if approved, false if invalid/expired
+     * Verifies the code the user entered against Twilio Verify and returns
+     * a typed result distinguishing "wrong code" (provider returned a non-
+     * approved status) from "provider error" (network / SDK exception).
      */
     @Override
-    public boolean verifyCode(String phoneNumber, String code) {
+    public VerifyResult verifyCodeDetailed(String phoneNumber, String code) {
+        VerificationCheck check;
         try {
-            VerificationCheck check = VerificationCheck.creator(verifyServiceSid)
+            check = VerificationCheck.creator(verifyServiceSid)
                     .setTo(phoneNumber)
                     .setCode(code)
                     .create();
-            boolean approved = "approved".equals(check.getStatus());
-            log.info("Twilio Verify check for {} — status: {}", phoneNumber, check.getStatus());
-            return approved;
         } catch (Exception e) {
             log.warn("Twilio Verify check failed for {}: {}", phoneNumber, e.getMessage());
-            return false;
+            return VerifyResult.PROVIDER_ERROR;
         }
+        log.info("Twilio Verify check for {} — status: {}", phoneNumber, check.getStatus());
+        return "approved".equals(check.getStatus())
+                ? VerifyResult.APPROVED
+                : VerifyResult.INVALID_CODE;
     }
 }

@@ -156,12 +156,27 @@ class OtpControllerTest {
         @Test
         @DisplayName("Should verify SMS OTP successfully")
         void shouldVerifySmsOtp() {
+            when(userRepository.findById(userId)).thenReturn(Optional.of(testUser));
             when(otpService.validate("otp:sms:" + userId, "654321")).thenReturn(true);
 
             ResponseEntity<Map<String, Object>> response =
                     otpController.verifySmsOtp(userId, Map.of("code", "654321"));
 
             assertThat(response.getBody()).containsEntry("success", true);
+        }
+
+        @Test
+        @DisplayName("verify: rejects unknown userId even in local-OTP mode (consistent with Verifiable mode)")
+        void verifyRejectsUnknownUserInLocalMode() {
+            // Pre-fix: local-OTP path skipped the User lookup and returned
+            // 200 `{success:false}` for a nonexistent userId, while the
+            // Verifiable path threw 404. Now both paths consistently 404.
+            when(userRepository.findById(userId)).thenReturn(Optional.empty());
+
+            assertThatThrownBy(() ->
+                    otpController.verifySmsOtp(userId, Map.of("code", "654321")))
+                    .isInstanceOf(UserNotFoundException.class);
+            verify(otpService, never()).validate(any(), any());
         }
     }
 
@@ -204,24 +219,26 @@ class OtpControllerTest {
         }
 
         @Test
-        @DisplayName("verify: must delegate to VerifiableSmsService.verifyCode, not OtpService.validate")
+        @DisplayName("verify: must delegate to VerifiableSmsService.verifyCodeDetailed, not OtpService.validate")
         void verifyShouldDelegateToProvider() {
             when(userRepository.findById(userId)).thenReturn(Optional.of(testUser));
-            when(verifiableSms.verifyCode("+905551234567", "654321")).thenReturn(true);
+            when(verifiableSms.verifyCodeDetailed("+905551234567", "654321"))
+                    .thenReturn(VerifiableSmsService.VerifyResult.APPROVED);
 
             ResponseEntity<Map<String, Object>> response =
                     otpController.verifySmsOtp(userId, Map.of("code", "654321"));
 
             assertThat(response.getBody()).containsEntry("success", true);
-            verify(verifiableSms).verifyCode("+905551234567", "654321");
+            verify(verifiableSms).verifyCodeDetailed("+905551234567", "654321");
             verify(otpService, never()).validate(any(), any());
         }
 
         @Test
-        @DisplayName("verify: rejects when provider says invalid")
-        void verifyRejectsWhenProviderReturnsFalse() {
+        @DisplayName("verify: rejects when provider says INVALID_CODE")
+        void verifyRejectsWhenProviderReturnsInvalid() {
             when(userRepository.findById(userId)).thenReturn(Optional.of(testUser));
-            when(verifiableSms.verifyCode("+905551234567", "000000")).thenReturn(false);
+            when(verifiableSms.verifyCodeDetailed("+905551234567", "000000"))
+                    .thenReturn(VerifiableSmsService.VerifyResult.INVALID_CODE);
 
             ResponseEntity<Map<String, Object>> response =
                     otpController.verifySmsOtp(userId, Map.of("code", "000000"));
@@ -230,11 +247,27 @@ class OtpControllerTest {
         }
 
         @Test
+        @DisplayName("verify: rejects (with PROVIDER_ERROR audit reason) when provider call errors")
+        void verifyRejectsOnProviderError() {
+            when(userRepository.findById(userId)).thenReturn(Optional.of(testUser));
+            when(verifiableSms.verifyCodeDetailed("+905551234567", "999999"))
+                    .thenReturn(VerifiableSmsService.VerifyResult.PROVIDER_ERROR);
+
+            ResponseEntity<Map<String, Object>> response =
+                    otpController.verifySmsOtp(userId, Map.of("code", "999999"));
+
+            // Same outward shape (no info leak), but the controller logs
+            // reason=PROVIDER_ERROR vs reason=INVALID_CODE for ops triage.
+            assertThat(response.getBody()).containsEntry("success", false);
+        }
+
+        @Test
         @DisplayName("verify: strips zero-width / bidi marks from carrier-relayed code (NFKC)")
         void verifyNormalizesUnicodeMarks() {
             when(userRepository.findById(userId)).thenReturn(Optional.of(testUser));
             // Provider only ever sees the cleaned digits.
-            when(verifiableSms.verifyCode("+905551234567", "654321")).thenReturn(true);
+            when(verifiableSms.verifyCodeDetailed("+905551234567", "654321"))
+                    .thenReturn(VerifiableSmsService.VerifyResult.APPROVED);
 
             // U+200E LEFT-TO-RIGHT MARK + U+FEFF ZWNBSP wrapped around digits,
             // plus surrounding whitespace — the kind of payload Turkish carriers
@@ -244,7 +277,7 @@ class OtpControllerTest {
                     otpController.verifySmsOtp(userId, Map.of("code", dirty));
 
             assertThat(response.getBody()).containsEntry("success", true);
-            verify(verifiableSms).verifyCode("+905551234567", "654321");
+            verify(verifiableSms).verifyCodeDetailed("+905551234567", "654321");
         }
     }
 
