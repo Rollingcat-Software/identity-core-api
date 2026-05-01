@@ -71,7 +71,15 @@ public class AuditLoggingAspect {
                     .httpMethod(request != null ? request.getMethod() : null)
                     .endpoint(request != null ? request.getRequestURI() : null)
                     .ipAddress(getClientIp(request))
-                    .userAgentV2(request != null ? request.getHeader("User-Agent") : null)
+                    // userAgentV2 holds raw browser-supplied User-Agent header
+                    // and is the value preferred by AuditLog.getEffectiveUserAgent().
+                    // Escape on the way in so a downstream renderer that drops
+                    // its escaping cannot produce executable HTML from an
+                    // attacker-controlled UA string. Mirrors AuditLogAdapter's
+                    // userAgent escaping for the legacy column.
+                    .userAgentV2(request != null
+                            ? AuditEscape.escape(request.getHeader("User-Agent"))
+                            : null)
                     .success(success)
                     .errorMessage(AuditEscape.escape(errorMessage))
                     .metadata(extractMetadata(joinPoint, audited))
