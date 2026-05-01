@@ -22,9 +22,12 @@ import com.fivucsas.identity.dto.InviteGuestRequest;
 import com.fivucsas.identity.dto.UpdateUserRequest;
 import com.fivucsas.identity.entity.GuestInvitation;
 import com.fivucsas.identity.entity.InvitationStatus;
+import com.fivucsas.identity.entity.Tenant;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.entity.UserSettings;
+import com.fivucsas.identity.repository.JpaTenantRepository;
 import com.fivucsas.identity.security.RbacAuthorizationService;
+import com.fivucsas.identity.security.TenantScopeResolver;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -80,6 +83,8 @@ public class UserController {
     private final GuestLifecycleService guestLifecycleService;
     private final GuestInvitationRepositoryPort invitationRepository;
     private final RbacAuthorizationService rbacService;
+    private final TenantScopeResolver tenantScopeResolver;
+    private final JpaTenantRepository tenantRepository;
 
     // --- User CRUD endpoints ---
 
@@ -291,18 +296,42 @@ public class UserController {
 
     @PostMapping("/api/v1/guests/invite")
     @Operation(summary = "Invite a guest user")
-    @PreAuthorize("@rbac.hasPermission('guest:invite')")
+    @PreAuthorize("@rbac.isTenantAdmin() or @rbac.hasPermission('guest:invite')")
     public ResponseEntity<GuestInvitationResponse> inviteGuest(
-            @Valid @RequestBody InviteGuestRequest request) {
+            @Valid @RequestBody InviteGuestRequest request,
+            @RequestParam(required = false) UUID tenantId) {
 
         User currentUser = rbacService.getCurrentUser()
                 .orElseThrow(() -> new UnauthorizedException());
 
-        log.info("POST /api/v1/guests/invite - Inviting guest {} by {}",
-                request.getEmail(), currentUser.getEmail());
+        // Resolve target tenant: SUPER_ADMIN may pin to any tenant via the
+        // optional `tenantId` query param; tenant-scoped callers always invite
+        // into their own tenant. Caller without a resolvable tenant rejects
+        // with 400 rather than NPE'ing on currentUser.getTenant().
+        UUID callerScope = tenantScopeResolver.currentScope();
+        Tenant targetTenant;
+        if (callerScope == null) {
+            // SUPER_ADMIN — must pick a tenant to invite into
+            UUID effectiveTenantId = tenantId != null ? tenantId :
+                    (currentUser.getTenant() != null ? currentUser.getTenant().getId() : null);
+            if (effectiveTenantId == null) {
+                throw new IllegalArgumentException(
+                        "'tenantId' query parameter is required when SUPER_ADMIN invites a guest.");
+            }
+            targetTenant = tenantRepository.findById(effectiveTenantId)
+                    .orElseThrow(() -> new IllegalArgumentException(
+                            "Tenant not found: " + effectiveTenantId));
+        } else if (TenantScopeResolver.FAIL_CLOSED_EMPTY_SCOPE.equals(callerScope)) {
+            throw new UnauthorizedException();
+        } else {
+            targetTenant = currentUser.getTenant();
+        }
+
+        log.info("POST /api/v1/guests/invite - Inviting guest {} into tenant {} by {}",
+                request.getEmail(), targetTenant.getId(), currentUser.getEmail());
 
         GuestInvitation invitation = guestLifecycleService.createInvitation(
-                currentUser.getTenant(),
+                targetTenant,
                 request.getEmail(),
                 currentUser,
                 request.getAccessDurationHours(),
@@ -331,30 +360,39 @@ public class UserController {
     }
 
     @GetMapping("/api/v1/guests")
-    @Operation(summary = "List guest invitations for current tenant")
+    @Operation(summary = "List guest invitations for current tenant (or platform-wide for SUPER_ADMIN)")
     @PreAuthorize("@rbac.isTenantAdmin() or @rbac.hasPermission('guest:read')")
     public ResponseEntity<List<GuestInvitationResponse>> listInvitations(
-            @RequestParam(required = false) String status) {
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) UUID tenantId) {
 
-        User currentUser = rbacService.getCurrentUser()
-                .orElseThrow(() -> new UnauthorizedException());
+        InvitationStatus statusFilter = (status != null && !status.isEmpty())
+                ? InvitationStatus.valueOf(status.toUpperCase(java.util.Locale.ROOT))
+                : null;
 
-        // SUPER_ADMIN / ROOT has no tenant, so fall back to empty list rather
-        // than NPE. (Cross-tenant guest listing is not a product need.)
-        if (currentUser.getTenant() == null) {
+        UUID callerScope = tenantScopeResolver.currentScope();
+        UUID effectiveTenantId;
+        if (callerScope == null) {
+            // SUPER_ADMIN — `tenantId` query param is optional; null means
+            // platform-wide (cross-tenant) listing.
+            effectiveTenantId = tenantId;
+        } else if (TenantScopeResolver.FAIL_CLOSED_EMPTY_SCOPE.equals(callerScope)) {
             return ResponseEntity.ok(List.of());
+        } else {
+            // Tenant-scoped caller: ignore any tenantId that isn't theirs.
+            effectiveTenantId = callerScope;
         }
 
-        UUID tenantId = currentUser.getTenant().getId();
-
         List<GuestInvitation> invitations;
-        if (status != null && !status.isEmpty()) {
-            invitations = invitationRepository.findByTenantIdAndStatus(
-                    tenantId,
-                    InvitationStatus.valueOf(status.toUpperCase(java.util.Locale.ROOT))
-            );
+        if (effectiveTenantId == null) {
+            // SUPER_ADMIN, no tenant pinned → cross-tenant listing
+            invitations = statusFilter != null
+                    ? invitationRepository.findAllByStatusOrderByCreatedAtDesc(statusFilter)
+                    : invitationRepository.findAllOrderByCreatedAtDesc();
+        } else if (statusFilter != null) {
+            invitations = invitationRepository.findByTenantIdAndStatus(effectiveTenantId, statusFilter);
         } else {
-            invitations = invitationRepository.findByTenantIdOrderByCreatedAtDesc(tenantId);
+            invitations = invitationRepository.findByTenantIdOrderByCreatedAtDesc(effectiveTenantId);
         }
 
         return ResponseEntity.ok(invitations.stream()
@@ -363,19 +401,23 @@ public class UserController {
     }
 
     @GetMapping("/api/v1/guests/count")
-    @Operation(summary = "Count active guests in tenant")
+    @Operation(summary = "Count active guests in tenant (or platform-wide for SUPER_ADMIN)")
     @PreAuthorize("@rbac.isTenantAdmin() or @rbac.hasPermission('guest:read')")
-    public ResponseEntity<Long> countActiveGuests() {
-        User currentUser = rbacService.getCurrentUser()
-                .orElseThrow(() -> new UnauthorizedException());
-
-        if (currentUser.getTenant() == null) {
-            // SUPER_ADMIN / ROOT: no tenant scope — return 0 rather than NPE.
+    public ResponseEntity<Long> countActiveGuests(
+            @RequestParam(required = false) UUID tenantId) {
+        UUID callerScope = tenantScopeResolver.currentScope();
+        UUID effectiveTenantId;
+        if (callerScope == null) {
+            effectiveTenantId = tenantId;
+        } else if (TenantScopeResolver.FAIL_CLOSED_EMPTY_SCOPE.equals(callerScope)) {
             return ResponseEntity.ok(0L);
+        } else {
+            effectiveTenantId = callerScope;
         }
 
-        long count = invitationRepository.countActiveGuestsInTenant(
-                currentUser.getTenant().getId(), Instant.now());
+        long count = effectiveTenantId == null
+                ? invitationRepository.countActiveGuestsPlatformWide(Instant.now())
+                : invitationRepository.countActiveGuestsInTenant(effectiveTenantId, Instant.now());
 
         return ResponseEntity.ok(count);
     }

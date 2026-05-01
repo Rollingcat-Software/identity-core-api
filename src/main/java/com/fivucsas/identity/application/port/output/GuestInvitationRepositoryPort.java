@@ -25,7 +25,23 @@ public interface GuestInvitationRepositoryPort {
 
     List<GuestInvitation> findByTenantIdAndStatus(UUID tenantId, InvitationStatus status);
 
+    /**
+     * Cross-tenant listing for SUPER_ADMIN. Returns every invitation in the
+     * platform, ordered most-recent first.
+     */
+    List<GuestInvitation> findAllOrderByCreatedAtDesc();
+
+    /**
+     * Cross-tenant status filter for SUPER_ADMIN.
+     */
+    List<GuestInvitation> findAllByStatusOrderByCreatedAtDesc(InvitationStatus status);
+
     long countActiveGuestsInTenant(UUID tenantId, Instant now);
+
+    /**
+     * Count of active guests across every tenant (SUPER_ADMIN dashboard).
+     */
+    long countActiveGuestsPlatformWide(Instant now);
 
     int expirePendingInvitations(Instant now);
 
