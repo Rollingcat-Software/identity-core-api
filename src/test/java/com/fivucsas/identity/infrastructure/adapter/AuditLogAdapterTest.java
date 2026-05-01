@@ -14,6 +14,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -237,6 +238,112 @@ class AuditLogAdapterTest {
 
             AuditLog saved = captureSaved();
             assertThat(saved.getTenantId()).isNull();
+        }
+    }
+
+    @Nested
+    @DisplayName("HTML escaping: defense-in-depth for user-supplied strings")
+    class Escaping {
+
+        @Test
+        @DisplayName("HTML special chars in userAgent are escaped on write")
+        void userAgentIsEscaped() {
+            when(userRepository.findTenantIdById(userId)).thenReturn(Optional.of(tenantId));
+
+            adapter.logUserAuthenticated(userId.toString(), "u@example.com",
+                    "1.2.3.4", "<script>alert('xss')</script>");
+
+            AuditLog saved = captureSaved();
+            assertThat(saved.getUserAgent())
+                    .isEqualTo("&lt;script&gt;alert(&#39;xss&#39;)&lt;/script&gt;");
+        }
+
+        @Test
+        @DisplayName("Null userAgent stays null (no NPE)")
+        void nullUserAgentStaysNull() {
+            when(userRepository.findTenantIdById(userId)).thenReturn(Optional.of(tenantId));
+
+            adapter.logUserAuthenticated(userId.toString(), "u@example.com",
+                    "1.2.3.4", null);
+
+            AuditLog saved = captureSaved();
+            assertThat(saved.getUserAgent()).isNull();
+        }
+
+        @Test
+        @DisplayName("String values in metadata are escaped")
+        void stringMetadataValuesAreEscaped() {
+            when(userRepository.findTenantIdById(userId)).thenReturn(Optional.of(tenantId));
+
+            // logUserAuthenticated(oauth) puts oauthClient into metadata as String.
+            adapter.logUserAuthenticated(userId.toString(), "u@example.com",
+                    "1.2.3.4", "Mozilla/5.0", "<img src=x onerror=alert(1)>");
+
+            AuditLog saved = captureSaved();
+            assertThat(saved.getMetadata())
+                    .containsEntry("oauthClient",
+                            "&lt;img src=x onerror=alert(1)&gt;");
+        }
+
+        @Test
+        @DisplayName("Non-String metadata values pass through unchanged")
+        void nonStringMetadataValuesPassThrough() {
+            when(userRepository.findTenantIdById(userId)).thenReturn(Optional.of(tenantId));
+
+            // logMfaStepCompleted has Integer values for stepCurrent / stepTotal
+            // and String values for method.
+            adapter.logMfaStepCompleted(userId.toString(), "FACE", 2, 3,
+                    "1.2.3.4", "Mozilla/5.0");
+
+            AuditLog saved = captureSaved();
+            Map<String, Object> meta = saved.getMetadata();
+            assertThat(meta.get("stepCurrent")).isEqualTo(2);
+            assertThat(meta.get("stepTotal")).isEqualTo(3);
+            assertThat(meta.get("method")).isEqualTo("FACE");
+        }
+
+        @Test
+        @DisplayName("List metadata values pass through unchanged")
+        void listMetadataValuesPassThrough() {
+            when(userRepository.findTenantIdById(userId)).thenReturn(Optional.of(tenantId));
+
+            adapter.logMfaComplete(userId.toString(), List.of("pwd", "<sms>"),
+                    "1.2.3.4", "Mozilla/5.0");
+
+            AuditLog saved = captureSaved();
+            // The List itself passes through unchanged — escapeIfString only
+            // escapes top-level Strings. Per AuditEscape contract, structured
+            // payloads keep their original type for JSONB storage.
+            Object amr = saved.getMetadata().get("amr");
+            assertThat(amr).isInstanceOf(List.class);
+            @SuppressWarnings("unchecked")
+            List<String> amrList = (List<String>) amr;
+            assertThat(amrList).containsExactly("pwd", "<sms>");
+        }
+
+        @Test
+        @DisplayName("PKCE failure: failureReason String is escaped")
+        void pkceFailureReasonEscaped() {
+            adapter.logPkceFailure("client-x", "1.2.3.4",
+                    "<bad>code_verifier mismatch</bad>");
+
+            AuditLog saved = captureSaved();
+            assertThat(saved.getMetadata())
+                    .containsEntry("failureReason",
+                            "&lt;bad&gt;code_verifier mismatch&lt;/bad&gt;");
+        }
+
+        @Test
+        @DisplayName("No special chars: userAgent passes through unchanged")
+        void plainUserAgentPassesThrough() {
+            when(userRepository.findTenantIdById(userId)).thenReturn(Optional.of(tenantId));
+
+            String plain = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)";
+            adapter.logUserAuthenticated(userId.toString(), "u@example.com",
+                    "1.2.3.4", plain);
+
+            AuditLog saved = captureSaved();
+            assertThat(saved.getUserAgent()).isEqualTo(plain);
         }
     }
 

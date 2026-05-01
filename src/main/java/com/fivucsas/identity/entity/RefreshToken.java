@@ -3,8 +3,9 @@ package com.fivucsas.identity.entity;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
-import lombok.Data;
+import lombok.Getter;
 import lombok.NoArgsConstructor;
+import lombok.Setter;
 import org.hibernate.annotations.CreationTimestamp;
 
 import java.time.Instant;
@@ -12,7 +13,8 @@ import java.util.UUID;
 
 @Entity
 @Table(name = "refresh_tokens")
-@Data
+@Getter
+@Setter
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
@@ -21,6 +23,25 @@ public class RefreshToken {
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
+
+    /**
+     * JPA-safe equality by immutable id (P2.10). Replaces the Lombok {@code @Data}
+     * default which included {@code user} (a lazy {@code @ManyToOne}) — that would
+     * trigger proxy initialization on every {@code equals}/{@code hashCode} and
+     * could StackOverflow via the back-reference. See {@link User#equals(Object)}
+     * for the full rationale.
+     */
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (!(o instanceof RefreshToken other)) return false;
+        return id != null && id.equals(other.id);
+    }
+
+    @Override
+    public int hashCode() {
+        return RefreshToken.class.hashCode();
+    }
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "user_id", nullable = false)
