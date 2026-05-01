@@ -5,6 +5,7 @@ import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -66,6 +67,14 @@ public class SoftDeletePurgeJob {
      * Skips entirely if the feature flag is false.
      */
     @Scheduled(cron = "0 30 3 * * *")
+    @SchedulerLock(
+            name = "SoftDeletePurgeJob_runScheduled",
+            // Hold the lock at most 25 minutes so a stuck instance can't block
+            // the next day's run. Hold it at least 1 minute so the lock outlasts
+            // a JVM restart that completed the work but couldn't release.
+            lockAtMostFor = "PT25M",
+            lockAtLeastFor = "PT1M"
+    )
     public void runScheduled() {
         if (!enabled) {
             log.debug("Soft-delete purge job skipped — app.purge.softDelete.enabled=false");
