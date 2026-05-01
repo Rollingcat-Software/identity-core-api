@@ -20,8 +20,18 @@ import java.util.UUID;
 /**
  * Read-only query service backing the admin auth-sessions list endpoint.
  *
- * <p>Always tenant-scoped (caller must supply a tenantId — even SUPER_ADMIN);
- * status and user filters are optional. Maps to the safe-fields DTO
+ * <p>Tenant-scope contract (Copilot post-merge round 5 doc update):
+ * <ul>
+ *   <li>Tenant-scoped callers MUST pass their own {@code tenantId}; the
+ *       controller enforces this by deriving {@code tenantId} from the
+ *       caller's RBAC scope.</li>
+ *   <li>SUPER_ADMIN MAY pass {@code tenantId = null} to request a
+ *       platform-wide cross-tenant listing. In that case this service runs
+ *       non-tenant-scoped repository queries. Authorization (i.e. the
+ *       caller is actually SUPER_ADMIN) MUST be enforced by the controller
+ *       BEFORE invoking this service — this layer trusts that check.</li>
+ * </ul>
+ * Status and user filters are optional. Maps to the safe-fields DTO
  * {@link AuthSessionListItemResponse}.</p>
  */
 @Service
@@ -36,9 +46,12 @@ public class AuthSessionQueryService {
     private final AuthSessionRepository authSessionRepository;
 
     /**
-     * Paginated tenant-scoped list of auth sessions.
+     * Paginated list of auth sessions.
      *
-     * @param tenantId      required — tenant whose sessions are returned
+     * @param tenantId      tenant whose sessions are returned. Pass
+     *                      {@code null} ONLY for SUPER_ADMIN platform-wide
+     *                      listings; the controller MUST verify SUPER_ADMIN
+     *                      role before calling with {@code null}.
      * @param statusFilter  optional list of statuses to include (null/empty
      *                      means all statuses)
      * @param userId        optional userId to further restrict to a single user

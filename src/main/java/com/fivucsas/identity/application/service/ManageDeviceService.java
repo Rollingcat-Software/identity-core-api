@@ -67,9 +67,21 @@ public class ManageDeviceService implements ManageDeviceUseCase {
                 .toList();
     }
 
+    /**
+     * Hard server-side cap on platform-wide device dumps. Copilot post-merge
+     * round 5 flagged the unbounded `findAll()`: above this limit the SUPER_ADMIN
+     * UI MUST switch to a paged endpoint (planned follow-up — see
+     * {@code listTenantDevices(tenantId)} for the existing tenant-scoped path).
+     * The limit is intentionally generous so existing dashboards keep working
+     * while the platform is small, but bounded so a runaway request can't
+     * pull a million rows.
+     */
+    private static final int MAX_PLATFORM_WIDE_DEVICES = 1000;
+
     @Override
     public List<DeviceResponse> listAllDevices() {
         return userDeviceRepository.findAll().stream()
+                .limit(MAX_PLATFORM_WIDE_DEVICES)
                 .map(DeviceResponse::from)
                 .toList();
     }

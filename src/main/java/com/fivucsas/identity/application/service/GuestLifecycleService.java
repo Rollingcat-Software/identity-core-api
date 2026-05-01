@@ -6,6 +6,7 @@ import com.fivucsas.identity.domain.repository.UserRepository;
 import com.fivucsas.identity.application.port.output.UserRoleRepositoryPort;
 import com.fivucsas.identity.application.port.output.RoleRepositoryPort;
 import com.fivucsas.identity.domain.repository.RefreshTokenRepository;
+import com.fivucsas.identity.exception.DomainStateConflictException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -62,7 +63,7 @@ public class GuestLifecycleService {
                                             int accessDurationHours, String message) {
         // Check for existing active invitation
         if (invitationRepository.existsActiveInvitation(tenant.getId(), email)) {
-            throw new IllegalStateException("An active invitation already exists for " + email + " in this tenant");
+            throw new DomainStateConflictException("An active invitation already exists for " + email + " in this tenant");
         }
 
         Instant now = Instant.now();
@@ -109,13 +110,13 @@ public class GuestLifecycleService {
                 .orElseThrow(() -> new IllegalArgumentException("Invalid invitation token"));
 
         if (invitation.getStatus() != InvitationStatus.PENDING) {
-            throw new IllegalStateException("Invitation is no longer pending (status: " + invitation.getStatus() + ")");
+            throw new DomainStateConflictException("Invitation is no longer pending (status: " + invitation.getStatus() + ")");
         }
 
         if (invitation.isInvitationExpired()) {
             invitation.expire();
             invitationRepository.save(invitation);
-            throw new IllegalStateException("Invitation has expired");
+            throw new DomainStateConflictException("Invitation has expired");
         }
 
         // Create guest user
@@ -160,7 +161,7 @@ public class GuestLifecycleService {
                 .orElseThrow(() -> new IllegalArgumentException("Guest user not found"));
 
         if (guestUser.getUserType() != UserType.GUEST) {
-            throw new IllegalStateException("User is not a guest");
+            throw new DomainStateConflictException("User is not a guest");
         }
 
         // Revoke the invitation
@@ -190,7 +191,7 @@ public class GuestLifecycleService {
                 .orElseThrow(() -> new IllegalArgumentException("Guest user not found"));
 
         if (guestUser.getUserType() != UserType.GUEST) {
-            throw new IllegalStateException("User is not a guest");
+            throw new DomainStateConflictException("User is not a guest");
         }
 
         Instant newExpiry = (guestUser.getExpiresAt() != null ? guestUser.getExpiresAt() : Instant.now())

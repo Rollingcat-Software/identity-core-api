@@ -15,6 +15,7 @@ import com.fivucsas.identity.repository.VerificationStepResultRepository;
 import com.fivucsas.identity.repository.AuthFlowRepository;
 import com.fivucsas.identity.repository.UserRepository;
 import com.fivucsas.identity.repository.JpaTenantRepository;
+import com.fivucsas.identity.exception.DomainStateConflictException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.persistence.EntityNotFoundException;
@@ -111,13 +112,13 @@ public class ManageVerificationService {
                 .orElseThrow(() -> new EntityNotFoundException("Verification session not found: " + sessionId));
 
         if (session.isTerminal()) {
-            throw new IllegalStateException("Session " + sessionId + " is already in terminal state: " + session.getStatus());
+            throw new DomainStateConflictException("Session " + sessionId + " is already in terminal state: " + session.getStatus());
         }
 
         if (session.isExpired()) {
             session.markExpired();
             sessionRepository.save(session);
-            throw new IllegalStateException("Session " + sessionId + " has expired");
+            throw new DomainStateConflictException("Session " + sessionId + " has expired");
         }
 
         if (session.getStatus() == VerificationSessionStatus.PENDING) {
@@ -276,11 +277,21 @@ public class ManageVerificationService {
 
         // Top failure reasons — derived from failed step results when present;
         // empty list when there is nothing to report (UI renders "no data").
-        List<VerificationStepResult> failedSteps = sessions.stream()
+        // Copilot post-merge round 5: batch-fetch step results for all failed
+        // sessions in a single query (avoids the previous N+1 pattern: one DB
+        // round-trip per failed session, which got expensive for tenants with
+        // many failures).
+        List<UUID> failedSessionIds = sessions.stream()
                 .filter(s -> s.getStatus() == VerificationSessionStatus.FAILED)
-                .flatMap(s -> stepResultRepository.findAllBySessionIdOrderByStepNumberAsc(s.getId()).stream())
-                .filter(r -> r.getStatus() == VerificationStepStatus.FAILED)
+                .map(VerificationSession::getId)
                 .toList();
+        List<VerificationStepResult> failedSteps = failedSessionIds.isEmpty()
+                ? List.of()
+                : stepResultRepository
+                        .findAllBySessionIdInOrderBySessionIdAscStepNumberAsc(failedSessionIds)
+                        .stream()
+                        .filter(r -> r.getStatus() == VerificationStepStatus.FAILED)
+                        .toList();
         java.util.Map<String, Long> reasonCounts = failedSteps.stream()
                 .map(r -> r.getErrorMessage() != null && !r.getErrorMessage().isBlank()
                         ? r.getErrorMessage()
@@ -354,7 +365,7 @@ public class ManageVerificationService {
                 .orElseThrow(() -> new EntityNotFoundException("Verification session not found: " + sessionId));
 
         if (session.isTerminal()) {
-            throw new IllegalStateException("Session " + sessionId + " is already in terminal state: " + session.getStatus());
+            throw new DomainStateConflictException("Session " + sessionId + " is already in terminal state: " + session.getStatus());
         }
 
         // Check all steps are completed
@@ -373,7 +384,7 @@ public class ManageVerificationService {
         }
 
         if (!allCompleted) {
-            throw new IllegalStateException("Not all steps are completed for session " + sessionId);
+            throw new DomainStateConflictException("Not all steps are completed for session " + sessionId);
         }
 
         session.markCompleted();
@@ -412,7 +423,7 @@ public class ManageVerificationService {
                         "Step result not found for session " + sessionId + " step " + stepNumber));
 
         if (stepResult.getStatus() != VerificationStepStatus.PENDING_REVIEW) {
-            throw new IllegalStateException(
+            throw new DomainStateConflictException(
                     "Step " + stepNumber + " is not in PENDING_REVIEW state (current: " + stepResult.getStatus() + ")");
         }
 

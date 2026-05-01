@@ -12,6 +12,7 @@ import com.fivucsas.identity.entity.AuthFlow;
 import com.fivucsas.identity.entity.Tenant;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.entity.VerificationSession;
+import com.fivucsas.identity.exception.DomainStateConflictException;
 import com.fivucsas.identity.repository.*;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.persistence.EntityNotFoundException;
@@ -159,7 +160,7 @@ class ManageVerificationServiceTest {
 
         // when/then
         assertThatThrownBy(() -> service.completeSession(sessionId))
-                .isInstanceOf(IllegalStateException.class)
+                .isInstanceOf(DomainStateConflictException.class)
                 .hasMessageContaining("terminal state");
     }
 
@@ -214,7 +215,7 @@ class ManageVerificationServiceTest {
 
         // when/then
         assertThatThrownBy(() -> service.completeSession(sessionId))
-                .isInstanceOf(IllegalStateException.class)
+                .isInstanceOf(DomainStateConflictException.class)
                 .hasMessageContaining("Not all steps are completed");
     }
 
@@ -232,7 +233,7 @@ class ManageVerificationServiceTest {
 
         // when/then
         assertThatThrownBy(() -> service.submitStepResult(sessionId, 1, command))
-                .isInstanceOf(IllegalStateException.class)
+                .isInstanceOf(DomainStateConflictException.class)
                 .hasMessageContaining("terminal state");
     }
 
@@ -250,7 +251,7 @@ class ManageVerificationServiceTest {
 
         // when/then
         assertThatThrownBy(() -> service.submitStepResult(sessionId, 1, command))
-                .isInstanceOf(IllegalStateException.class)
+                .isInstanceOf(DomainStateConflictException.class)
                 .hasMessageContaining("expired");
 
         verify(session).markExpired();
@@ -271,7 +272,7 @@ class ManageVerificationServiceTest {
 
         // when/then
         assertThatThrownBy(() -> service.reviewStep(sessionId, 1, true, "looks good"))
-                .isInstanceOf(IllegalStateException.class)
+                .isInstanceOf(DomainStateConflictException.class)
                 .hasMessageContaining("not in PENDING_REVIEW state");
     }
 

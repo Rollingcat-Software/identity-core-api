@@ -10,6 +10,7 @@ import com.fivucsas.identity.domain.model.auth.AuthMethodType;
 import com.fivucsas.identity.dto.EnrollmentDto;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.entity.UserEnrollment;
+import com.fivucsas.identity.exception.DomainStateConflictException;
 import com.fivucsas.identity.exception.ResourceNotFoundException;
 import com.fivucsas.identity.repository.UserEnrollmentRepository;
 import com.fivucsas.identity.security.RbacAuthorizationService;
@@ -90,7 +91,7 @@ public class EnrollmentController {
         UserEnrollment enrollment = enrollmentRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Enrollment not found"));
         if (!"FAILED".equals(enrollment.getStatus().name())) {
-            throw new IllegalStateException("Only failed enrollments can be retried");
+            throw new DomainStateConflictException("Only failed enrollments can be retried");
         }
         enrollment.startEnrollment();
         enrollmentRepository.save(enrollment);
