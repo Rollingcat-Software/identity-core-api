@@ -194,12 +194,20 @@ public class OtpController {
             valid = result.isApproved();
             if (!valid) {
                 // Distinguish "wrong code" from "provider unreachable" so audit
-                // logs reflect what actually happened.
-                String reason = result == VerifiableSmsService.VerifyResult.PROVIDER_ERROR
-                        ? "PROVIDER_ERROR"
-                        : "INVALID_CODE";
-                log.warn("SMS OTP mismatch for user: {} via VerifiableSmsService (reason={})",
-                        userId, reason);
+                // logs reflect what actually happened. The summary string also
+                // matches the failure mode so ops searches on
+                // "provider error" don't get swamped by genuine bad-code hits.
+                switch (result) {
+                    case PROVIDER_ERROR -> log.warn(
+                            "SMS OTP provider error for user: {} via VerifiableSmsService (reason=PROVIDER_ERROR)",
+                            userId);
+                    case INVALID_CODE -> log.warn(
+                            "SMS OTP mismatch for user: {} via VerifiableSmsService (reason=INVALID_CODE)",
+                            userId);
+                    default -> log.warn(
+                            "SMS OTP rejected for user: {} via VerifiableSmsService (reason={})",
+                            userId, result);
+                }
             }
         } else {
             valid = otpService.validate(SMS_OTP_PREFIX + userId, code);
