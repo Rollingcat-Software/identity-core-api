@@ -23,14 +23,22 @@ spring:
       connection-timeout: 30000
       idle-timeout: 600000
       max-lifetime: 1800000
+      # Hard upper bound on every query at the PostgreSQL session level (30s).
+      # Prevents a single runaway query from holding a Hikari connection
+      # indefinitely. Override per-connection if needed via env.
+      connection-init-sql: ${DB_CONNECTION_INIT_SQL:SET statement_timeout = 30000}
 
   # Flyway (Production)
+  # validate-on-migrate: TRUE enforces migration-checksum integrity. If a
+  # migration file is mutated post-apply or a migration is missing locally, the
+  # app refuses to boot. Operator override: set
+  # SPRING_FLYWAY_VALIDATE_ON_MIGRATE=false in .env.prod for emergency rollback.
   flyway:
     enabled: true
     locations: classpath:db/migration
     baseline-on-migrate: true
     baseline-version: 0
-    validate-on-migrate: false
+    validate-on-migrate: ${SPRING_FLYWAY_VALIDATE_ON_MIGRATE:true}
 
   # H2 Console (DISABLED in production for security)
   h2:
@@ -88,7 +96,10 @@ logging:
     org.springframework.security: WARN
     org.hibernate: WARN
   pattern:
-    console: "%d{yyyy-MM-dd HH:mm:ss} - %msg%n"
+    # %X{requestId} is populated by RequestIdFilter (P2.8b). Falls back to "-"
+    # when the log line is emitted off-thread (e.g. background task).
+    console: "%d{yyyy-MM-dd HH:mm:ss} [%X{requestId:--}] %-5level %logger{36} - %msg%n"
+    file: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%X{requestId:--}] %-5level %logger{36} - %msg%n"
   file:
     name: /var/log/fivucsas/identity-core-api.log
   logback:
