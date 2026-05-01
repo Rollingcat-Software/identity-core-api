@@ -193,6 +193,21 @@
             <version>10.1.0</version>
         </dependency>
 
+        <!-- ShedLock — single-replica execution guard for @Scheduled jobs.
+             Without this, multiple instances of the API (e.g. during a
+             rolling deploy) would each run SoftDeletePurgeJob and other
+             cron tasks, causing duplicate work and lock contention. -->
+        <dependency>
+            <groupId>net.javacrumbs.shedlock</groupId>
+            <artifactId>shedlock-spring</artifactId>
+            <version>5.16.0</version>
+        </dependency>
+        <dependency>
+            <groupId>net.javacrumbs.shedlock</groupId>
+            <artifactId>shedlock-provider-jdbc-template</artifactId>
+            <version>5.16.0</version>
+        </dependency>
+
         <!-- Lombok -->
         <dependency>
             <groupId>org.projectlombok</groupId>
