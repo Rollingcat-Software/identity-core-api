@@ -195,8 +195,11 @@ public class ManageVerificationService {
      * configured; never throws so the dashboard can render gracefully.</p>
      */
     public List<com.fivucsas.identity.application.dto.response.AuthFlowResponse> getVerificationFlows(UUID tenantId) {
-        if (tenantId == null) return List.of();
-        return authFlowRepository.findAllByTenantId(tenantId).stream()
+        // tenantId == null → SUPER_ADMIN platform-wide listing.
+        java.util.stream.Stream<AuthFlow> stream = tenantId == null
+                ? authFlowRepository.findAll().stream()
+                : authFlowRepository.findAllByTenantId(tenantId).stream();
+        return stream
                 .filter(f -> f.getFlowType() == FlowType.VERIFICATION)
                 .map(com.fivucsas.identity.application.dto.response.AuthFlowResponse::from)
                 .toList();
@@ -224,16 +227,92 @@ public class ManageVerificationService {
                         || s.getStatus() == VerificationSessionStatus.PENDING).count();
         long expired = sessions.stream()
                 .filter(s -> s.getStatus() == VerificationSessionStatus.EXPIRED).count();
+        double completionRate = total == 0 ? 0.0 : ((double) completed / total) * 100.0;
+        double failureRate = total == 0 ? 0.0 : ((double) failed / total) * 100.0;
         double successRate = total == 0 ? 0.0 : (double) completed / total;
+
+        // Average time-to-complete (minutes) — only over COMPLETED sessions
+        // with non-null completedAt.
+        double avgTimeMinutes = sessions.stream()
+                .filter(s -> s.getStatus() == VerificationSessionStatus.COMPLETED
+                        && s.getCompletedAt() != null && s.getCreatedAt() != null)
+                .mapToLong(s -> ChronoUnit.MINUTES.between(s.getCreatedAt(), s.getCompletedAt()))
+                .average()
+                .orElse(0.0);
+
+        // Status distribution — one entry per status that actually appears.
+        java.util.Map<VerificationSessionStatus, Long> statusCounts = sessions.stream()
+                .collect(java.util.stream.Collectors.groupingBy(
+                        VerificationSession::getStatus,
+                        java.util.stream.Collectors.counting()));
+        List<Map<String, Object>> statusDistribution = statusCounts.entrySet().stream()
+                .map(e -> {
+                    Map<String, Object> entry = new HashMap<>();
+                    entry.put("status", e.getKey().name().toLowerCase(java.util.Locale.ROOT));
+                    entry.put("count", e.getValue());
+                    return entry;
+                })
+                .toList();
+
+        // Daily verification counts — last 30 days, ISO date keys.
+        Instant cutoff = Instant.now().minus(30, ChronoUnit.DAYS);
+        java.util.Map<String, Long> perDay = sessions.stream()
+                .filter(s -> s.getCreatedAt() != null && s.getCreatedAt().isAfter(cutoff))
+                .collect(java.util.stream.Collectors.groupingBy(
+                        s -> s.getCreatedAt()
+                                .atZone(java.time.ZoneOffset.UTC)
+                                .toLocalDate()
+                                .toString(),
+                        java.util.stream.Collectors.counting()));
+        List<Map<String, Object>> dailyVerifications = perDay.entrySet().stream()
+                .sorted(java.util.Map.Entry.comparingByKey())
+                .map(e -> {
+                    Map<String, Object> entry = new HashMap<>();
+                    entry.put("date", e.getKey());
+                    entry.put("count", e.getValue());
+                    return entry;
+                })
+                .toList();
+
+        // Top failure reasons — derived from failed step results when present;
+        // empty list when there is nothing to report (UI renders "no data").
+        List<VerificationStepResult> failedSteps = sessions.stream()
+                .filter(s -> s.getStatus() == VerificationSessionStatus.FAILED)
+                .flatMap(s -> stepResultRepository.findAllBySessionIdOrderByStepNumberAsc(s.getId()).stream())
+                .filter(r -> r.getStatus() == VerificationStepStatus.FAILED)
+                .toList();
+        java.util.Map<String, Long> reasonCounts = failedSteps.stream()
+                .map(r -> r.getErrorMessage() != null && !r.getErrorMessage().isBlank()
+                        ? r.getErrorMessage()
+                        : (r.getStepType() != null ? r.getStepType() : "unknown"))
+                .collect(java.util.stream.Collectors.groupingBy(
+                        r -> r, java.util.stream.Collectors.counting()));
+        List<Map<String, Object>> failureReasons = reasonCounts.entrySet().stream()
+                .sorted(java.util.Map.Entry.<String, Long>comparingByValue().reversed())
+                .limit(10)
+                .map(e -> {
+                    Map<String, Object> entry = new HashMap<>();
+                    entry.put("reason", e.getKey());
+                    entry.put("count", e.getValue());
+                    return entry;
+                })
+                .toList();
 
         Map<String, Object> stats = new HashMap<>();
         stats.put("tenantId", tenantId != null ? tenantId.toString() : null);
         stats.put("total", total);
+        stats.put("totalVerifications", total);
         stats.put("completed", completed);
         stats.put("failed", failed);
         stats.put("inProgress", inProgress);
         stats.put("expired", expired);
         stats.put("successRate", successRate);
+        stats.put("completionRate", completionRate);
+        stats.put("failureRate", failureRate);
+        stats.put("avgTimeMinutes", avgTimeMinutes);
+        stats.put("statusDistribution", statusDistribution);
+        stats.put("dailyVerifications", dailyVerifications);
+        stats.put("failureReasons", failureReasons);
         return stats;
     }
 
