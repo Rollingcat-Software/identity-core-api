@@ -161,6 +161,34 @@ public class VerifyMfaStepService {
 
         Map<String, Object> data = req.data() != null ? req.data() : Map.of();
 
+        // WebAuthn two-phase flow: a request with action=challenge produces a
+        // server challenge that the browser feeds to navigator.credentials.get
+        // — it does not VERIFY anything yet. The original
+        // AuthController.verifyMfaStep short-circuited the substitution guard
+        // for this case so a re-request after a temporary failure would still
+        // mint a new challenge. Mirror that behavior: call the handler before
+        // the same-method guard. The handler returns a CHALLENGE result, which
+        // the substitution guard would otherwise spuriously block when the
+        // method was previously completed but the user is re-attempting.
+        boolean isChallengeRequest = "challenge".equals(data.get("action"));
+        if (isChallengeRequest) {
+            try {
+                MfaStepResult challengeResult = handler.verify(session, user, data);
+                if (challengeResult.isChallenge()) {
+                    return VerifyMfaStepResponse.passthrough(challengeResult.challengeResponse());
+                }
+                // Handler did not produce a challenge — fall through to the
+                // normal verification path so the failure is reported uniformly.
+            } catch (Exception e) {
+                log.error("AUDIT: MFA challenge error — method: {}, userId={}, error: {}, ip={}, userAgent={}",
+                        req.method(), session.getUserId(), e.getMessage(),
+                        req.clientIp(), req.userAgent(), e);
+                auditLogPort.logMfaStepFailed(session.getUserId().toString(), req.method(),
+                        "challenge-error: " + e.getMessage(), req.clientIp(), req.userAgent());
+                return VerifyMfaStepResponse.error("Challenge error: " + e.getMessage());
+            }
+        }
+
         // Same-method prevention (substitution guard, NOT a retry guard). See
         // detailed rationale in original AuthController.verifyMfaStep — only
         // reject when the method was previously completed AND is NOT the
@@ -208,10 +236,23 @@ public class VerifyMfaStepService {
         session.addCompletedMethod(reuseKey);
         session.advanceStep();
 
-        if (session.allStepsCompleted()) {
-            return completeMfa(session, user, req);
+        // Wrap the post-verification orchestration so a flow-lookup failure or
+        // token-mint failure returns a structured ERROR + audit emission
+        // instead of a 500. The legacy AuthController had a try/catch on the
+        // entire body for this reason; the refactor must preserve it.
+        try {
+            if (session.allStepsCompleted()) {
+                return completeMfa(session, user, req);
+            }
+            return advanceToNextStep(session, user, req);
+        } catch (Exception e) {
+            log.error("AUDIT: MFA orchestration error — method: {}, userId={}, error: {}, ip={}, userAgent={}",
+                    req.method(), user.getId(), e.getMessage(),
+                    req.clientIp(), req.userAgent(), e);
+            auditLogPort.logMfaStepFailed(user.getId().toString(), req.method(),
+                    "orchestration-error: " + e.getMessage(), req.clientIp(), req.userAgent());
+            return VerifyMfaStepResponse.error("MFA orchestration error: " + e.getMessage());
         }
-        return advanceToNextStep(session, user, req);
     }
 
     private VerifyMfaStepResponse completeMfa(MfaSession session, User user, VerifyMfaStepRequest req) {
