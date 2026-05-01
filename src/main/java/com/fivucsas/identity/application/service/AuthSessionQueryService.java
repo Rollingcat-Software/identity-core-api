@@ -52,10 +52,6 @@ public class AuthSessionQueryService {
             int page,
             int size) {
 
-        if (tenantId == null) {
-            throw new IllegalArgumentException("tenantId is required");
-        }
-
         int safeSize = Math.min(Math.max(size, 1), MAX_PAGE_SIZE);
         int safePage = Math.max(page, 0);
         Pageable pageable = PageRequest.of(safePage, safeSize,
@@ -63,9 +59,22 @@ public class AuthSessionQueryService {
 
         boolean hasStatusFilter = statusFilter != null && !statusFilter.isEmpty();
         boolean hasUserFilter = userId != null;
+        boolean hasTenantFilter = tenantId != null;
 
         Page<AuthSession> result;
-        if (hasUserFilter && hasStatusFilter) {
+        if (!hasTenantFilter) {
+            // SUPER_ADMIN platform-wide listing — caller scope already
+            // verified by the controller; tenant filter intentionally absent.
+            if (hasUserFilter && hasStatusFilter) {
+                result = authSessionRepository.findAllByUserIdAndStatusIn(userId, statusFilter, pageable);
+            } else if (hasUserFilter) {
+                result = authSessionRepository.findAllByUserId(userId, pageable);
+            } else if (hasStatusFilter) {
+                result = authSessionRepository.findAllByStatusIn(statusFilter, pageable);
+            } else {
+                result = authSessionRepository.findAll(pageable);
+            }
+        } else if (hasUserFilter && hasStatusFilter) {
             result = authSessionRepository.findAllByTenantIdAndUserIdAndStatusIn(
                     tenantId, userId, statusFilter, pageable);
         } else if (hasUserFilter) {

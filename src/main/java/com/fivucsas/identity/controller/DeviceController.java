@@ -70,15 +70,16 @@ public class DeviceController {
         }
         UUID effectiveTenantId;
         if (callerScope == null) {
-            // SUPER_ADMIN: must supply tenantId explicitly to avoid dumping
-            // every device in the system.
-            if (tenantId == null) {
-                throw new IllegalArgumentException("Either 'userId' or 'tenantId' query parameter is required.");
-            }
+            // SUPER_ADMIN: tenantId optional. When omitted we list every
+            // device on the platform — without this, the admin dashboard
+            // can never observe activity from non-system tenants.
             effectiveTenantId = tenantId;
         } else {
             // Tenant-scoped caller: ignore any tenantId that isn't theirs.
             effectiveTenantId = callerScope;
+        }
+        if (effectiveTenantId == null) {
+            return ResponseEntity.ok(manageDeviceUseCase.listAllDevices());
         }
         if (TenantScopeResolver.FAIL_CLOSED_EMPTY_SCOPE.equals(effectiveTenantId)) {
             return ResponseEntity.ok(List.of());

@@ -32,6 +32,11 @@ public class UserDeviceRepositoryAdapter implements UserDeviceRepositoryPort {
     }
 
     @Override
+    public List<UserDevice> findAll() {
+        return jpaRepository.findAll();
+    }
+
+    @Override
     public Optional<UserDevice> findByUserIdAndDeviceFingerprint(UUID userId, String fingerprint) {
         return jpaRepository.findByUserIdAndDeviceFingerprint(userId, fingerprint);
     }

@@ -90,10 +90,9 @@ public class AuthSessionController {
         UUID effectiveTenantId;
 
         if (callerScope == null) {
-            // SUPER_ADMIN — must supply tenantId explicitly.
-            if (tenantId == null) {
-                throw new IllegalArgumentException("'tenantId' query parameter is required for SUPER_ADMIN.");
-            }
+            // SUPER_ADMIN — `tenantId` query param optional. When omitted,
+            // we list platform-wide (cross-tenant) so the dashboard renders
+            // real activity instead of just the system tenant's empty list.
             effectiveTenantId = tenantId;
         } else if (TenantScopeResolver.FAIL_CLOSED_EMPTY_SCOPE.equals(callerScope)) {
             // Caller without resolvable tenant — fail closed (empty page).
