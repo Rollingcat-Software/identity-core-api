@@ -141,9 +141,19 @@ class ManageVerificationServiceStatsTest {
     }
 
     @Test
-    @DisplayName("getVerificationFlows with null tenant → empty list")
-    void flowsNullTenantReturnsEmpty() {
-        assertThat(service.getVerificationFlows(null)).isEmpty();
+    @DisplayName("getVerificationFlows with null tenant → platform-wide VERIFICATION flows")
+    void flowsNullTenantReturnsPlatformWide() {
+        AuthFlow kyc = AuthFlow.builder().id(UUID.randomUUID()).tenant(tenant)
+                .name("KYC").flowType(FlowType.VERIFICATION).build();
+        AuthFlow login = AuthFlow.builder().id(UUID.randomUUID()).tenant(tenant)
+                .name("Login").flowType(FlowType.AUTHENTICATION).build();
+        when(authFlowRepository.findAll()).thenReturn(List.of(kyc, login));
+
+        var flows = service.getVerificationFlows(null);
+
+        // Cross-tenant listing still filters by FlowType.VERIFICATION.
+        assertThat(flows).hasSize(1);
+        assertThat(flows.get(0).name()).isEqualTo("KYC");
     }
 
     @Test

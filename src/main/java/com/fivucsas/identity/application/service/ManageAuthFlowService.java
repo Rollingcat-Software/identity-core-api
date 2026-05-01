@@ -124,6 +124,19 @@ public class ManageAuthFlowService implements ManageAuthFlowUseCase {
             );
         }
         if (command.isDefault() != null && command.isDefault()) {
+            // Dethrone the existing default for this (tenant, operationType)
+            // pair so the "Default" column always identifies a single flow.
+            // Without this, calling setAsDefault here would silently produce
+            // two defaults — surprising for the runtime resolver and the
+            // admin UI alike.
+            authFlowRepository
+                    .findAllByTenantIdAndOperationType(tenantId, flow.getOperationType())
+                    .stream()
+                    .filter(f -> f.isDefault() && !f.getId().equals(flow.getId()))
+                    .forEach(f -> {
+                        f.unsetDefault();
+                        authFlowRepository.save(f);
+                    });
             flow.setAsDefault();
         }
         if (command.isActive() != null) {

@@ -72,16 +72,15 @@ public class VerificationController {
         UUID callerScope = tenantScopeResolver.currentScope();
         UUID effectiveTenantId;
         if (callerScope == null) {
-            // SUPER_ADMIN — honor the query param; empty list if omitted.
+            // SUPER_ADMIN — honor query param. When omitted, the service
+            // returns every VERIFICATION flow on the platform so the
+            // dashboard renders real data instead of a fake empty state.
             effectiveTenantId = tenantId;
         } else if (TenantScopeResolver.FAIL_CLOSED_EMPTY_SCOPE.equals(callerScope)) {
             return ResponseEntity.ok(List.of());
         } else {
             // Tenant-scoped caller: always pin to their own tenant.
             effectiveTenantId = callerScope;
-        }
-        if (effectiveTenantId == null) {
-            return ResponseEntity.ok(List.of());
         }
         return ResponseEntity.ok(verificationService.getVerificationFlows(effectiveTenantId));
     }

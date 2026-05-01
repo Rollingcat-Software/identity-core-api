@@ -123,14 +123,18 @@ class AuthSessionControllerListTest {
     }
 
     @Test
-    @DisplayName("SUPER_ADMIN without tenantId param → 400 (refuse to dump all tenants)")
-    void superAdminWithoutTenantIdIs400() throws Exception {
+    @DisplayName("SUPER_ADMIN without tenantId param → platform-wide listing (null tenantId passed through)")
+    void superAdminWithoutTenantIdIsPlatformWide() throws Exception {
         when(tenantScopeResolver.currentScope()).thenReturn(null);
+        when(authSessionQueryService.listForTenant(eq((UUID) null), any(), any(), eq(0), eq(20)))
+                .thenReturn(Map.of("content", List.of(), "totalElements", 0L,
+                        "totalPages", 0, "page", 0, "size", 20));
 
         mockMvc.perform(get("/api/v1/auth/sessions"))
-                .andExpect(status().isBadRequest());
+                .andExpect(status().isOk());
 
-        verify(authSessionQueryService, never()).listForTenant(any(), any(), any(), org.mockito.ArgumentMatchers.anyInt(), org.mockito.ArgumentMatchers.anyInt());
+        verify(authSessionQueryService).listForTenant(
+                eq((UUID) null), any(), any(), eq(0), eq(20));
     }
 
     @Test

@@ -27,7 +27,6 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
@@ -79,12 +78,17 @@ class AuthSessionQueryServiceTest {
     }
 
     @Test
-    @DisplayName("rejects null tenantId — admin endpoint MUST be tenant-scoped")
-    void rejectsNullTenant() {
-        assertThatThrownBy(() ->
-                service.listForTenant(null, List.of(), null, 0, 20))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("tenantId");
+    @DisplayName("null tenantId → SUPER_ADMIN platform-wide listing (delegates to findAll)")
+    void nullTenantPlatformWide() {
+        // Caller scope is verified at the controller; the service trusts a
+        // null tenantId as a deliberate "list across all tenants" request.
+        Page<AuthSession> page = new PageImpl<>(List.of(session));
+        when(authSessionRepository.findAll(any(Pageable.class))).thenReturn(page);
+
+        Map<String, Object> body = service.listForTenant(null, null, null, 0, 20);
+
+        verify(authSessionRepository).findAll(any(Pageable.class));
+        assertThat(body.get("totalElements")).isEqualTo(1L);
     }
 
     @Test

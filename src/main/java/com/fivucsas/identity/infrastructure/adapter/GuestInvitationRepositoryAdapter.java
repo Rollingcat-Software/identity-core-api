@@ -49,8 +49,23 @@ public class GuestInvitationRepositoryAdapter implements GuestInvitationReposito
     }
 
     @Override
+    public List<GuestInvitation> findAllOrderByCreatedAtDesc() {
+        return jpaRepository.findAllByOrderByCreatedAtDesc();
+    }
+
+    @Override
+    public List<GuestInvitation> findAllByStatusOrderByCreatedAtDesc(InvitationStatus status) {
+        return jpaRepository.findAllByStatusOrderByCreatedAtDesc(status);
+    }
+
+    @Override
     public long countActiveGuestsInTenant(UUID tenantId, Instant now) {
         return jpaRepository.countActiveGuestsInTenant(tenantId, now);
+    }
+
+    @Override
+    public long countActiveGuestsPlatformWide(Instant now) {
+        return jpaRepository.countActiveGuestsPlatformWide(now);
     }
 
     @Override

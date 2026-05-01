@@ -17,6 +17,9 @@ public interface UserDeviceRepositoryPort {
 
     List<UserDevice> findAllByTenantId(UUID tenantId);
 
+    /** Platform-wide listing — used by SUPER_ADMIN admin UI. */
+    List<UserDevice> findAll();
+
     Optional<UserDevice> findByUserIdAndDeviceFingerprint(UUID userId, String fingerprint);
 
     UserDevice save(UserDevice device);
