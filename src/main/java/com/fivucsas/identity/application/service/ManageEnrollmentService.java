@@ -245,15 +245,23 @@ public class ManageEnrollmentService implements ManageEnrollmentUseCase {
     private void deleteBiometricData(UUID userId, AuthMethodType methodType) {
         try {
             switch (methodType) {
-                case FACE -> biometricServicePort.deleteFace(userId);
-                case VOICE -> biometricServicePort.deleteVoice(userId);
-                // FINGERPRINT intentionally omitted (P1.4): server-side fingerprint
-                // biometric was a SHA-256 placeholder and has been removed. Platform
-                // fingerprint is WebAuthn-only — credential cleanup happens in
-                // cleanupMethodData() above (internal-transport WebAuthnCredentials).
+                case FACE -> {
+                    biometricServicePort.deleteFace(userId);
+                    log.info("Biometric data deleted from external service for user: {} method: {}", userId, methodType);
+                }
+                case VOICE -> {
+                    biometricServicePort.deleteVoice(userId);
+                    log.info("Biometric data deleted from external service for user: {} method: {}", userId, methodType);
+                }
+                case FINGERPRINT -> {
+                    // P1.4: server-side fingerprint biometric was a SHA-256 placeholder
+                    // and has been removed. Platform fingerprint is WebAuthn-only —
+                    // credential cleanup happens in cleanupMethodData() above
+                    // (internal-transport WebAuthnCredentials).
+                    log.debug("FINGERPRINT enrollment delete: WebAuthn-only, no external biometric to remove for user: {}", userId);
+                }
                 default -> { /* no-op for non-biometric types */ }
             }
-            log.info("Biometric data deleted from external service for user: {} method: {}", userId, methodType);
         } catch (Exception e) {
             log.warn("Failed to delete biometric data from external service for user: {} method: {}. " +
                      "Enrollment revocation will proceed. Error: {}", userId, methodType, e.getMessage());
