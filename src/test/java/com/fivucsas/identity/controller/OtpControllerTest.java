@@ -5,6 +5,7 @@ import com.fivucsas.identity.entity.UserStatus;
 import com.fivucsas.identity.infrastructure.email.EmailService;
 import com.fivucsas.identity.infrastructure.otp.OtpService;
 import com.fivucsas.identity.infrastructure.sms.SmsService;
+import com.fivucsas.identity.infrastructure.sms.VerifiableSmsService;
 import com.fivucsas.identity.domain.exception.UserNotFoundException;
 import com.fivucsas.identity.domain.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -16,6 +17,7 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.ResponseEntity;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.Map;
 import java.util.Optional;
@@ -160,6 +162,107 @@ class OtpControllerTest {
                     otpController.verifySmsOtp(userId, Map.of("code", "654321"));
 
             assertThat(response.getBody()).containsEntry("success", true);
+        }
+    }
+
+    /**
+     * Regression for USER-BUG-4 (2026-05-01): when production runs with
+     * {@code SMS_PROVIDER=twilio-verify}, the SmsService bean is a
+     * {@link VerifiableSmsService}. In that mode the provider generates the
+     * code itself; the local Redis-backed {@link OtpService} must be bypassed
+     * on both send and verify, otherwise the user's correctly-typed Twilio
+     * code is compared to an unrelated locally-generated code and rejected.
+     */
+    @Nested
+    @DisplayName("SMS OTP via Twilio Verify (VerifiableSmsService)")
+    class SmsOtpViaVerifiableProvider {
+
+        /** Mockito mock that implements both interfaces — mirrors the prod bean. */
+        private interface VerifiableSms extends SmsService, VerifiableSmsService {}
+
+        private VerifiableSms verifiableSms;
+
+        @BeforeEach
+        void rewireWithVerifiableSms() {
+            verifiableSms = mock(VerifiableSms.class);
+            ReflectionTestUtils.setField(otpController, "smsService", verifiableSms);
+        }
+
+        @Test
+        @DisplayName("send: must NOT call OtpService.generate (Twilio mints the code)")
+        void sendShouldNotGenerateLocalCode() {
+            when(userRepository.findById(userId)).thenReturn(Optional.of(testUser));
+
+            ResponseEntity<Map<String, Object>> response = otpController.sendSmsOtp(userId);
+
+            assertThat(response.getStatusCode().value()).isEqualTo(200);
+            // The bug: pre-fix code called otpService.generate(...) here, putting
+            // a code in Redis that verifySmsOtp would later compare against the
+            // user-entered Twilio code.
+            verify(otpService, never()).generate(any());
+            verify(verifiableSms).sendOtp(eq("+905551234567"), any());
+        }
+
+        @Test
+        @DisplayName("verify: must delegate to VerifiableSmsService.verifyCode, not OtpService.validate")
+        void verifyShouldDelegateToProvider() {
+            when(userRepository.findById(userId)).thenReturn(Optional.of(testUser));
+            when(verifiableSms.verifyCode("+905551234567", "654321")).thenReturn(true);
+
+            ResponseEntity<Map<String, Object>> response =
+                    otpController.verifySmsOtp(userId, Map.of("code", "654321"));
+
+            assertThat(response.getBody()).containsEntry("success", true);
+            verify(verifiableSms).verifyCode("+905551234567", "654321");
+            verify(otpService, never()).validate(any(), any());
+        }
+
+        @Test
+        @DisplayName("verify: rejects when provider says invalid")
+        void verifyRejectsWhenProviderReturnsFalse() {
+            when(userRepository.findById(userId)).thenReturn(Optional.of(testUser));
+            when(verifiableSms.verifyCode("+905551234567", "000000")).thenReturn(false);
+
+            ResponseEntity<Map<String, Object>> response =
+                    otpController.verifySmsOtp(userId, Map.of("code", "000000"));
+
+            assertThat(response.getBody()).containsEntry("success", false);
+        }
+
+        @Test
+        @DisplayName("verify: strips zero-width / bidi marks from carrier-relayed code (NFKC)")
+        void verifyNormalizesUnicodeMarks() {
+            when(userRepository.findById(userId)).thenReturn(Optional.of(testUser));
+            // Provider only ever sees the cleaned digits.
+            when(verifiableSms.verifyCode("+905551234567", "654321")).thenReturn(true);
+
+            // U+200E LEFT-TO-RIGHT MARK + U+FEFF ZWNBSP wrapped around digits,
+            // plus surrounding whitespace — the kind of payload Turkish carriers
+            // sometimes inject before relaying SMS to RCS clients.
+            String dirty = " ‎654321﻿ ";
+            ResponseEntity<Map<String, Object>> response =
+                    otpController.verifySmsOtp(userId, Map.of("code", dirty));
+
+            assertThat(response.getBody()).containsEntry("success", true);
+            verify(verifiableSms).verifyCode("+905551234567", "654321");
+        }
+    }
+
+    @Nested
+    @DisplayName("Code normalization")
+    class CodeNormalization {
+
+        @Test
+        @DisplayName("normalizeCode strips whitespace, ZWSP, BOM, LRM/RLM and NFKC-normalizes")
+        void normalizesUnicode() {
+            assertThat(OtpController.normalizeCode(" 123456 ")).isEqualTo("123456");
+            assertThat(OtpController.normalizeCode("​123456‌")).isEqualTo("123456");
+            assertThat(OtpController.normalizeCode("‎654321﻿")).isEqualTo("654321");
+            // Fullwidth digits → NFKC → ASCII digits
+            assertThat(OtpController.normalizeCode("１２３４５６")).isEqualTo("123456");
+            assertThat(OtpController.normalizeCode(null)).isNull();
+            assertThat(OtpController.normalizeCode("")).isNull();
+            assertThat(OtpController.normalizeCode("   ")).isNull();
         }
     }
 }
