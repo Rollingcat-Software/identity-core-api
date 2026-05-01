@@ -4,6 +4,7 @@ import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.infrastructure.email.EmailService;
 import com.fivucsas.identity.infrastructure.otp.OtpService;
 import com.fivucsas.identity.infrastructure.sms.SmsService;
+import com.fivucsas.identity.infrastructure.sms.VerifiableSmsService;
 import com.fivucsas.identity.infrastructure.totp.TotpService;
 import com.fivucsas.identity.security.TotpSecretCipher;
 import com.fivucsas.identity.domain.repository.UserRepository;
@@ -17,6 +18,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
+import java.text.Normalizer;
 import java.time.Duration;
 import java.util.Map;
 import java.util.UUID;
@@ -43,6 +45,25 @@ public class OtpController {
     private final UserRepository userRepository;
     private final StringRedisTemplate redisTemplate;
     private final TotpSecretCipher totpSecretCipher;
+
+    /**
+     * Normalize an OTP code coming from a user-typed input or carrier-relayed
+     * SMS. Strips zero-width / bidi formatting marks (some carriers and IMEs
+     * inject these), NFC-normalizes Unicode digits, and trims surrounding
+     * whitespace. Without this, a code visually identical to the stored value
+     * compares non-equal because of an invisible U+200E / U+200F / U+FEFF.
+     *
+     * @return null if the input is null/blank after normalization
+     */
+    static String normalizeCode(String raw) {
+        if (raw == null) return null;
+        String stripped = raw
+                // Zero-width + BOM + bidi formatting marks
+                .replaceAll("[\\u200B-\\u200F\\u202A-\\u202E\\u2060\\uFEFF]", "")
+                .trim();
+        if (stripped.isEmpty()) return null;
+        return Normalizer.normalize(stripped, Normalizer.Form.NFKC);
+    }
 
     // --- /api/v1/otp endpoints ---
 
@@ -73,12 +94,15 @@ public class OtpController {
             @RequestBody Map<String, String> request) {
         log.info("Email OTP verify request for user: {}", userId);
 
-        String code = request.get("code");
-        if (code == null || code.isBlank()) {
+        String code = normalizeCode(request.get("code"));
+        if (code == null) {
             return ResponseEntity.badRequest().body(Map.of("success", false, "message", "code is required"));
         }
 
         boolean valid = otpService.validate(EMAIL_OTP_PREFIX + userId, code);
+        if (!valid) {
+            log.warn("Email OTP mismatch for user: {} (reason=OTP_MISMATCH_OR_EXPIRED)", userId);
+        }
 
         return ResponseEntity.ok(Map.of(
                 "success", valid,
@@ -102,8 +126,20 @@ public class OtpController {
             ));
         }
 
-        String code = otpService.generate(SMS_OTP_PREFIX + userId);
-        smsService.sendOtp(user.getPhoneNumber(), code);
+        // When the configured SmsService is a VerifiableSmsService (e.g. Twilio
+        // Verify), the provider generates and stores the code itself — the
+        // `code` argument to sendOtp(...) is intentionally ignored. We must NOT
+        // pre-generate a local Redis code in that case, because verifySmsOtp
+        // would otherwise compare the user-entered Twilio code against an
+        // unrelated local code and always reject the first attempt.
+        // (USER-BUG-4 root cause, 2026-05-01.)
+        if (smsService instanceof VerifiableSmsService) {
+            smsService.sendOtp(user.getPhoneNumber(), "");
+            log.info("SMS OTP send delegated to VerifiableSmsService for user: {}", userId);
+        } else {
+            String code = otpService.generate(SMS_OTP_PREFIX + userId);
+            smsService.sendOtp(user.getPhoneNumber(), code);
+        }
 
         return ResponseEntity.ok(Map.of(
                 "success", true,
@@ -120,12 +156,36 @@ public class OtpController {
             @RequestBody Map<String, String> request) {
         log.info("SMS OTP verify request for user: {}", userId);
 
-        String code = request.get("code");
-        if (code == null || code.isBlank()) {
+        String code = normalizeCode(request.get("code"));
+        if (code == null) {
             return ResponseEntity.badRequest().body(Map.of("success", false, "message", "code is required"));
         }
 
-        boolean valid = otpService.validate(SMS_OTP_PREFIX + userId, code);
+        boolean valid;
+        if (smsService instanceof VerifiableSmsService verifiable) {
+            // Provider-side verification (e.g. Twilio Verify). Look up the
+            // phone number on the User record — that's the destination Twilio
+            // sent the code to, and Twilio matches by `to` + `code`.
+            User user = userRepository.findById(userId)
+                    .orElseThrow(() -> new UserNotFoundException(userId.toString()));
+            String phoneNumber = user.getPhoneNumber();
+            if (phoneNumber == null || phoneNumber.isBlank()) {
+                log.warn("SMS OTP verify rejected for user: {} (reason=NO_PHONE)", userId);
+                return ResponseEntity.badRequest().body(Map.of(
+                        "success", false,
+                        "message", "User does not have a phone number configured"
+                ));
+            }
+            valid = verifiable.verifyCode(phoneNumber, code);
+            if (!valid) {
+                log.warn("SMS OTP mismatch for user: {} via VerifiableSmsService (reason=PROVIDER_REJECTED)", userId);
+            }
+        } else {
+            valid = otpService.validate(SMS_OTP_PREFIX + userId, code);
+            if (!valid) {
+                log.warn("SMS OTP mismatch for user: {} via local OTP store (reason=OTP_MISMATCH_OR_EXPIRED)", userId);
+            }
+        }
 
         return ResponseEntity.ok(Map.of(
                 "success", valid,
