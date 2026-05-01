@@ -11,7 +11,7 @@ import javax.sql.DataSource;
 
 /**
  * Wires ShedLock into the Spring context so {@code @SchedulerLock}-annotated
- * methods take a row-level lease in {@code shedlock} (see V53 migration)
+ * methods take a row-level lease in {@code shedlock} (see V51 migration)
  * before executing.
  *
  * <p>Without this, multiple replicas of identity-core-api would each run
