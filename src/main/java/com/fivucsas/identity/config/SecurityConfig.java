@@ -1,5 +1,6 @@
 package com.fivucsas.identity.config;
 
+import com.fivucsas.identity.infrastructure.multitenancy.TenantBindFromAuthFilter;
 import com.fivucsas.identity.infrastructure.web.RequestIdFilter;
 import com.fivucsas.identity.security.JwtAuthenticationFilter;
 import com.fivucsas.identity.security.RbacPermissionEvaluator;
@@ -40,6 +41,7 @@ public class SecurityConfig {
 
     private final JwtAuthenticationFilter jwtAuthFilter;
     private final RequestIdFilter requestIdFilter;
+    private final TenantBindFromAuthFilter tenantBindFromAuthFilter;
     private final UserDetailsService userDetailsService;
     private final RbacPermissionEvaluator rbacPermissionEvaluator;
 
@@ -193,7 +195,14 @@ public class SecurityConfig {
                 .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class)
                 // P2.8b: RequestIdFilter must run before auth so any log lines
                 // emitted by JwtAuthenticationFilter carry the requestId MDC.
-                .addFilterBefore(requestIdFilter, JwtAuthenticationFilter.class);
+                .addFilterBefore(requestIdFilter, JwtAuthenticationFilter.class)
+                // P0-SEC-1 (SECURITY_REVIEW_2026-05-01): TenantContextFilter
+                // (Order(1)) trusts X-Tenant-ID at face value. Right after the
+                // JWT auth filter has populated SecurityContextHolder, rebind
+                // TenantContext to the JWT-derived tenantId so a forged header
+                // can no longer swap tenants for an authenticated user.
+                // SUPER_ADMIN keeps the legitimate cross-tenant override.
+                .addFilterAfter(tenantBindFromAuthFilter, JwtAuthenticationFilter.class);
 
         // Only disable frame options for H2 console in non-prod profiles
         if (!isProductionProfile()) {
