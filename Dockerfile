@@ -52,8 +52,19 @@ EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD curl -f http://localhost:8080/actuator/health || exit 1
 
-# JVM options for containers
-ENV JAVA_OPTS="-Xms256m -Xmx512m -XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0"
+# JVM options for containers.
+#
+# -Xms/-Xmx are deliberately omitted: the prior `-Xmx512m` silently
+# overrode `MaxRAMPercentage` and capped the heap at 512 MB even though
+# the production container runs with a 2 GiB limit. Removing the
+# explicit -Xmx restores the percentage-based sizing — at 75% of 2 GiB
+# the heap is ~1.5 GB, ~3× the prior cap, which removes the most common
+# young-GC pause class on /auth/login and /users.
+#
+# UseContainerSupport is the default on Java 21 but kept explicit for
+# clarity. ExitOnOutOfMemoryError + heap-dump-on-OOM produce a
+# diagnosable artifact instead of a half-alive container.
+ENV JAVA_OPTS="-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0 -XX:InitialRAMPercentage=50.0 -XX:+UseG1GC -XX:MaxGCPauseMillis=200 -XX:+ExitOnOutOfMemoryError -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=/tmp/heapdump.hprof"
 
 # Run the application
 ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS -jar app.jar"]
