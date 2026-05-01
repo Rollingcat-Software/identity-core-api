@@ -1,5 +1,9 @@
 package com.fivucsas.identity.controller;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.entity.UserStatus;
 import com.fivucsas.identity.infrastructure.email.EmailService;
@@ -8,6 +12,7 @@ import com.fivucsas.identity.infrastructure.sms.SmsService;
 import com.fivucsas.identity.infrastructure.sms.VerifiableSmsService;
 import com.fivucsas.identity.domain.exception.UserNotFoundException;
 import com.fivucsas.identity.domain.repository.UserRepository;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -16,6 +21,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
 import org.springframework.test.util.ReflectionTestUtils;
 
@@ -196,11 +202,29 @@ class OtpControllerTest {
         private interface VerifiableSms extends SmsService, VerifiableSmsService {}
 
         private VerifiableSms verifiableSms;
+        private Logger otpControllerLogger;
+        private ListAppender<ILoggingEvent> logAppender;
 
         @BeforeEach
         void rewireWithVerifiableSms() {
             verifiableSms = mock(VerifiableSms.class);
             ReflectionTestUtils.setField(otpController, "smsService", verifiableSms);
+
+            // Attach a Logback ListAppender so the PROVIDER_ERROR /
+            // INVALID_CODE branch tests can assert what was actually
+            // logged, not just the response body shape.
+            otpControllerLogger = (Logger) LoggerFactory.getLogger(OtpController.class);
+            logAppender = new ListAppender<>();
+            logAppender.start();
+            otpControllerLogger.addAppender(logAppender);
+        }
+
+        @AfterEach
+        void detachAppender() {
+            if (otpControllerLogger != null && logAppender != null) {
+                otpControllerLogger.detachAppender(logAppender);
+                logAppender.stop();
+            }
         }
 
         @Test
@@ -234,7 +258,7 @@ class OtpControllerTest {
         }
 
         @Test
-        @DisplayName("verify: rejects when provider says INVALID_CODE")
+        @DisplayName("verify: rejects when provider says INVALID_CODE — logs reason=INVALID_CODE")
         void verifyRejectsWhenProviderReturnsInvalid() {
             when(userRepository.findById(userId)).thenReturn(Optional.of(testUser));
             when(verifiableSms.verifyCodeDetailed("+905551234567", "000000"))
@@ -244,10 +268,23 @@ class OtpControllerTest {
                     otpController.verifySmsOtp(userId, Map.of("code", "000000"));
 
             assertThat(response.getBody()).containsEntry("success", false);
+
+            // The branch under test logs a WARN with reason=INVALID_CODE
+            // and the message prefix "SMS OTP mismatch". Assert both so a
+            // future refactor that collapses the switch back to a single
+            // string fails this test.
+            assertThat(logAppender.list)
+                    .as("OtpController must log SMS OTP mismatch with reason=INVALID_CODE")
+                    .anySatisfy(event -> {
+                        assertThat(event.getLevel()).isEqualTo(Level.WARN);
+                        String formatted = event.getFormattedMessage();
+                        assertThat(formatted).contains("SMS OTP mismatch");
+                        assertThat(formatted).contains("reason=INVALID_CODE");
+                    });
         }
 
         @Test
-        @DisplayName("verify: rejects (with PROVIDER_ERROR audit reason) when provider call errors")
+        @DisplayName("verify: rejects (logs reason=PROVIDER_ERROR + 'provider error' summary) when provider call errors")
         void verifyRejectsOnProviderError() {
             when(userRepository.findById(userId)).thenReturn(Optional.of(testUser));
             when(verifiableSms.verifyCodeDetailed("+905551234567", "999999"))
@@ -257,8 +294,24 @@ class OtpControllerTest {
                     otpController.verifySmsOtp(userId, Map.of("code", "999999"));
 
             // Same outward shape (no info leak), but the controller logs
-            // reason=PROVIDER_ERROR vs reason=INVALID_CODE for ops triage.
+            // reason=PROVIDER_ERROR vs reason=INVALID_CODE for ops triage,
+            // and the summary string says "provider error" (not "mismatch")
+            // so dashboards filtering on free text don't lump the two.
             assertThat(response.getBody()).containsEntry("success", false);
+
+            assertThat(logAppender.list)
+                    .as("OtpController must log SMS OTP provider error with reason=PROVIDER_ERROR")
+                    .anySatisfy(event -> {
+                        assertThat(event.getLevel()).isEqualTo(Level.WARN);
+                        String formatted = event.getFormattedMessage();
+                        assertThat(formatted).contains("SMS OTP provider error");
+                        assertThat(formatted).contains("reason=PROVIDER_ERROR");
+                    });
+            // Negative assertion: the misleading "mismatch" wording from
+            // the pre-fix code must NOT appear for a provider-error case.
+            assertThat(logAppender.list)
+                    .noneSatisfy(event -> assertThat(event.getFormattedMessage())
+                            .contains("SMS OTP mismatch"));
         }
 
         @Test

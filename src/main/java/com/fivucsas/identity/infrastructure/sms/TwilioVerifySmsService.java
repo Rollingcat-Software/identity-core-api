@@ -60,7 +60,10 @@ public class TwilioVerifySmsService implements SmsService, VerifiableSmsService 
                     .setCode(code)
                     .create();
         } catch (Exception e) {
-            log.warn("Twilio Verify check failed for {}: {}", phoneNumber, e.getMessage());
+            // Pass the exception as the last arg so SLF4J logs the full
+            // stack trace (not just e.getMessage(), which loses the cause
+            // chain — e.g. wrapped TimeoutException inside ApiException).
+            log.warn("Twilio Verify check failed for {}: {}", phoneNumber, e.getMessage(), e);
             return VerifyResult.PROVIDER_ERROR;
         }
         log.info("Twilio Verify check for {} — status: {}", phoneNumber, check.getStatus());
