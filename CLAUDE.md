@@ -29,6 +29,13 @@ docker compose -f docker-compose.prod.yml --env-file .env.prod up -d identity-co
 
 Password, EmailOtp, SmsOtp, Totp, QrCode, Face, Fingerprint, Voice, NfcDocument, HardwareKey
 
+**Note (P1.4)**: `FINGERPRINT` is delivered exclusively via WebAuthn platform authenticator
+(FingerprintAuthHandler). The legacy server-side fingerprint biometric path
+(`/api/v1/biometric/fingerprint/{enroll,verify,delete}` + BiometricServicePort.{enroll,verify,delete}Fingerprint)
+was removed because the biometric-processor backend was a SHA-256 hash placeholder,
+not a real biometric. The `AuthMethodType.FINGERPRINT` enum value is retained
+(used by WebAuthn) and 3 existing user_enrollments rows continue to work.
+
 ## Key Patterns
 
 - **N-step MFA**: JWT deferred until all steps complete. `POST /auth/mfa/step` with session token. RFC 8176 `amr` claim.

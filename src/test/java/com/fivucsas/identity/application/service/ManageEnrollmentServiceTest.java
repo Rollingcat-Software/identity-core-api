@@ -209,15 +209,16 @@ class ManageEnrollmentServiceTest {
 
     @Test
     void revokeEnrollment_WhenBiometricDeleteFails_ShouldStillRevoke() {
-        // given
+        // given — use FACE since FINGERPRINT no longer calls biometricServicePort
+        // after P1.4 (server-side fingerprint biometric removed; WebAuthn-only).
         UserEnrollment enrollment = mock(UserEnrollment.class);
-        when(userEnrollmentRepository.findByUserIdAndAuthMethodType(userId, AuthMethodType.FINGERPRINT))
+        when(userEnrollmentRepository.findByUserIdAndAuthMethodType(userId, AuthMethodType.FACE))
                 .thenReturn(Optional.of(enrollment));
         doThrow(new RuntimeException("Connection refused"))
-                .when(biometricServicePort).deleteFingerprint(userId);
+                .when(biometricServicePort).deleteFace(userId);
 
         // when
-        service.revokeEnrollment(userId, AuthMethodType.FINGERPRINT);
+        service.revokeEnrollment(userId, AuthMethodType.FACE);
 
         // then - enrollment should still be revoked even though biometric delete failed
         verify(enrollment).revoke();

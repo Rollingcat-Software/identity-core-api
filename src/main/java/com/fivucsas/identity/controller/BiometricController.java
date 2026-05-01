@@ -142,65 +142,11 @@ public class BiometricController {
         return ResponseEntity.ok(mapToVerificationResponse(response));
     }
 
-    @PostMapping("/api/v1/biometric/fingerprint/enroll/{userId}")
-    @Operation(summary = "Enroll user's fingerprint biometric data")
-    @PreAuthorize("hasAuthority('biometric:enroll') or @userSecurityService.isCurrentUser(#userId)")
-    public ResponseEntity<BiometricVerificationResponse> enrollFingerprint(
-            @PathVariable UUID userId,
-            @RequestBody Map<String, String> request) {
-
-        log.info("Fingerprint enrollment request for user: {}", userId);
-
-        String fingerprintData = request.get("fingerprintData");
-        if (fingerprintData == null || fingerprintData.isBlank()) {
-            return ResponseEntity.badRequest().body(
-                BiometricVerificationResponse.builder()
-                    .verified(false).confidence(0.0)
-                    .message("fingerprintData is required").build());
-        }
-
-        Map<String, Object> result = biometricServicePort.enrollFingerprint(userId, fingerprintData);
-        boolean success = Boolean.TRUE.equals(result.get("success"))
-                || "true".equalsIgnoreCase(String.valueOf(result.get("success")));
-
-        if (success) {
-            recordEnrollmentScores(userId, AuthMethodType.FINGERPRINT, result);
-        }
-
-        return ResponseEntity.ok(BiometricVerificationResponse.builder()
-            .verified(success)
-            .confidence(success ? 1.0 : 0.0)
-            .message(success ? "Fingerprint enrolled successfully" : String.valueOf(result.get("message")))
-            .build());
-    }
-
-    @PostMapping("/api/v1/biometric/fingerprint/verify/{userId}")
-    @Operation(summary = "Verify user's fingerprint against enrolled biometric data")
-    @PreAuthorize("hasAuthority('biometric:verify') or @userSecurityService.isCurrentUser(#userId)")
-    public ResponseEntity<BiometricVerificationResponse> verifyFingerprint(
-            @PathVariable UUID userId,
-            @RequestBody Map<String, String> request) {
-
-        log.info("Fingerprint verification request for user: {}", userId);
-
-        String fingerprintData = request.get("fingerprintData");
-        if (fingerprintData == null || fingerprintData.isBlank()) {
-            return ResponseEntity.badRequest().body(
-                BiometricVerificationResponse.builder()
-                    .verified(false).confidence(0.0)
-                    .message("fingerprintData is required").build());
-        }
-
-        Map<String, Object> result = biometricServicePort.verifyFingerprint(userId, fingerprintData);
-        boolean verified = Boolean.TRUE.equals(result.get("verified"))
-                || "true".equalsIgnoreCase(String.valueOf(result.get("verified")));
-
-        return ResponseEntity.ok(BiometricVerificationResponse.builder()
-            .verified(verified)
-            .confidence(verified ? 1.0 : 0.0)
-            .message(verified ? "Fingerprint verified successfully" : "Fingerprint verification failed")
-            .build());
-    }
+    // Fingerprint enroll/verify endpoints removed (P1.4): the biometric-processor
+    // backend was a SHA-256 hash placeholder, not a real biometric. Platform
+    // fingerprint authentication is now provided exclusively via WebAuthn (FIDO2)
+    // through FingerprintAuthHandler, which uses the platform authenticator and
+    // signed assertions — see /api/v1/auth/mfa/step with method=FINGERPRINT.
 
     @PostMapping("/api/v1/biometric/voice/enroll/{userId}")
     @Operation(summary = "Enroll user's voice biometric data")
@@ -279,22 +225,9 @@ public class BiometricController {
             .build());
     }
 
-    @DeleteMapping("/api/v1/biometric/fingerprint/{userId}")
-    @Operation(summary = "Delete user's enrolled fingerprint biometric data")
-    @PreAuthorize("hasAuthority('biometric:delete') or @userSecurityService.isCurrentUser(#userId)")
-    public ResponseEntity<BiometricVerificationResponse> deleteFingerprint(@PathVariable UUID userId) {
-        log.info("Fingerprint deletion request for user: {}", userId);
-
-        Map<String, Object> result = biometricServicePort.deleteFingerprint(userId);
-        boolean success = Boolean.TRUE.equals(result.get("success"))
-                || "true".equalsIgnoreCase(String.valueOf(result.get("success")));
-
-        return ResponseEntity.ok(BiometricVerificationResponse.builder()
-            .verified(success)
-            .confidence(0.0)
-            .message(success ? "Fingerprint data deleted successfully" : String.valueOf(result.get("message")))
-            .build());
-    }
+    // Fingerprint delete endpoint removed (P1.4): WebAuthn credentials are deleted
+    // through ManageEnrollmentService.cleanupMethodData (FINGERPRINT case),
+    // which scopes to internal-transport WebAuthn credentials.
 
     @DeleteMapping("/api/v1/biometric/voice/{userId}")
     @Operation(summary = "Delete user's enrolled voice biometric data")
