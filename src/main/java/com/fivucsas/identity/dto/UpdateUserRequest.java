@@ -27,7 +27,17 @@ public class UpdateUserRequest {
     @Pattern(regexp = "^[0-9]{11}$", message = "ID number must be 11 digits")
     private String idNumber;
 
-    @Pattern(regexp = "^\\+?[0-9]{10,15}$", message = "Invalid phone number format")
+    /**
+     * Phone number in strict E.164 format (USER-BUG-4 follow-up).
+     * Required prefix `+`, country-code first digit 1-9, total 10-15 digits.
+     * Twilio Verify matches `to` + `code` byte-for-byte: a non-E.164 input
+     * sends to one normalized number but verifies against the raw string
+     * the server stored, producing a silent send-OK / verify-FAIL.
+     * <p>
+     * Error code: {@code phone.e164} — consumed by formatApiError in the web client.
+     */
+    @Pattern(regexp = "^\\+[1-9]\\d{9,14}$",
+             message = "phone.e164: Phone number must be in E.164 format (e.g. +905551234567)")
     private String phoneNumber;
 
     @Size(max = 500, message = "Address must not exceed 500 characters")
