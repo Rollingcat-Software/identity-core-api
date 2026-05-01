@@ -10,9 +10,11 @@ import java.util.Map;
  * Strategy for verifying a single step of an N-step MFA flow.
  *
  * <p>One implementation exists per {@link AuthMethodType}; Spring auto-injects
- * them into {@link VerifyMfaStepService} via a typed {@code Map}. Each handler
- * is a thin wrapper around the per-method correctness check that previously
- * lived inline in {@code AuthController.verifyMfaStep}.
+ * the {@code List<VerifyMfaStepHandler>} into {@link VerifyMfaStepService},
+ * which indexes them into an {@link java.util.EnumMap} keyed by
+ * {@link #supports()}. Each handler is a thin wrapper around the per-method
+ * correctness check that previously lived inline in
+ * {@code AuthController.verifyMfaStep}.
  *
  * <p>Handlers MUST NOT:
  * <ul>
