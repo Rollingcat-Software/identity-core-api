@@ -167,9 +167,11 @@ public class VerifyMfaStepService {
         // AuthController.verifyMfaStep short-circuited the substitution guard
         // for this case so a re-request after a temporary failure would still
         // mint a new challenge. Mirror that behavior: call the handler before
-        // the same-method guard. The handler returns a CHALLENGE result, which
-        // the substitution guard would otherwise spuriously block when the
-        // method was previously completed but the user is re-attempting.
+        // the same-method guard. The handler MUST return a CHALLENGE result
+        // when action=challenge; anything else (valid, invalid, throw) is a
+        // contract violation that we surface as 400 BAD_REQUEST, NOT by
+        // re-invoking the handler in the normal path (which would
+        // double-process counters / attempt tracking).
         boolean isChallengeRequest = "challenge".equals(data.get("action"));
         if (isChallengeRequest) {
             try {
@@ -177,15 +179,34 @@ public class VerifyMfaStepService {
                 if (challengeResult.isChallenge()) {
                     return VerifyMfaStepResponse.passthrough(challengeResult.challengeResponse());
                 }
-                // Handler did not produce a challenge — fall through to the
-                // normal verification path so the failure is reported uniformly.
-            } catch (Exception e) {
-                log.error("AUDIT: MFA challenge error — method: {}, userId={}, error: {}, ip={}, userAgent={}",
-                        req.method(), session.getUserId(), e.getMessage(),
+                // Handler returned a non-challenge result for action=challenge.
+                // This is a contract violation — surface as 400 instead of
+                // calling the handler a second time on the verification path.
+                log.warn("AUDIT: MFA challenge handler returned non-challenge result — method: {}, userId={}",
+                        req.method(), session.getUserId());
+                auditLogPort.logMfaStepFailed(session.getUserId().toString(), req.method(),
+                        "challenge-handler-contract-violation", req.clientIp(), req.userAgent());
+                return VerifyMfaStepResponse.badRequest(
+                        "Challenge action is not supported for method " + req.method());
+            } catch (RuntimeException e) {
+                // Handler signature is `verify(...) throws nothing` — only
+                // RuntimeExceptions can escape. We re-set the interrupt flag
+                // if the cause chain contains an InterruptedException (e.g.
+                // an HTTP client wrapping InterruptedException in
+                // RuntimeException) so cooperative cancellation isn't lost.
+                if (containsInterrupted(e)) {
+                    Thread.currentThread().interrupt();
+                }
+                // Detailed message goes to the server log + audit row only —
+                // never the client (could leak upstream IDs / config / stack
+                // context). User sees a stable, non-leaking message.
+                log.error("AUDIT: MFA challenge error — method: {}, userId={}, ip={}, userAgent={}",
+                        req.method(), session.getUserId(),
                         req.clientIp(), req.userAgent(), e);
                 auditLogPort.logMfaStepFailed(session.getUserId().toString(), req.method(),
-                        "challenge-error: " + e.getMessage(), req.clientIp(), req.userAgent());
-                return VerifyMfaStepResponse.error("Challenge error: " + e.getMessage());
+                        "challenge-error: " + e.getClass().getSimpleName(),
+                        req.clientIp(), req.userAgent());
+                return VerifyMfaStepResponse.error("Challenge could not be created");
             }
         }
 
@@ -209,13 +230,19 @@ public class VerifyMfaStepService {
         MfaStepResult result;
         try {
             result = handler.verify(session, user, data);
-        } catch (Exception e) {
-            log.error("AUDIT: MFA step error — method: {}, userId={}, error: {}, ip={}, userAgent={}",
-                    req.method(), session.getUserId(), e.getMessage(),
+        } catch (RuntimeException e) {
+            if (containsInterrupted(e)) {
+                Thread.currentThread().interrupt();
+            }
+            // Detailed message in server log + audit only — never to the
+            // client. User sees a stable non-leaking message.
+            log.error("AUDIT: MFA step error — method: {}, userId={}, ip={}, userAgent={}",
+                    req.method(), session.getUserId(),
                     req.clientIp(), req.userAgent(), e);
             auditLogPort.logMfaStepFailed(session.getUserId().toString(), req.method(),
-                    "error: " + e.getMessage(), req.clientIp(), req.userAgent());
-            return VerifyMfaStepResponse.error("Verification error: " + e.getMessage());
+                    "error: " + e.getClass().getSimpleName(),
+                    req.clientIp(), req.userAgent());
+            return VerifyMfaStepResponse.error("Verification could not be completed");
         }
 
         if (result.isChallenge()) {
@@ -245,14 +272,35 @@ public class VerifyMfaStepService {
                 return completeMfa(session, user, req);
             }
             return advanceToNextStep(session, user, req);
-        } catch (Exception e) {
-            log.error("AUDIT: MFA orchestration error — method: {}, userId={}, error: {}, ip={}, userAgent={}",
-                    req.method(), user.getId(), e.getMessage(),
+        } catch (RuntimeException e) {
+            if (containsInterrupted(e)) {
+                Thread.currentThread().interrupt();
+            }
+            // Detailed message in server log + audit only.
+            log.error("AUDIT: MFA orchestration error — method: {}, userId={}, ip={}, userAgent={}",
+                    req.method(), user.getId(),
                     req.clientIp(), req.userAgent(), e);
             auditLogPort.logMfaStepFailed(user.getId().toString(), req.method(),
-                    "orchestration-error: " + e.getMessage(), req.clientIp(), req.userAgent());
-            return VerifyMfaStepResponse.error("MFA orchestration error: " + e.getMessage());
+                    "orchestration-error: " + e.getClass().getSimpleName(),
+                    req.clientIp(), req.userAgent());
+            return VerifyMfaStepResponse.error("MFA could not be completed");
         }
+    }
+
+    /**
+     * Walks the cause chain of {@code t} looking for an
+     * {@link InterruptedException}. Used to re-set the thread interrupt flag
+     * when an HTTP client / executor wrapped {@code InterruptedException} as
+     * a {@link RuntimeException} so cooperative cancellation isn't lost.
+     */
+    private static boolean containsInterrupted(Throwable t) {
+        while (t != null) {
+            if (t instanceof InterruptedException) {
+                return true;
+            }
+            t = t.getCause();
+        }
+        return false;
     }
 
     private VerifyMfaStepResponse completeMfa(MfaSession session, User user, VerifyMfaStepRequest req) {
