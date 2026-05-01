@@ -263,12 +263,20 @@ public class GlobalExceptionHandler {
 
     /**
      * Domain "state conflict" — e.g. invitation already exists, attempt to
-     * accept an expired invite, etc. Maps to HTTP 409 Conflict so the UI can
-     * show a meaningful message instead of a generic 500.
+     * accept an expired invite, retry a non-failed enrollment, etc. Maps to
+     * HTTP 409 Conflict so the UI can show a meaningful message instead of a
+     * generic 500.
+     *
+     * <p>Copilot post-merge round 5: narrowed from
+     * {@link IllegalStateException} (which is also thrown for internal/server
+     * faults like crypto/key loading, missing JWT claims, and tenant context
+     * errors) to a dedicated {@link DomainStateConflictException}. Generic
+     * {@code IllegalStateException} now falls through to the default 500
+     * handler so operational issues are not silently masked as 409s.</p>
      */
-    @ExceptionHandler(IllegalStateException.class)
-    public ResponseEntity<ErrorResponse> handleIllegalState(
-            IllegalStateException ex,
+    @ExceptionHandler(DomainStateConflictException.class)
+    public ResponseEntity<ErrorResponse> handleDomainStateConflict(
+            DomainStateConflictException ex,
             HttpServletRequest request) {
         log.warn("State conflict: {}", ex.getMessage());
 

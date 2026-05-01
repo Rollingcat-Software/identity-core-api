@@ -304,23 +304,25 @@ public class UserController {
         User currentUser = rbacService.getCurrentUser()
                 .orElseThrow(() -> new UnauthorizedException());
 
-        // Resolve target tenant: SUPER_ADMIN may pin to any tenant via the
-        // optional `tenantId` query param; tenant-scoped callers always invite
-        // into their own tenant. Caller without a resolvable tenant rejects
-        // with 400 rather than NPE'ing on currentUser.getTenant().
+        // Resolve target tenant: SUPER_ADMIN MUST pin to a tenant via the
+        // `tenantId` query param (no silent fallback to currentUser.tenant /
+        // system tenant); tenant-scoped callers always invite into their own
+        // tenant. Caller without a resolvable tenant rejects with 400 rather
+        // than defaulting into an unintended tenant.
+        // Copilot post-merge round 5: previous fallback would silently invite
+        // guests into the SUPER_ADMIN's home (often `system`) tenant when the
+        // caller forgot `?tenantId=`. Now the request fails fast with 400.
         UUID callerScope = tenantScopeResolver.currentScope();
         Tenant targetTenant;
         if (callerScope == null) {
-            // SUPER_ADMIN — must pick a tenant to invite into
-            UUID effectiveTenantId = tenantId != null ? tenantId :
-                    (currentUser.getTenant() != null ? currentUser.getTenant().getId() : null);
-            if (effectiveTenantId == null) {
+            // SUPER_ADMIN — must pick a tenant to invite into explicitly
+            if (tenantId == null) {
                 throw new IllegalArgumentException(
                         "'tenantId' query parameter is required when SUPER_ADMIN invites a guest.");
             }
-            targetTenant = tenantRepository.findById(effectiveTenantId)
+            targetTenant = tenantRepository.findById(tenantId)
                     .orElseThrow(() -> new IllegalArgumentException(
-                            "Tenant not found: " + effectiveTenantId));
+                            "Tenant not found: " + tenantId));
         } else if (TenantScopeResolver.FAIL_CLOSED_EMPTY_SCOPE.equals(callerScope)) {
             throw new UnauthorizedException();
         } else {
@@ -385,7 +387,11 @@ public class UserController {
 
         List<GuestInvitation> invitations;
         if (effectiveTenantId == null) {
-            // SUPER_ADMIN, no tenant pinned → cross-tenant listing
+            // SUPER_ADMIN, no tenant pinned → cross-tenant listing.
+            // Copilot post-merge round 5: cross-tenant dumps are bounded by a
+            // hard cap (MAX_PLATFORM_WIDE_GUESTS) to prevent runaway memory/
+            // latency. Operators who need more should pass a `status` filter
+            // or `tenantId`. A paginated endpoint is a planned follow-up.
             invitations = statusFilter != null
                     ? invitationRepository.findAllByStatusOrderByCreatedAtDesc(statusFilter)
                     : invitationRepository.findAllOrderByCreatedAtDesc();
@@ -396,9 +402,13 @@ public class UserController {
         }
 
         return ResponseEntity.ok(invitations.stream()
+                .limit(MAX_PLATFORM_WIDE_GUESTS)
                 .map(GuestInvitationResponse::from)
                 .collect(Collectors.toList()));
     }
+
+    /** Hard server-side cap on guest-invitation listings (Copilot post-merge round 5). */
+    private static final int MAX_PLATFORM_WIDE_GUESTS = 1000;
 
     @GetMapping("/api/v1/guests/count")
     @Operation(summary = "Count active guests in tenant (or platform-wide for SUPER_ADMIN)")

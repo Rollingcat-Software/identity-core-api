@@ -17,6 +17,7 @@ import com.fivucsas.identity.application.port.output.AuthSessionStepRepositoryPo
 import com.fivucsas.identity.repository.JpaTenantRepository;
 import com.fivucsas.identity.domain.repository.UserRepository;
 import com.fivucsas.identity.entity.*;
+import com.fivucsas.identity.exception.DomainStateConflictException;
 import com.fivucsas.identity.service.RefreshTokenService;
 import jakarta.persistence.EntityNotFoundException;
 import lombok.RequiredArgsConstructor;
@@ -113,11 +114,11 @@ public class ExecuteAuthSessionService implements ExecuteAuthSessionUseCase {
         if (session.isExpired()) {
             session.markExpired();
             authSessionRepository.save(session);
-            throw new IllegalStateException("Session has expired");
+            throw new DomainStateConflictException("Session has expired");
         }
 
         if (session.isTerminal()) {
-            throw new IllegalStateException("Session is already in terminal state: " + session.getStatus());
+            throw new DomainStateConflictException("Session is already in terminal state: " + session.getStatus());
         }
 
         if (session.getStatus() == AuthSessionStatus.CREATED) {
@@ -204,7 +205,7 @@ public class ExecuteAuthSessionService implements ExecuteAuthSessionUseCase {
                 .orElseThrow(() -> new EntityNotFoundException("Step not found for order: " + stepOrder));
 
         if (currentStep.getAuthFlowStep().isRequired()) {
-            throw new IllegalStateException("Cannot skip required step");
+            throw new DomainStateConflictException("Cannot skip required step");
         }
 
         currentStep.skip();
@@ -261,7 +262,7 @@ public class ExecuteAuthSessionService implements ExecuteAuthSessionUseCase {
         List<AuthFlowStep> steps = authFlowStepRepository
                 .findAllByAuthFlowIdOrderByStepOrderAsc(flow.getId());
         if (steps.isEmpty()) {
-            throw new IllegalStateException("Auth flow has no steps configured");
+            throw new DomainStateConflictException("Auth flow has no steps configured");
         }
         AuthFlowStep firstStep = steps.getFirst();
         if (firstStep.getAuthMethod() == null || firstStep.getAuthMethod().getType() == null) {

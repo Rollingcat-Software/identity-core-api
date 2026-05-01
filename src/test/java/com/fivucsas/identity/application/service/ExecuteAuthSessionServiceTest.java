@@ -9,6 +9,7 @@ import com.fivucsas.identity.application.service.handler.AuthMethodHandler;
 import com.fivucsas.identity.application.service.handler.StepResult;
 import com.fivucsas.identity.domain.model.auth.*;
 import com.fivucsas.identity.entity.*;
+import com.fivucsas.identity.exception.DomainStateConflictException;
 import com.fivucsas.identity.repository.JpaTenantRepository;
 import com.fivucsas.identity.domain.repository.UserRepository;
 import com.fivucsas.identity.service.RefreshTokenService;
@@ -169,7 +170,7 @@ class ExecuteAuthSessionServiceTest {
                 "test-tenant", OperationType.APP_LOGIN, "WEB", null, null, "127.0.0.1", "agent");
 
         assertThatThrownBy(() -> service.startSession(command))
-                .isInstanceOf(IllegalStateException.class)
+                .isInstanceOf(DomainStateConflictException.class)
                 .hasMessageContaining("no steps configured");
     }
 
@@ -196,7 +197,7 @@ class ExecuteAuthSessionServiceTest {
 
         // when/then
         assertThatThrownBy(() -> service.completeStep(sessionId, 1, command))
-                .isInstanceOf(IllegalStateException.class)
+                .isInstanceOf(DomainStateConflictException.class)
                 .hasMessageContaining("expired");
 
         verify(session).markExpired();
@@ -217,7 +218,7 @@ class ExecuteAuthSessionServiceTest {
 
         // when/then
         assertThatThrownBy(() -> service.completeStep(sessionId, 1, command))
-                .isInstanceOf(IllegalStateException.class)
+                .isInstanceOf(DomainStateConflictException.class)
                 .hasMessageContaining("terminal state");
     }
 
@@ -264,7 +265,7 @@ class ExecuteAuthSessionServiceTest {
 
         // when/then
         assertThatThrownBy(() -> service.skipStep(sessionId, 1))
-                .isInstanceOf(IllegalStateException.class)
+                .isInstanceOf(DomainStateConflictException.class)
                 .hasMessageContaining("Cannot skip required step");
     }
 }
