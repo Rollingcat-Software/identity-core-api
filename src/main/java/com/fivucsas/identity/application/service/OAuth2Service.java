@@ -236,21 +236,30 @@ public class OAuth2Service {
         OAuth2Client client = clientRepository.findByClientIdAndActiveTrue(clientId)
                 .orElseThrow(() -> new IllegalArgumentException("Invalid client_id"));
 
-        if (clientSecret != null && !clientSecret.isEmpty()) {
+        // P0-SEC-2 (2026-05-02): RFC 6749 §2.3.1 — confidential clients MUST
+        // authenticate to the token endpoint regardless of PKCE state. The
+        // previous shape ("if clientSecret-present check, else if confidential
+        // AND verifier-empty reject") let an attacker who replayed a stolen
+        // code+code_verifier (both transit the user agent) skip the secret
+        // check entirely on a confidential client. PKCE is *not* a substitute
+        // for client authentication — it only proves the same UA that started
+        // the flow finished it.
+        if (client.isConfidential()) {
+            if (clientSecret == null || clientSecret.isEmpty()
+                    || !passwordEncoder.matches(clientSecret, client.getClientSecret())) {
+                throw new OAuth2Exception(HttpStatus.UNAUTHORIZED,
+                        "client_secret required for confidential client");
+            }
+        } else if (clientSecret != null && !clientSecret.isEmpty()) {
+            // Public client supplied a client_secret. If it doesn't match,
+            // reject — the caller clearly intended to authenticate.
             if (!passwordEncoder.matches(clientSecret, client.getClientSecret())) {
                 throw new IllegalArgumentException("Invalid client_secret");
             }
-        } else if (client.isConfidential() && (codeVerifier == null || codeVerifier.isEmpty())) {
-            // BE-M2 (2026-04-19): confidential clients MUST authenticate. Previously
-            // this only logged a warn and fell through to the public-client path,
-            // which meant a compromised confidential client_id could mint tokens
-            // without any credential. Hard-reject with RFC 6749 §5.2 invalid_client.
-            throw new OAuth2Exception(HttpStatus.UNAUTHORIZED,
-                    "client_secret required for confidential client");
         } else if (storedCodeChallenge.isEmpty()) {
-            // No PKCE and no client_secret — public client without PKCE. This is
-            // still a misconfiguration (we mandate PKCE for public clients at
-            // /authorize), so keep the warn trail for older registrations.
+            // Public client, no PKCE and no client_secret. We mandate PKCE for
+            // public clients at /authorize, so this path only fires for older
+            // registrations — keep the warn trail.
             log.warn("OAuth2 token request without client_secret or PKCE for client: {}", clientId);
         }
 

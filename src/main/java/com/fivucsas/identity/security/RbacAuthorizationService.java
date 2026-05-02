@@ -107,6 +107,22 @@ public class RbacAuthorizationService {
     }
 
     /**
+     * String-typed overload of {@link #canAccessTenant(UUID)} for SpEL
+     * expressions whose source field is a {@code String} (e.g. JSON request
+     * DTOs). Fail-closed on null/blank/malformed input — a missing tenantId
+     * never grants access, and a non-UUID string returns false instead of
+     * throwing (which would surface as 500 rather than 403).
+     */
+    public boolean canAccessTenant(String tenantId) {
+        if (tenantId == null || tenantId.isBlank()) return false;
+        try {
+            return canAccessTenant(UUID.fromString(tenantId));
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
+    }
+
+    /**
      * Checks if the current user is ROOT.
      */
     public boolean isRoot() {

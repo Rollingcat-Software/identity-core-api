@@ -88,7 +88,7 @@ public class DeviceController {
     }
 
     @PostMapping("/api/v1/devices")
-    @PreAuthorize("hasPermission(null, 'Device', 'device:register')")
+    @PreAuthorize("hasPermission(null, 'Device', 'device:register') and @rbac.canAccessTenant(#tenantId)")
     public ResponseEntity<DeviceResponse> registerDevice(
             @RequestParam UUID userId,
             @RequestParam UUID tenantId,
