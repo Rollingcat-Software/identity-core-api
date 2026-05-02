@@ -13,13 +13,27 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.security.MessageDigest;
+import java.security.SecureRandom;
 import java.time.Instant;
+import java.util.Base64;
+import java.util.Optional;
 import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
 @Slf4j
 public class RefreshTokenService implements com.fivucsas.identity.application.port.output.RefreshTokenPort {
+
+    /**
+     * Length (bytes) of the random secret-half. 32 bytes = 256 bits, which is
+     * larger than SHA-256's collision-resistance bound — so storing only the
+     * digest gives no offline brute-force advantage versus storing the secret
+     * directly. SECURITY_REVIEW_2026-05-01.md §P1-1.
+     */
+    private static final int SECRET_BYTES = 32;
+
+    private static final SecureRandom SECURE_RANDOM = new SecureRandom();
 
     private final RefreshTokenRepository refreshTokenRepository;
     private final AuditLogPort auditLogPort;
@@ -53,9 +67,21 @@ public class RefreshTokenService implements com.fivucsas.identity.application.po
         // replaced. Cross-device bulk revocation is a user-initiated operation
         // (see SessionService) and not a side effect of normal login.
 
+        // P1-1 (2026-05-02): wire format is `<id>.<secret>` where `<secret>` is
+        // a 32-byte URL-safe random. Only sha256(secret) is persisted in
+        // token_secret_hash. The plaintext `token` column is dual-written for
+        // backwards-compat reads of rows minted before this PR; it will be
+        // dropped in a follow-up migration after operator soak.
+        UUID tokenId = UUID.randomUUID();
+        String secret = generateSecret();
+        String wireToken = tokenId + "." + secret;
+        byte[] secretHash = RefreshTokenHasher.sha256(secret);
+
         RefreshToken refreshToken = RefreshToken.builder()
+                .id(tokenId)
                 .user(user)
-                .token(UUID.randomUUID().toString())
+                .token(wireToken)
+                .tokenSecretHash(secretHash)
                 .familyId(familyId)
                 .expiryDate(Instant.now().plusMillis(refreshTokenDurationMs))
                 .ipAddress(ipAddress)
@@ -63,6 +89,12 @@ public class RefreshTokenService implements com.fivucsas.identity.application.po
                 .build();
 
         return refreshTokenRepository.save(refreshToken);
+    }
+
+    private static String generateSecret() {
+        byte[] bytes = new byte[SECRET_BYTES];
+        SECURE_RANDOM.nextBytes(bytes);
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
     }
 
     @Transactional
@@ -93,10 +125,73 @@ public class RefreshTokenService implements com.fivucsas.identity.application.po
         return token;
     }
 
+    /**
+     * Locate a refresh token by the raw value the client presented.
+     *
+     * <p>P1-1 (2026-05-02) dual-read:
+     * <ul>
+     *   <li>If the raw value matches the new {@code <id>.<secret>} wire format,
+     *       look up by id and constant-time-compare {@code sha256(secret)}
+     *       against {@code token_secret_hash}.</li>
+     *   <li>Otherwise (legacy tokens issued before this PR), fall back to the
+     *       plaintext-column equality lookup. Those tokens will roll off via
+     *       TTL within {@code jwt.refresh-expiration}.</li>
+     * </ul>
+     *
+     * <p>A hash mismatch on a known id is treated as "wrong token" (404-shaped),
+     * not "reused token" — only an explicit revoked-and-presented token triggers
+     * family revocation in {@link #verifyExpiration(RefreshToken)}.
+     */
     @Transactional(readOnly = true)
     public RefreshToken findByToken(String token) {
+        Optional<RefreshToken> hashed = findByHashedWireToken(token);
+        if (hashed.isPresent()) {
+            return hashed.get();
+        }
+        // Legacy fallback: plaintext-column equality match.
         return refreshTokenRepository.findByToken(token)
                 .orElseThrow(() -> new TokenRevokedException("Refresh token not found or has been revoked"));
+    }
+
+    /**
+     * Returns a present {@code Optional} only when {@code raw} is a well-formed
+     * {@code <id>.<secret>} pair AND the row's {@code token_secret_hash} matches
+     * {@code sha256(secret)} in constant time.
+     */
+    private Optional<RefreshToken> findByHashedWireToken(String raw) {
+        if (raw == null) {
+            return Optional.empty();
+        }
+        int dot = raw.indexOf('.');
+        if (dot <= 0 || dot == raw.length() - 1) {
+            return Optional.empty();
+        }
+        String idPart = raw.substring(0, dot);
+        String secret = raw.substring(dot + 1);
+        UUID tokenId;
+        try {
+            tokenId = UUID.fromString(idPart);
+        } catch (IllegalArgumentException ex) {
+            return Optional.empty();
+        }
+        Optional<RefreshToken> row = refreshTokenRepository.findById(tokenId);
+        if (row.isEmpty()) {
+            return Optional.empty();
+        }
+        byte[] storedHash = row.get().getTokenSecretHash();
+        if (storedHash == null) {
+            // Row was minted before this PR — fall through to plaintext path.
+            return Optional.empty();
+        }
+        byte[] presentedHash = RefreshTokenHasher.sha256(secret);
+        if (!MessageDigest.isEqual(storedHash, presentedHash)) {
+            // Wrong secret for a real id. Treat as "not found" — caller throws
+            // TokenRevokedException("not found"). Do NOT trigger family revoke
+            // here: only verifyExpiration's revoked-token path qualifies as
+            // "reuse-detected" per RFC 6749 §10.4.
+            return Optional.empty();
+        }
+        return row;
     }
 
     @Transactional
