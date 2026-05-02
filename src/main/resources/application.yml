@@ -25,6 +25,12 @@ app:
   purge:
     softDelete:
       enabled: ${APP_PURGE_SOFT_DELETE_ENABLED:false}
+  # WebAuthn allowed RP origins (P1-2). Exact-match, case-sensitive (RFC 6454 §4).
+  # Any origin not in this list is rejected. Override with WEBAUTHN_ALLOWED_ORIGINS
+  # (comma-separated) per environment. Default profile retains prod hosts plus
+  # localhost for dev convenience — DO NOT add localhost to application-prod.yml.
+  webauthn:
+    allowed-origins: ${WEBAUTHN_ALLOWED_ORIGINS:https://app.fivucsas.com,https://verify.fivucsas.com,https://demo.fivucsas.com,http://localhost:5173,http://localhost:8080}
 
 # Redis Configuration
 redis:

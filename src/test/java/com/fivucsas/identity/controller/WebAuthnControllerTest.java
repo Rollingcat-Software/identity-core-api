@@ -25,6 +25,7 @@ import java.util.*;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -387,6 +388,7 @@ class WebAuthnControllerTest {
             when(webAuthnService.verifyAssertion(sessionId, "credId", "authData", "clientData", "sig", "pubKey"))
                     .thenReturn(true);
             when(webAuthnService.extractSignCount("authData")).thenReturn(6L);
+            when(webAuthnService.validateSignCount(6L, 5L)).thenReturn(true);
 
             Map<String, Object> request = new HashMap<>();
             request.put("sessionId", sessionId.toString());
@@ -461,18 +463,49 @@ class WebAuthnControllerTest {
         }
 
         @Test
-        @DisplayName("Should not update sign count when new count is not higher")
-        void shouldNotUpdateSignCountWhenNotHigher() {
+        @DisplayName("Should reject sign-counter regression as cloned credential (P1-4)")
+        void shouldRejectSignCountRegression() {
             UUID sessionId = UUID.randomUUID();
             WebAuthnCredential cred = mock(WebAuthnCredential.class);
             when(cred.getPublicKey()).thenReturn("pubKey");
             when(cred.getSignCount()).thenReturn(10L);
-            when(cred.getUser()).thenReturn(testUser);
+            // No need to stub getUser() — counter check happens before email log
 
             when(credentialRepository.findByCredentialId("credId")).thenReturn(Optional.of(cred));
             when(webAuthnService.verifyAssertion(sessionId, "credId", "authData", "clientData", "sig", "pubKey"))
                     .thenReturn(true);
             when(webAuthnService.extractSignCount("authData")).thenReturn(5L);
+            when(webAuthnService.validateSignCount(5L, 10L)).thenReturn(false);
+
+            Map<String, Object> request = new HashMap<>();
+            request.put("sessionId", sessionId.toString());
+            request.put("credentialId", "credId");
+            request.put("authenticatorData", "authData");
+            request.put("clientDataJSON", "clientData");
+            request.put("signature", "sig");
+
+            ResponseEntity<Map<String, Object>> response = webAuthnController.authenticate(request);
+
+            assertThat(response.getStatusCode().value()).isEqualTo(401);
+            assertThat(response.getBody()).containsEntry("success", false);
+            verify(cred, never()).updateSignCount(anyLong());
+            verify(credentialRepository, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("Should not save when counter equals stored but is both-zero (per spec note)")
+        void shouldAcceptBothZeroWithoutSave() {
+            UUID sessionId = UUID.randomUUID();
+            WebAuthnCredential cred = mock(WebAuthnCredential.class);
+            when(cred.getPublicKey()).thenReturn("pubKey");
+            when(cred.getSignCount()).thenReturn(0L);
+            when(cred.getUser()).thenReturn(testUser);
+
+            when(credentialRepository.findByCredentialId("credId")).thenReturn(Optional.of(cred));
+            when(webAuthnService.verifyAssertion(sessionId, "credId", "authData", "clientData", "sig", "pubKey"))
+                    .thenReturn(true);
+            when(webAuthnService.extractSignCount("authData")).thenReturn(0L);
+            when(webAuthnService.validateSignCount(0L, 0L)).thenReturn(true);
 
             Map<String, Object> request = new HashMap<>();
             request.put("sessionId", sessionId.toString());
@@ -484,6 +517,7 @@ class WebAuthnControllerTest {
             ResponseEntity<Map<String, Object>> response = webAuthnController.authenticate(request);
 
             assertThat(response.getStatusCode().value()).isEqualTo(200);
+            // Counter is not strictly greater (both 0), so no save — spec-compliant behavior.
             verify(cred, never()).updateSignCount(anyLong());
             verify(credentialRepository, never()).save(any());
         }

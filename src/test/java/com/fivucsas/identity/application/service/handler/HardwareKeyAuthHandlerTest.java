@@ -70,6 +70,7 @@ class HardwareKeyAuthHandlerTest {
         when(webAuthnService.verifyAssertion(sessionId, "credId", "authData", "clientData", "sig", "publicKeyBase64"))
                 .thenReturn(true);
         when(webAuthnService.extractSignCount("authData")).thenReturn(1L);
+        when(webAuthnService.validateSignCount(1L, 0L)).thenReturn(true);
 
         StepResult result = handler.validate(session, step, Map.of(
                 "credentialId", "credId",

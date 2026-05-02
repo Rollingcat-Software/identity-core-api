@@ -91,9 +91,14 @@ public class HardwareKeyAuthHandler implements AuthMethodHandler {
                 signature, credential.getPublicKey());
 
         if (valid) {
-            // Update sign count to detect cloned authenticators
+            // P1-4: validate the WebAuthn sign-counter per spec §6.1 step 17.
             long newSignCount = webAuthnService.extractSignCount(authenticatorData);
-            if (newSignCount > 0 && newSignCount > credential.getSignCount()) {
+            if (!webAuthnService.validateSignCount(newSignCount, credential.getSignCount())) {
+                log.warn("Hardware-key WebAuthn sign-counter regression for session: {} — rejecting (possible cloned credential)",
+                        session.getId());
+                return StepResult.failure("Authenticator counter regression — possible cloned credential");
+            }
+            if (newSignCount > credential.getSignCount()) {
                 credential.updateSignCount(newSignCount);
                 credentialRepository.save(credential);
             }

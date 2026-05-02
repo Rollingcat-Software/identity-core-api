@@ -63,6 +63,9 @@ spring:
 app:
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:https://api.fivucsas.com,https://app.fivucsas.com,https://demo.fivucsas.com,https://verify.fivucsas.com}
+  # WebAuthn allowed RP origins (P1-2). Production never includes localhost.
+  webauthn:
+    allowed-origins: ${WEBAUTHN_ALLOWED_ORIGINS:https://app.fivucsas.com,https://verify.fivucsas.com,https://demo.fivucsas.com}
 
 # JWT Configuration (Production)
 # CRITICAL: JWT secret MUST come from environment variable (see JwtSecretProvider)
