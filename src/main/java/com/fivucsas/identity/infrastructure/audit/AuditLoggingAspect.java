@@ -65,11 +65,20 @@ public class AuditLoggingAspect {
             AuditLog auditLog = AuditLog.builder()
                     .tenantId(tenantId)
                     .userId(user != null ? user.getUserId() : null)
-                    .action(audited.action().name())
-                    .resourceType(audited.resourceType())
+                    // §P2-1 defense-in-depth: action is sourced from an enum
+                    // and resourceType from an annotation literal today, but
+                    // escape both consistently so the contract matches
+                    // AuditLogAdapter's direct-write path. endpoint also
+                    // escapes — request URIs include path variables like
+                    // /api/v1/users/{id} where the bound id is caller-supplied
+                    // and could carry HTML special chars in degenerate cases.
+                    .action(AuditEscape.escape(audited.action().name()))
+                    .resourceType(AuditEscape.escape(audited.resourceType()))
                     .resourceId(extractResourceId(joinPoint, audited))
                     .httpMethod(request != null ? request.getMethod() : null)
-                    .endpoint(request != null ? request.getRequestURI() : null)
+                    .endpoint(request != null && request.getRequestURI() != null
+                            ? AuditEscape.escape(request.getRequestURI())
+                            : null)
                     .ipAddress(getClientIp(request))
                     // userAgentV2 holds raw browser-supplied User-Agent header
                     // and is the value preferred by AuditLog.getEffectiveUserAgent().

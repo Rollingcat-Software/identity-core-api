@@ -1,5 +1,7 @@
 package com.fivucsas.identity.entity;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -57,6 +59,32 @@ class MfaSessionTest {
         List<String> methods = session.getCompletedMethods();
         assertEquals(1, methods.size());
         assertEquals("pwd", methods.get(0));
+    }
+
+    // ──────────────────────────────────────────────────────────────
+    // §P1-7: special characters must not corrupt stepsData JSON
+    // ──────────────────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("addCompletedMethod with special chars (\", \\) keeps stepsData valid JSON — no fall-through corruption")
+    void addCompletedMethodWithSpecialChars() throws Exception {
+        // Force the catch path by setting stepsData to invalid JSON: any
+        // future change that swaps the catch fallback back to string concat
+        // would corrupt the document and this test would fail.
+        session.setStepsData("not-valid-json[}");
+        String tricky = "weird\"value\\with\"quotes";
+
+        session.addCompletedMethod(tricky);
+
+        // Result must parse as a JSON array with the original String value
+        // intact (Jackson's escaping is implementation-correct: " -> \", \ -> \\).
+        ObjectMapper mapper = new ObjectMapper();
+        List<String> parsed = mapper.readValue(session.getStepsData(),
+                new TypeReference<List<String>>() {});
+        assertEquals(1, parsed.size());
+        assertEquals(tricky, parsed.get(0),
+                "Special characters must survive a Jackson round-trip; the old "
+                        + "string-concat fallback would have produced unparseable JSON.");
     }
 
     @Test

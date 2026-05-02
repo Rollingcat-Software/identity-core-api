@@ -45,6 +45,10 @@ class JwtDualAlgoTest {
         service = new JwtService(hmacProvider, rsa, new MockEnvironment());
         ReflectionTestUtils.setField(service, "jwtExpiration", 900_000L);
         ReflectionTestUtils.setField(service, "defaultAlgo", "HS512");
+        // Coexistence-window tests still mint and verify HS512. Opt in
+        // explicitly; default-off behaviour is exercised in
+        // JwtServiceSecurityHardeningTest.
+        ReflectionTestUtils.setField(service, "allowHs512", true);
     }
 
     @Test

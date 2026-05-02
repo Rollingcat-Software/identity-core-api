@@ -176,8 +176,13 @@ public class AuditLogAdapter implements AuditLogPort {
             UUID tenantUuid = resolveTenantId(userUuid);
 
             AuditLog auditLog = AuditLog.builder()
-                    .action(action)
-                    .resourceType(resourceType)
+                    // SECURITY_REVIEW_2026-05-01 §P2-1: action / resourceType
+                    // are static literals at every current call site, but
+                    // escape them defense-in-depth so the contract is uniform
+                    // — any future caller wiring a user-controlled action name
+                    // (e.g. plugin event types) inherits the escape.
+                    .action(AuditEscape.escape(action))
+                    .resourceType(AuditEscape.escape(resourceType))
                     .tenantId(tenantUuid)
                     .userId(userUuid)
                     .resourceId(userUuid)

@@ -333,6 +333,56 @@ class AuditLogAdapterTest {
                             "&lt;bad&gt;code_verifier mismatch&lt;/bad&gt;");
         }
 
+        /**
+         * SECURITY_REVIEW_2026-05-01 §P2-1: action and resourceType are
+         * static literals at every current call site, but escape coverage
+         * is uniform — the next caller wiring tenant-supplied event types
+         * must inherit the escape automatically.
+         */
+        @Test
+        @DisplayName("logSecurityEvent: action and resourceType are escaped on the way in")
+        void actionAndResourceTypeAreEscaped() {
+            when(userRepository.findTenantIdById(userId)).thenReturn(Optional.of(tenantId));
+
+            // Pass an attacker-shaped eventType; logSecurityEvent threads it
+            // straight into AuditLog.action.
+            adapter.logSecurityEvent(userId.toString(), "<script>alert(1)</script>",
+                    "1.2.3.4", "details");
+
+            AuditLog saved = captureSaved();
+            assertThat(saved.getAction())
+                    .isEqualTo("&lt;script&gt;alert(1)&lt;/script&gt;");
+            // resourceType is hard-coded to "SECURITY"; assert it round-trips
+            // unchanged (no special chars to escape).
+            assertThat(saved.getResourceType()).isEqualTo("SECURITY");
+        }
+    }
+
+    @Nested
+    @DisplayName("§P2-1 sweep: every direct AuditLog.builder call site honors the escape contract")
+    class DirectWriteSweep {
+
+        /**
+         * Defense-in-depth regression: walk one direct-call path
+         * (logPkceFailure — the most exposed because clientId can be any
+         * caller-supplied string) and assert the row never carries raw HTML
+         * even when the input does. Mirrors the aspect's escape contract.
+         */
+        @Test
+        @DisplayName("PKCE failure with HTML in clientId: row is sanitized end-to-end")
+        void pkceFailureSanitizesAllStringFields() {
+            adapter.logPkceFailure("<x onerror=alert(1)>", "1.2.3.4",
+                    "VERIFIER_MISMATCH");
+
+            AuditLog saved = captureSaved();
+            // action / resourceType are literals on this method; verify both
+            // round-trip and that no raw HTML leaks via metadata.clientId.
+            assertThat(saved.getAction()).isEqualTo("PKCE_FAILURE");
+            assertThat(saved.getResourceType()).isEqualTo("OAUTH2");
+            assertThat(saved.getMetadata())
+                    .containsEntry("clientId", "&lt;x onerror=alert(1)&gt;");
+        }
+
         @Test
         @DisplayName("No special chars: userAgent passes through unchanged")
         void plainUserAgentPassesThrough() {

@@ -50,6 +50,11 @@ class JwtServiceTest {
         jwtService = new JwtService(jwtSecretProvider, rsaKeyProvider, new MockEnvironment());
         ReflectionTestUtils.setField(jwtService, "jwtExpiration", ACCESS_TOKEN_EXPIRATION);
         ReflectionTestUtils.setField(jwtService, "defaultAlgo", "HS512");
+        // §P0-3 fix: HS512 verification is now off-by-default. The legacy
+        // tests in this class predate the gate and assert HS512 round-trips,
+        // so opt them in. JwtServiceSecurityHardeningTest covers the
+        // off-by-default behaviour.
+        ReflectionTestUtils.setField(jwtService, "allowHs512", true);
     }
 
     // ============== ACCESS TOKEN GENERATION TESTS ==============
@@ -133,6 +138,7 @@ class JwtServiceTest {
         JwtService otherJwtService = new JwtService(otherSecretProvider, rsaKeyProvider, new MockEnvironment());
         ReflectionTestUtils.setField(otherJwtService, "jwtExpiration", ACCESS_TOKEN_EXPIRATION);
         ReflectionTestUtils.setField(otherJwtService, "defaultAlgo", "HS512");
+        ReflectionTestUtils.setField(otherJwtService, "allowHs512", true);
         String tokenWithDifferentKey = otherJwtService.generateAccessToken(TEST_EMAIL);
 
         // Act & Assert
@@ -147,6 +153,7 @@ class JwtServiceTest {
         JwtService shortExpirationService = new JwtService(jwtSecretProvider, rsaKeyProvider, new MockEnvironment());
         ReflectionTestUtils.setField(shortExpirationService, "jwtExpiration", 1L); // 1ms
         ReflectionTestUtils.setField(shortExpirationService, "defaultAlgo", "HS512");
+        ReflectionTestUtils.setField(shortExpirationService, "allowHs512", true);
         String token = shortExpirationService.generateAccessToken(TEST_EMAIL);
 
         // Act - Wait for token to expire
