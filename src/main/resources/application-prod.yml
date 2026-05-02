@@ -59,13 +59,22 @@ spring:
         order_inserts: true
         order_updates: true
 
-# CORS Configuration (Production)
+# CORS + WebAuthn + JWT-validation config (Production)
+# Single `app:` block — Spring's YAML loader rejects duplicate top-level keys.
 app:
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:https://api.fivucsas.com,https://app.fivucsas.com,https://demo.fivucsas.com,https://verify.fivucsas.com}
   # WebAuthn allowed RP origins (P1-2). Production never includes localhost.
   webauthn:
     allowed-origins: ${WEBAUTHN_ALLOWED_ORIGINS:https://app.fivucsas.com,https://verify.fivucsas.com,https://demo.fivucsas.com}
+  # SECURITY_REVIEW_2026-05-01 §P0-3 / §P2-3:
+  # - allow-hs512: HS512 verification OFF in prod once 30-day soak completes.
+  # - issuer: pinned so tokens forged against a different deployment's RSA key
+  #   (e.g. staging) are rejected at the parser, not just at signature time.
+  security:
+    jwt:
+      allow-hs512: ${APP_SECURITY_JWT_ALLOW_HS512:false}
+      issuer: ${APP_SECURITY_JWT_ISSUER:https://api.fivucsas.com}
 
 # JWT Configuration (Production)
 # CRITICAL: JWT secret MUST come from environment variable (see JwtSecretProvider)
@@ -82,19 +91,6 @@ jwt:
 fivucsas:
   jwt:
     default-algo: RS256
-
-# SECURITY_REVIEW_2026-05-01 §P0-3 / §P2-3:
-# - allow-hs512: HS512 verification surface is OFF in prod. The leaked
-#   f8ee668:.env.gcp HS secret is treated as compromised; any HS512 token
-#   must be rejected. Override via APP_SECURITY_JWT_ALLOW_HS512 only for an
-#   emergency rollback window, then flip back.
-# - issuer: pinned so a token forged against a different deployment's RSA
-#   key (e.g. staging) is rejected on the parser, not just at signature time.
-app:
-  security:
-    jwt:
-      allow-hs512: ${APP_SECURITY_JWT_ALLOW_HS512:false}
-      issuer: ${APP_SECURITY_JWT_ISSUER:https://api.fivucsas.com}
 
 # FastAPI Integration (Production)
 # IMPORTANT: Configure via environment variables
