@@ -210,11 +210,13 @@ public class ManageUserService implements ManageUserUseCase {
      * via {@code /api/v1/users}. The {@code @PreAuthorize("user:read")} check
      * verifies the permission exists, not the tenant scope.</p>
      *
-     * <p>Source of truth is the DB lookup in {@link RbacAuthorizationService}
-     * — the Spring principal is a plain {@code UserDetails} (not
+     * <p>Source of truth is the DB lookup in {@link RbacAuthorizationService}.
+     * Historically the Spring principal was a plain {@code UserDetails} (not
      * {@code CustomUserDetails}) so {@code AuthorizationService.getCurrentTenantId()}
-     * cannot be used here; it silently returns null and would re-open the
-     * leak.</p>
+     * silently returned null and would re-open the leak — fixed in the PR that
+     * wires {@code CustomUserDetails} as the authenticated principal. Routing
+     * through the DB is kept here to avoid coupling tenant scope to principal
+     * cache state.</p>
      *
      * <p>Fail-closed: if the current user cannot be resolved to a tenant,
      * return a zero-UUID sentinel that matches no tenant, so the query
