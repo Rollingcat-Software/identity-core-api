@@ -26,7 +26,6 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
-import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.util.UriComponentsBuilder;
 
@@ -199,7 +198,6 @@ public class OAuth2Controller {
      */
     @PostMapping("/authorize/complete")
     @Operation(summary = "Mint an OAuth2 authorization code after hosted-login MFA completes")
-    @Transactional
     public ResponseEntity<?> authorizeComplete(@Valid @RequestBody HostedAuthorizeCompleteRequest body) {
         // Bean Validation (@NotBlank/@Pattern/@Size on the request DTO) enforces
         // structural correctness before this body runs. The local
@@ -264,21 +262,13 @@ public class OAuth2Controller {
             return errorResponse(400, "invalid_request", "User not found for MFA session", body.state);
         }
 
-        // Mark consumed BEFORE minting the code so a crash between consume and mint
-        // leaves the session poisoned (still marked consumed) and the transaction
-        // rolls back the consume with the mint.
-        session.consume();
-        mfaSessionRepository.save(session);
-
-        String code = oAuth2Service.generateAuthorizationCode(
-                user.getEmail(), body.clientId, body.redirectUri,
-                body.scope == null ? "openid profile email" : body.scope,
+        // Atomic critical section (consume + mint + delete) lives in the
+        // service so the controller carries no transaction. See
+        // OAuth2Service#consumeMfaSessionAndMintCode for the @Transactional
+        // boundary (P1-Q9, review 2026-05-01).
+        String code = oAuth2Service.consumeMfaSessionAndMintCode(
+                session, user, body.clientId, body.redirectUri, body.scope,
                 body.nonce, body.codeChallenge, body.codeChallengeMethod);
-
-        // Burn the MFA session record so it can't be replayed for a second code.
-        // Runs inside the same @Transactional — delete + consume + code mint all
-        // commit or rollback together.
-        mfaSessionRepository.delete(session);
 
         Map<String, Object> response = new LinkedHashMap<>();
         response.put("code", code);
@@ -286,7 +276,6 @@ public class OAuth2Controller {
         if (body.state != null) {
             response.put("state", body.state);
         }
-        log.info("OAuth2 hosted code minted — userId={}, clientId={}", user.getId(), body.clientId);
         return ResponseEntity.ok(response);
     }
 

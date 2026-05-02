@@ -5,12 +5,15 @@ import com.fivucsas.identity.domain.exception.OAuth2Exception;
 import com.fivucsas.identity.domain.exception.PkceVerificationException;
 import com.fivucsas.identity.domain.model.PkceFailureReason;
 import com.fivucsas.identity.domain.repository.UserRepository;
+import com.fivucsas.identity.entity.MfaSession;
 import com.fivucsas.identity.entity.OAuth2Client;
 import com.fivucsas.identity.entity.Tenant;
 import com.fivucsas.identity.entity.User;
+import com.fivucsas.identity.repository.MfaSessionRepository;
 import com.fivucsas.identity.security.JwtService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InOrder;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -39,6 +42,7 @@ class OAuth2ServiceTest {
     @Mock private JwtService jwtService;
     @Mock private StringRedisTemplate redisTemplate;
     @Mock private PasswordEncoder passwordEncoder;
+    @Mock private MfaSessionRepository mfaSessionRepository;
 
     @InjectMocks
     private OAuth2Service service;
@@ -496,5 +500,69 @@ class OAuth2ServiceTest {
         assertThatThrownBy(() -> service.getUserInfo("token"))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("User not found");
+    }
+
+    /**
+     * Regression for the controller-to-service @Transactional move (P1-Q9,
+     * quality review 2026-05-01). The atomic critical section must:
+     * (1) call {@code MfaSession.consume()},
+     * (2) save the session (consumed_at flip persisted),
+     * (3) write the auth-code into Redis,
+     * (4) delete the session row — in that order.
+     *
+     * <p>Reordering any of these steps reintroduces the race where a session
+     * could mint two codes (consume after mint) or be replayed (delete before
+     * mint with a downstream failure rolling back delete only).</p>
+     */
+    @Test
+    void consumeMfaSessionAndMintCode_ShouldConsumeSaveMintDeleteInOrder() {
+        // given
+        MfaSession session = mock(MfaSession.class);
+        User user = mock(User.class);
+        when(user.getEmail()).thenReturn("alice@example.com");
+        when(user.getId()).thenReturn(UUID.randomUUID());
+        ValueOperations<String, String> ops = mock(ValueOperations.class);
+        when(redisTemplate.opsForValue()).thenReturn(ops);
+
+        // when
+        String code = service.consumeMfaSessionAndMintCode(
+                session, user, "client-X", "https://app.example.com/cb",
+                "openid profile", "nonce-1", "challenge-1", "S256");
+
+        // then
+        assertThat(code).isNotBlank();
+        InOrder inOrder = inOrder(session, mfaSessionRepository, ops);
+        inOrder.verify(session).consume();
+        inOrder.verify(mfaSessionRepository).save(session);
+        // Code stored in Redis between save and delete.
+        inOrder.verify(ops).set(startsWith("oauth2:code:"), anyString(), any(Duration.class));
+        inOrder.verify(mfaSessionRepository).delete(session);
+        inOrder.verifyNoMoreInteractions();
+    }
+
+    /**
+     * Regression for P1-Q9: when scope is {@code null} the service must
+     * default to {@code "openid profile email"} (preserves the controller's
+     * pre-move behaviour — the controller used to do this defaulting inline).
+     */
+    @Test
+    void consumeMfaSessionAndMintCode_WhenScopeNull_ShouldDefaultScope() {
+        // given
+        MfaSession session = mock(MfaSession.class);
+        User user = mock(User.class);
+        when(user.getEmail()).thenReturn("bob@example.com");
+        when(user.getId()).thenReturn(UUID.randomUUID());
+        ValueOperations<String, String> ops = mock(ValueOperations.class);
+        when(redisTemplate.opsForValue()).thenReturn(ops);
+
+        // when
+        service.consumeMfaSessionAndMintCode(
+                session, user, "client-Y", "https://app.example.com/cb",
+                null, null, null, null);
+
+        // then — Redis payload contains the defaulted scope
+        org.mockito.ArgumentCaptor<String> payloadCaptor = org.mockito.ArgumentCaptor.forClass(String.class);
+        verify(ops).set(startsWith("oauth2:code:"), payloadCaptor.capture(), any(Duration.class));
+        assertThat(payloadCaptor.getValue()).contains("\"scope\":\"openid profile email\"");
     }
 }
