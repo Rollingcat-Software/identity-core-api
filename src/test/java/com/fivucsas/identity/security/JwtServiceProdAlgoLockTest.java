@@ -65,7 +65,8 @@ class JwtServiceProdAlgoLockTest {
         JwtSecretProvider hmac = mock(JwtSecretProvider.class);
         when(hmac.getSecret()).thenReturn(TEST_SECRET);
         RsaKeyProvider rsa = JwtAlgoTestSupport.newRsaKeyProvider();
-        JwtService svc = new JwtService(hmac, rsa, env);
+        HsKeyRegistry registry = JwtAlgoTestSupport.newHsKeyRegistry(hmac);
+        JwtService svc = new JwtService(registry, rsa, env);
         ReflectionTestUtils.setField(svc, "jwtExpiration", 900_000L);
         return svc;
     }

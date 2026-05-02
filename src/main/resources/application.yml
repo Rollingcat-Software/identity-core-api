@@ -31,6 +31,17 @@ app:
   # localhost for dev convenience — DO NOT add localhost to application-prod.yml.
   webauthn:
     allowed-origins: ${WEBAUTHN_ALLOWED_ORIGINS:https://app.fivucsas.com,https://verify.fivucsas.com,https://demo.fivucsas.com,http://localhost:5173,http://localhost:8080}
+  # HS512 key registry (parallel-verify rotation). The active kid is stamped on
+  # every newly-signed HS512 token; retired kids stay in the verification set
+  # until their tokens age out. Per-kid secrets are read from environment vars
+  # named `JWT_HS_KEY_<KID_UPPER_DASHES_TO_UNDERSCORES>` — adding a new kid is
+  # config-only (operator mints the secret + sets the env, then later flips
+  # `active-hs-kid`). Backward compat: when the active kid's env var is unset,
+  # the registry falls back to the legacy `JWT_SECRET`.
+  security:
+    jwt:
+      active-hs-kid: ${APP_SECURITY_JWT_ACTIVE_HS_KID:hs-2026-04}
+      retired-hs-kids: ${APP_SECURITY_JWT_RETIRED_HS_KIDS:}
 
 # Redis Configuration
 redis:

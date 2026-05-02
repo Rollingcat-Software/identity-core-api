@@ -42,7 +42,8 @@ class JwtDualAlgoTest {
         hmacProvider = mock(JwtSecretProvider.class);
         when(hmacProvider.getSecret()).thenReturn(TEST_SECRET);
         rsa = JwtAlgoTestSupport.newRsaKeyProvider();
-        service = new JwtService(hmacProvider, rsa, new MockEnvironment());
+        HsKeyRegistry registry = JwtAlgoTestSupport.newHsKeyRegistry(hmacProvider);
+        service = new JwtService(registry, rsa, new MockEnvironment());
         ReflectionTestUtils.setField(service, "jwtExpiration", 900_000L);
         ReflectionTestUtils.setField(service, "defaultAlgo", "HS512");
         // Coexistence-window tests still mint and verify HS512. Opt in

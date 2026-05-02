@@ -47,7 +47,8 @@ class JwtServiceTest {
         // (e.g. malformed-token parse failures). BE-H1 keeps HMAC still wired.
         org.mockito.Mockito.lenient().when(jwtSecretProvider.getSecret()).thenReturn(TEST_SECRET);
         rsaKeyProvider = JwtAlgoTestSupport.newRsaKeyProvider();
-        jwtService = new JwtService(jwtSecretProvider, rsaKeyProvider, new MockEnvironment());
+        HsKeyRegistry registry = JwtAlgoTestSupport.newHsKeyRegistry(jwtSecretProvider);
+        jwtService = new JwtService(registry, rsaKeyProvider, new MockEnvironment());
         ReflectionTestUtils.setField(jwtService, "jwtExpiration", ACCESS_TOKEN_EXPIRATION);
         ReflectionTestUtils.setField(jwtService, "defaultAlgo", "HS512");
         // §P0-3 fix: HS512 verification is now off-by-default. The legacy
@@ -135,7 +136,8 @@ class JwtServiceTest {
         JwtSecretProvider otherSecretProvider = org.mockito.Mockito.mock(JwtSecretProvider.class);
         // Different Base64-encoded secret
         when(otherSecretProvider.getSecret()).thenReturn("ZGlmZmVyZW50LXNlY3JldC1rZXktZm9yLXRlc3RpbmctcHVycG9zZXMtYXQtbGVhc3QtMjU2LWJpdHMtbG9uZw==");
-        JwtService otherJwtService = new JwtService(otherSecretProvider, rsaKeyProvider, new MockEnvironment());
+        HsKeyRegistry otherRegistry = JwtAlgoTestSupport.newHsKeyRegistry(otherSecretProvider);
+        JwtService otherJwtService = new JwtService(otherRegistry, rsaKeyProvider, new MockEnvironment());
         ReflectionTestUtils.setField(otherJwtService, "jwtExpiration", ACCESS_TOKEN_EXPIRATION);
         ReflectionTestUtils.setField(otherJwtService, "defaultAlgo", "HS512");
         ReflectionTestUtils.setField(otherJwtService, "allowHs512", true);
@@ -150,7 +152,8 @@ class JwtServiceTest {
     @DisplayName("Validate token - should return false for expired token")
     void testIsTokenValid_ExpiredToken() {
         // Arrange - Create service with very short expiration
-        JwtService shortExpirationService = new JwtService(jwtSecretProvider, rsaKeyProvider, new MockEnvironment());
+        HsKeyRegistry shortExpRegistry = JwtAlgoTestSupport.newHsKeyRegistry(jwtSecretProvider);
+        JwtService shortExpirationService = new JwtService(shortExpRegistry, rsaKeyProvider, new MockEnvironment());
         ReflectionTestUtils.setField(shortExpirationService, "jwtExpiration", 1L); // 1ms
         ReflectionTestUtils.setField(shortExpirationService, "defaultAlgo", "HS512");
         ReflectionTestUtils.setField(shortExpirationService, "allowHs512", true);
