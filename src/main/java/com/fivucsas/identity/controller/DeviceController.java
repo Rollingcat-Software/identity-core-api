@@ -516,9 +516,17 @@ public class DeviceController {
             ));
         }
 
-        // Update sign count to detect cloned authenticators
+        // P1-4: validate the WebAuthn sign-counter per spec §6.1 step 17.
         long newSignCount = webAuthnService.extractSignCount(authenticatorData);
-        if (newSignCount > 0 && newSignCount > credential.getSignCount()) {
+        if (!webAuthnService.validateSignCount(newSignCount, credential.getSignCount())) {
+            log.warn("WebAuthn authenticate: sign-counter regression for credential: {} — rejecting (possible cloned credential)",
+                    credentialId);
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of(
+                    "success", false,
+                    "message", "Authenticator counter regression — possible cloned credential"
+            ));
+        }
+        if (newSignCount > credential.getSignCount()) {
             credential.updateSignCount(newSignCount);
             credentialRepository.save(credential);
         }

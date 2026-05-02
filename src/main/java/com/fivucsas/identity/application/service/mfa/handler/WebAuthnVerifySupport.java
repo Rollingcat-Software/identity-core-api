@@ -98,9 +98,17 @@ public class WebAuthnVerifySupport {
                     clientDataJSON, signature, credential.getPublicKey());
 
             if (verified) {
-                long signCount = webAuthnService.extractSignCount(authenticatorData);
-                credential.updateSignCount(signCount);
-                webAuthnCredentialRepository.save(credential);
+                // P1-4: validate the WebAuthn sign-counter per spec §6.1 step 17.
+                long newSignCount = webAuthnService.extractSignCount(authenticatorData);
+                if (!webAuthnService.validateSignCount(newSignCount, credential.getSignCount())) {
+                    log.warn("MFA WebAuthn sign-counter regression for user: {} cred: {} — rejecting (possible cloned credential)",
+                            user.getEmail(), credentialId);
+                    return MfaStepResult.fail();
+                }
+                if (newSignCount > credential.getSignCount()) {
+                    credential.updateSignCount(newSignCount);
+                    webAuthnCredentialRepository.save(credential);
+                }
             }
             return verified ? MfaStepResult.ok() : MfaStepResult.fail();
         } catch (Exception e) {

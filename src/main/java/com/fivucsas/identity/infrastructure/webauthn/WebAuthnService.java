@@ -13,6 +13,8 @@ import java.security.*;
 import java.security.spec.X509EncodedKeySpec;
 import java.time.Duration;
 import java.util.Base64;
+import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 @Service
@@ -26,12 +28,28 @@ public class WebAuthnService {
     private final StringRedisTemplate redisTemplate;
     @Getter
     private final String rpId;
+    /**
+     * Explicit allowlist of accepted RP origins per WebAuthn §7.2 step 9.
+     * Replaces the prior {@code origin.contains(rpId)} substring trick that
+     * accepted phishing hosts like {@code https://attacker-fivucsas.com.evil.com}.
+     * Comparison is exact-match and case-sensitive (RFC 6454 §4).
+     */
+    private final Set<String> allowedOrigins;
 
     public WebAuthnService(
             StringRedisTemplate redisTemplate,
-            @Value("${webauthn.rp-id:fivucsas.com}") String rpId) {
+            @Value("${webauthn.rp-id:fivucsas.com}") String rpId,
+            @Value("${app.webauthn.allowed-origins:}") List<String> allowedOrigins) {
         this.redisTemplate = redisTemplate;
         this.rpId = rpId;
+        this.allowedOrigins = allowedOrigins == null ? Set.of() : Set.copyOf(allowedOrigins);
+        if (this.allowedOrigins.isEmpty()) {
+            log.warn("WebAuthn: app.webauthn.allowed-origins is empty — every assertion will be rejected. " +
+                    "Configure the property to enable WebAuthn authentication.");
+        } else {
+            log.info("WebAuthn: configured with {} allowed origin(s): {}",
+                    this.allowedOrigins.size(), this.allowedOrigins);
+        }
     }
 
     public String generateChallenge(UUID sessionId) {
@@ -58,26 +76,39 @@ public class WebAuthnService {
             return false;
         }
 
-        if (clientDataJsonB64 != null && !clientDataJsonB64.isEmpty()) {
-            try {
-                byte[] decoded = decodeBase64(clientDataJsonB64);
-                JsonNode clientData = OBJECT_MAPPER.readTree(decoded);
+        // P1-3: clientDataJSON is REQUIRED. Previously a null/empty value silently
+        // skipped the entire challenge proof, allowing any registration to succeed
+        // (and consume the Redis challenge) without ever proving freshness.
+        if (clientDataJsonB64 == null || clientDataJsonB64.isEmpty()) {
+            log.warn("WebAuthn: clientDataJSON missing — rejecting registration for session: {}", sessionId);
+            return false;
+        }
 
-                String type = clientData.has("type") ? clientData.get("type").asText() : null;
-                if (!"webauthn.create".equals(type)) {
-                    log.warn("WebAuthn clientData type mismatch: expected 'webauthn.create', got '{}'", type);
-                    return false;
-                }
+        try {
+            byte[] decoded = decodeBase64(clientDataJsonB64);
+            JsonNode clientData = OBJECT_MAPPER.readTree(decoded);
 
-                String challenge = clientData.has("challenge") ? clientData.get("challenge").asText() : null;
-                if (!storedChallenge.equals(challenge)) {
-                    log.warn("WebAuthn challenge mismatch in registration clientDataJSON");
-                    return false;
-                }
-            } catch (Exception e) {
-                log.warn("WebAuthn registration clientDataJSON parsing failed: {}", e.getMessage());
+            String type = clientData.has("type") ? clientData.get("type").asText() : null;
+            if (!"webauthn.create".equals(type)) {
+                log.warn("WebAuthn clientData type mismatch: expected 'webauthn.create', got '{}'", type);
                 return false;
             }
+
+            String challenge = clientData.has("challenge") ? clientData.get("challenge").asText() : null;
+            if (!storedChallenge.equals(challenge)) {
+                log.warn("WebAuthn challenge mismatch in registration clientDataJSON");
+                return false;
+            }
+
+            // P1-2: origin must be in the explicit allowlist (exact-match, case-sensitive).
+            String origin = clientData.has("origin") ? clientData.get("origin").asText() : null;
+            if (!isOriginAllowed(origin)) {
+                log.warn("WebAuthn registration origin not in allowlist: '{}'", origin);
+                return false;
+            }
+        } catch (Exception e) {
+            log.warn("WebAuthn registration clientDataJSON parsing failed: {}", e.getMessage());
+            return false;
         }
 
         // Consume the challenge
@@ -200,6 +231,45 @@ public class WebAuthnService {
     }
 
     /**
+     * Validates the WebAuthn sign-counter per spec §6.1 step 17.
+     *
+     * <ul>
+     *   <li>If both new and stored are 0, accept with INFO log — some authenticators
+     *       (especially platform authenticators on Apple/Android) deliberately
+     *       always emit 0 for privacy reasons; the spec permits this.</li>
+     *   <li>Otherwise, require {@code newCount &gt; storedCount}. Equal or lesser
+     *       values indicate a cloned authenticator and MUST be rejected.</li>
+     * </ul>
+     *
+     * @return {@code true} if the counter is acceptable, {@code false} if it
+     *         indicates a possible cloned credential.
+     */
+    public boolean validateSignCount(long newCount, long storedCount) {
+        if (newCount == 0 && storedCount == 0) {
+            log.info("WebAuthn sign-counter both zero — accepting per spec note (authenticator does not implement counter)");
+            return true;
+        }
+        if (newCount > storedCount) {
+            return true;
+        }
+        log.warn("WebAuthn sign-counter regression — possible cloned credential. new={}, stored={}",
+                newCount, storedCount);
+        return false;
+    }
+
+    /**
+     * Returns {@code true} when {@code origin} is non-null and exactly matches
+     * one of the configured {@code app.webauthn.allowed-origins} entries.
+     * Comparison is case-sensitive (RFC 6454 §4).
+     */
+    private boolean isOriginAllowed(String origin) {
+        if (origin == null || origin.isEmpty()) {
+            return false;
+        }
+        return allowedOrigins.contains(origin);
+    }
+
+    /**
      * Validates clientDataJSON per WebAuthn spec:
      * - Must be valid JSON
      * - type must be "webauthn.get"
@@ -229,10 +299,12 @@ public class WebAuthnService {
                 return false;
             }
 
-            // Verify origin contains expected RP ID
+            // P1-2: origin must be in the explicit allowlist (exact-match, case-sensitive
+            // per RFC 6454 §4). Replaces the previous substring check that accepted
+            // phishing hosts whose hostname contained the rpId as a substring.
             String origin = clientData.has("origin") ? clientData.get("origin").asText() : null;
-            if (origin == null || !origin.contains(rpId)) {
-                log.warn("WebAuthn origin mismatch: expected origin containing '{}', got '{}'", rpId, origin);
+            if (!isOriginAllowed(origin)) {
+                log.warn("WebAuthn assertion origin not in allowlist: '{}'", origin);
                 return false;
             }
 
