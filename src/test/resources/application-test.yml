@@ -55,6 +55,15 @@ fivucsas:
     enc-key: AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=
     migrate-on-boot: false
 
+# Test profile: HS512 verification stays on so legacy fixture tokens still
+# round-trip; production posture (HS512 off) is asserted in dedicated
+# JwtServiceSecurityHardeningTest.
+app:
+  security:
+    jwt:
+      allow-hs512: true
+      issuer: ""
+
 # CORS Configuration for Testing
 cors:
   allowed-origins: http://localhost:3000,http://localhost:5173

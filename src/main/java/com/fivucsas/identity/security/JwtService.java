@@ -51,6 +51,25 @@ public class JwtService implements TokenGenerationPort {
     @Value("${fivucsas.jwt.default-algo:HS512}")
     private String defaultAlgo;
 
+    /**
+     * P0-3 code half (SECURITY_REVIEW_2026-05-01 §P0-3): the leaked
+     * f8ee668:.env.gcp HS512 secret keeps the HS512 verification path a
+     * forge surface. RS256 has been the prod default since 2026-04-20, so
+     * accept HS512 tokens only when an operator explicitly opts in (e.g.
+     * an emergency rollback window). Default OFF — any HS512 token is
+     * rejected with a SignatureException at parse time.
+     */
+    @Value("${app.security.jwt.allow-hs512:false}")
+    private boolean allowHs512;
+
+    /**
+     * P1-5 / §P0-3 fix: bind {@code iss} on the parser. Empty value disables
+     * the requirement (kept open for the dev profile where the issuer URL
+     * isn't pinned).
+     */
+    @Value("${app.security.jwt.issuer:}")
+    private String expectedIssuer;
+
     public JwtService(JwtSecretProvider jwtSecretProvider,
                       RsaKeyProvider rsaKeyProvider,
                       Environment environment) {
@@ -66,6 +85,24 @@ public class JwtService implements TokenGenerationPort {
      * {@code JWT_DEFAULT_ALGO} env var or a stray {@code @PropertySource}.
      * Fail fast at startup rather than silently mint HS512 tokens in prod.
      */
+    @PostConstruct
+    void logSigningPosture() {
+        if (allowHs512) {
+            log.warn("SECURITY: app.security.jwt.allow-hs512=true — HS512 token "
+                    + "verification is enabled. RS256 has been the prod default since "
+                    + "2026-04-20; flip this back to false unless rolling back.");
+        } else {
+            log.info("JWT verification: HS512 path DISABLED (P0-3 code-side closure); "
+                    + "RS256-only via kid={}", rsaKeyProvider != null ? rsaKeyProvider.getKid() : "n/a");
+        }
+        if (expectedIssuer != null && !expectedIssuer.isEmpty()) {
+            log.info("JWT verification: issuer pinned to '{}'", expectedIssuer);
+        } else {
+            log.warn("JWT verification: no issuer requirement configured "
+                    + "(set app.security.jwt.issuer=https://api.fivucsas.com in prod)");
+        }
+    }
+
     @PostConstruct
     void assertProdAlgoIsRs256() {
         if (environment == null) {
@@ -134,6 +171,13 @@ public class JwtService implements TokenGenerationPort {
                 .issuedAt(new Date(System.currentTimeMillis()))
                 .expiration(new Date(System.currentTimeMillis() + expiration));
 
+        // §P0-3 / P1-5: stamp the issuer claim on every minted access token so
+        // the verification side can reject tokens forged for a different
+        // deployment (e.g. a staging RSA key mistakenly reused in dev).
+        if (expectedIssuer != null && !expectedIssuer.isEmpty()) {
+            builder = builder.issuer(expectedIssuer);
+        }
+
         String alg = defaultAlgo == null ? "HS512" : defaultAlgo.trim().toUpperCase();
         String token;
         if ("RS256".equals(alg)) {
@@ -175,9 +219,16 @@ public class JwtService implements TokenGenerationPort {
     }
 
     private Claims extractAllClaims(String token) {
-        return Jwts
+        var parserBuilder = Jwts
                 .parser()
-                .keyLocator(keyLocator())
+                .keyLocator(keyLocator());
+        // §P0-3 / P1-5: require issuer when configured. Empty config (dev
+        // profile) leaves it unrestricted, matching pre-existing behaviour
+        // for local-only flows.
+        if (expectedIssuer != null && !expectedIssuer.isEmpty()) {
+            parserBuilder = parserBuilder.requireIssuer(expectedIssuer);
+        }
+        return parserBuilder
                 .build()
                 .parseSignedClaims(token)
                 .getPayload();
@@ -194,18 +245,53 @@ public class JwtService implements TokenGenerationPort {
             @Override
             public Key locate(io.jsonwebtoken.Header header) {
                 if (!(header instanceof JwsHeader jws)) {
-                    return getHmacSignInKey();
+                    // Non-JWS header (e.g. unsigned JWT) — refuse outright.
+                    throw new io.jsonwebtoken.security.SignatureException(
+                            "Unsigned JWT rejected (JWS header required)");
                 }
                 String kid = jws.getKeyId();
                 String alg = jws.getAlgorithm();
+
+                // §P0-3 code half: HS512 verification surface is OFF by
+                // default. The leaked f8ee668:.env.gcp HS secret means any
+                // HS512-tagged token must be rejected unless the operator
+                // explicitly opts in for a rollback window.
                 if (kid == null) {
-                    // Legacy tokens minted before BE-H1: no kid, HS512 only.
+                    // Legacy tokens (pre-BE-H1) had no kid; they were HS512.
+                    // Same gate applies.
+                    if (!allowHs512) {
+                        throw new io.jsonwebtoken.security.SignatureException(
+                                "HS512 verification disabled (kid absent); "
+                                        + "set app.security.jwt.allow-hs512=true to re-enable");
+                    }
+                    if (!"HS512".equals(alg)) {
+                        throw new io.jsonwebtoken.security.SignatureException(
+                                "alg/kid mismatch: kid=null requires alg=HS512, got " + alg);
+                    }
                     return getHmacSignInKey();
                 }
                 if (HS_KID.equals(kid)) {
+                    if (!allowHs512) {
+                        throw new io.jsonwebtoken.security.SignatureException(
+                                "HS512 verification disabled (kid=" + HS_KID + "); "
+                                        + "set app.security.jwt.allow-hs512=true to re-enable");
+                    }
+                    // §P2-3: bind alg-to-kid. JJWT will catch most key/alg
+                    // mismatches at signature-verify time, but the explicit
+                    // contract closes CVE-2018-0114-shape forgeries where a
+                    // header pretends to be one alg while actually using
+                    // another.
+                    if (!"HS512".equals(alg)) {
+                        throw new io.jsonwebtoken.security.SignatureException(
+                                "alg/kid mismatch: kid=" + HS_KID + " requires alg=HS512, got " + alg);
+                    }
                     return getHmacSignInKey();
                 }
                 if (rsaKeyProvider.getKid().equals(kid)) {
+                    if (!"RS256".equals(alg)) {
+                        throw new io.jsonwebtoken.security.SignatureException(
+                                "alg/kid mismatch: kid=" + kid + " requires alg=RS256, got " + alg);
+                    }
                     return rsaKeyProvider.getPublicKey();
                 }
                 throw new io.jsonwebtoken.security.SignatureException(

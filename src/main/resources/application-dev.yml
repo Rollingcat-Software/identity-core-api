@@ -50,6 +50,16 @@ jwt:
   expiration: 86400000  # 24 hours
   refresh-expiration: 604800000  # 7 days
 
+# SECURITY_REVIEW_2026-05-01 §P0-3:
+# Dev profile: HS512 still permitted for local tooling that mints HS-signed
+# fixtures, and no issuer requirement so local sandbox tokens stay valid.
+# Prod profile pins both off — see application-prod.yml.
+app:
+  security:
+    jwt:
+      allow-hs512: ${APP_SECURITY_JWT_ALLOW_HS512:true}
+      issuer: ${APP_SECURITY_JWT_ISSUER:}
+
 # Redis Configuration (Development)
 # SECURITY: Password must be set via REDIS_PASSWORD environment variable
 redis:

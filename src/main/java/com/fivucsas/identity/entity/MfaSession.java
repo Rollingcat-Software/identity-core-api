@@ -166,7 +166,27 @@ public class MfaSession {
             methods.add(amrValue);
             this.stepsData = MAPPER.writeValueAsString(methods);
         } catch (Exception e) {
-            this.stepsData = "[\"" + amrValue + "\"]";
+            // SECURITY_REVIEW_2026-05-01 §P1-7: previous shape wrote
+            //   this.stepsData = "[\"" + amrValue + "\"]";
+            // which corrupted the JSON document if {@code amrValue} contained
+            // a quote or backslash. Today {@code amrValue} is an enum name so
+            // the value is safe, but the next caller that passes
+            // tenant-supplied data would inject a JSON-shaped payload.
+            // Use Jackson on this path too so the encoding contract stays
+            // honest regardless of input.
+            try {
+                this.stepsData = MAPPER.writeValueAsString(java.util.List.of(amrValue));
+            } catch (com.fasterxml.jackson.core.JsonProcessingException jpe) {
+                // writeValueAsString on a List<String> with a single element
+                // can only fail under serializer-level misconfiguration. If
+                // it does, leave the existing stepsData untouched rather than
+                // corrupt it — the service-layer same-method check will then
+                // simply not see the new value and reject the step.
+                org.slf4j.LoggerFactory.getLogger(MfaSession.class)
+                        .error("MfaSession.addCompletedMethod fallback Jackson serialization failed; "
+                                + "original parse error: {}, fallback error: {}",
+                                e.getMessage(), jpe.getMessage());
+            }
         }
     }
 

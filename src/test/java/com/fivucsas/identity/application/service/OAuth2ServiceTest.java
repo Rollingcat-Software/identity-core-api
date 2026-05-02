@@ -413,6 +413,53 @@ class OAuth2ServiceTest {
         verify(redisTemplate).delete("oauth2:code:conf-code-ok");
     }
 
+    /**
+     * SECURITY_REVIEW_2026-05-01 §P2-2: a public client (isConfidential=false)
+     * that supplies neither a client_secret nor a PKCE code_verifier must be
+     * rejected with 400. Previously the path logged a warn and fell through.
+     */
+    @Test
+    void exchangeCode_WhenPublicClientWithoutSecretOrVerifier_ShouldReject() {
+        // given — public client, stored code with NO challenge (legacy
+        // pre-PKCE registration), no client_secret, no code_verifier.
+        ValueOperations<String, String> valueOps = mock(ValueOperations.class);
+        when(redisTemplate.opsForValue()).thenReturn(valueOps);
+        when(valueOps.get("oauth2:code:public-no-pkce"))
+                .thenReturn("user@test.com|client-1|https://cb.com|openid|||");
+
+        OAuth2Client client = mock(OAuth2Client.class);
+        when(client.isConfidential()).thenReturn(false);
+        when(clientRepository.findByClientIdAndActiveTrue("client-1")).thenReturn(Optional.of(client));
+
+        // when/then — was a log.warn fall-through; now hard-rejected.
+        assertThatThrownBy(() -> service.exchangeCode(
+                "public-no-pkce", "client-1", "https://cb.com", null, null))
+                .isInstanceOf(OAuth2Exception.class)
+                .hasMessageContaining("code_verifier required for public client");
+    }
+
+    /**
+     * §P2-2 companion: a public client supplying an empty-string secret AND
+     * empty-string verifier is treated identically to null/null. Defensive
+     * against form parsers that materialize missing fields as "".
+     */
+    @Test
+    void exchangeCode_WhenPublicClientEmptyStringSecretAndVerifier_ShouldReject() {
+        ValueOperations<String, String> valueOps = mock(ValueOperations.class);
+        when(redisTemplate.opsForValue()).thenReturn(valueOps);
+        when(valueOps.get("oauth2:code:public-empty-strings"))
+                .thenReturn("user@test.com|client-1|https://cb.com|openid|||");
+
+        OAuth2Client client = mock(OAuth2Client.class);
+        when(client.isConfidential()).thenReturn(false);
+        when(clientRepository.findByClientIdAndActiveTrue("client-1")).thenReturn(Optional.of(client));
+
+        assertThatThrownBy(() -> service.exchangeCode(
+                "public-empty-strings", "client-1", "https://cb.com", "", ""))
+                .isInstanceOf(OAuth2Exception.class)
+                .hasMessageContaining("code_verifier required for public client");
+    }
+
     @Test
     void getUserInfo_WhenValidToken_ShouldReturnUserClaims() {
         // given

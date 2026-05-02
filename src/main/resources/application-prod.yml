@@ -83,6 +83,19 @@ fivucsas:
   jwt:
     default-algo: RS256
 
+# SECURITY_REVIEW_2026-05-01 §P0-3 / §P2-3:
+# - allow-hs512: HS512 verification surface is OFF in prod. The leaked
+#   f8ee668:.env.gcp HS secret is treated as compromised; any HS512 token
+#   must be rejected. Override via APP_SECURITY_JWT_ALLOW_HS512 only for an
+#   emergency rollback window, then flip back.
+# - issuer: pinned so a token forged against a different deployment's RSA
+#   key (e.g. staging) is rejected on the parser, not just at signature time.
+app:
+  security:
+    jwt:
+      allow-hs512: ${APP_SECURITY_JWT_ALLOW_HS512:false}
+      issuer: ${APP_SECURITY_JWT_ISSUER:https://api.fivucsas.com}
+
 # FastAPI Integration (Production)
 # IMPORTANT: Configure via environment variables
 biometric:

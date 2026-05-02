@@ -256,11 +256,28 @@ public class OAuth2Service {
             if (!passwordEncoder.matches(clientSecret, client.getClientSecret())) {
                 throw new IllegalArgumentException("Invalid client_secret");
             }
-        } else if (storedCodeChallenge.isEmpty()) {
-            // Public client, no PKCE and no client_secret. We mandate PKCE for
-            // public clients at /authorize, so this path only fires for older
-            // registrations — keep the warn trail.
-            log.warn("OAuth2 token request without client_secret or PKCE for client: {}", clientId);
+        } else {
+            // SECURITY_REVIEW_2026-05-01 §P2-2: public client with neither a
+            // client_secret nor a code_verifier. RFC 7636 §4.4.1 mandates PKCE
+            // for public clients on the token endpoint. The previous shape
+            // logged a warn and fell through, so any pre-V34 public client
+            // could redeem a code without proving it owned the original
+            // /authorize request. Hard-reject with 400.
+            if (codeVerifier == null || codeVerifier.isEmpty()) {
+                log.warn("OAuth2 token request rejected — public client without code_verifier: {}", clientId);
+                throw new OAuth2Exception(HttpStatus.BAD_REQUEST,
+                        "code_verifier required for public client");
+            }
+            // codeVerifier present but storedCodeChallenge was empty (i.e. the
+            // /authorize request never set a challenge). We still reject:
+            // a verifier without a stored challenge can't be matched and the
+            // request is malformed.
+            if (storedCodeChallenge.isEmpty()) {
+                log.warn("OAuth2 token request rejected — public client supplied code_verifier "
+                        + "but authorization code has no code_challenge: {}", clientId);
+                throw new OAuth2Exception(HttpStatus.BAD_REQUEST,
+                        "code_verifier supplied but no code_challenge was registered at /authorize");
+            }
         }
 
         // Find user
