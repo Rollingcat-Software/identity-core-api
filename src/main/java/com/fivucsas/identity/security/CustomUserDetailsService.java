@@ -2,6 +2,7 @@ package com.fivucsas.identity.security;
 
 import com.fivucsas.identity.entity.Permission;
 import com.fivucsas.identity.entity.Role;
+import com.fivucsas.identity.entity.Tenant;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.entity.UserRole;
 import com.fivucsas.identity.entity.UserType;
@@ -18,9 +19,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.UUID;
 
 /**
  * Custom UserDetailsService implementation for loading user-specific data.
@@ -55,15 +58,20 @@ public class CustomUserDetailsService implements UserDetailsService {
         // Check if guest account has expired
         if (user.isExpired()) {
             log.warn("Expired guest user attempted login: {}", email);
-            return org.springframework.security.core.userdetails.User.builder()
-                    .username(user.getEmail())
-                    .password(user.getPasswordHash())
-                    .authorities(new HashSet<>())
-                    .accountExpired(true)
-                    .accountLocked(false)
-                    .credentialsExpired(false)
-                    .disabled(true)
-                    .build();
+            // Disabled CustomUserDetails — Spring's DaoAuthenticationProvider treats
+            // !isEnabled() as a hard reject (DisabledException), preserving the
+            // previous .accountExpired(true).disabled(true) semantics. Returning
+            // CustomUserDetails (instead of Spring's stock User) is required so
+            // TenantBindFromAuthFilter / AuthorizationService / AuditLoggingAspect
+            // can downcast the principal — the silent no-op fixed by this PR.
+            return new CustomUserDetails(
+                    user.getId(),
+                    user.getEmail(),
+                    user.getPasswordHash(),
+                    extractTenantId(user),
+                    false,                               // enabled = false → expired/disabled
+                    Collections.<GrantedAuthority>emptySet()
+            );
         }
 
         // Load authorities (roles, permissions, and user type)
@@ -72,15 +80,19 @@ public class CustomUserDetailsService implements UserDetailsService {
         log.debug("Loaded {} authorities for user {} (type: {})",
                 authorities.size(), email, user.getUserType());
 
-        return org.springframework.security.core.userdetails.User.builder()
-                .username(user.getEmail())
-                .password(user.getPasswordHash())
-                .authorities(authorities)
-                .accountExpired(false)
-                .accountLocked(false)
-                .credentialsExpired(false)
-                .disabled(!isUserActive(user))
-                .build();
+        return new CustomUserDetails(
+                user.getId(),
+                user.getEmail(),
+                user.getPasswordHash(),
+                extractTenantId(user),
+                isUserActive(user),
+                authorities
+        );
+    }
+
+    private static UUID extractTenantId(User user) {
+        Tenant tenant = user.getTenant();
+        return tenant != null ? tenant.getId() : null;
     }
 
     /**

@@ -29,11 +29,14 @@ import java.util.UUID;
  * </ul>
  *
  * <p><b>Why not reuse {@link AuthorizationService#getCurrentTenantId()}?</b>
- * The Spring principal is a plain {@link org.springframework.security.core.userdetails.UserDetails}
- * (not {@code CustomUserDetails}), so {@code getCurrentTenantId()} silently
- * returns {@code null} and would re-open the cross-tenant leak. Always go
- * through {@link RbacAuthorizationService#getCurrentUser()}, which hits the
- * DB.</p>
+ * Historically the Spring principal was a plain
+ * {@link org.springframework.security.core.userdetails.UserDetails} (not
+ * {@code CustomUserDetails}), so {@code getCurrentTenantId()} silently
+ * returned {@code null} and would re-open the cross-tenant leak. Fixed in
+ * the PR that wires {@code CustomUserDetails} as the authenticated principal
+ * (CustomUserDetailsService now constructs CustomUserDetails directly). This
+ * resolver still routes through the DB ({@link RbacAuthorizationService#getCurrentUser()})
+ * to keep tenant scope decisions independent of cached principal state.</p>
  */
 @Service
 @RequiredArgsConstructor
