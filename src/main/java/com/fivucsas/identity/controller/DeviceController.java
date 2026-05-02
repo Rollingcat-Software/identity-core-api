@@ -4,7 +4,7 @@ import com.fivucsas.identity.application.dto.command.RegisterDeviceCommand;
 import com.fivucsas.identity.application.dto.response.DeviceResponse;
 import com.fivucsas.identity.application.port.input.ManageDeviceUseCase;
 import com.fivucsas.identity.application.port.input.ManageEnrollmentUseCase;
-import com.fivucsas.identity.domain.exception.ResourceNotFoundException;
+import com.fivucsas.identity.application.service.WebAuthnCredentialService;
 import com.fivucsas.identity.domain.exception.UserNotFoundException;
 import com.fivucsas.identity.application.port.output.WebAuthnCredentialRepositoryPort;
 import com.fivucsas.identity.domain.model.auth.AuthMethodType;
@@ -23,7 +23,6 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.LinkedHashMap;
@@ -45,6 +44,7 @@ public class DeviceController {
     private final ManageDeviceUseCase manageDeviceUseCase;
     private final WebAuthnService webAuthnService;
     private final WebAuthnCredentialRepositoryPort credentialRepository;
+    private final WebAuthnCredentialService webAuthnCredentialService;
     private final UserRepository userRepository;
     private final ManageEnrollmentUseCase manageEnrollmentUseCase;
     private final TenantScopeResolver tenantScopeResolver;
@@ -231,32 +231,6 @@ public class DeviceController {
     }
 
     /**
-     * Revokes the WebAuthn enrollment record if no credentials of the given transport type
-     * remain after a deletion. This keeps the enrollment status in sync with actual credentials.
-     *
-     * Called from delete endpoints so that removing the last passkey automatically
-     * marks the method as NOT_ENROLLED rather than leaving a stale ENROLLED record.
-     */
-    private void revokeWebAuthnEnrollmentIfNeeded(UUID userId, String transports) {
-        AuthMethodType methodType = resolveWebAuthnMethodType(transports);
-        List<WebAuthnCredential> remaining = credentialRepository.findAllByUserId(userId);
-        boolean anyOfSameType = remaining.stream().anyMatch(c -> {
-            boolean isInternal = c.getTransports() != null && c.getTransports().toLowerCase().contains("internal");
-            return methodType == AuthMethodType.FINGERPRINT ? isInternal : !isInternal;
-        });
-
-        if (!anyOfSameType) {
-            try {
-                manageEnrollmentUseCase.revokeEnrollment(userId, methodType);
-                log.info("Auto-revoked {} enrollment for user {} after last credential deleted", methodType, userId);
-            } catch (Exception e) {
-                log.warn("Failed to revoke {} enrollment for user {} after credential deletion: {}",
-                        methodType, userId, e.getMessage());
-            }
-        }
-    }
-
-    /**
      * Auto-completes the enrollment record for a WebAuthn credential after successful registration.
      * Logs a warning (but does NOT fail) if the enrollment record cannot be updated,
      * since the credential itself has already been persisted.
@@ -275,31 +249,16 @@ public class DeviceController {
     @DeleteMapping("/api/v1/webauthn/credentials/by-id/{id}")
     @Operation(summary = "Delete a WebAuthn credential by database ID")
     @PreAuthorize("isAuthenticated()")
-    @Transactional
     public ResponseEntity<Void> deleteCredentialById(@PathVariable UUID id) {
-        WebAuthnCredential credential = credentialRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Credential", id.toString()));
-        UUID userId = credential.getUser().getId();
-        String transports = credential.getTransports();
-
-        credentialRepository.deleteById(id);
-
-        // Revoke the enrollment if no credentials of this transport type remain
-        revokeWebAuthnEnrollmentIfNeeded(userId, transports);
-
+        webAuthnCredentialService.deleteById(id);
         return ResponseEntity.noContent().build();
     }
 
     @DeleteMapping("/api/v1/webauthn/credentials/{credentialId}")
     @Operation(summary = "Delete a WebAuthn credential")
     @PreAuthorize("isAuthenticated()")
-    @Transactional
     public ResponseEntity<Void> deleteCredential(@PathVariable String credentialId) {
-        if (!credentialRepository.existsByCredentialId(credentialId)) {
-            throw new ResourceNotFoundException("Credential", credentialId);
-        }
-
-        credentialRepository.deleteByCredentialId(credentialId);
+        webAuthnCredentialService.deleteByCredentialId(credentialId);
         return ResponseEntity.noContent().build();
     }
 

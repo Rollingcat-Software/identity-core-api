@@ -25,6 +25,7 @@ import com.fivucsas.identity.infrastructure.email.EmailService;
 import com.fivucsas.identity.infrastructure.otp.OtpService;
 import com.fivucsas.identity.infrastructure.sms.SmsService;
 import com.fivucsas.identity.infrastructure.sms.VerifiableSmsService;
+import com.fivucsas.identity.infrastructure.web.InMemoryMultipartFile;
 import com.fivucsas.identity.domain.repository.UserRepository;
 import com.fivucsas.identity.domain.exception.UserNotFoundException;
 import com.fivucsas.identity.security.RateLimitService;
@@ -55,8 +56,6 @@ import com.fivucsas.identity.repository.MfaSessionRepository;
 import com.fivucsas.identity.repository.UserEnrollmentRepository;
 import com.fivucsas.identity.service.RefreshTokenService;
 
-import java.io.ByteArrayInputStream;
-import java.io.InputStream;
 import java.util.*;
 
 /**
@@ -497,19 +496,8 @@ public class AuthController {
                     if (image == null || image.isBlank()) yield false;
                     byte[] imageBytes = java.util.Base64.getDecoder().decode(
                             image.contains(",") ? image.substring(image.indexOf(",") + 1) : image);
-                    final byte[] bytes = imageBytes;
-                    MultipartFile faceFile = new MultipartFile() {
-                        public String getName() { return "file"; }
-                        public String getOriginalFilename() { return "face.jpg"; }
-                        public String getContentType() { return "image/jpeg"; }
-                        public boolean isEmpty() { return bytes.length == 0; }
-                        public long getSize() { return bytes.length; }
-                        public byte[] getBytes() { return bytes; }
-                        public InputStream getInputStream() { return new ByteArrayInputStream(bytes); }
-                        public void transferTo(java.io.File dest) throws java.io.IOException {
-                            java.nio.file.Files.write(dest.toPath(), bytes);
-                        }
-                    };
+                    MultipartFile faceFile = new InMemoryMultipartFile(
+                            "file", "face.jpg", "image/jpeg", imageBytes);
                     Map<String, Object> faceResult = biometricService.verifyFace(user.getId(), faceFile);
                     // Check spoof detection
                     String errorCode2fa = faceResult.get("error_code") instanceof String ec ? ec : null;
@@ -1122,41 +1110,5 @@ public class AuthController {
             log.info("TOTP secret re-cached in Redis for user: {}", user.getId());
         }
         return secret;
-    }
-
-    /**
-     * Simple in-memory MultipartFile for base64 to MultipartFile conversion.
-     */
-    private record InMemoryMultipartFile(
-            String name, String originalFilename, String contentType, byte[] content
-    ) implements org.springframework.web.multipart.MultipartFile {
-
-        @Override
-        public String getName() { return name; }
-
-        @Override
-        public String getOriginalFilename() { return originalFilename; }
-
-        @Override
-        public String getContentType() { return contentType; }
-
-        @Override
-        public boolean isEmpty() { return content == null || content.length == 0; }
-
-        @Override
-        public long getSize() { return content != null ? content.length : 0; }
-
-        @Override
-        public byte[] getBytes() { return content; }
-
-        @Override
-        public java.io.InputStream getInputStream() { return new java.io.ByteArrayInputStream(content); }
-
-        @Override
-        public void transferTo(java.io.File dest) throws java.io.IOException {
-            try (java.io.FileOutputStream fos = new java.io.FileOutputStream(dest)) {
-                fos.write(content);
-            }
-        }
     }
 }

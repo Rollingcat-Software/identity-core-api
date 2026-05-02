@@ -2,6 +2,8 @@ package com.fivucsas.identity.controller;
 
 import com.fivucsas.identity.application.port.input.ManageDeviceUseCase;
 import com.fivucsas.identity.application.port.output.WebAuthnCredentialRepositoryPort;
+import com.fivucsas.identity.application.service.WebAuthnCredentialService;
+import com.fivucsas.identity.domain.exception.ResourceNotFoundException;
 import com.fivucsas.identity.domain.repository.UserRepository;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.entity.UserStatus;
@@ -35,6 +37,7 @@ class WebAuthnControllerTest {
     @Mock private ManageDeviceUseCase manageDeviceUseCase;
     @Mock private WebAuthnService webAuthnService;
     @Mock private WebAuthnCredentialRepositoryPort credentialRepository;
+    @Mock private WebAuthnCredentialService webAuthnCredentialService;
     @Mock private UserRepository userRepository;
 
     @InjectMocks
@@ -187,23 +190,23 @@ class WebAuthnControllerTest {
         }
 
         @Test
-        @DisplayName("Should delete credential")
+        @DisplayName("Should delegate delete to WebAuthnCredentialService and return 204")
         void shouldDeleteCredential() {
-            when(credentialRepository.existsByCredentialId("credId")).thenReturn(true);
-
+            // Service handles existence + actual delete; controller just delegates.
             ResponseEntity<Void> response = webAuthnController.deleteCredential("credId");
 
             assertThat(response.getStatusCode().value()).isEqualTo(204);
-            verify(credentialRepository).deleteByCredentialId("credId");
+            verify(webAuthnCredentialService).deleteByCredentialId("credId");
         }
 
         @Test
-        @DisplayName("Should throw when deleting non-existent credential")
+        @DisplayName("Should propagate ResourceNotFoundException from the service for unknown credentialId")
         void shouldThrowWhenDeletingNonExistent() {
-            when(credentialRepository.existsByCredentialId("unknownCred")).thenReturn(false);
+            doThrow(new ResourceNotFoundException("Credential", "unknownCred"))
+                    .when(webAuthnCredentialService).deleteByCredentialId("unknownCred");
 
             assertThatThrownBy(() -> webAuthnController.deleteCredential("unknownCred"))
-                    .isInstanceOf(RuntimeException.class);
+                    .isInstanceOf(ResourceNotFoundException.class);
         }
     }
 

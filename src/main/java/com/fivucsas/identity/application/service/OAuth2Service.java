@@ -7,8 +7,10 @@ import com.fivucsas.identity.domain.exception.OAuth2Exception;
 import com.fivucsas.identity.domain.exception.PkceVerificationException;
 import com.fivucsas.identity.domain.model.PkceFailureReason;
 import com.fivucsas.identity.domain.repository.UserRepository;
+import com.fivucsas.identity.entity.MfaSession;
 import com.fivucsas.identity.entity.OAuth2Client;
 import com.fivucsas.identity.entity.User;
+import com.fivucsas.identity.repository.MfaSessionRepository;
 import com.fivucsas.identity.security.JwtService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -52,6 +54,7 @@ public class OAuth2Service {
     private final JwtService jwtService;
     private final StringRedisTemplate redisTemplate;
     private final PasswordEncoder passwordEncoder;
+    private final MfaSessionRepository mfaSessionRepository;
 
     @Value("${app.base-url:https://api.fivucsas.com}")
     private String issuer;
@@ -138,6 +141,63 @@ public class OAuth2Service {
      */
     public String generateAuthorizationCode(String userEmail, String clientId, String redirectUri, String scope) {
         return generateAuthorizationCode(userEmail, clientId, redirectUri, scope, null, null, null);
+    }
+
+    /**
+     * Atomic "consume MFA session and mint authorization code" critical section
+     * for the hosted-login {@code POST /oauth2/authorize/complete} endpoint.
+     *
+     * <p>All three steps run inside the same transaction, so a failure between
+     * consume and mint rolls back the consume and the session can be retried
+     * (rather than being left poisoned in {@code consumed=true}-but-no-code state).
+     * On success the session row is deleted so the same MFA can never mint a
+     * second code.</p>
+     *
+     * <p>Quality batch P1-Q9 (review 2026-05-01): the {@code @Transactional}
+     * boundary used to live on {@code OAuth2Controller.authorizeComplete};
+     * moved here so the controller stays HTTP-only. Behaviour is unchanged —
+     * the consume/mint/delete order, the audit-log lines, and the JSON
+     * response shape mirror the previous controller body.</p>
+     *
+     * @param session   the {@link MfaSession} resolved from the bearer token
+     * @param user      the user the session authenticates
+     * @param clientId  validated OAuth2 client id
+     * @param redirectUri validated redirect URI
+     * @param scope     requested scope (defaulted by caller if blank)
+     * @param nonce     OIDC nonce (nullable)
+     * @param codeChallenge PKCE challenge (nullable)
+     * @param codeChallengeMethod PKCE method (nullable)
+     * @return the freshly minted single-use authorization code
+     */
+    @Transactional
+    public String consumeMfaSessionAndMintCode(
+            MfaSession session,
+            User user,
+            String clientId,
+            String redirectUri,
+            String scope,
+            String nonce,
+            String codeChallenge,
+            String codeChallengeMethod) {
+
+        // Mark consumed BEFORE minting the code so a crash between consume and mint
+        // leaves the session poisoned (still marked consumed) and the transaction
+        // rolls back the consume with the mint.
+        session.consume();
+        mfaSessionRepository.save(session);
+
+        String code = generateAuthorizationCode(
+                user.getEmail(), clientId, redirectUri,
+                scope == null ? "openid profile email" : scope,
+                nonce, codeChallenge, codeChallengeMethod);
+
+        // Burn the MFA session record so it can't be replayed for a second code.
+        // Runs inside the same @Transactional — delete + consume + code mint all
+        // commit or rollback together.
+        mfaSessionRepository.delete(session);
+
+        log.info("OAuth2 hosted code minted — userId={}, clientId={}", user.getId(), clientId);
+        return code;
     }
 
     /**

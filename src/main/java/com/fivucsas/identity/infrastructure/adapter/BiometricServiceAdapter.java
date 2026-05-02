@@ -26,6 +26,17 @@ import java.util.UUID;
  * Implements the BiometricServicePort by calling the external FastAPI service.
  * Uses Spring 6's RestClient (synchronous) instead of reactive WebClient
  * since all calls were blocking anyway.
+ *
+ * <p>Typing note: every response is deserialised through
+ * {@link #MAP_TYPE} (a {@link ParameterizedTypeReference}). RestClient
+ * preserves the parameterised return type, so no unchecked cast is performed
+ * inside this class — the {@code @SuppressWarnings("unchecked")} annotations
+ * that previously sat on each {@code Map<String, Object>}-returning method
+ * were therefore noise and were removed in the P1-Q6 quality batch
+ * (review 2026-05-01). A future change that introduces typed Jackson DTOs
+ * per Python endpoint (BiometricEnrollResponse, BiometricVerifyResponse, …)
+ * would let callers stop reasoning about loose maps; that work is tracked
+ * separately and is out of scope here.</p>
  */
 @Component
 @Slf4j
@@ -82,7 +93,6 @@ public class BiometricServiceAdapter implements BiometricServicePort {
     }
 
     @Override
-    @SuppressWarnings("unchecked")
     public Map<String, Object> enrollFace(UUID userId,
                                           MultipartFile faceImage,
                                           String tenantId,
@@ -114,7 +124,6 @@ public class BiometricServiceAdapter implements BiometricServicePort {
     }
 
     @Override
-    @SuppressWarnings("unchecked")
     public Map<String, Object> verifyFace(UUID userId,
                                           MultipartFile faceImage,
                                           String tenantId,
@@ -146,7 +155,6 @@ public class BiometricServiceAdapter implements BiometricServicePort {
     }
 
     @Override
-    @SuppressWarnings("unchecked")
     public Map<String, Object> enrollVoice(UUID userId, String voiceData) {
         log.info("Calling biometric service to enroll voice for user: {}", userId);
         try {
@@ -164,7 +172,6 @@ public class BiometricServiceAdapter implements BiometricServicePort {
     }
 
     @Override
-    @SuppressWarnings("unchecked")
     public Map<String, Object> verifyVoice(UUID userId, String voiceData) {
         log.info("Calling biometric service to verify voice for user: {}", userId);
         try {
@@ -210,7 +217,6 @@ public class BiometricServiceAdapter implements BiometricServicePort {
     }
 
     @Override
-    @SuppressWarnings("unchecked")
     public Map<String, Object> enrollFaceMulti(UUID userId,
                                                List<MultipartFile> images,
                                                String tenantId,
@@ -240,7 +246,6 @@ public class BiometricServiceAdapter implements BiometricServicePort {
     }
 
     @Override
-    @SuppressWarnings("unchecked")
     public Map<String, Object> searchFace(MultipartFile faceImage,
                                           String tenantId,
                                           String clientEmbedding,
@@ -293,7 +298,6 @@ public class BiometricServiceAdapter implements BiometricServicePort {
     }
 
     @Override
-    @SuppressWarnings("unchecked")
     public Map<String, Object> searchVoice(String voiceData) {
         log.info("Calling biometric service to search voice");
         try {
@@ -308,7 +312,6 @@ public class BiometricServiceAdapter implements BiometricServicePort {
     }
 
     @Override
-    @SuppressWarnings("unchecked")
     public Map<String, Object> detectCardType(MultipartFile image) {
         log.info("Calling biometric service to detect card type");
         try {

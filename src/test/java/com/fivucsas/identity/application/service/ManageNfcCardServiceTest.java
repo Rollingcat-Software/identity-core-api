@@ -1,0 +1,158 @@
+package com.fivucsas.identity.application.service;
+
+import com.fivucsas.identity.application.port.input.ManageEnrollmentUseCase;
+import com.fivucsas.identity.application.port.output.NfcCardRepositoryPort;
+import com.fivucsas.identity.domain.model.auth.AuthMethodType;
+import com.fivucsas.identity.domain.repository.UserRepository;
+import com.fivucsas.identity.entity.NfcCard;
+import com.fivucsas.identity.entity.Tenant;
+import com.fivucsas.identity.entity.User;
+import com.fivucsas.identity.security.RbacAuthorizationService;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.mockito.junit.jupiter.MockitoSettings;
+import org.mockito.quality.Strictness;
+
+import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+/**
+ * Regression coverage for {@link ManageNfcCardService}, the application-level
+ * home of the NFC enrollment / verify / lookup logic that used to live (with
+ * controller-level {@code @Transactional}) inside {@code NfcController}.
+ *
+ * <p>P1-Q9, quality review 2026-05-01: behaviour parity is the contract. Each
+ * test below asserts a status branch that the controller previously emitted
+ * via {@code Map.of("success", false, "message", "...")} bodies — now
+ * encoded as a {@link ManageNfcCardService.EnrollResult.Status} or
+ * {@link ManageNfcCardService.DeactivateOutcome} so the controller does no
+ * persistence work of its own.</p>
+ */
+@ExtendWith(MockitoExtension.class)
+@MockitoSettings(strictness = Strictness.LENIENT)
+@DisplayName("ManageNfcCardService — P1-Q9 controller-tx-move regression")
+class ManageNfcCardServiceTest {
+
+    @Mock private NfcCardRepositoryPort nfcCardRepository;
+    @Mock private UserRepository userRepository;
+    @Mock private RbacAuthorizationService rbacService;
+    @Mock private ManageEnrollmentUseCase manageEnrollmentUseCase;
+
+    @InjectMocks
+    private ManageNfcCardService service;
+
+    private User currentUser;
+    private Tenant tenant;
+    private UUID tenantId;
+    private UUID currentUserId;
+
+    @BeforeEach
+    void setUpCurrentUser() {
+        tenantId = UUID.randomUUID();
+        currentUserId = UUID.randomUUID();
+        tenant = mock(Tenant.class);
+        when(tenant.getId()).thenReturn(tenantId);
+        currentUser = mock(User.class);
+        when(currentUser.getId()).thenReturn(currentUserId);
+        when(currentUser.getTenant()).thenReturn(tenant);
+        when(rbacService.getCurrentUser()).thenReturn(Optional.of(currentUser));
+    }
+
+    @Test
+    @DisplayName("enrollCard → CONFLICT when an active card with the same serial already exists in the tenant")
+    void enrollCard_WhenSerialActivelyEnrolledInTenant_ShouldReturnConflict() {
+        when(nfcCardRepository.existsByCardSerialAndTenantIdAndIsActiveTrue("AABB", tenantId))
+                .thenReturn(true);
+
+        ManageNfcCardService.EnrollResult result =
+                service.enrollCard(null, "AABB", "MIFARE", "Test card");
+
+        assertThat(result.status()).isEqualTo(ManageNfcCardService.EnrollResult.Status.CONFLICT);
+        verify(nfcCardRepository, never()).save(any(NfcCard.class));
+        verify(manageEnrollmentUseCase, never()).startEnrollment(any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("enrollCard → USER_NOT_FOUND when the requested target user does not exist")
+    void enrollCard_WhenTargetUserMissing_ShouldReturnUserNotFound() {
+        UUID targetUserId = UUID.randomUUID();
+        when(nfcCardRepository.existsByCardSerialAndTenantIdAndIsActiveTrue("CCDD", tenantId))
+                .thenReturn(false);
+        when(userRepository.findById(targetUserId)).thenReturn(Optional.empty());
+
+        ManageNfcCardService.EnrollResult result =
+                service.enrollCard(targetUserId, "CCDD", "MIFARE", null);
+
+        assertThat(result.status()).isEqualTo(ManageNfcCardService.EnrollResult.Status.USER_NOT_FOUND);
+        verify(nfcCardRepository, never()).save(any(NfcCard.class));
+    }
+
+    @Test
+    @DisplayName("enrollCard → OK auto-completes the NFC_DOCUMENT enrollment record (auto-complete side-effect parity)")
+    void enrollCard_WhenSuccessful_ShouldCallStartEnrollmentForNfcDocument() {
+        UUID targetUserId = UUID.randomUUID();
+        User targetUser = mock(User.class);
+        when(nfcCardRepository.existsByCardSerialAndTenantIdAndIsActiveTrue("EEFF", tenantId))
+                .thenReturn(false);
+        when(nfcCardRepository.findByCardSerialAndTenantId("EEFF", tenantId))
+                .thenReturn(Optional.empty());
+        when(userRepository.findById(targetUserId)).thenReturn(Optional.of(targetUser));
+        // builder() / save() roundtrip — return a stub card with the saved state.
+        when(nfcCardRepository.save(any(NfcCard.class))).thenAnswer(invocation -> {
+            NfcCard incoming = invocation.getArgument(0);
+            // The builder leaves id null until JPA assigns; for the assertion below
+            // we just need a non-null UUID to flow back to the caller.
+            NfcCard saved = mock(NfcCard.class);
+            when(saved.getId()).thenReturn(UUID.randomUUID());
+            when(saved.getCardSerial()).thenReturn(incoming.getCardSerial());
+            return saved;
+        });
+
+        ManageNfcCardService.EnrollResult result =
+                service.enrollCard(targetUserId, "EEFF", "MIFARE", "personal");
+
+        assertThat(result.status()).isEqualTo(ManageNfcCardService.EnrollResult.Status.OK);
+        assertThat(result.targetUserId()).isEqualTo(targetUserId);
+        assertThat(result.card()).isNotNull();
+        verify(manageEnrollmentUseCase, times(1))
+                .startEnrollment(eq(targetUserId), eq(tenantId), eq(AuthMethodType.NFC_DOCUMENT));
+    }
+
+    @Test
+    @DisplayName("removeAllUserEnrollments → returns 0 when the user has no NFC cards (parity with previous controller body)")
+    void removeAllUserEnrollments_WhenUserHasNoCards_ShouldReturnZero() {
+        UUID userId = UUID.randomUUID();
+        when(nfcCardRepository.findByUserId(userId)).thenReturn(List.of());
+
+        int deactivated = service.removeAllUserEnrollments(userId);
+
+        assertThat(deactivated).isZero();
+        verify(nfcCardRepository, never()).saveAll(any());
+    }
+
+    @Test
+    @DisplayName("deactivateCard → NOT_FOUND when the card belongs to a different user")
+    void deactivateCard_WhenCardNotInUserList_ShouldReturnNotFound() {
+        when(nfcCardRepository.findByUserId(currentUserId)).thenReturn(List.of());
+
+        ManageNfcCardService.DeactivateOutcome outcome =
+                service.deactivateCard(UUID.randomUUID());
+
+        assertThat(outcome).isEqualTo(ManageNfcCardService.DeactivateOutcome.NOT_FOUND);
+    }
+}

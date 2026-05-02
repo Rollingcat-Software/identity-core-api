@@ -1,11 +1,7 @@
 package com.fivucsas.identity.controller;
 
-import com.fivucsas.identity.domain.model.auth.OperationType;
-import com.fivucsas.identity.entity.AuthFlow;
-import com.fivucsas.identity.entity.AuthSession;
+import com.fivucsas.identity.application.service.AdminOverviewService;
 import com.fivucsas.identity.domain.repository.TenantRepository;
-import com.fivucsas.identity.repository.AuthFlowRepository;
-import com.fivucsas.identity.repository.AuthSessionRepository;
 import com.fivucsas.identity.repository.UserRepository;
 import com.fivucsas.identity.application.port.output.CachePort;
 import com.fivucsas.identity.infrastructure.email.EmailService;
@@ -23,12 +19,12 @@ import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.crypto.password.PasswordEncoder;
-import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.util.Collections;
 
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
@@ -45,8 +41,7 @@ class AdminOverviewControllerTest {
 
     @Autowired private MockMvc mockMvc;
 
-    @MockBean private AuthFlowRepository authFlowRepository;
-    @MockBean private AuthSessionRepository authSessionRepository;
+    @MockBean private AdminOverviewService adminOverviewService;
 
     // Security and infrastructure beans
     @MockBean private TenantRepository tenantRepository;
@@ -65,7 +60,7 @@ class AdminOverviewControllerTest {
     @Test
     @DisplayName("GET /api/v1/auth-flows - Returns empty list")
     void getAllAuthFlows_WhenNone_ShouldReturnEmptyList() throws Exception {
-        when(authFlowRepository.findAll()).thenReturn(Collections.emptyList());
+        when(adminOverviewService.listAllAuthFlows(any())).thenReturn(Collections.emptyList());
 
         mockMvc.perform(get("/api/v1/auth-flows"))
                 .andExpect(status().isOk())
@@ -76,7 +71,7 @@ class AdminOverviewControllerTest {
     @Test
     @DisplayName("GET /api/v1/auth-sessions - Returns empty list")
     void getAllAuthSessions_WhenNone_ShouldReturnEmptyList() throws Exception {
-        when(authSessionRepository.findAll()).thenReturn(Collections.emptyList());
+        when(adminOverviewService.listAllAuthSessions()).thenReturn(Collections.emptyList());
 
         mockMvc.perform(get("/api/v1/auth-sessions"))
                 .andExpect(status().isOk())
