@@ -75,7 +75,7 @@ public class RoleController {
 
     @GetMapping("/api/v1/roles/tenant/{tenantId}")
     @Operation(summary = "Get roles by tenant")
-    @PreAuthorize("@rbac.hasPermission('role:read')")
+    @PreAuthorize("@rbac.hasPermission('role:read') and @rbac.canAccessTenant(#tenantId)")
     public ResponseEntity<List<RoleResponse>> getRolesByTenant(@PathVariable String tenantId) {
         log.info("GET /api/v1/roles/tenant/{} - Get roles by tenant", tenantId);
 
@@ -90,7 +90,7 @@ public class RoleController {
 
     @PostMapping("/api/v1/roles")
     @Operation(summary = "Create new role")
-    @PreAuthorize("@rbac.hasPermission('role:create')")
+    @PreAuthorize("@rbac.hasPermission('role:create') and @rbac.canAccessTenant(#request.tenantId)")
     public ResponseEntity<RoleResponse> createRole(@Valid @RequestBody CreateRoleRequest request) {
         log.info("POST /api/v1/roles - Create role: {}", request.getName());
 

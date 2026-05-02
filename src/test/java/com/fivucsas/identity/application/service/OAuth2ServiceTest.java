@@ -1,6 +1,7 @@
 package com.fivucsas.identity.application.service;
 
 import com.fivucsas.identity.application.port.output.OAuth2ClientRepositoryPort;
+import com.fivucsas.identity.domain.exception.OAuth2Exception;
 import com.fivucsas.identity.domain.exception.PkceVerificationException;
 import com.fivucsas.identity.domain.model.PkceFailureReason;
 import com.fivucsas.identity.domain.repository.UserRepository;
@@ -302,6 +303,114 @@ class OAuth2ServiceTest {
                 "pkce-code", "client-1", "https://cb.com", null, null))
                 .isInstanceOf(PkceVerificationException.class)
                 .hasMessageContaining("code_verifier is required");
+    }
+
+    /**
+     * P0-SEC-2 (2026-05-02): Confidential clients MUST authenticate at the
+     * token endpoint regardless of whether they also supply a PKCE
+     * code_verifier (RFC 6749 §2.3.1). The previous shape allowed an attacker
+     * who replayed a stolen code+verifier to bypass the secret check entirely.
+     */
+    @Test
+    void exchangeCode_WhenConfidentialClientMissingSecretButHasVerifier_ShouldReject() throws Exception {
+        // given — confidential client, valid PKCE pair, NO client_secret
+        String codeVerifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        byte[] hash = digest.digest(codeVerifier.getBytes(StandardCharsets.US_ASCII));
+        String codeChallenge = Base64.getUrlEncoder().withoutPadding().encodeToString(hash);
+
+        ValueOperations<String, String> valueOps = mock(ValueOperations.class);
+        when(redisTemplate.opsForValue()).thenReturn(valueOps);
+        when(valueOps.get("oauth2:code:conf-code"))
+                .thenReturn("user@test.com|client-1|https://cb.com|openid||" + codeChallenge + "|S256");
+
+        OAuth2Client client = mock(OAuth2Client.class);
+        when(client.isConfidential()).thenReturn(true);
+        when(clientRepository.findByClientIdAndActiveTrue("client-1")).thenReturn(Optional.of(client));
+
+        // when/then — must reject with 401 invalid_client even though PKCE matches
+        assertThatThrownBy(() -> service.exchangeCode(
+                "conf-code", "client-1", "https://cb.com", null, codeVerifier))
+                .isInstanceOf(OAuth2Exception.class)
+                .hasMessageContaining("client_secret required for confidential client");
+    }
+
+    /**
+     * P0-SEC-2 companion: confidential client with a *wrong* client_secret
+     * is also rejected — even when PKCE validates.
+     */
+    @Test
+    void exchangeCode_WhenConfidentialClientWrongSecretWithVerifier_ShouldReject() throws Exception {
+        // given
+        String codeVerifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        byte[] hash = digest.digest(codeVerifier.getBytes(StandardCharsets.US_ASCII));
+        String codeChallenge = Base64.getUrlEncoder().withoutPadding().encodeToString(hash);
+
+        ValueOperations<String, String> valueOps = mock(ValueOperations.class);
+        when(redisTemplate.opsForValue()).thenReturn(valueOps);
+        when(valueOps.get("oauth2:code:conf-code-2"))
+                .thenReturn("user@test.com|client-1|https://cb.com|openid||" + codeChallenge + "|S256");
+
+        OAuth2Client client = mock(OAuth2Client.class);
+        when(client.isConfidential()).thenReturn(true);
+        when(client.getClientSecret()).thenReturn("hashed-secret");
+        when(clientRepository.findByClientIdAndActiveTrue("client-1")).thenReturn(Optional.of(client));
+        when(passwordEncoder.matches("wrong-secret", "hashed-secret")).thenReturn(false);
+
+        // when/then
+        assertThatThrownBy(() -> service.exchangeCode(
+                "conf-code-2", "client-1", "https://cb.com", "wrong-secret", codeVerifier))
+                .isInstanceOf(OAuth2Exception.class)
+                .hasMessageContaining("client_secret required for confidential client");
+    }
+
+    /**
+     * P0-SEC-2 happy path: confidential client with correct secret + valid
+     * PKCE verifier still mints tokens.
+     */
+    @Test
+    void exchangeCode_WhenConfidentialClientCorrectSecretWithVerifier_ShouldSucceed() throws Exception {
+        // given
+        String codeVerifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        byte[] hash = digest.digest(codeVerifier.getBytes(StandardCharsets.US_ASCII));
+        String codeChallenge = Base64.getUrlEncoder().withoutPadding().encodeToString(hash);
+
+        ValueOperations<String, String> valueOps = mock(ValueOperations.class);
+        when(redisTemplate.opsForValue()).thenReturn(valueOps);
+        when(valueOps.get("oauth2:code:conf-code-ok"))
+                .thenReturn("user@test.com|client-1|https://cb.com|openid profile email||" + codeChallenge + "|S256");
+
+        OAuth2Client client = mock(OAuth2Client.class);
+        when(client.isConfidential()).thenReturn(true);
+        when(client.getClientSecret()).thenReturn("hashed-secret");
+        when(clientRepository.findByClientIdAndActiveTrue("client-1")).thenReturn(Optional.of(client));
+        when(passwordEncoder.matches("right-secret", "hashed-secret")).thenReturn(true);
+
+        User user = mock(User.class);
+        Tenant tenant = mock(Tenant.class);
+        UUID userId = UUID.randomUUID();
+        when(tenant.getId()).thenReturn(UUID.randomUUID());
+        when(user.getId()).thenReturn(userId);
+        when(user.getEmail()).thenReturn("user@test.com");
+        when(user.getFullName()).thenReturn("Test User");
+        when(user.getFirstName()).thenReturn("Test");
+        when(user.getLastName()).thenReturn("User");
+        when(user.isEmailVerified()).thenReturn(true);
+        when(user.getTenant()).thenReturn(tenant);
+        when(userRepository.findByEmail("user@test.com")).thenReturn(Optional.of(user));
+
+        when(jwtService.generateToken(anyMap(), eq("user@test.com"))).thenReturn("access-jwt", "id-jwt");
+        when(jwtService.getExpirationMillis()).thenReturn(3600000L);
+
+        // when
+        Map<String, Object> result = service.exchangeCode(
+                "conf-code-ok", "client-1", "https://cb.com", "right-secret", codeVerifier);
+
+        // then
+        assertThat(result).containsEntry("access_token", "access-jwt");
+        verify(redisTemplate).delete("oauth2:code:conf-code-ok");
     }
 
     @Test
