@@ -51,6 +51,22 @@ public class RefreshToken {
     private String token;
 
     /**
+     * SHA-256 of the refresh-token secret-half (P1-1, 2026-05-02).
+     *
+     * <p>The wire token has the form {@code <id>.<secret>}; only the digest
+     * of the secret-half is persisted. Nullable for backward compatibility
+     * with rows minted before this PR — those rows still satisfy reads via
+     * the plaintext {@link #token} column. New rows always populate this
+     * column. The plaintext column will be dropped in a follow-up migration
+     * after operator soak.
+     *
+     * <p>See {@link com.fivucsas.identity.service.RefreshTokenHasher} and
+     * {@code SECURITY_REVIEW_2026-05-01.md} §P1-1.
+     */
+    @Column(name = "token_secret_hash")
+    private byte[] tokenSecretHash;
+
+    /**
      * Rotation-family identifier (Sec-P2 #6, 2026-04-29).
      *
      * <p>All refresh tokens minted from a single initial login share one
