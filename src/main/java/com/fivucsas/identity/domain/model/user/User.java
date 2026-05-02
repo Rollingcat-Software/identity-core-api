@@ -13,11 +13,17 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 
 /**
- * Pure domain model for User aggregate root.
- * No JPA annotations - this is a pure domain concept.
+ * Pure domain model for User aggregate root — the hexagonal target model.
  *
- * Business logic lives here; persistence is handled by infrastructure.
- * Uses value objects (Email, FullName, HashedPassword, etc.) for type safety.
+ * <p>New application/service code MUST reach this aggregate via {@code UserDomainRepository}
+ * (port) + {@code UserDomainRepositoryAdapter} (adapter). Direct use of {@code entity.User}
+ * from {@code application..} / {@code controller..} is forbidden and is enforced by
+ * {@code UserDomainBoundaryTest} (ArchUnit, ratchet/freeze pattern). See
+ * {@code ANALYSIS_2026-05-02_USER_DOMAIN_AND_JWT_ROTATION.md} for the migration rationale.
+ *
+ * <p>No JPA annotations — this is a pure domain concept. Business logic lives here;
+ * persistence is handled by infrastructure. Uses value objects (Email, FullName,
+ * HashedPassword, etc.) for type safety.
  */
 public class User {
 
