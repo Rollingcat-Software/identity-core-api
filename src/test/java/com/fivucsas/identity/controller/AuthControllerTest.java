@@ -556,18 +556,32 @@ class AuthControllerTest {
     }
 
     @Test
-    @DisplayName("POST /api/v1/auth/mfa/step - controller routes BAD_REQUEST status to 400 and preserves METHOD_ALREADY_USED")
-    void testMfaStep_ControllerTranslatesBadRequestToHttp400() throws Exception {
+    @DisplayName("POST /api/v1/auth/mfa/step - controller routes CONFLICT status to 409 with METHOD_ALREADY_USED + recovery context")
+    void testMfaStep_ControllerTranslatesConflictToHttp409() throws Exception {
+        // Post-audit 2026-04-24 edge cases #4 + #5: METHOD_ALREADY_USED now
+        // returns 409 (not 400) and the body carries currentStep, expectedMethods,
+        // completedMethods, and nextAction so the client can render recovery UX
+        // without a follow-up GET on session state.
         when(verifyMfaStepService.execute(any()))
-                .thenReturn(com.fivucsas.identity.application.service.mfa.VerifyMfaStepResponse.methodAlreadyUsed());
+                .thenReturn(com.fivucsas.identity.application.service.mfa.VerifyMfaStepResponse
+                        .methodAlreadyUsed(
+                                3,
+                                3,
+                                java.util.Set.of("TOTP"),
+                                java.util.List.of("PASSWORD", "EMAIL_OTP")));
 
         String body = "{\"sessionToken\":\"t\",\"method\":\"EMAIL_OTP\",\"data\":{\"code\":\"123456\"}}";
         mockMvc.perform(post("/api/v1/auth/mfa/step")
                         .with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.error").value("METHOD_ALREADY_USED"));
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error").value("METHOD_ALREADY_USED"))
+                .andExpect(jsonPath("$.currentStep").value(3))
+                .andExpect(jsonPath("$.totalSteps").value(3))
+                .andExpect(jsonPath("$.nextAction").value("SWITCH_METHOD"))
+                .andExpect(jsonPath("$.expectedMethods").isArray())
+                .andExpect(jsonPath("$.completedMethods").isArray());
     }
 
     @Test

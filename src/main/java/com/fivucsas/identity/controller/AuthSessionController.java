@@ -169,6 +169,29 @@ public class AuthSessionController {
         return ResponseEntity.noContent().build();
     }
 
+    /**
+     * Idempotent cancellation. Post-audit 2026-04-24 login edge cases #3 + #9.
+     *
+     * <p>Returns 204 if the session existed (whether we cancelled it now or it
+     * was already in a terminal state) and 404 if the id is unknown. Repeating
+     * the call after success still yields 204 — terminal sessions stay
+     * terminal. The legacy {@code POST /{sessionId}/cancel} variant is kept
+     * for backwards compatibility with existing clients.
+     */
+    @DeleteMapping("/{sessionId}")
+    @Operation(
+        summary = "Cancel an in-flight auth session (idempotent)",
+        description = "204 on cancel-or-already-terminal, 404 if unknown id. " +
+                      "Authn required.",
+        security = @SecurityRequirement(name = "bearer-jwt")
+    )
+    public ResponseEntity<Void> deleteSession(@PathVariable UUID sessionId) {
+        boolean existed = executeAuthSessionUseCase.tryCancelSession(sessionId);
+        return existed
+                ? ResponseEntity.noContent().build()
+                : ResponseEntity.notFound().build();
+    }
+
     // --- /api/v1/auth/sessions/my endpoints (user session management) ---
 
     @GetMapping("/my")

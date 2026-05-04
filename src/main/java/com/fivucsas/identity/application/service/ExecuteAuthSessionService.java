@@ -9,6 +9,7 @@ import com.fivucsas.identity.application.port.output.AuditLogPort;
 import com.fivucsas.identity.application.port.output.TokenGenerationPort;
 import com.fivucsas.identity.application.service.handler.AuthMethodHandler;
 import com.fivucsas.identity.application.service.handler.StepResult;
+import com.fivucsas.identity.domain.exception.NeedsEnrollmentException;
 import com.fivucsas.identity.domain.model.auth.*;
 import com.fivucsas.identity.application.port.output.AuthFlowRepositoryPort;
 import com.fivucsas.identity.application.port.output.AuthFlowStepRepositoryPort;
@@ -29,6 +30,8 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 
 @Service
@@ -47,6 +50,7 @@ public class ExecuteAuthSessionService implements ExecuteAuthSessionUseCase {
     private final TokenGenerationPort tokenGenerator;
     private final AuditLogPort auditLogPort;
     private final RefreshTokenService refreshTokenService;
+    private final EnrollmentHealthService enrollmentHealthService;
 
     private static final int SESSION_TIMEOUT_MINUTES = 10;
 
@@ -66,6 +70,22 @@ public class ExecuteAuthSessionService implements ExecuteAuthSessionUseCase {
             user = userRepository.findByEmail(command.email()).orElse(null);
         }
 
+        validateFlowIntegrity(flow);
+
+        List<AuthFlowStep> flowSteps = authFlowStepRepository
+                .findAllByAuthFlowIdOrderByStepOrderAsc(flow.getId());
+
+        // Pre-flight enrollment check (post-audit 2026-04-24 login edge cases
+        // #1 + #6). When the email resolves to a known user, ensure every
+        // REQUIRED step has at least one usable method — otherwise the session
+        // would advance past step 0 only to trap the user on an un-enrollable
+        // step. Anonymous starts (no email) cannot be pre-checked here; the
+        // existing per-step NEEDS_ENROLLMENT path in
+        // AuthController.switchMethod covers them after PASSWORD assigns user.
+        if (user != null) {
+            verifyUserCanCompleteFlow(user, flowSteps);
+        }
+
         AuthSession session = AuthSession.builder()
                 .user(user)
                 .tenant(tenant)
@@ -78,12 +98,7 @@ public class ExecuteAuthSessionService implements ExecuteAuthSessionUseCase {
                 .expiresAt(Instant.now().plus(SESSION_TIMEOUT_MINUTES, ChronoUnit.MINUTES))
                 .build();
 
-        validateFlowIntegrity(flow);
-
         AuthSession savedSession = authSessionRepository.save(session);
-
-        List<AuthFlowStep> flowSteps = authFlowStepRepository
-                .findAllByAuthFlowIdOrderByStepOrderAsc(flow.getId());
 
         for (AuthFlowStep flowStep : flowSteps) {
             AuthSessionStep sessionStep = AuthSessionStep.builder()
@@ -230,6 +245,82 @@ public class ExecuteAuthSessionService implements ExecuteAuthSessionUseCase {
         session.cancel();
         authSessionRepository.save(session);
         log.info("Auth session cancelled: {}", sessionId);
+    }
+
+    @Override
+    public boolean tryCancelSession(UUID sessionId) {
+        // Idempotent variant for DELETE /api/v1/auth/sessions/{sessionId}
+        // (post-audit 2026-04-24 login edge case #3). Sessions already in a
+        // terminal state are NOT re-transitioned — we just no-op so the second
+        // DELETE call after a successful first one still returns 204.
+        Optional<AuthSession> sessionOpt = authSessionRepository.findByIdForUpdate(sessionId);
+        if (sessionOpt.isEmpty()) {
+            return false;
+        }
+        AuthSession session = sessionOpt.get();
+        if (session.isTerminal()) {
+            log.debug("Auth session {} already terminal ({}); DELETE is a no-op",
+                    sessionId, session.getStatus());
+            return true;
+        }
+        session.cancel();
+        authSessionRepository.save(session);
+        log.info("Auth session cancelled via DELETE: {}", sessionId);
+        return true;
+    }
+
+    /**
+     * Pre-flight enrollment check — for each REQUIRED step in the flow, ensure
+     * the user is enrolled in at least one of the step's available methods (or
+     * the step's configured fallback). Throws {@link NeedsEnrollmentException}
+     * on the first dead-end.
+     *
+     * <p>Mirrors {@code AuthenticateUserService.verifyUserCanCompleteFlow}; the
+     * shared {@link EnrollmentHealthService} performs backing-data validation
+     * so a stale ENROLLED row that no longer has crypto material is treated as
+     * not-enrolled.
+     */
+    private void verifyUserCanCompleteFlow(User user, List<AuthFlowStep> flowSteps) {
+        Map<AuthMethodType, Boolean> healthStatus =
+                enrollmentHealthService.validateEnrollments(user.getId());
+
+        for (AuthFlowStep step : flowSteps) {
+            if (!step.isRequired()) {
+                continue;
+            }
+
+            boolean hasEnrolledMethod = step.getAvailableMethods().stream()
+                    .filter(Objects::nonNull)
+                    .anyMatch(m -> isMethodUsable(m, healthStatus));
+            if (hasEnrolledMethod) {
+                continue;
+            }
+
+            AuthMethod fallback = step.getFallbackMethod();
+            if (fallback != null && isMethodUsable(fallback, healthStatus)) {
+                continue;
+            }
+
+            AuthMethodType missing = step.getAvailableMethods().stream()
+                    .filter(Objects::nonNull)
+                    .map(AuthMethod::getType)
+                    .findFirst()
+                    .orElse(fallback != null ? fallback.getType() : null);
+
+            String methodName = missing != null ? missing.name() : "UNKNOWN";
+            String enrollmentUrl = missing != null
+                    ? "/enroll/" + missing.name().toLowerCase()
+                    : "/enroll";
+            log.warn("AUDIT: Auth session pre-flight blocked — user {} cannot complete flow (needs {})",
+                    user.getId(), methodName);
+            throw new NeedsEnrollmentException(methodName, enrollmentUrl);
+        }
+    }
+
+    private boolean isMethodUsable(AuthMethod method, Map<AuthMethodType, Boolean> healthStatus) {
+        if (method == null) return false;
+        if (!method.isRequiresEnrollment()) return true;
+        return Boolean.TRUE.equals(healthStatus.get(method.getType()));
     }
 
     private Integer findNextRequiredStep(List<AuthSessionStep> steps, int currentOrder) {

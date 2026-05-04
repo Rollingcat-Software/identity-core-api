@@ -13,4 +13,12 @@ public interface ExecuteAuthSessionUseCase {
     StepResultResponse completeStep(UUID sessionId, int stepOrder, CompleteAuthStepCommand command);
     StepResultResponse skipStep(UUID sessionId, int stepOrder);
     void cancelSession(UUID sessionId);
+
+    /**
+     * Cancel a session if it exists. Returns {@code true} when a row was found
+     * (and either cancelled now or was already in a terminal state); {@code false}
+     * when no session matched the id. Idempotent — safe to retry. Post-audit
+     * 2026-04-24 login edge case #3.
+     */
+    boolean tryCancelSession(UUID sessionId);
 }

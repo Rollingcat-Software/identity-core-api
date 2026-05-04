@@ -599,6 +599,7 @@ public class AuthController {
             case OK -> ResponseEntity.ok(result.body());
             case BAD_REQUEST -> ResponseEntity.badRequest().body(result.body());
             case UNAUTHORIZED -> ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(result.body());
+            case CONFLICT -> ResponseEntity.status(HttpStatus.CONFLICT).body(result.body());
         };
     }
 

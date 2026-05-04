@@ -222,7 +222,11 @@ public class VerifyMfaStepService {
         if (completedMethods.contains(reuseKey) && !submittedMethodIsExpectedAtCurrentStep) {
             log.warn("AUDIT: MFA same-method reuse attempt — method: {}, userId={}, ip={}, userAgent={}",
                     req.method(), user.getId(), req.clientIp(), req.userAgent());
-            return VerifyMfaStepResponse.methodAlreadyUsed();
+            return VerifyMfaStepResponse.methodAlreadyUsed(
+                    session.getCurrentStep(),
+                    session.getTotalSteps(),
+                    currentStepMethodNames,
+                    completedMethods);
         }
 
         // Per-method verification — handler may also short-circuit with a
@@ -256,7 +260,14 @@ public class VerifyMfaStepService {
                     session.getTotalSteps(), req.clientIp(), req.userAgent());
             auditLogPort.logMfaStepFailed(user.getId().toString(), req.method(), reason,
                     req.clientIp(), req.userAgent());
-            return VerifyMfaStepResponse.failed("Verification failed for " + req.method());
+            // Edge case #5: include currentStep + expectedMethod + completedMethods so
+            // clients can render "retry or switch method" UX without a separate GET.
+            return VerifyMfaStepResponse.failed(
+                    "Verification failed for " + req.method(),
+                    session.getCurrentStep(),
+                    session.getTotalSteps(),
+                    req.method(),
+                    completedMethods);
         }
 
         // Step verified — advance session.
