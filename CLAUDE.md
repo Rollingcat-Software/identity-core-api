@@ -45,19 +45,59 @@ not a real biometric. The `AuthMethodType.FINGERPRINT` enum value is retained
 - **NFC enrollment**: Auto-creates user_enrollments record. Reactivates existing inactive card on re-enrollment.
 - **CORS**: api.fivucsas.com, app.fivucsas.com, demo.fivucsas.com, verify.fivucsas.com
 
-## Flyway Migrations (V1-V38)
+## Flyway Migrations (V1-V57)
 
 V1-V15: Core schema | V16: Auth methods/flows | V17: Devices | V24: OAuth2 | V25: Enrollments
 V26-V28: Verification pipeline | V29: EMAIL_OTP default | V30: Adaptive MFA (CHOICE steps)
 V31: display_order fix | V32: Entity professionalization (revokedAt, expiresAt, verifiedAt)
-V33: voice_enrollments table (deployed 2026-04-14 — unblocked VOICE auth)
-V34: oauth2_clients.confidential column (PKCE S256 mandated for public clients — PR-1)
-V35: mfa_sessions.consumed_at TIMESTAMP (atomic code-mint replay guard — PR-1 B4)
-V36: mfa_sessions.client_id UUID (cross-client replay guard — PR-1 B2)
-V37: oauth2_clients.tenant_id index (audit safety-net; V24 already had it)
-V38: fivucsas-web-dashboard → confidential=false (SPA cannot hold a secret)
+V33: voice_enrollments table | V34: oauth2_clients.confidential | V35: mfa_sessions.consumed_at
+V36: mfa_sessions.client_id | V37: oauth2_clients.tenant_id index | V38: dashboard → confidential=false
+V39-V49: TOTP encryption, audit_logs partition, GDPR purge job, tenants.deleted_at
+V50: refresh_tokens.family_id (RFC 6749 §10.4 reuse-detection)
+V51: shedlock | V52: shedlock TZ fix | V53: forbid hard-delete trigger on users/tenants
+V54: phone E.164 normalization | V55: refresh_token hash + dual-read (P1-1)
+V56: noop placeholder reserved for refresh-token plaintext-column drop (chain-contiguity)
+V57: audit_logs handed to pg_partman — fail-soft when extension missing
+     (`RAISE WARNING + RETURN`); explicit opt-out via `app.skip_partman_v57=on` GUC.
+     See `/opt/projects/infra/RUNBOOK_AUDIT_LOG_PARTMAN.md`.
 
-**V34-V38 all applied to prod DB (container rebuilt 2026-04-16 + 2026-04-18).**
+**V34-V55 applied in prod (rebuilt 2026-05-02 17:50 UTC).**
+**V56 + V57 rebuild PENDING as of 2026-05-04 — operator reality below.**
+
+## 2026-05-04 highlights
+
+- **PR #63** — ArchUnit `UserDomainImportBoundaryTest` freezes direct `entity.User`
+  imports outside `infrastructure/`/`repository/`/`entity/` (T2.2 implementation;
+  prevents drift back into the dual-User-model anti-pattern).
+- **PR #64** — `HsKeyRegistry` Spring component holds `Map<String, SecretKey>`
+  keyed by `kid`. `JwtService.buildToken` stamps the active kid; `keyLocator()`
+  routes verification through `hsKeyRegistry.keyFor(kid)`. Legacy `JWT_SECRET`
+  maps to historical kid `hs-2026-04`. Sets up no-logout HS-secret rotation.
+- **PR #65** — login edge cases #1/#3/#4/#5/#6/#9 (DELETE `/auth/sessions/{id}`,
+  `METHOD_ALREADY_USED` → 409, response carries `currentStep`/`totalSteps`/etc.).
+- **PR #66** — DeviceController + 5 call-sites now route credential writes through
+  `WebAuthnCredentialService.{saveCredential,updateSignCount}`; new ArchUnit
+  `WebAuthnRepoWriteBoundaryTest` blocks future regressions.
+- **PR #67** — `/oauth2/userinfo` rejects ID-token replay via `type=oauth2` claim.
+- **PR #68** — V57 pg_partman + V56 chain-contiguity placeholder + Testcontainers IT.
+- **PR #69** — F15: `Thread.sleep` eliminated from `JwtServiceTest`.
+- **PR #70** — `User` entity gets `@SQLDelete` (mirrors `softDelete()` domain method)
+  + `@SQLRestriction("deleted_at IS NULL")`. V53 BEFORE-DELETE trigger no longer
+  surfaces as 5xx on `userRepository.delete()`. All 9 `findBy*` methods auto-filter
+  the GDPR retention window. `findPurgeCandidates` uses `nativeQuery=true`.
+- **PR #71 (P0-PROD, merged)** — `RefreshToken` now `implements Persistable<UUID>`
+  with explicit `isNew()` flag. Closes the 6 audit-log MFA_STEP_FAILED rows for
+  `ahabgu@gmail.com` between 06:34–06:38 UTC on 2026-05-04 (Hibernate was
+  treating manually-assigned UUIDs as merge candidates → silent NOOP on insert).
+
+## Operator reality (2026-05-04)
+
+- Last prod rebuild: 2026-05-02 17:50 UTC.
+- **2026-05-04 rebuild PENDING** to pick up PR #63–#71 (notably the P0
+  refresh-token fix #71 — ships V56 placeholder + V57 pg_partman).
+- pg_partman (V57) is fail-soft. Operator can rebuild api safely without first
+  installing partman; `ALTER DATABASE identity_core SET app.skip_partman_v57='on'`
+  is also available for explicit opt-out.
 
 ## Cross-Repo Dependencies
 

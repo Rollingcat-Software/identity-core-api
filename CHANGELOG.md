@@ -2,6 +2,64 @@
 
 ## [Unreleased]
 
+### 2026-05-04 — Quality + senior-DB-review wave (9 PRs)
+
+Squash-merged to `main`:
+
+- **PR #63** `arch/user-domain-boundary-archunit` (`432b4d3`) — ArchUnit guard
+  freezing direct `entity.User` imports outside `infrastructure/`/`repository/`/
+  `entity/`. Implements T2.2 from `ROADMAP_OPTIMIZED_2026-05-02.md`.
+- **PR #64** `feat/jwt-kid-registry` (`2d958c5`) — `HsKeyRegistry` component +
+  `JwtService` kid stamping + JWS `keyLocator` per-kid lookup. Backward-compat:
+  legacy `JWT_SECRET` maps to historical kid `hs-2026-04` automatically.
+- **PR #65** `fix/login-edge-cases-2026-05-04` (`d224ad1`) — login edge cases
+  #1, #3, #4, #5, #6, #9 from the 2026-04-24 audit:
+  - #1/#6 pre-flight enrollment check on `ExecuteAuthSessionService.startSession`.
+  - #3/#9 new `DELETE /api/v1/auth/sessions/{sessionId}` (idempotent 204/404).
+  - #4 `METHOD_ALREADY_USED` returns 409 (was 400).
+  - #5 error responses carry `currentStep`, `totalSteps`, `expectedMethod(s)`,
+    `completedMethods`, `nextAction`.
+- **PR #66** `fix/devicecontroller-webauthn-service-boundary` (`e986609`) —
+  `DeviceController` + `HardwareKeyAuthHandler` + `FingerprintAuthHandler` +
+  `WebAuthnVerifySupport` now route credential writes through
+  `WebAuthnCredentialService.{saveCredential,updateSignCount}`. New ArchUnit
+  `WebAuthnRepoWriteBoundaryTest` blocks future regressions.
+- **PR #67** `chore/security-userinfo-typecheck` (`2b49bd5`) — `/oauth2/userinfo`
+  now requires `type=oauth2` claim, rejecting ID-token replay.
+- **PR #68** `feat/audit-log-pg-partman-migration` (`d95425c`) — V57 pg_partman
+  with monthly partitions, premake=12, retention 24 months, **fail-soft when
+  extension missing** (`RAISE WARNING + RETURN`). New
+  `V56__noop_reserved_for_refresh_token_plaintext_drop.sql` placeholder for chain
+  contiguity. Testcontainers IT against `postgres:16-alpine`. Operator runbook at
+  `/opt/projects/infra/RUNBOOK_AUDIT_LOG_PARTMAN.md`.
+- **PR #69** `chore/test-f15-deterministic-clock` (`70036a5`) — F15: `Thread.sleep`
+  eliminated from `JwtServiceTest` (negative-expiration mint + `jti` uniqueness).
+- **PR #70** `fix/user-soft-delete-jpa-restriction` (`1e23ef0`) — `User` entity
+  gets `@SQLDelete` (mirrors `softDelete()` domain method) + `@SQLRestriction
+  ("deleted_at IS NULL")`. V53 BEFORE-DELETE trigger no longer 5xx's on
+  `userRepository.delete()`. All 9 `findBy*` methods auto-filter the GDPR
+  retention window. `findPurgeCandidates` switched to `nativeQuery=true` so
+  `SoftDeletePurgeJob` can still see deleted rows. New
+  `UserSoftDeleteAnnotationsTest` mirrors `TenantSoftDeleteAnnotationsTest`.
+  Closes SENIOR_DB_REVIEW_2026-05-04 §P0-2 + §P0-3.
+- **PR #71 (P0-PROD)** `fix/refresh-token-persistable-isnew` (`a77c844`) —
+  `RefreshToken` now `implements Persistable<UUID>` with an explicit `isNew()`
+  flag toggled in `@PrePersist`. Hibernate had been treating manually-assigned
+  UUIDs as merge candidates and silently NOOP-ing the insert; this surfaced as
+  6 `MFA_STEP_FAILED` audit-log rows for `ahabgu@gmail.com` between 06:34–06:38
+  UTC on 2026-05-04. Rebuild required to take effect in prod.
+
+### Operator notes
+
+- Last prod rebuild: 2026-05-02 17:50 UTC. **2026-05-04 rebuild PENDING** to
+  pick up #63–#71.
+- V57 (pg_partman) is fail-soft, so a rebuild is safe even without
+  `pg_partman` installed in the postgres image — the migration logs a
+  `RAISE WARNING` and returns. To opt out explicitly:
+  `ALTER DATABASE identity_core SET app.skip_partman_v57='on';`
+- Senior DB review (`SENIOR_DB_REVIEW_2026-05-04.md`) Appendix C lists 7 prod
+  queries that need Hetzner SSH to answer.
+
 ### Docs — 2026-04-26 (iOS / macOS scope dropped)
 - Forward-looking "Sign in with Apple" social auth dropped from `README.md` Future section. iOS / iPadOS / macOS permanently out of scope — Sign in with Apple requires Apple Developer Program enrollment, and no Apple hardware/account is available. Google social auth remains in scope. macOS dev-environment Redis install instructions are unaffected (developer environment guidance, not product scope).
 
