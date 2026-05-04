@@ -9,6 +9,8 @@ import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.Filter;
 import org.hibernate.annotations.FilterDef;
 import org.hibernate.annotations.ParamDef;
+import org.hibernate.annotations.SQLDelete;
+import org.hibernate.annotations.SQLRestriction;
 import org.hibernate.annotations.UpdateTimestamp;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
@@ -37,6 +39,12 @@ import java.util.stream.Collectors;
 @Table(name = "users", indexes = {
     @Index(name = "idx_users_tenant_id", columnList = "tenant_id")
 })
+// V53 BEFORE-DELETE trigger forbids hard DELETE FROM users at DB level.
+// @SQLDelete redirects entity.delete() to a soft-delete UPDATE that mirrors softDelete().
+// @SQLRestriction filters all entity-level reads to non-deleted rows; native queries must
+// add the predicate themselves.
+@SQLDelete(sql = "UPDATE users SET deleted_at = NOW(), status = 'INACTIVE', is_active = false WHERE id = ?")
+@SQLRestriction("deleted_at IS NULL")
 @FilterDef(name = "tenantFilter", parameters = @ParamDef(name = "tenantId", type = UUID.class))
 @Filter(name = "tenantFilter", condition = "tenant_id = :tenantId")
 @Getter

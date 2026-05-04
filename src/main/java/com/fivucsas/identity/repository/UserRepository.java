@@ -123,6 +123,12 @@ public interface UserRepository extends JpaRepository<User, UUID> {
      * @param pageable pagination for batched purge
      * @return page of purge-eligible users
      */
-    @Query("SELECT u FROM User u WHERE u.deletedAt IS NOT NULL AND u.deletedAt < :cutoff")
+    // Native query bypasses the entity's @SQLRestriction("deleted_at IS NULL") so we
+    // can actually find soft-deleted rows for the 30-day purge window.
+    @Query(
+        value = "SELECT * FROM users u WHERE u.deleted_at IS NOT NULL AND u.deleted_at < :cutoff",
+        countQuery = "SELECT COUNT(*) FROM users u WHERE u.deleted_at IS NOT NULL AND u.deleted_at < :cutoff",
+        nativeQuery = true
+    )
     Page<User> findPurgeCandidates(@Param("cutoff") Instant cutoff, Pageable pageable);
 }
