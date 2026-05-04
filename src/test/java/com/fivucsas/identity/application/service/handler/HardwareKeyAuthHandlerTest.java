@@ -7,6 +7,7 @@ import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.entity.WebAuthnCredential;
 import com.fivucsas.identity.infrastructure.webauthn.WebAuthnService;
 import com.fivucsas.identity.application.port.output.WebAuthnCredentialRepositoryPort;
+import com.fivucsas.identity.application.service.WebAuthnCredentialService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -25,6 +26,7 @@ class HardwareKeyAuthHandlerTest {
 
     @Mock private WebAuthnService webAuthnService;
     @Mock private WebAuthnCredentialRepositoryPort credentialRepository;
+    @Mock private WebAuthnCredentialService webAuthnCredentialService;
     @Mock private AuthSession session;
     @Mock private AuthFlowStep step;
 
@@ -80,8 +82,8 @@ class HardwareKeyAuthHandlerTest {
         ));
 
         assertThat(result.isSuccess()).isTrue();
-        verify(credential).updateSignCount(1L);
-        verify(credentialRepository).save(credential);
+        verify(webAuthnCredentialService).updateSignCount(credential, 1L);
+        verify(credentialRepository, never()).save(any(WebAuthnCredential.class));
     }
 
     @Test

@@ -112,7 +112,8 @@ class WebAuthnControllerTest {
 
             assertThat(response.getStatusCode().value()).isEqualTo(201);
             assertThat(response.getBody()).containsEntry("success", true);
-            verify(credentialRepository).save(any(WebAuthnCredential.class));
+            verify(webAuthnCredentialService).saveCredential(any(WebAuthnCredential.class));
+            verify(credentialRepository, never()).save(any(WebAuthnCredential.class));
         }
 
         @Test
@@ -271,7 +272,7 @@ class WebAuthnControllerTest {
 
             WebAuthnCredential saved = mock(WebAuthnCredential.class);
             when(saved.getId()).thenReturn(UUID.randomUUID());
-            when(credentialRepository.save(any(WebAuthnCredential.class))).thenReturn(saved);
+            when(webAuthnCredentialService.saveCredential(any(WebAuthnCredential.class))).thenReturn(saved);
 
             Map<String, Object> request = new HashMap<>();
             request.put("sessionId", sessionId.toString());
@@ -286,6 +287,7 @@ class WebAuthnControllerTest {
             assertThat(response.getBody()).containsEntry("success", true);
             assertThat(response.getBody()).containsEntry("credentialId", "newCredId");
             assertThat(response.getBody()).containsKey("id");
+            verify(credentialRepository, never()).save(any(WebAuthnCredential.class));
         }
 
         @Test
@@ -406,8 +408,8 @@ class WebAuthnControllerTest {
             assertThat(response.getBody()).containsEntry("success", true);
             assertThat(response.getBody()).containsEntry("email", "test@example.com");
             assertThat(response.getBody()).containsEntry("userId", userId.toString());
-            verify(cred).updateSignCount(6L);
-            verify(credentialRepository).save(cred);
+            verify(webAuthnCredentialService).updateSignCount(cred, 6L);
+            verify(credentialRepository, never()).save(any(WebAuthnCredential.class));
         }
 
         @Test
@@ -491,7 +493,7 @@ class WebAuthnControllerTest {
 
             assertThat(response.getStatusCode().value()).isEqualTo(401);
             assertThat(response.getBody()).containsEntry("success", false);
-            verify(cred, never()).updateSignCount(anyLong());
+            verify(webAuthnCredentialService, never()).updateSignCount(any(), anyLong());
             verify(credentialRepository, never()).save(any());
         }
 
@@ -520,8 +522,9 @@ class WebAuthnControllerTest {
             ResponseEntity<Map<String, Object>> response = webAuthnController.authenticate(request);
 
             assertThat(response.getStatusCode().value()).isEqualTo(200);
-            // Counter is not strictly greater (both 0), so no save — spec-compliant behavior.
-            verify(cred, never()).updateSignCount(anyLong());
+            // Controller delegates to the service; the service no-ops when the
+            // new count is not strictly greater (spec-compliant both-zero case).
+            verify(webAuthnCredentialService).updateSignCount(cred, 0L);
             verify(credentialRepository, never()).save(any());
         }
     }

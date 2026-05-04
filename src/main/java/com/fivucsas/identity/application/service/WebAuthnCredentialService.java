@@ -14,10 +14,16 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * Application service for WebAuthn credential lifecycle (delete).
+ * Application service for WebAuthn credential lifecycle.
  *
- * <p>Holds the transaction boundary for credential deletes so the controller
- * stays HTTP-only (P1-Q9, quality review 2026-05-01).</p>
+ * <p>Holds the transaction boundary for credential reads/writes so HTTP and
+ * auth-handler callers stay free of persistence concerns (P1-Q9, quality
+ * review 2026-05-01; T-SEC-TAIL §T4.4 boundary closure 2026-05-04).</p>
+ *
+ * <p>Controllers and auth handlers must route writes through this service;
+ * the {@code WebAuthnRepoWriteBoundaryTest} ArchUnit rule enforces that.
+ * Peer application services (e.g. {@code ManageEnrollmentService}) are
+ * exempt because they implement the inverse enrollment-revoke lifecycle.</p>
  */
 @Service
 @RequiredArgsConstructor
@@ -26,6 +32,40 @@ public class WebAuthnCredentialService {
 
     private final WebAuthnCredentialRepositoryPort credentialRepository;
     private final ManageEnrollmentUseCase manageEnrollmentUseCase;
+
+    /**
+     * Persist a brand-new WebAuthn credential and auto-complete the matching
+     * enrollment row so {@code biometric_enrollments} stays in sync with
+     * actual credentials. Mirrors the inverse delete path
+     * ({@link #revokeWebAuthnEnrollmentIfNeeded}).
+     *
+     * <p>The enrollment side-effect is best-effort: a failure is logged at
+     * WARN but never rolls back the credential save, since the credential
+     * itself is the source of truth and a missing enrollment row will be
+     * reconciled on next login.</p>
+     */
+    @Transactional
+    public WebAuthnCredential saveCredential(WebAuthnCredential credential) {
+        WebAuthnCredential saved = credentialRepository.save(credential);
+        autoCompleteWebAuthnEnrollment(saved.getUser().getId(), saved.getTransports());
+        return saved;
+    }
+
+    /**
+     * Persist a WebAuthn credential sign-counter advance per WebAuthn §6.1
+     * step 17. Caller must have already verified
+     * {@link com.fivucsas.identity.infrastructure.webauthn.WebAuthnService#validateSignCount}
+     * (this method does not re-validate). No-ops when {@code newSignCount}
+     * is not strictly greater than the stored counter — matches the spec
+     * note on both-zero authenticators.
+     */
+    @Transactional
+    public void updateSignCount(WebAuthnCredential credential, long newSignCount) {
+        if (newSignCount > credential.getSignCount()) {
+            credential.updateSignCount(newSignCount);
+            credentialRepository.save(credential);
+        }
+    }
 
     /**
      * Delete a credential by primary key. Auto-revokes the matching
@@ -67,6 +107,17 @@ public class WebAuthnCredentialService {
             return AuthMethodType.FINGERPRINT;
         }
         return AuthMethodType.HARDWARE_KEY;
+    }
+
+    private void autoCompleteWebAuthnEnrollment(UUID userId, String transports) {
+        AuthMethodType methodType = resolveWebAuthnMethodType(transports);
+        try {
+            manageEnrollmentUseCase.completeEnrollment(userId, methodType, "{}");
+            log.info("Auto-completed {} enrollment for user {}", methodType, userId);
+        } catch (Exception e) {
+            log.warn("Failed to auto-complete {} enrollment for user {} after WebAuthn registration: {}",
+                    methodType, userId, e.getMessage());
+        }
     }
 
     /**
