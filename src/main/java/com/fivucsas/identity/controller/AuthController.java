@@ -799,7 +799,7 @@ public class AuthController {
         boolean requiresEnrollment = requestedMethod == null || requestedMethod.isRequiresEnrollment();
         boolean isEnrolled = !requiresEnrollment || Boolean.TRUE.equals(healthStatus.get(requestedType));
         if (!isEnrolled) {
-            String enrollmentPath = "/enroll/" + requestedType.name().toLowerCase();
+            String enrollmentPath = "/enroll/" + requestedType.name().toLowerCase(java.util.Locale.ROOT);
             log.warn("AUDIT: MFA switch-method blocked — user not enrolled for {}, userId={}, ip={}",
                     requestedType, user.getId(), clientIp);
             return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of(

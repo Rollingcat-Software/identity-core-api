@@ -445,7 +445,12 @@ public class OAuth2Service {
     public Map<String, Object> getUserInfo(String accessToken) {
         String type = jwtService.extractClaim(accessToken, c -> c.get("type", String.class));
         if (!"oauth2".equals(type)) {
+            // RFC 6750 §3.1 — Bearer-token errors at a resource endpoint use
+            // `invalid_token`, not `invalid_client` (which is only for the auth
+            // server's token endpoint). Pass explicit errorCode so the default
+            // status-to-code mapper does not stamp `invalid_client`.
             throw new OAuth2Exception(HttpStatus.UNAUTHORIZED,
+                    "invalid_token",
                     "userinfo requires an OAuth2 access token");
         }
         String email = jwtService.extractEmail(accessToken);

@@ -87,13 +87,24 @@ public class WebAuthnCredentialService {
     /**
      * Delete a credential by its WebAuthn credentialId. Throws
      * {@link ResourceNotFoundException} if the credentialId is unknown.
+     *
+     * <p>Mirrors {@link #deleteById(UUID)} semantics: when the last credential
+     * of a given transport class disappears, the corresponding enrollment
+     * (FINGERPRINT for platform, HARDWARE_KEY for roaming) is auto-revoked.
+     * Without this, calls through {@code DELETE /api/v1/webauthn/credentials/{credentialId}}
+     * would leave a stale ENROLLED row and skew MFA availability checks
+     * (Copilot review on PR #66).</p>
      */
     @Transactional
     public void deleteByCredentialId(String credentialId) {
-        if (!credentialRepository.existsByCredentialId(credentialId)) {
-            throw new ResourceNotFoundException("Credential", credentialId);
-        }
+        WebAuthnCredential credential = credentialRepository.findByCredentialId(credentialId)
+                .orElseThrow(() -> new ResourceNotFoundException("Credential", credentialId));
+        UUID userId = credential.getUser().getId();
+        String transports = credential.getTransports();
+
         credentialRepository.deleteByCredentialId(credentialId);
+
+        revokeWebAuthnEnrollmentIfNeeded(userId, transports);
     }
 
     /**

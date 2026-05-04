@@ -192,19 +192,45 @@ class WebAuthnCredentialServiceTest {
     class DeleteByCredentialId {
 
         @Test
-        @DisplayName("delegates to the repo when credentialId is known")
-        void delegatesToRepo() {
-            when(credentialRepository.existsByCredentialId("credId")).thenReturn(true);
+        @DisplayName("revokes FINGERPRINT enrollment when last platform credential removed (parity with deleteById)")
+        void revokesEnrollmentWhenLastPlatformCredentialRemoved() {
+            // Copilot review on PR #66: deleteByCredentialId previously skipped
+            // revokeWebAuthnEnrollmentIfNeeded, leaving stale ENROLLED rows.
+            WebAuthnCredential c = mock(WebAuthnCredential.class);
+            when(c.getUser()).thenReturn(user);
+            when(c.getTransports()).thenReturn("internal");
+            when(credentialRepository.findByCredentialId("credId")).thenReturn(Optional.of(c));
+            when(credentialRepository.findAllByUserId(userId)).thenReturn(List.of());
 
             service.deleteByCredentialId("credId");
 
             verify(credentialRepository).deleteByCredentialId("credId");
+            verify(manageEnrollmentUseCase).revokeEnrollment(userId, AuthMethodType.FINGERPRINT);
+        }
+
+        @Test
+        @DisplayName("keeps enrollment when another platform credential remains")
+        void keepsEnrollmentWhenOtherPlatformCredentialRemains() {
+            WebAuthnCredential deleted = mock(WebAuthnCredential.class);
+            when(deleted.getUser()).thenReturn(user);
+            when(deleted.getTransports()).thenReturn("internal");
+
+            WebAuthnCredential remaining = mock(WebAuthnCredential.class);
+            when(remaining.getTransports()).thenReturn("internal");
+
+            when(credentialRepository.findByCredentialId("credId")).thenReturn(Optional.of(deleted));
+            when(credentialRepository.findAllByUserId(userId)).thenReturn(List.of(remaining));
+
+            service.deleteByCredentialId("credId");
+
+            verify(credentialRepository).deleteByCredentialId("credId");
+            verify(manageEnrollmentUseCase, never()).revokeEnrollment(any(), any());
         }
 
         @Test
         @DisplayName("throws ResourceNotFoundException when credentialId is unknown")
         void throwsWhenUnknown() {
-            when(credentialRepository.existsByCredentialId("missing")).thenReturn(false);
+            when(credentialRepository.findByCredentialId("missing")).thenReturn(Optional.empty());
 
             assertThatThrownBy(() -> service.deleteByCredentialId("missing"))
                     .isInstanceOf(ResourceNotFoundException.class);

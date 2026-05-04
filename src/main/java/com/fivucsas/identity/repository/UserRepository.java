@@ -6,6 +6,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -131,4 +132,22 @@ public interface UserRepository extends JpaRepository<User, UUID> {
         nativeQuery = true
     )
     Page<User> findPurgeCandidates(@Param("cutoff") Instant cutoff, Pageable pageable);
+
+    /**
+     * GDPR Art. 17 / KVKK hard-purge of a single user row.
+     *
+     * <p>Required because {@link User} carries {@link org.hibernate.annotations.SQLDelete @SQLDelete}
+     * which rewrites JPA delete()/deleteById() into a soft-delete UPDATE. Without this
+     * native escape hatch, {@code SoftDeletePurgeJob} would loop forever rereading the
+     * same already-soft-deleted rows.</p>
+     *
+     * <p>Caller must wrap the call in a transaction that runs
+     * {@code SET LOCAL app.allow_hard_delete = 'on'} first, otherwise the V53 BEFORE-DELETE
+     * trigger blocks the row removal.</p>
+     *
+     * @return rows affected (0 if id missing, 1 on success)
+     */
+    @Modifying
+    @Query(value = "DELETE FROM users WHERE id = :id", nativeQuery = true)
+    int hardDeleteById(@Param("id") UUID id);
 }

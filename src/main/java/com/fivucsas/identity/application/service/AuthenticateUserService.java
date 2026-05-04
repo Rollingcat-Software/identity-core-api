@@ -349,7 +349,7 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
 
             String methodName = missing != null ? missing.name() : "UNKNOWN";
             String enrollmentUrl = missing != null
-                    ? "/enroll/" + missing.name().toLowerCase()
+                    ? "/enroll/" + missing.name().toLowerCase(java.util.Locale.ROOT)
                     : "/enroll";
             throw new NeedsEnrollmentException(methodName, enrollmentUrl);
         }
