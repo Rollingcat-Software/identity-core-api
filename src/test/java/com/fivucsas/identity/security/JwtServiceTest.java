@@ -151,23 +151,24 @@ class JwtServiceTest {
     @Test
     @DisplayName("Validate token - should return false for expired token")
     void testIsTokenValid_ExpiredToken() {
-        // Arrange - Create service with very short expiration
-        HsKeyRegistry shortExpRegistry = JwtAlgoTestSupport.newHsKeyRegistry(jwtSecretProvider);
-        JwtService shortExpirationService = new JwtService(shortExpRegistry, rsaKeyProvider, new MockEnvironment());
-        ReflectionTestUtils.setField(shortExpirationService, "jwtExpiration", 1L); // 1ms
-        ReflectionTestUtils.setField(shortExpirationService, "defaultAlgo", "HS512");
-        ReflectionTestUtils.setField(shortExpirationService, "allowHs512", true);
-        String token = shortExpirationService.generateAccessToken(TEST_EMAIL);
+        // F15 (TEST_REVIEW_2026-05-01): mint a token with negative expiration so
+        // it is ALREADY expired when generated. This is deterministic — no
+        // Thread.sleep, no race-prone wall-clock dependency.
+        //
+        // Long.MIN_VALUE caused integer overflow in the build path
+        // (System.currentTimeMillis() + Long.MIN_VALUE wraps positive). A
+        // 1-hour offset into the past is safe and unambiguous.
+        long oneHourAgoOffset = -1L * 60L * 60L * 1000L; // -3_600_000 ms
+        HsKeyRegistry expiredRegistry = JwtAlgoTestSupport.newHsKeyRegistry(jwtSecretProvider);
+        JwtService expiredTokenService = new JwtService(expiredRegistry, rsaKeyProvider, new MockEnvironment());
+        ReflectionTestUtils.setField(expiredTokenService, "jwtExpiration", oneHourAgoOffset);
+        ReflectionTestUtils.setField(expiredTokenService, "defaultAlgo", "HS512");
+        ReflectionTestUtils.setField(expiredTokenService, "allowHs512", true);
+        String alreadyExpired = expiredTokenService.generateAccessToken(TEST_EMAIL);
 
-        // Act - Wait for token to expire
-        try {
-            Thread.sleep(10);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        }
-
-        // Assert
-        assertThatThrownBy(() -> jwtService.extractEmail(token))
+        // Assert — the token's exp claim is in the past relative to "now",
+        // so any verification path must throw ExpiredJwtException.
+        assertThatThrownBy(() -> jwtService.extractEmail(alreadyExpired))
                 .isInstanceOf(ExpiredJwtException.class);
     }
 
@@ -208,15 +209,19 @@ class JwtServiceTest {
     }
 
     @Test
-    @DisplayName("Token format - tokens generated at different times should be different")
-    void testTokenFormat_DifferentTokens() throws InterruptedException {
-        // Act - Add delay to ensure different timestamp (JWT uses second precision)
+    @DisplayName("Token format - successive tokens differ via unique jti (no time dependency)")
+    void testTokenFormat_DifferentTokens() {
+        // F15 (TEST_REVIEW_2026-05-01): the original test slept 1.1s to force a
+        // different JWT `iat` claim (second-precision). That's flaky and slow.
+        // {@link JwtService#buildToken} stamps a fresh UUID `jti` on every call
+        // (see {@code .id(UUID.randomUUID().toString())}), so successive tokens
+        // are guaranteed to differ regardless of the wall clock.
         String token1 = jwtService.generateAccessToken(TEST_EMAIL);
-        Thread.sleep(1100); // Wait > 1 second to ensure different timestamp
         String token2 = jwtService.generateAccessToken(TEST_EMAIL);
 
-        // Assert - Tokens should be different due to different issue times
         assertThat(token1).isNotEqualTo(token2);
+        // Belt-and-braces: the discriminator is the jti claim itself.
+        assertThat(jwtService.extractJti(token1)).isNotEqualTo(jwtService.extractJti(token2));
     }
 
     @Test
