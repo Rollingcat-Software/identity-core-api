@@ -429,7 +429,6 @@ Method <com.fivucsas.identity.controller.DeviceController.authenticate(java.util
 Method <com.fivucsas.identity.controller.DeviceController.authenticateOptions(java.util.Map)> calls method <com.fivucsas.identity.entity.User.getId()> in (DeviceController.java:393)
 Method <com.fivucsas.identity.controller.DeviceController.getRegistrationOptions(java.util.UUID)> calls method <com.fivucsas.identity.entity.User.getEmail()> in (DeviceController.java:129)
 Method <com.fivucsas.identity.controller.DeviceController.register(java.util.Map)> calls method <com.fivucsas.identity.entity.User.getEmail()> in (DeviceController.java:364)
-Method <com.fivucsas.identity.controller.DeviceController.register(java.util.Map)> calls method <com.fivucsas.identity.entity.User.getId()> in (DeviceController.java:362)
 Method <com.fivucsas.identity.controller.DeviceController.registerOptions(java.util.Map)> calls method <com.fivucsas.identity.entity.User.getEmail()> in (DeviceController.java:292)
 Method <com.fivucsas.identity.controller.DeviceController.registerOptions(java.util.Map)> calls method <com.fivucsas.identity.entity.User.getEmail()> in (DeviceController.java:305)
 Method <com.fivucsas.identity.controller.DeviceController.registerOptions(java.util.Map)> calls method <com.fivucsas.identity.entity.User.getFirstName()> in (DeviceController.java:293)
@@ -530,3 +529,4 @@ Method <com.fivucsas.identity.service.RefreshTokenService.verifyExpiration(com.f
 Method <com.fivucsas.identity.application.service.ExecuteAuthSessionService.verifyUserCanCompleteFlow(com.fivucsas.identity.entity.User, java.util.List)> calls method <com.fivucsas.identity.entity.User.getId()> in (ExecuteAuthSessionService.java:285)
 Method <com.fivucsas.identity.application.service.ExecuteAuthSessionService.verifyUserCanCompleteFlow(com.fivucsas.identity.entity.User, java.util.List)> calls method <com.fivucsas.identity.entity.User.getId()> in (ExecuteAuthSessionService.java:315)
 Method <com.fivucsas.identity.application.service.ExecuteAuthSessionService.verifyUserCanCompleteFlow(com.fivucsas.identity.entity.User, java.util.List)> has parameter of type <com.fivucsas.identity.entity.User> in (ExecuteAuthSessionService.java:0)
+Method <com.fivucsas.identity.application.service.WebAuthnCredentialService.saveCredential(com.fivucsas.identity.entity.WebAuthnCredential)> calls method <com.fivucsas.identity.entity.User.getId()> in (WebAuthnCredentialService.java:50)

@@ -8,6 +8,7 @@ import com.fivucsas.identity.entity.AuthSession;
 import com.fivucsas.identity.entity.WebAuthnCredential;
 import com.fivucsas.identity.infrastructure.webauthn.WebAuthnService;
 import com.fivucsas.identity.application.port.output.WebAuthnCredentialRepositoryPort;
+import com.fivucsas.identity.application.service.WebAuthnCredentialService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -34,6 +35,7 @@ public class FingerprintAuthHandler implements AuthMethodHandler {
 
     private final WebAuthnService webAuthnService;
     private final WebAuthnCredentialRepositoryPort credentialRepository;
+    private final WebAuthnCredentialService webAuthnCredentialService;
 
     @Override
     public AuthMethodType getMethodType() {
@@ -114,10 +116,7 @@ public class FingerprintAuthHandler implements AuthMethodHandler {
                             session.getUser().getEmail());
                     return StepResult.failure("Authenticator counter regression — possible cloned credential");
                 }
-                if (newSignCount > credential.getSignCount()) {
-                    credential.updateSignCount(newSignCount);
-                    credentialRepository.save(credential);
-                }
+                webAuthnCredentialService.updateSignCount(credential, newSignCount);
 
                 log.info("Fingerprint (WebAuthn platform) verification successful for user: {}",
                         session.getUser().getEmail());

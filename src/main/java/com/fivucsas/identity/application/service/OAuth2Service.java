@@ -432,9 +432,22 @@ public class OAuth2Service {
      * Extracts user info claims from the access token.
      * Implements OIDC UserInfo endpoint (OpenID Connect Core Section 5.3).
      *
+     * <p>SECURITY_REVIEW_2026-05-01 §"Out-of-scope but worth flagging" #2:
+     * reject ID tokens replayed against this endpoint. Per OIDC Core §5.3.1,
+     * UserInfo MUST be called with an OAuth 2.0 access token, not an ID token.
+     * The access tokens minted at {@link #exchangeCode} carry {@code type=oauth2};
+     * ID tokens carry {@code type=id_token}. Without this check, any RS256-signed
+     * token with a valid email subject was accepted, making the ID-token a
+     * stand-in for the access token.</p>
+     *
      * @return map of OIDC standard claims
      */
     public Map<String, Object> getUserInfo(String accessToken) {
+        String type = jwtService.extractClaim(accessToken, c -> c.get("type", String.class));
+        if (!"oauth2".equals(type)) {
+            throw new OAuth2Exception(HttpStatus.UNAUTHORIZED,
+                    "userinfo requires an OAuth2 access token");
+        }
         String email = jwtService.extractEmail(accessToken);
         User user = userRepository.findByEmail(email)
                 .orElseThrow(() -> new IllegalArgumentException("User not found"));

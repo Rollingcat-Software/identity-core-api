@@ -467,6 +467,7 @@ class OAuth2ServiceTest {
     @Test
     void getUserInfo_WhenValidToken_ShouldReturnUserClaims() {
         // given
+        when(jwtService.extractClaim(eq("valid-token"), any())).thenReturn("oauth2");
         when(jwtService.extractEmail("valid-token")).thenReturn("user@test.com");
         User user = mock(User.class);
         UUID userId = UUID.randomUUID();
@@ -493,6 +494,7 @@ class OAuth2ServiceTest {
     @Test
     void getUserInfo_WhenUserNotFound_ShouldThrowIllegalArgument() {
         // given
+        when(jwtService.extractClaim(eq("token"), any())).thenReturn("oauth2");
         when(jwtService.extractEmail("token")).thenReturn("no@user.com");
         when(userRepository.findByEmail("no@user.com")).thenReturn(Optional.empty());
 
@@ -500,6 +502,29 @@ class OAuth2ServiceTest {
         assertThatThrownBy(() -> service.getUserInfo("token"))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("User not found");
+    }
+
+    @Test
+    void getUserInfo_WhenIdTokenReplayed_ShouldReject() {
+        // SECURITY_REVIEW_2026-05-01 §"Out-of-scope" #2: an ID token replayed
+        // against /oauth2/userinfo must be rejected. Pre-fix, any RS256 token
+        // with a valid email subject was accepted.
+        when(jwtService.extractClaim(eq("id-token-replay"), any())).thenReturn("id_token");
+
+        assertThatThrownBy(() -> service.getUserInfo("id-token-replay"))
+                .isInstanceOf(OAuth2Exception.class)
+                .hasMessageContaining("userinfo requires an OAuth2 access token");
+    }
+
+    @Test
+    void getUserInfo_WhenTypeClaimMissing_ShouldReject() {
+        // Tokens minted before the type claim was introduced (or by a non-OAuth2
+        // path) must also fail closed.
+        when(jwtService.extractClaim(eq("legacy-token"), any())).thenReturn(null);
+
+        assertThatThrownBy(() -> service.getUserInfo("legacy-token"))
+                .isInstanceOf(OAuth2Exception.class)
+                .hasMessageContaining("userinfo requires an OAuth2 access token");
     }
 
     /**

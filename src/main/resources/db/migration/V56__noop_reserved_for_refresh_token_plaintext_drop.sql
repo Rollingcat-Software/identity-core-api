@@ -1,0 +1,28 @@
+-- V56__noop_reserved_for_refresh_token_plaintext_drop.sql
+--
+-- Reserves the V56 slot for the refresh-token plaintext-column drop
+-- migration scheduled ~2026-05-09 (after the V55 dual-read soak window
+-- closes). Without this placeholder, V57 (pg_partman) would create a
+-- non-contiguous chain (V55 → V57) and `MigrationChainContiguityTest`
+-- correctly fails: with Flyway's default `out-of-order=false`, a future
+-- real V56 ship would refuse to apply on environments that already
+-- recorded V57.
+--
+-- Pattern mirrors V43__noop_reserved_v43_ships_as_V48.sql.
+--
+-- Lifecycle:
+--   - When the real V56 lands, REPLACE this file's contents with the
+--     drop-column DDL. Filename + version stay the same so the
+--     contiguity test stays green and Flyway sees a normal new file
+--     (the no-op was never applied to prod yet — see operator notes
+--     in the PR description for V57 about Task #80 Flyway repair).
+--   - On environments where this no-op already applied, Flyway's
+--     checksum check WILL fail when the file is overwritten. Run
+--     `flyway repair` (covered by Task #80) to recompute checksums
+--     before the real V56 is deployed.
+--
+-- A pure SQL comment is technically valid but some Flyway versions
+-- complain about "no statements"; emit a harmless SELECT to keep every
+-- parser happy.
+
+SELECT 1 WHERE FALSE;
