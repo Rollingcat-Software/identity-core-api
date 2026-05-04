@@ -45,7 +45,8 @@ class JwtServiceSecurityHardeningTest {
         hmacProvider = mock(JwtSecretProvider.class);
         when(hmacProvider.getSecret()).thenReturn(TEST_SECRET);
         rsa = JwtAlgoTestSupport.newRsaKeyProvider();
-        service = new JwtService(hmacProvider, rsa, new MockEnvironment());
+        HsKeyRegistry registry = JwtAlgoTestSupport.newHsKeyRegistry(hmacProvider);
+        service = new JwtService(registry, rsa, new MockEnvironment());
         ReflectionTestUtils.setField(service, "jwtExpiration", 900_000L);
         ReflectionTestUtils.setField(service, "defaultAlgo", "RS256");
         // Default-off: this is the prod posture per §P0-3.

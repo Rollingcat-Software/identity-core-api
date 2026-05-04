@@ -5,8 +5,6 @@ import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.JwsHeader;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.Locator;
-import io.jsonwebtoken.io.Decoders;
-import io.jsonwebtoken.security.Keys;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -39,9 +37,16 @@ import java.util.function.Function;
 @Primary
 public class JwtService implements TokenGenerationPort {
 
-    public static final String HS_KID = "hs-2026-04";
+    /**
+     * Historical default kid for HS512 tokens. Kept for backward compatibility
+     * with callers that reference the constant directly (e.g. test harnesses).
+     * The actual signing kid is read from {@link HsKeyRegistry#getActiveKid()}
+     * which defaults to this value when {@code app.security.jwt.active-hs-kid}
+     * is unset.
+     */
+    public static final String HS_KID = HsKeyRegistry.DEFAULT_ACTIVE_KID;
 
-    private final JwtSecretProvider jwtSecretProvider;
+    private final HsKeyRegistry hsKeyRegistry;
     private final RsaKeyProvider rsaKeyProvider;
     private final Environment environment;
 
@@ -70,10 +75,10 @@ public class JwtService implements TokenGenerationPort {
     @Value("${app.security.jwt.issuer:}")
     private String expectedIssuer;
 
-    public JwtService(JwtSecretProvider jwtSecretProvider,
+    public JwtService(HsKeyRegistry hsKeyRegistry,
                       RsaKeyProvider rsaKeyProvider,
                       Environment environment) {
-        this.jwtSecretProvider = jwtSecretProvider;
+        this.hsKeyRegistry = hsKeyRegistry;
         this.rsaKeyProvider = rsaKeyProvider;
         this.environment = environment;
     }
@@ -186,9 +191,13 @@ public class JwtService implements TokenGenerationPort {
                     .signWith(rsaKeyProvider.getPrivateKey(), Jwts.SIG.RS256)
                     .compact();
         } else {
+            // Stamp the active kid from the registry so verifiers route to the
+            // matching SecretKey. During parallel-verify rotation this is the
+            // newly-rolled kid; tokens signed before rotation keep their old
+            // kid and verify against the retired entry.
             token = builder
-                    .header().keyId(HS_KID).and()
-                    .signWith(getHmacSignInKey(), Jwts.SIG.HS512)
+                    .header().keyId(hsKeyRegistry.getActiveKid()).and()
+                    .signWith(hsKeyRegistry.getActiveKey(), Jwts.SIG.HS512)
                     .compact();
         }
         // SECURITY: Never log the actual token - it's a bearer credential
@@ -236,9 +245,13 @@ public class JwtService implements TokenGenerationPort {
 
     /**
      * Locates the verification key by the JWS {@code kid} header.
-     * - "hs-2026-04" (or null kid for backward compatibility with legacy tokens) -> HS512 secret
-     * - the RSA kid -> RS256 public key
-     * Any other kid is rejected.
+     * <ul>
+     *   <li>kid in {@link HsKeyRegistry} (active or retired) -> the matching HS512 secret</li>
+     *   <li>kid absent (legacy pre-BE-H1 tokens) -> active HS512 secret</li>
+     *   <li>kid == {@link RsaKeyProvider#getKid()} -> RS256 public key</li>
+     *   <li>anything else -> {@link io.jsonwebtoken.security.SignatureException}</li>
+     * </ul>
+     * The HS path is gated by {@code app.security.jwt.allow-hs512}.
      */
     private Locator<Key> keyLocator() {
         return new Locator<>() {
@@ -258,7 +271,7 @@ public class JwtService implements TokenGenerationPort {
                 // explicitly opts in for a rollback window.
                 if (kid == null) {
                     // Legacy tokens (pre-BE-H1) had no kid; they were HS512.
-                    // Same gate applies.
+                    // Same gate applies — verify against the registry's active key.
                     if (!allowHs512) {
                         throw new io.jsonwebtoken.security.SignatureException(
                                 "HS512 verification disabled (kid absent); "
@@ -268,12 +281,23 @@ public class JwtService implements TokenGenerationPort {
                         throw new io.jsonwebtoken.security.SignatureException(
                                 "alg/kid mismatch: kid=null requires alg=HS512, got " + alg);
                     }
-                    return getHmacSignInKey();
+                    return hsKeyRegistry.getActiveKey();
                 }
-                if (HS_KID.equals(kid)) {
+                if (rsaKeyProvider.getKid().equals(kid)) {
+                    if (!"RS256".equals(alg)) {
+                        throw new io.jsonwebtoken.security.SignatureException(
+                                "alg/kid mismatch: kid=" + kid + " requires alg=RS256, got " + alg);
+                    }
+                    return rsaKeyProvider.getPublicKey();
+                }
+                // HS512 path: registry lookup. Both the active kid and any
+                // retired kids resolve here — that's the parallel-verify
+                // window during a key rotation.
+                SecretKey hsKey = hsKeyRegistry.keyFor(kid);
+                if (hsKey != null) {
                     if (!allowHs512) {
                         throw new io.jsonwebtoken.security.SignatureException(
-                                "HS512 verification disabled (kid=" + HS_KID + "); "
+                                "HS512 verification disabled (kid=" + kid + "); "
                                         + "set app.security.jwt.allow-hs512=true to re-enable");
                     }
                     // §P2-3: bind alg-to-kid. JJWT will catch most key/alg
@@ -283,25 +307,13 @@ public class JwtService implements TokenGenerationPort {
                     // another.
                     if (!"HS512".equals(alg)) {
                         throw new io.jsonwebtoken.security.SignatureException(
-                                "alg/kid mismatch: kid=" + HS_KID + " requires alg=HS512, got " + alg);
+                                "alg/kid mismatch: kid=" + kid + " requires alg=HS512, got " + alg);
                     }
-                    return getHmacSignInKey();
-                }
-                if (rsaKeyProvider.getKid().equals(kid)) {
-                    if (!"RS256".equals(alg)) {
-                        throw new io.jsonwebtoken.security.SignatureException(
-                                "alg/kid mismatch: kid=" + kid + " requires alg=RS256, got " + alg);
-                    }
-                    return rsaKeyProvider.getPublicKey();
+                    return hsKey;
                 }
                 throw new io.jsonwebtoken.security.SignatureException(
                         "Unknown JWT key id: " + kid + " (alg=" + alg + ")");
             }
         };
-    }
-
-    private SecretKey getHmacSignInKey() {
-        byte[] keyBytes = Decoders.BASE64.decode(jwtSecretProvider.getSecret());
-        return Keys.hmacShaKeyFor(keyBytes);
     }
 }
