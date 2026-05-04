@@ -513,7 +513,12 @@ class OAuth2ServiceTest {
 
         assertThatThrownBy(() -> service.getUserInfo("id-token-replay"))
                 .isInstanceOf(OAuth2Exception.class)
-                .hasMessageContaining("userinfo requires an OAuth2 access token");
+                .hasMessageContaining("userinfo requires an OAuth2 access token")
+                // RFC 6750 §3.1 — Bearer-token errors at the UserInfo resource
+                // endpoint must surface as `invalid_token`, NOT `invalid_client`
+                // (which is reserved for token-endpoint client-auth errors).
+                .extracting(t -> ((OAuth2Exception) t).getErrorCode())
+                .isEqualTo("invalid_token");
     }
 
     @Test

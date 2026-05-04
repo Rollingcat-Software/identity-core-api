@@ -152,8 +152,17 @@ public class SoftDeletePurgeJob {
             try {
                 UUID userId = user.getId();
                 String emailSnapshot = user.getEmail();  // snapshot before delete for audit
-                userRepository.delete(user);
+                // CRITICAL: User entity carries @SQLDelete (PR #70) which rewrites JPA
+                // delete() into a soft-delete UPDATE. Calling userRepository.delete(user)
+                // here would re-stamp deleted_at/status and cause the purge loop to
+                // rediscover the same rows forever. Use the native hardDeleteById
+                // escape hatch added on UserRepository for this purpose.
+                int rows = userRepository.hardDeleteById(userId);
                 userRepository.flush();   // force the FK cascades to run inside this tx
+                if (rows == 0) {
+                    log.warn("Hard purge of user {} affected 0 rows — skipping audit and continuing.", userId);
+                    continue;
+                }
                 auditLogPort.logSecurityEvent(
                     null,  // actor is the system scheduler, not a user
                     "USER_HARD_PURGED",

@@ -309,7 +309,7 @@ public class ExecuteAuthSessionService implements ExecuteAuthSessionUseCase {
 
             String methodName = missing != null ? missing.name() : "UNKNOWN";
             String enrollmentUrl = missing != null
-                    ? "/enroll/" + missing.name().toLowerCase()
+                    ? "/enroll/" + missing.name().toLowerCase(java.util.Locale.ROOT)
                     : "/enroll";
             log.warn("AUDIT: Auth session pre-flight blocked — user {} cannot complete flow (needs {})",
                     user.getId(), methodName);

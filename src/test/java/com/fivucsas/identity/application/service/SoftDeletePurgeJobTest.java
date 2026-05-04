@@ -113,17 +113,52 @@ class SoftDeletePurgeJobTest {
         when(userRepository.findPurgeCandidates(any(), any(Pageable.class)))
             .thenReturn(new PageImpl<>(List.of(oldUser)))
             .thenReturn(Page.empty());
+        when(userRepository.hardDeleteById(oldUser.getId())).thenReturn(1);
 
         SoftDeletePurgeJob.PurgeResult result = job.purge();
 
         assertThat(result.purged()).isEqualTo(1);
         assertThat(result.purgedIds()).containsExactly(oldUser.getId());
-        verify(userRepository).delete(oldUser);
+        // Native hard-delete bypasses @SQLDelete (which would otherwise loop forever
+        // re-stamping the same soft-deleted rows). See UserRepository.hardDeleteById.
+        verify(userRepository).hardDeleteById(oldUser.getId());
+        verify(userRepository, never()).delete(any());
         verify(auditLogPort).logSecurityEvent(
             any(),  // actor=null for system scheduler
             eq("USER_HARD_PURGED"),
             any(),
             anyString());
+    }
+
+    @Test
+    @DisplayName("purge() does NOT re-discover the same row across cycles (no infinite loop)")
+    void purge_doesNotInfiniteLoopOnSameSoftDeletedRow() {
+        ReflectionTestUtils.setField(job, "enabled", true);
+
+        UUID userId = UUID.randomUUID();
+        User oldUser = User.builder()
+            .id(userId)
+            .email("loop@example.com")
+            .passwordHash("$2a$10$hash")
+            .firstName("Loop")
+            .lastName("Guard")
+            .build();
+        oldUser.softDelete();
+        ReflectionTestUtils.setField(oldUser, "deletedAt",
+            Instant.now().minus(Duration.ofDays(40)));
+
+        // First page returns the candidate, then empty — simulates the row being
+        // hard-deleted out of the candidate set on the next call.
+        when(userRepository.findPurgeCandidates(any(), any(Pageable.class)))
+            .thenReturn(new PageImpl<>(List.of(oldUser)))
+            .thenReturn(Page.empty());
+        when(userRepository.hardDeleteById(userId)).thenReturn(1);
+
+        SoftDeletePurgeJob.PurgeResult result = job.purge();
+
+        // hardDeleteById called exactly once — no soft-delete rewrite recurrence.
+        verify(userRepository, times(1)).hardDeleteById(userId);
+        assertThat(result.purged()).isEqualTo(1);
     }
 
     @Test
@@ -153,6 +188,8 @@ class SoftDeletePurgeJobTest {
         // First call returns 2 users (< batch size of 100) → job exits after first batch.
         when(userRepository.findPurgeCandidates(any(), any(Pageable.class)))
             .thenReturn(new PageImpl<>(List.of(u1, u2)));
+        // Hard delete returns 1 row affected for both candidates.
+        when(userRepository.hardDeleteById(any(UUID.class))).thenReturn(1);
 
         SoftDeletePurgeJob.PurgeResult result = job.purge();
 
