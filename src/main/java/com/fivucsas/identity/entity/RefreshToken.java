@@ -7,6 +7,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 import org.hibernate.annotations.CreationTimestamp;
+import org.springframework.data.domain.Persistable;
 
 import java.time.Instant;
 import java.util.UUID;
@@ -18,11 +19,52 @@ import java.util.UUID;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class RefreshToken {
+public class RefreshToken implements Persistable<UUID> {
 
     @Id
-    @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
+
+    /**
+     * Spring Data isNew() override (P0-PROD bug 2026-05-04 fix).
+     *
+     * <p>P1-1 (PR #56, 2026-05-02) introduced the wire format
+     * {@code <id>.<secret>} which forces us to know the row id before save so
+     * we can build the wire token. The previous code did
+     * {@code .id(UUID.randomUUID())} on the builder which, combined with
+     * {@code @GeneratedValue}, fooled Spring Data's default {@code isNew()}
+     * (id-is-null check) into seeing every fresh row as already-persistent.
+     * {@code SimpleJpaRepository.save} therefore went through {@code merge}
+     * instead of {@code persist}, hit the detached-merge path, and threw
+     * {@code StaleObjectStateException} on every mint between 2026-05-02
+     * (rebuild) and 2026-05-04 — every MFA step that completed a flow could
+     * not produce its refresh token.
+     *
+     * <p>Implementing {@link Persistable} with an explicit transient
+     * {@code newEntity} flag lets us pre-assign the id deterministically and
+     * still tell Spring Data this is a brand-new row, so {@code save} routes
+     * to {@code persist} (INSERT). After {@code @PostLoad} or
+     * {@code @PostPersist}, {@code newEntity} flips to {@code false} so a
+     * subsequent in-place update goes through {@code merge} as normal.</p>
+     */
+    @Transient
+    @Builder.Default
+    private boolean newEntity = true;
+
+    @Override
+    public UUID getId() {
+        return id;
+    }
+
+    @Override
+    public boolean isNew() {
+        return newEntity;
+    }
+
+    @PostLoad
+    @PostPersist
+    void markPersistent() {
+        this.newEntity = false;
+    }
 
     /**
      * JPA-safe equality by immutable id (P2.10). Replaces the Lombok {@code @Data}
