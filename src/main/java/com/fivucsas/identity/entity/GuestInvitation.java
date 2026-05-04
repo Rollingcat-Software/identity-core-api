@@ -3,7 +3,9 @@ package com.fivucsas.identity.entity;
 import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.annotations.UpdateTimestamp;
+import org.hibernate.type.SqlTypes;
 
 import java.time.Instant;
 import java.util.UUID;
@@ -78,8 +80,18 @@ public class GuestInvitation {
     @Builder.Default
     private int extensionCount = 0;
 
+    // P0-PROD 2026-05-04: `columnDefinition="jsonb"` only affects DDL — Hibernate
+    // still binds Java String as varchar at runtime, which PostgreSQL rejects
+    // against a real jsonb column with `expression is of type character varying`.
+    // `@JdbcTypeCode(SqlTypes.JSON)` tells Hibernate to bind the field as
+    // PostgreSQL JSON, so the String must be valid JSON ("{}", null, etc.).
+    // Caller-side: GuestLifecycleService.createInvitation must pass a JSON-shaped
+    // string ("{}" for empty), not a free-text message — the user-facing welcome
+    // text already lives in the dedicated `message` text column above.
+    @JdbcTypeCode(SqlTypes.JSON)
     @Column(columnDefinition = "jsonb")
-    private String metadata;
+    @Builder.Default
+    private String metadata = "{}";
 
     // Lifecycle timestamps
     @Column(name = "accepted_at")
