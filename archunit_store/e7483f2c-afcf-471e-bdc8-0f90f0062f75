@@ -429,7 +429,6 @@ Method <com.fivucsas.identity.controller.DeviceController.authenticate(java.util
 Method <com.fivucsas.identity.controller.DeviceController.authenticateOptions(java.util.Map)> calls method <com.fivucsas.identity.entity.User.getId()> in (DeviceController.java:393)
 Method <com.fivucsas.identity.controller.DeviceController.getRegistrationOptions(java.util.UUID)> calls method <com.fivucsas.identity.entity.User.getEmail()> in (DeviceController.java:129)
 Method <com.fivucsas.identity.controller.DeviceController.register(java.util.Map)> calls method <com.fivucsas.identity.entity.User.getEmail()> in (DeviceController.java:364)
-Method <com.fivucsas.identity.controller.DeviceController.register(java.util.Map)> calls method <com.fivucsas.identity.entity.User.getId()> in (DeviceController.java:362)
 Method <com.fivucsas.identity.controller.DeviceController.registerOptions(java.util.Map)> calls method <com.fivucsas.identity.entity.User.getEmail()> in (DeviceController.java:292)
 Method <com.fivucsas.identity.controller.DeviceController.registerOptions(java.util.Map)> calls method <com.fivucsas.identity.entity.User.getEmail()> in (DeviceController.java:305)
 Method <com.fivucsas.identity.controller.DeviceController.registerOptions(java.util.Map)> calls method <com.fivucsas.identity.entity.User.getFirstName()> in (DeviceController.java:293)
@@ -527,3 +526,4 @@ Method <com.fivucsas.identity.service.RefreshTokenService.revokeToken(java.lang.
 Method <com.fivucsas.identity.service.RefreshTokenService.rotateRefreshToken(com.fivucsas.identity.entity.RefreshToken, java.lang.String, java.lang.String)> calls method <com.fivucsas.identity.entity.User.getEmail()> in (RefreshTokenService.java:214)
 Method <com.fivucsas.identity.service.RefreshTokenService.verifyExpiration(com.fivucsas.identity.entity.RefreshToken)> calls method <com.fivucsas.identity.entity.User.getEmail()> in (RefreshTokenService.java:116)
 Method <com.fivucsas.identity.service.RefreshTokenService.verifyExpiration(com.fivucsas.identity.entity.RefreshToken)> calls method <com.fivucsas.identity.entity.User.getId()> in (RefreshTokenService.java:118)
+Method <com.fivucsas.identity.application.service.WebAuthnCredentialService.saveCredential(com.fivucsas.identity.entity.WebAuthnCredential)> calls method <com.fivucsas.identity.entity.User.getId()> in (WebAuthnCredentialService.java:50)

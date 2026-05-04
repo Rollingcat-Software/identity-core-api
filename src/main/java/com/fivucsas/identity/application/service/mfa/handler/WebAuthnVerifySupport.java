@@ -1,6 +1,7 @@
 package com.fivucsas.identity.application.service.mfa.handler;
 
 import com.fivucsas.identity.application.port.output.WebAuthnCredentialRepositoryPort;
+import com.fivucsas.identity.application.service.WebAuthnCredentialService;
 import com.fivucsas.identity.application.service.mfa.MfaStepResult;
 import com.fivucsas.identity.entity.MfaSession;
 import com.fivucsas.identity.entity.User;
@@ -34,6 +35,7 @@ public class WebAuthnVerifySupport {
 
     private final WebAuthnService webAuthnService;
     private final WebAuthnCredentialRepositoryPort webAuthnCredentialRepository;
+    private final WebAuthnCredentialService webAuthnCredentialService;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     /**
@@ -105,10 +107,7 @@ public class WebAuthnVerifySupport {
                             user.getEmail(), credentialId);
                     return MfaStepResult.fail();
                 }
-                if (newSignCount > credential.getSignCount()) {
-                    credential.updateSignCount(newSignCount);
-                    webAuthnCredentialRepository.save(credential);
-                }
+                webAuthnCredentialService.updateSignCount(credential, newSignCount);
             }
             return verified ? MfaStepResult.ok() : MfaStepResult.fail();
         } catch (Exception e) {
