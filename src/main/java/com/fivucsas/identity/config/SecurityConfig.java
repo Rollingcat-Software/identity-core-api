@@ -118,6 +118,10 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/sessions/*/steps/*").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/sessions/*/steps/*/skip").authenticated()
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/sessions/*/cancel").authenticated()
+                        // Idempotent DELETE counterpart to /cancel (post-audit 2026-04-24
+                        // login edge case #3). Authn required so an attacker can't enumerate
+                        // and cancel arbitrary in-flight sessions by id.
+                        .requestMatchers(HttpMethod.DELETE, "/api/v1/auth/sessions/*").authenticated()
 
                         // QR session creation and polling must be public (unauthenticated clients)
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/qr/session").permitAll()

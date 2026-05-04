@@ -391,9 +391,19 @@ class VerifyMfaStepServiceTest {
 
         VerifyMfaStepResponse result = service.execute(req("EMAIL_OTP", Map.of("code", "123456")));
 
-        assertThat(result.status()).isEqualTo(VerifyMfaStepResponse.Status.BAD_REQUEST);
+        // Post-audit 2026-04-24 edge case #4: substitution rejection now returns
+        // 409 CONFLICT (not 400) — request is well-formed but conflicts with
+        // session state, matching /mfa/switch-method's existing convention.
+        assertThat(result.status()).isEqualTo(VerifyMfaStepResponse.Status.CONFLICT);
         assertThat(result.body())
-                .containsEntry("error", "METHOD_ALREADY_USED");
+                .containsEntry("error", "METHOD_ALREADY_USED")
+                // Edge case #5: recovery context is included so clients don't
+                // need a follow-up GET on session state.
+                .containsEntry("currentStep", 3)
+                .containsEntry("totalSteps", 3)
+                .containsEntry("nextAction", "SWITCH_METHOD")
+                .containsKey("expectedMethods")
+                .containsKey("completedMethods");
         // Guard fires BEFORE handler dispatch.
         verify(emailOtpHandler, never()).verify(any(), any(), any());
     }
