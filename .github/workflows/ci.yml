@@ -68,6 +68,16 @@ jobs:
       - name: Verify Docker is available (for Testcontainers)
         run: docker version && docker ps
 
+      - name: Pull pgvector image and alias as postgres:16-alpine
+        # Tests reference postgres:16-alpine but Flyway V0 requires the
+        # pgvector extension (production runs pgvector/pgvector:pg16).
+        # Self-hosted runner had a custom image baked in; ubuntu-latest does
+        # not. Retag the public pgvector image so the test sources stay
+        # unchanged.
+        run: |
+          docker pull pgvector/pgvector:pg16
+          docker tag pgvector/pgvector:pg16 postgres:16-alpine
+
       - name: Run integration tests
         env:
           MAVEN_OPTS: -Xmx2g
