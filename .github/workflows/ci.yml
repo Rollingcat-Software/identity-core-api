@@ -50,7 +50,7 @@ jobs:
   integration-tests:
     name: Integration tests (Testcontainers)
     needs: test
-    runs-on: [self-hosted, linux, x64]
+    runs-on: ubuntu-latest
     timeout-minutes: 35
     env:
       RUN_INTEGRATION: 'true'
