@@ -54,8 +54,14 @@ jwt:
 # Dev profile: HS512 still permitted for local tooling that mints HS-signed
 # fixtures, and no issuer requirement so local sandbox tokens stay valid.
 # Prod profile pins both off — see application-prod.yml.
+#
+# IMPORTANT: keep this `app:` block as the SINGLE root for any app.* property.
+# A second top-level `app:` (e.g. `app: { security: { expose-docs: true } }`)
+# silently overwrites this one under Spring/SnakeYAML's default loader, which
+# would drop the JWT settings here. The merged form below avoids that.
 app:
   security:
+    expose-docs: true
     jwt:
       allow-hs512: ${APP_SECURITY_JWT_ALLOW_HS512:true}
       issuer: ${APP_SECURITY_JWT_ISSUER:}
@@ -91,11 +97,6 @@ server:
     include-message: always
     include-binding-errors: always
     include-stacktrace: always  # Development only
-
-# Security (Development)
-app:
-  security:
-    expose-docs: true
 
 # CORS Configuration (Development)
 cors:
