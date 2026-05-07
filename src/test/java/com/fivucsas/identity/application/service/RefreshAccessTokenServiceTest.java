@@ -3,7 +3,10 @@ package com.fivucsas.identity.application.service;
 import com.fivucsas.identity.application.dto.command.RefreshTokenCommand;
 import com.fivucsas.identity.application.dto.response.AuthenticationResponse;
 import com.fivucsas.identity.application.port.output.TokenGenerationPort;
+import com.fivucsas.identity.domain.exception.TenantSuspendedException;
 import com.fivucsas.identity.entity.RefreshToken;
+import com.fivucsas.identity.entity.Tenant;
+import com.fivucsas.identity.entity.TenantStatus;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.entity.UserStatus;
 import com.fivucsas.identity.service.RefreshTokenService;
@@ -193,6 +196,110 @@ class RefreshAccessTokenServiceTest {
 
             verify(refreshTokenService, never()).rotateRefreshToken(any(), any(), any());
             verify(tokenGenerator, never()).generateAccessToken(any());
+        }
+    }
+
+    /**
+     * P0-#8 (INVESTIGATION_MASTER_2026-05-07): block refresh-token rotation
+     * for users whose tenant is no longer ACTIVE. Without this gate a session
+     * that was alive when the tenant went SUSPENDED could be kept fresh
+     * indefinitely via {@code /auth/refresh} — totally bypassing the
+     * suspension at {@code /auth/login}.
+     */
+    @Nested
+    @DisplayName("Tenant Suspension on refresh (P0-#8)")
+    class TenantSuspendedOnRefresh {
+
+        @Test
+        @DisplayName("Should throw TenantSuspendedException when user.tenant.status != ACTIVE")
+        void shouldThrowWhenTenantSuspended() {
+            // Given — refresh token belongs to a user whose tenant is SUSPENDED.
+            Tenant suspendedTenant = Tenant.builder()
+                    .id(UUID.randomUUID())
+                    .name("Suspended Tenant")
+                    .status(TenantStatus.SUSPENDED)
+                    .build();
+            User suspendedTenantUser = User.builder()
+                    .id(UUID.randomUUID())
+                    .email("test@example.com")
+                    .passwordHash(VALID_BCRYPT_HASH)
+                    .firstName("John")
+                    .lastName("Doe")
+                    .status(UserStatus.ACTIVE)
+                    .tenant(suspendedTenant)
+                    .createdAt(Instant.now())
+                    .updatedAt(Instant.now())
+                    .build();
+            RefreshToken suspendedTenantToken = RefreshToken.builder()
+                    .id(UUID.randomUUID())
+                    .token("existing-refresh-token")
+                    .user(suspendedTenantUser)
+                    .expiryDate(Instant.now().plus(Duration.ofDays(7)))
+                    .build();
+
+            when(refreshTokenService.findByToken("existing-refresh-token"))
+                    .thenReturn(suspendedTenantToken);
+            when(refreshTokenService.verifyExpiration(suspendedTenantToken))
+                    .thenReturn(suspendedTenantToken);
+
+            // When/Then
+            assertThatThrownBy(() -> refreshAccessTokenService.execute(validCommand))
+                    .isInstanceOf(TenantSuspendedException.class)
+                    .satisfies(ex -> {
+                        TenantSuspendedException tse = (TenantSuspendedException) ex;
+                        assertThat(tse.getStatus()).isEqualTo(TenantStatus.SUSPENDED);
+                        assertThat(tse.getErrorCode()).isEqualTo("TENANT_SUSPENDED");
+                    });
+
+            // Critical: refresh token MUST NOT be rotated (rotation issues a
+            // new token; if we rotate before the gate, the old token is
+            // already invalidated and the user is in a half-state). No new
+            // access token must be minted.
+            verify(refreshTokenService, never()).rotateRefreshToken(any(), any(), any());
+            verify(tokenGenerator, never()).generateAccessToken(any());
+            verify(tokenGenerator, never()).generateAccessToken(any(), any());
+        }
+
+        @Test
+        @DisplayName("Should refresh successfully when tenant is ACTIVE")
+        void shouldRefreshWhenTenantActive() {
+            // Given — user tenant is ACTIVE.
+            Tenant activeTenant = Tenant.builder()
+                    .id(UUID.randomUUID())
+                    .name("Active Tenant")
+                    .status(TenantStatus.ACTIVE)
+                    .build();
+            User activeUser = User.builder()
+                    .id(UUID.randomUUID())
+                    .email("test@example.com")
+                    .passwordHash(VALID_BCRYPT_HASH)
+                    .firstName("John")
+                    .lastName("Doe")
+                    .status(UserStatus.ACTIVE)
+                    .tenant(activeTenant)
+                    .createdAt(Instant.now())
+                    .updatedAt(Instant.now())
+                    .build();
+            RefreshToken activeTenantToken = RefreshToken.builder()
+                    .id(UUID.randomUUID())
+                    .token("existing-refresh-token")
+                    .user(activeUser)
+                    .expiryDate(Instant.now().plus(Duration.ofDays(7)))
+                    .build();
+
+            when(refreshTokenService.findByToken("existing-refresh-token"))
+                    .thenReturn(activeTenantToken);
+            when(refreshTokenService.verifyExpiration(activeTenantToken))
+                    .thenReturn(activeTenantToken);
+            when(refreshTokenService.rotateRefreshToken(eq(activeTenantToken), any(), any()))
+                    .thenReturn(newToken);
+            when(tokenGenerator.generateAccessToken("test@example.com")).thenReturn("new-access-token");
+
+            // When
+            AuthenticationResponse response = refreshAccessTokenService.execute(validCommand);
+
+            // Then
+            assertThat(response.getAccessToken()).isEqualTo("new-access-token");
         }
     }
 

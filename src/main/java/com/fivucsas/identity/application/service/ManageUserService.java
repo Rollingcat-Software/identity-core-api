@@ -11,6 +11,7 @@ import com.fivucsas.identity.application.port.output.AuditLogQueryPort;
 import com.fivucsas.identity.application.port.output.PasswordEncoderPort;
 import com.fivucsas.identity.domain.exception.DuplicateEmailException;
 import com.fivucsas.identity.domain.exception.TenantNotFoundException;
+import com.fivucsas.identity.domain.exception.TenantUserQuotaExceededException;
 import com.fivucsas.identity.domain.exception.RoleNotFoundException;
 import com.fivucsas.identity.domain.exception.UserNotFoundException;
 import com.fivucsas.identity.domain.model.user.*;
@@ -74,6 +75,19 @@ public class ManageUserService implements ManageUserUseCase {
             UUID tenantUuid = UUID.fromString(command.getTenantId());
             tenant = tenantRepository.findById(tenantUuid)
                 .orElseThrow(() -> new TenantNotFoundException(command.getTenantId()));
+        }
+
+        // P0-#7 (INVESTIGATION_MASTER_2026-05-07): enforce tenant.max_users on
+        // the admin-create path too. RegisterUserService gates the public
+        // self-service flow; this gates the SUPER_ADMIN/TENANT_ADMIN admin UI
+        // path. Tenant-less users (system-wide) are not capped here.
+        if (tenant != null) {
+            long currentUserCount = userRepository.countByTenantId(tenant.getId());
+            if (currentUserCount >= tenant.getMaxUsers()) {
+                log.warn("AUDIT: User creation refused — tenant quota exceeded, tenantId={}, currentUsers={}, maxUsers={}",
+                    tenant.getId(), currentUserCount, tenant.getMaxUsers());
+                throw new TenantUserQuotaExceededException(tenant.getMaxUsers());
+            }
         }
 
         User user = User.builder()

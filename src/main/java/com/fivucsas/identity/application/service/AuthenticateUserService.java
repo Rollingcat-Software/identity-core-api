@@ -12,6 +12,7 @@ import com.fivucsas.identity.domain.exception.AccountLockedException;
 import com.fivucsas.identity.domain.exception.InvalidCredentialsException;
 import com.fivucsas.identity.domain.exception.NeedsEnrollmentException;
 import com.fivucsas.identity.domain.exception.TenantMismatchException;
+import com.fivucsas.identity.domain.exception.TenantSuspendedException;
 import com.fivucsas.identity.domain.model.auth.AuthMethodType;
 import com.fivucsas.identity.domain.model.auth.OperationType;
 import com.fivucsas.identity.domain.model.auth.StepType;
@@ -67,6 +68,25 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
 
         User user = userRepository.findByEmail(command.getEmail())
             .orElseThrow(InvalidCredentialsException::new);
+
+        // P0-#8 (INVESTIGATION_MASTER_2026-05-07): refuse authentication when
+        // the user's tenant is not ACTIVE. Tenant.canAcceptUsers() existed in
+        // the domain model with zero non-DTO callers — suspended /
+        // inactive / pending tenants kept minting JWTs through this path.
+        // Reject AFTER the email is found (no enumeration leak: the tenant
+        // identity is not exposed in the response — only the suspension fact)
+        // and BEFORE the lockout / password / MFA branches so the gate
+        // applies uniformly to all auth strategies.
+        if (user.getTenant() != null
+                && user.getTenant().getStatus() != TenantStatus.ACTIVE) {
+            log.warn("AUDIT: Login refused — tenant not active, email={}, tenantId={}, tenantStatus={}, ip={}",
+                    command.getEmail(), user.getTenant().getId(),
+                    user.getTenant().getStatus(), command.getIpAddress());
+            auditLogPort.logAuthenticationFailed(command.getEmail(),
+                    command.getIpAddress(),
+                    "Tenant " + user.getTenant().getStatus() + " — auth refused");
+            throw new TenantSuspendedException(user.getTenant().getStatus());
+        }
 
         // Check if account is locked
         if (user.isLocked()) {

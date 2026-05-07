@@ -11,8 +11,10 @@ import com.fivucsas.identity.application.port.output.TokenGenerationPort;
 import com.fivucsas.identity.domain.exception.AccountLockedException;
 import com.fivucsas.identity.domain.exception.InvalidCredentialsException;
 import com.fivucsas.identity.domain.exception.TenantMismatchException;
+import com.fivucsas.identity.domain.exception.TenantSuspendedException;
 import com.fivucsas.identity.entity.OAuth2Client;
 import com.fivucsas.identity.entity.Tenant;
+import com.fivucsas.identity.entity.TenantStatus;
 import com.fivucsas.identity.domain.repository.UserRepository;
 import com.fivucsas.identity.entity.RefreshToken;
 import com.fivucsas.identity.entity.User;
@@ -372,8 +374,13 @@ class AuthenticateUserServiceTest {
             UUID userTenantId = UUID.randomUUID();
             UUID marmaraTenantId = UUID.randomUUID();
 
-            Tenant userTenant = Tenant.builder().id(userTenantId).name("Fivucsas").build();
-            Tenant marmaraTenant = Tenant.builder().id(marmaraTenantId).name("Marmara University").build();
+            // P0-#8 (2026-05-07): both tenants must be ACTIVE so the new
+            // tenant-suspension gate doesn't short-circuit ahead of the
+            // tenant-mismatch check this test is asserting.
+            Tenant userTenant = Tenant.builder()
+                    .id(userTenantId).name("Fivucsas").status(TenantStatus.ACTIVE).build();
+            Tenant marmaraTenant = Tenant.builder()
+                    .id(marmaraTenantId).name("Marmara University").status(TenantStatus.ACTIVE).build();
 
             User gmailUser = User.builder()
                     .id(UUID.randomUUID())
@@ -428,7 +435,10 @@ class AuthenticateUserServiceTest {
         void shouldAllowLoginWhenUserAndClientShareTenant() {
             // Given — user and client both belong to Marmara
             UUID marmaraTenantId = UUID.randomUUID();
-            Tenant marmaraTenant = Tenant.builder().id(marmaraTenantId).name("Marmara University").build();
+            // P0-#8 (2026-05-07): ACTIVE so the tenant-suspension gate is
+            // a no-op here.
+            Tenant marmaraTenant = Tenant.builder()
+                    .id(marmaraTenantId).name("Marmara University").status(TenantStatus.ACTIVE).build();
 
             User marmaraUser = User.builder()
                     .id(UUID.randomUUID())
@@ -499,8 +509,12 @@ class AuthenticateUserServiceTest {
             UUID userTenantId = UUID.randomUUID();
             UUID otherTenantId = UUID.randomUUID();
 
-            Tenant userTenant = Tenant.builder().id(userTenantId).name("Fivucsas").build();
-            Tenant nameMissing = Tenant.builder().id(otherTenantId).name("").build();
+            // P0-#8 (2026-05-07): ACTIVE so the tenant-suspension gate
+            // does not preempt the tenant-mismatch surface under test.
+            Tenant userTenant = Tenant.builder()
+                    .id(userTenantId).name("Fivucsas").status(TenantStatus.ACTIVE).build();
+            Tenant nameMissing = Tenant.builder()
+                    .id(otherTenantId).name("").status(TenantStatus.ACTIVE).build();
 
             User user = User.builder()
                     .id(UUID.randomUUID())
@@ -535,6 +549,127 @@ class AuthenticateUserServiceTest {
                     .isInstanceOf(TenantMismatchException.class)
                     .satisfies(ex -> assertThat(((TenantMismatchException) ex).getRequiredTenant())
                             .isEqualTo("Acme Portal"));
+        }
+    }
+
+    /**
+     * P0-#8 (INVESTIGATION_MASTER_2026-05-07): tenant suspension gate.
+     *
+     * <p>Asserts that authentication fails with HTTP 423
+     * {@link TenantSuspendedException} when the user's tenant is in any
+     * non-ACTIVE status (SUSPENDED, INACTIVE, PENDING). Critically, the
+     * password must NEVER be checked and no token must be issued — the
+     * suspension takes precedence over every other branch.</p>
+     */
+    @Nested
+    @DisplayName("Tenant Suspension (P0-#8)")
+    class TenantSuspended {
+
+        @Test
+        @DisplayName("Should throw TenantSuspendedException when user.tenant.status = SUSPENDED")
+        void shouldThrowWhenTenantSuspended() {
+            // Given — user belongs to a tenant that has been suspended.
+            Tenant suspendedTenant = Tenant.builder()
+                    .id(UUID.randomUUID())
+                    .name("Suspended Tenant")
+                    .status(TenantStatus.SUSPENDED)
+                    .build();
+            User suspendedTenantUser = User.builder()
+                    .id(UUID.randomUUID())
+                    .email("test@example.com")
+                    .passwordHash(VALID_BCRYPT_HASH)
+                    .firstName("John")
+                    .lastName("Doe")
+                    .status(UserStatus.ACTIVE)
+                    .tenant(suspendedTenant)
+                    .createdAt(Instant.now())
+                    .updatedAt(Instant.now())
+                    .build();
+
+            when(userRepository.findByEmail("test@example.com"))
+                    .thenReturn(Optional.of(suspendedTenantUser));
+
+            // When/Then
+            assertThatThrownBy(() -> authenticateUserService.execute(validCommand))
+                    .isInstanceOf(TenantSuspendedException.class)
+                    .satisfies(ex -> {
+                        TenantSuspendedException tse = (TenantSuspendedException) ex;
+                        assertThat(tse.getStatus()).isEqualTo(TenantStatus.SUSPENDED);
+                        assertThat(tse.getErrorCode()).isEqualTo("TENANT_SUSPENDED");
+                    });
+
+            // Critical: password must NOT be checked, no token issued.
+            verify(passwordEncoder, never()).matches(any(), any());
+            verify(tokenGenerator, never()).generateAccessToken(any());
+            verify(tokenGenerator, never()).generateAccessToken(any(), any());
+            verify(refreshTokenService, never()).createRefreshToken(any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("Should also throw for INACTIVE and PENDING tenants")
+        void shouldThrowForInactiveAndPending() {
+            for (TenantStatus blockedStatus : List.of(TenantStatus.INACTIVE, TenantStatus.PENDING)) {
+                Tenant blockedTenant = Tenant.builder()
+                        .id(UUID.randomUUID())
+                        .name(blockedStatus + " Tenant")
+                        .status(blockedStatus)
+                        .build();
+                User blockedUser = User.builder()
+                        .id(UUID.randomUUID())
+                        .email("test@example.com")
+                        .passwordHash(VALID_BCRYPT_HASH)
+                        .firstName("John")
+                        .lastName("Doe")
+                        .status(UserStatus.ACTIVE)
+                        .tenant(blockedTenant)
+                        .createdAt(Instant.now())
+                        .updatedAt(Instant.now())
+                        .build();
+
+                when(userRepository.findByEmail("test@example.com"))
+                        .thenReturn(Optional.of(blockedUser));
+
+                assertThatThrownBy(() -> authenticateUserService.execute(validCommand))
+                        .isInstanceOf(TenantSuspendedException.class)
+                        .satisfies(ex -> assertThat(((TenantSuspendedException) ex).getStatus())
+                                .isEqualTo(blockedStatus));
+
+                reset(userRepository);
+            }
+        }
+
+        @Test
+        @DisplayName("Should NOT throw when user.tenant.status = ACTIVE")
+        void shouldAllowActiveTenant() {
+            // Given — ACTIVE tenant, password matches, no MFA configured.
+            Tenant activeTenant = Tenant.builder()
+                    .id(UUID.randomUUID())
+                    .name("Active Tenant")
+                    .status(TenantStatus.ACTIVE)
+                    .build();
+            User activeUser = User.builder()
+                    .id(UUID.randomUUID())
+                    .email("test@example.com")
+                    .passwordHash(VALID_BCRYPT_HASH)
+                    .firstName("John")
+                    .lastName("Doe")
+                    .status(UserStatus.ACTIVE)
+                    .tenant(activeTenant)
+                    .createdAt(Instant.now())
+                    .updatedAt(Instant.now())
+                    .build();
+
+            when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(activeUser));
+            when(passwordEncoder.matches("Password123!", VALID_BCRYPT_HASH)).thenReturn(true);
+            when(tokenGenerator.generateAccessToken("test@example.com", List.of("pwd"))).thenReturn("access-token");
+            when(refreshTokenService.createRefreshToken(any(), any(), any())).thenReturn(refreshToken);
+
+            // When
+            AuthenticationResponse response = authenticateUserService.execute(validCommand);
+
+            // Then
+            assertThat(response).isNotNull();
+            assertThat(response.getAccessToken()).isEqualTo("access-token");
         }
     }
 
