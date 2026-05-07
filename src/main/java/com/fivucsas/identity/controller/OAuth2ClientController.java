@@ -27,8 +27,14 @@ import java.util.stream.Collectors;
 /**
  * REST controller for OAuth 2.0 client management (CRUD).
  *
- * Allows authenticated users to register, list, view, delete,
+ * Allows TENANT_ADMIN (and ROOT) users to register, list, view, delete,
  * and toggle status of OAuth2 clients within their tenant.
+ *
+ * <p>T-P1-SEC Fix B (2026-05-07): tightened from {@code isAuthenticated()} to
+ * {@code @rbac.isTenantAdmin()} on every endpoint. Previously any
+ * TENANT_MEMBER could mint OAuth2 client credentials for the tenant —
+ * effectively a privilege-escalation primitive. {@code isTenantAdmin()} returns
+ * true for TENANT_ADMIN, ROOT, and SUPER_ADMIN via {@code UserType.isAtLeast}.
  */
 @RestController
 @RequestMapping("/api/v1/oauth2/clients")
@@ -50,8 +56,8 @@ public class OAuth2ClientController {
      * List all OAuth2 clients for the current tenant.
      */
     @GetMapping
-    @PreAuthorize("isAuthenticated()")
-    @Operation(summary = "List all OAuth2 clients for the authenticated user's tenant")
+    @PreAuthorize("@rbac.isTenantAdmin()")
+    @Operation(summary = "List all OAuth2 clients for the authenticated user's tenant (admin only)")
     public ResponseEntity<List<OAuth2ClientResponse>> listClients() {
         User currentUser = rbacService.getCurrentUser()
                 .orElseThrow(() -> new IllegalStateException("Not authenticated"));
@@ -70,8 +76,8 @@ public class OAuth2ClientController {
      * Register a new OAuth2 client. Returns client_id + plaintext client_secret ONCE.
      */
     @PostMapping
-    @PreAuthorize("isAuthenticated()")
-    @Operation(summary = "Register a new OAuth2 client (returns client_secret in plaintext once)")
+    @PreAuthorize("@rbac.isTenantAdmin()")
+    @Operation(summary = "Register a new OAuth2 client (returns client_secret in plaintext once, admin only)")
     public ResponseEntity<OAuth2ClientCreatedResponse> registerClient(
             @Valid @RequestBody RegisterClientRequest request) {
 
@@ -119,8 +125,8 @@ public class OAuth2ClientController {
      * Get a single OAuth2 client by ID. Secret is masked.
      */
     @GetMapping("/{id}")
-    @PreAuthorize("isAuthenticated()")
-    @Operation(summary = "Get OAuth2 client details (secret is masked)")
+    @PreAuthorize("@rbac.isTenantAdmin()")
+    @Operation(summary = "Get OAuth2 client details (secret is masked, admin only)")
     public ResponseEntity<OAuth2ClientResponse> getClient(@PathVariable UUID id) {
         User currentUser = rbacService.getCurrentUser()
                 .orElseThrow(() -> new IllegalStateException("Not authenticated"));
@@ -137,8 +143,8 @@ public class OAuth2ClientController {
      * Delete (hard-delete) an OAuth2 client.
      */
     @DeleteMapping("/{id}")
-    @PreAuthorize("isAuthenticated()")
-    @Operation(summary = "Delete an OAuth2 client")
+    @PreAuthorize("@rbac.isTenantAdmin()")
+    @Operation(summary = "Delete an OAuth2 client (admin only)")
     public ResponseEntity<Void> deleteClient(@PathVariable UUID id) {
         User currentUser = rbacService.getCurrentUser()
                 .orElseThrow(() -> new IllegalStateException("Not authenticated"));
@@ -158,8 +164,8 @@ public class OAuth2ClientController {
      * Toggle active/inactive status of an OAuth2 client.
      */
     @PatchMapping("/{id}/status")
-    @PreAuthorize("isAuthenticated()")
-    @Operation(summary = "Toggle active/inactive status of an OAuth2 client")
+    @PreAuthorize("@rbac.isTenantAdmin()")
+    @Operation(summary = "Toggle active/inactive status of an OAuth2 client (admin only)")
     public ResponseEntity<OAuth2ClientResponse> toggleStatus(
             @PathVariable UUID id,
             @Valid @RequestBody ToggleStatusRequest request) {
