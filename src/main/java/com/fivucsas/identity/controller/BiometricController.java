@@ -251,13 +251,36 @@ public class BiometricController {
     @PreAuthorize("isAuthenticated()")
     public ResponseEntity<Map<String, Object>> searchFace(
             @RequestParam("file") MultipartFile image,
-            @RequestParam(value = "tenant_id", required = false) String tenantId,
             @RequestParam(value = "client_embedding", required = false) String clientEmbedding,
             @RequestParam(value = "client_embeddings", required = false) String clientEmbeddings) {
+        // USER-BUG-4 fix: derive tenant_id from authenticated user, never trust the
+        // client. The biometric-processor /search endpoint requires `tenant_id`
+        // (Form min_length=1) and the pgvector query enforces `AND tenant_id = $4`.
+        // Previously, frontend-initiated calls could omit tenant_id, scoping searches
+        // to NULL — which silently filtered out every embedding row whose tenant_id
+        // also happens to be NULL (orphan rows from earlier enrollments) AND every
+        // properly-scoped row, returning "No matches found" even for enrolled users.
+        String tenantId = resolveCurrentTenantId();
         log.info("Face search request (tenant: {})", tenantId);
         Map<String, Object> result = biometricServicePort.searchFace(
                 image, tenantId, clientEmbedding, clientEmbeddings);
         return ResponseEntity.ok(result);
+    }
+
+    /**
+     * Resolves the tenant_id of the currently authenticated principal. Throws
+     * 401 when no principal is on the security context (defense-in-depth: the
+     * @PreAuthorize("isAuthenticated()") gate already guards this, but we treat
+     * a missing user here as a hard auth failure rather than silently passing
+     * a null tenant downstream).
+     */
+    private String resolveCurrentTenantId() {
+        // Resolve the principal's tenant via the security-layer helper, which keeps
+        // the JPA `entity.User` type contained inside `security..` per the
+        // hexagonal-boundary ratchet enforced by UserDomainBoundaryTest.
+        UUID tenantId = rbacService.getCurrentUserTenantId()
+                .orElseThrow(UnauthorizedException::new);
+        return tenantId.toString();
     }
 
     @PostMapping("/api/v1/biometric/voice/search")

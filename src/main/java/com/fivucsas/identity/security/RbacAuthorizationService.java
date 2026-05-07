@@ -209,4 +209,21 @@ public class RbacAuthorizationService {
         String email = auth.getName();
         return userRepository.findByEmail(email);
     }
+
+    /**
+     * Returns the {@code tenant_id} of the currently authenticated principal, or
+     * {@link Optional#empty()} if there is no authenticated user (or the user has
+     * no tenant attached, e.g. ROOT/SUPER_ADMIN).
+     *
+     * <p>This helper exists so application/controller code can derive the caller's
+     * tenant scope WITHOUT importing {@code entity.User} — the JPA entity is kept
+     * inside the {@code security..} package per the hexagonal-boundary ratchet
+     * enforced by {@code UserDomainBoundaryTest}. See
+     * {@code ANALYSIS_2026-05-02_USER_DOMAIN_AND_JWT_ROTATION.md}.
+     */
+    public Optional<UUID> getCurrentUserTenantId() {
+        return getCurrentUser()
+                .map(User::getTenant)
+                .map(t -> t.getId());
+    }
 }

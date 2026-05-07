@@ -32,7 +32,11 @@ import org.springframework.test.web.servlet.MockMvc;
 import java.util.Map;
 import java.util.UUID;
 
+import java.util.Optional;
+
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
@@ -146,4 +150,42 @@ class BiometricControllerTest {
     }
 
     // P1.4: enrollFingerprint success test removed alongside the endpoint.
+
+    /**
+     * USER-BUG-4 regression: face-search must scope by the authenticated user's
+     * tenant_id (derived server-side), not by an unrelated request param. The bug
+     * fixed here was that the controller used to forward whatever (or nothing)
+     * the client sent for `tenant_id`, causing searches to be scoped to NULL and
+     * silently miss real enrollments. After the fix, the tenant_id supplied to
+     * the downstream BiometricServicePort.searchFace must be the principal's
+     * own tenant — even if the caller tries to override it via the form param.
+     */
+    @Test
+    @DisplayName("POST /api/v1/biometric/search - Tenant scope is derived from authenticated user (USER-BUG-4)")
+    void searchFace_ShouldScopeByCurrentUserTenant() throws Exception {
+        UUID tenantUuid = UUID.fromString("11111111-1111-1111-1111-111111111111");
+
+        // Stub the security-layer helper that the controller now depends on for
+        // tenant resolution. Returning the principal's tenant id directly avoids
+        // touching `entity.User` from this test (mirrors the production path
+        // where the JPA entity stays inside `security..` per the hexagonal
+        // boundary enforced by UserDomainBoundaryTest).
+        when(rbacService.getCurrentUserTenantId()).thenReturn(Optional.of(tenantUuid));
+        when(biometricServicePort.searchFace(any(), eq(tenantUuid.toString()), any(), any()))
+                .thenReturn(Map.of("found", true, "matches", java.util.List.of()));
+
+        MockMultipartFile image = new MockMultipartFile(
+                "file", "face.jpg", MediaType.IMAGE_JPEG_VALUE, "fake-image-bytes".getBytes());
+
+        mockMvc.perform(multipart("/api/v1/biometric/search")
+                        .file(image)
+                        // Hostile attempt to override scope: client sends a different tenant.
+                        // The controller MUST ignore this and use the principal's tenant.
+                        .param("tenant_id", "00000000-0000-0000-0000-000000000000"))
+                .andExpect(status().isOk());
+
+        // Verify the downstream port was invoked with the principal's tenant,
+        // NOT the client-supplied form value.
+        verify(biometricServicePort).searchFace(any(), eq(tenantUuid.toString()), any(), any());
+    }
 }
