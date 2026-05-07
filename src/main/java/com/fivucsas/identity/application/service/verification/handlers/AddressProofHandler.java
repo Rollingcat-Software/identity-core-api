@@ -4,18 +4,39 @@ import com.fivucsas.identity.application.service.verification.VerificationStepHa
 import com.fivucsas.identity.application.service.verification.VerificationStepResult;
 import com.fivucsas.identity.entity.VerificationSession;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
 import java.util.Map;
 
 /**
  * Handles ADDRESS_PROOF verification step.
- * Currently stores the document and flags it for manual review.
  *
- * TODO: Integrate with OCR/address validation service for automated extraction
- * TODO: Add address matching against government databases
+ * <p><b>STUB / DEV-ONLY.</b> The current implementation accepts any non-empty
+ * image payload and returns {@code status=PENDING_REVIEW, document_stored=true}
+ * without actually persisting the image, validating the document, or extracting
+ * the address. The inline comment ("would be stored via a media storage service
+ * in production") admits as much. Returning a hard-coded "stored" verdict in
+ * production would silently false-pass any KYC flow that includes an
+ * {@code ADDRESS_PROOF} step.
+ *
+ * <p>To make the silent-mock-in-prod failure mode impossible, this bean is
+ * gated to the {@code dev} Spring profile only. In any non-dev profile (notably
+ * {@code prod}) the bean is NOT registered, and
+ * {@code VerificationStepHandlerRegistry.getHandler("ADDRESS_PROOF")} will
+ * throw {@link UnsupportedOperationException} — surfacing an explicit "feature
+ * not implemented" error rather than a counterfeit pass. Mirrors the
+ * {@code WatchlistCheckHandler} ratchet (P0-#3, api #81).
+ *
+ * <p>P1 fix: see hygiene wave 2026-05-07.
+ *
+ * <p>TODO: Integrate with OCR/address validation service for automated extraction.
+ *          Add address matching against government databases. Wire actual media
+ *          storage (S3/equivalent) so {@code document_stored=true} reflects
+ *          reality. Remove this profile gate once a real implementation ships.
  */
 @Component
+@Profile("dev")
 @Slf4j
 public class AddressProofHandler implements VerificationStepHandler {
 

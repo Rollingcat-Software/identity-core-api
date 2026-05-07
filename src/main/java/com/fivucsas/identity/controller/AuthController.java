@@ -347,7 +347,12 @@ public class AuthController {
 
         boolean valid = otpService.validate(EMAIL_VERIFY_OTP_PREFIX + user.getId(), code);
         if (!valid) {
-            return ResponseEntity.ok(Map.of("success", false, "message", "Invalid or expired verification code"));
+            // P1 hygiene 2026-05-07: invalid/expired OTP is an auth failure,
+            // surface as 401 so observability tools (4xx-rate alerts, log
+            // dashboards) and downstream HTTP clients see it as a failure
+            // rather than a 200 with an embedded `success:false`.
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(Map.of("success", false, "message", "Invalid or expired verification code"));
         }
 
         user.verifyEmail();
@@ -397,7 +402,10 @@ public class AuthController {
 
         boolean valid = otpService.validate(PHONE_VERIFY_OTP_PREFIX + user.getId(), code);
         if (!valid) {
-            return ResponseEntity.ok(Map.of("success", false, "message", "Invalid or expired verification code"));
+            // P1 hygiene 2026-05-07: invalid/expired OTP returns 401 so
+            // observability tools see an auth failure (was 200/success:false).
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(Map.of("success", false, "message", "Invalid or expired verification code"));
         }
 
         user.verifyPhone();
@@ -442,7 +450,9 @@ public class AuthController {
         boolean valid = otpService.validate(TWO_FA_OTP_PREFIX + user.getId(), code);
         if (!valid) {
             log.warn("AUDIT: 2FA failed — method: EMAIL_OTP, reason: invalid_or_expired_otp, userId={}", user.getId());
-            return ResponseEntity.ok(Map.of("success", false, "message", "Invalid or expired verification code"));
+            // P1 hygiene 2026-05-07: failed 2FA is auth failure → HTTP 401.
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(Map.of("success", false, "message", "Invalid or expired verification code"));
         }
 
         log.info("AUDIT: 2FA verified — method: EMAIL_OTP, userId={}", user.getId());
@@ -578,7 +588,11 @@ public class AuthController {
                 log.warn("AUDIT: 2FA failed — method: {}, reason: {}, userId={}, ip={}, userAgent={}",
                         method, reason, user.getId(), clientIp, ua);
                 auditLogPort.logTwoFactorFailed(user.getId().toString(), method, reason, clientIp, ua);
-                return ResponseEntity.ok(Map.of("success", false, "message", "Verification failed for " + method));
+                // P1 hygiene 2026-05-07: failed 2FA verification is an auth
+                // failure → HTTP 401 (was 200/success:false, hiding from
+                // 4xx-rate observability).
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                        .body(Map.of("success", false, "message", "Verification failed for " + method));
             }
         } catch (Exception e) {
             String clientIp = getClientIP(httpRequest);
@@ -586,7 +600,11 @@ public class AuthController {
             log.error("AUDIT: 2FA error — method: {}, userId={}, error: {}, ip={}, userAgent={}",
                     method, user.getId(), e.getMessage(), clientIp, ua);
             auditLogPort.logTwoFactorFailed(user.getId().toString(), method, "error: " + e.getMessage(), clientIp, ua);
-            return ResponseEntity.ok(Map.of("success", false, "message", "Verification error: " + e.getMessage()));
+            // P1 hygiene 2026-05-07: server-side error during verify is a
+            // 500-class failure, not a successful response. Logging at ERROR
+            // already; surface to clients as 500 so monitoring catches it.
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("success", false, "message", "Verification error: " + e.getMessage()));
         }
     }
 
