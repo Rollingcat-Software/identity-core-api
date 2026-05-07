@@ -7,8 +7,6 @@ import com.fivucsas.identity.application.port.input.VerifyBiometricUseCase;
 import com.fivucsas.identity.application.port.output.BiometricServicePort;
 import com.fivucsas.identity.application.port.output.CachePort;
 import com.fivucsas.identity.domain.repository.TenantRepository;
-import com.fivucsas.identity.entity.Tenant;
-import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.repository.UserRepository;
 import com.fivucsas.identity.infrastructure.email.EmailService;
 import com.fivucsas.identity.infrastructure.otp.OtpService;
@@ -167,21 +165,12 @@ class BiometricControllerTest {
     void searchFace_ShouldScopeByCurrentUserTenant() throws Exception {
         UUID tenantUuid = UUID.fromString("11111111-1111-1111-1111-111111111111");
 
-        // Build a User entity attached to a Tenant whose id matches the expected
-        // tenant scope. We use real entity classes (no Mockito mocking of final
-        // accessors) so the controller's `currentUser.getTenantId().getValue()`
-        // chain returns the canonical UUID string.
-        Tenant tenant = Tenant.builder()
-                .id(tenantUuid)
-                .name("Marmara University")
-                .build();
-        User principal = User.builder()
-                .id(UUID.randomUUID())
-                .email("ayse@marun.edu.tr")
-                .tenant(tenant)
-                .build();
-
-        when(rbacService.getCurrentUser()).thenReturn(Optional.of(principal));
+        // Stub the security-layer helper that the controller now depends on for
+        // tenant resolution. Returning the principal's tenant id directly avoids
+        // touching `entity.User` from this test (mirrors the production path
+        // where the JPA entity stays inside `security..` per the hexagonal
+        // boundary enforced by UserDomainBoundaryTest).
+        when(rbacService.getCurrentUserTenantId()).thenReturn(Optional.of(tenantUuid));
         when(biometricServicePort.searchFace(any(), eq(tenantUuid.toString()), any(), any()))
                 .thenReturn(Map.of("found", true, "matches", java.util.List.of()));
 

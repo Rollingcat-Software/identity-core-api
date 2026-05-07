@@ -275,11 +275,12 @@ public class BiometricController {
      * a null tenant downstream).
      */
     private String resolveCurrentTenantId() {
-        User currentUser = rbacService.getCurrentUser()
+        // Resolve the principal's tenant via the security-layer helper, which keeps
+        // the JPA `entity.User` type contained inside `security..` per the
+        // hexagonal-boundary ratchet enforced by UserDomainBoundaryTest.
+        UUID tenantId = rbacService.getCurrentUserTenantId()
                 .orElseThrow(UnauthorizedException::new);
-        return currentUser.getTenantId() != null
-                ? currentUser.getTenantId().getValue().toString()
-                : null;
+        return tenantId.toString();
     }
 
     @PostMapping("/api/v1/biometric/voice/search")
