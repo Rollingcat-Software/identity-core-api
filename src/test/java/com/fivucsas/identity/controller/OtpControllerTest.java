@@ -93,7 +93,8 @@ class OtpControllerTest {
         @Test
         @DisplayName("Should verify email OTP successfully")
         void shouldVerifyEmailOtp() {
-            when(otpService.validate("otp:email:" + userId, "123456")).thenReturn(true);
+            when(otpService.validateWithResult("otp:email:" + userId, "123456"))
+                    .thenReturn(OtpService.ValidationResult.valid());
 
             ResponseEntity<Map<String, Object>> response =
                     otpController.verifyEmailOtp(userId, Map.of("code", "123456"));
@@ -104,12 +105,31 @@ class OtpControllerTest {
         @Test
         @DisplayName("Should reject invalid email OTP")
         void shouldRejectInvalidOtp() {
-            when(otpService.validate("otp:email:" + userId, "000000")).thenReturn(false);
+            when(otpService.validateWithResult("otp:email:" + userId, "000000"))
+                    .thenReturn(OtpService.ValidationResult.invalid(4));
 
             ResponseEntity<Map<String, Object>> response =
                     otpController.verifyEmailOtp(userId, Map.of("code", "000000"));
 
-            assertThat(response.getBody()).containsEntry("success", false);
+            assertThat(response.getBody())
+                    .containsEntry("success", false)
+                    .containsEntry("errorCode", "OTP_INVALID")
+                    .containsEntry("remainingAttempts", 4L);
+        }
+
+        @Test
+        @DisplayName("Should report OTP_ATTEMPTS_EXHAUSTED on the 5th wrong guess")
+        void shouldReportExhaustedOnFifthWrongGuess() {
+            when(otpService.validateWithResult("otp:email:" + userId, "000000"))
+                    .thenReturn(OtpService.ValidationResult.exhausted());
+
+            ResponseEntity<Map<String, Object>> response =
+                    otpController.verifyEmailOtp(userId, Map.of("code", "000000"));
+
+            assertThat(response.getBody())
+                    .containsEntry("success", false)
+                    .containsEntry("errorCode", "OTP_ATTEMPTS_EXHAUSTED")
+                    .containsEntry("remainingAttempts", 0);
         }
 
         @Test
@@ -163,7 +183,8 @@ class OtpControllerTest {
         @DisplayName("Should verify SMS OTP successfully")
         void shouldVerifySmsOtp() {
             when(userRepository.findById(userId)).thenReturn(Optional.of(testUser));
-            when(otpService.validate("otp:sms:" + userId, "654321")).thenReturn(true);
+            when(otpService.validateWithResult("otp:sms:" + userId, "654321"))
+                    .thenReturn(OtpService.ValidationResult.valid());
 
             ResponseEntity<Map<String, Object>> response =
                     otpController.verifySmsOtp(userId, Map.of("code", "654321"));
@@ -183,6 +204,7 @@ class OtpControllerTest {
                     otpController.verifySmsOtp(userId, Map.of("code", "654321")))
                     .isInstanceOf(UserNotFoundException.class);
             verify(otpService, never()).validate(any(), any());
+            verify(otpService, never()).validateWithResult(any(), any());
         }
     }
 
@@ -255,6 +277,7 @@ class OtpControllerTest {
             assertThat(response.getBody()).containsEntry("success", true);
             verify(verifiableSms).verifyCodeDetailed("+905551234567", "654321");
             verify(otpService, never()).validate(any(), any());
+            verify(otpService, never()).validateWithResult(any(), any());
         }
 
         @Test
