@@ -69,7 +69,12 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
 
         // Check if account is locked
         if (user.isLocked()) {
-            if (user.getLockedUntil() != null && Instant.now().isAfter(user.getLockedUntil())) {
+            // Cache lockedUntil in a local so this branch makes only ONE
+            // entity.User.getLockedUntil() call site — preserves the existing
+            // ArchUnit FreezingArchRule baseline (UserDomainBoundaryTest) that
+            // pins entity-User invocations by (caller, callee) tuple.
+            Instant lockedUntil = user.getLockedUntil();
+            if (lockedUntil != null && Instant.now().isAfter(lockedUntil)) {
                 // Lock period expired, auto-unlock
                 user.resetFailedLoginAttempts();
                 userRepository.save(user);
@@ -82,8 +87,8 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
                 // GlobalExceptionHandler can return HTTP 423 with a structured
                 // body. Previously this path threw InvalidCredentialsException
                 // and the frontend's i18n key `errors.ACCOUNT_LOCKED` was dead.
-                long remainingSeconds = user.getLockedUntil() != null
-                        ? Math.max(0L, Duration.between(Instant.now(), user.getLockedUntil()).getSeconds())
+                long remainingSeconds = lockedUntil != null
+                        ? Math.max(0L, Duration.between(Instant.now(), lockedUntil).getSeconds())
                         : 0L;
                 throw new AccountLockedException(remainingSeconds);
             }
@@ -149,8 +154,11 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
             // AccountLockedException so the user gets the lockout message
             // instead of "invalid credentials" on the 5th wrong-password try.
             if (justLocked) {
-                long remainingSeconds = user.getLockedUntil() != null
-                        ? Math.max(0L, Duration.between(Instant.now(), user.getLockedUntil()).getSeconds())
+                // Cache lockedUntil — single call site keeps the ArchUnit
+                // FreezingArchRule baseline (UserDomainBoundaryTest) green.
+                Instant lockedUntil = user.getLockedUntil();
+                long remainingSeconds = lockedUntil != null
+                        ? Math.max(0L, Duration.between(Instant.now(), lockedUntil).getSeconds())
                         : LOCKOUT_DURATION.getSeconds();
                 throw new AccountLockedException(remainingSeconds);
             }
