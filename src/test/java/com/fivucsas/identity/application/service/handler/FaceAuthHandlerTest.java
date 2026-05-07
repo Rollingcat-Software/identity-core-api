@@ -12,6 +12,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.Base64;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 
@@ -68,6 +69,78 @@ class FaceAuthHandlerTest {
         StepResult result = handler.validate(session, step, Map.of("image", fakeImage));
 
         assertThat(result.isSuccess()).isFalse();
+    }
+
+    /**
+     * P0-#10 regression: previously a high `confidence` value would override
+     * server-side `verified=false` via a hardcoded 0.7 cosine fallback.
+     * The fix removes that fallback — handler now trusts ONLY `verified`.
+     */
+    @Test
+    void validate_WhenVerifiedFalseButConfidenceHigh_ShouldReturnFailure() {
+        UUID userId = UUID.randomUUID();
+        User user = mock(User.class);
+        when(user.getId()).thenReturn(userId);
+        when(user.getEmail()).thenReturn("user@test.com");
+        when(session.getUser()).thenReturn(user);
+
+        String fakeImage = Base64.getEncoder().encodeToString(new byte[]{1, 2, 3});
+        when(biometricServicePort.verifyFace(eq(userId), any()))
+                .thenReturn(Map.of("verified", false, "confidence", 0.95));
+
+        StepResult result = handler.validate(session, step, Map.of("image", fakeImage));
+
+        assertThat(result.isSuccess())
+                .as("server verified=false must NOT be overridden by high confidence")
+                .isFalse();
+    }
+
+    /**
+     * P0-#10: even when confidence is low, if the server (which applies the
+     * adaptive aging threshold) reports verified=true, we trust it.
+     */
+    @Test
+    void validate_WhenVerifiedTrueButConfidenceLow_ShouldReturnSuccess() {
+        UUID userId = UUID.randomUUID();
+        User user = mock(User.class);
+        when(user.getId()).thenReturn(userId);
+        when(user.getEmail()).thenReturn("user@test.com");
+        when(session.getUser()).thenReturn(user);
+
+        String fakeImage = Base64.getEncoder().encodeToString(new byte[]{1, 2, 3});
+        when(biometricServicePort.verifyFace(eq(userId), any()))
+                .thenReturn(Map.of("verified", true, "confidence", 0.5));
+
+        StepResult result = handler.validate(session, step, Map.of("image", fakeImage));
+
+        assertThat(result.isSuccess())
+                .as("server verified=true must be trusted (server-side adaptive threshold)")
+                .isTrue();
+    }
+
+    /**
+     * P0-#10: missing `verified` field is treated as hard-reject (fail-closed)
+     * and logged at ERROR level. Previously the handler would silently fall
+     * through to the 0.7 confidence fallback.
+     */
+    @Test
+    void validate_WhenVerifiedFieldMissing_ShouldReturnFailure() {
+        UUID userId = UUID.randomUUID();
+        User user = mock(User.class);
+        when(user.getId()).thenReturn(userId);
+        when(session.getUser()).thenReturn(user);
+
+        String fakeImage = Base64.getEncoder().encodeToString(new byte[]{1, 2, 3});
+        Map<String, Object> noVerifiedField = new HashMap<>();
+        noVerifiedField.put("confidence", 0.99);
+        when(biometricServicePort.verifyFace(eq(userId), any()))
+                .thenReturn(noVerifiedField);
+
+        StepResult result = handler.validate(session, step, Map.of("image", fakeImage));
+
+        assertThat(result.isSuccess())
+                .as("missing `verified` field must fail closed, not fall back to confidence")
+                .isFalse();
     }
 
     @Test

@@ -494,28 +494,33 @@ public class AuthController {
                 case FACE -> {
                     String image = (String) data.get("image");
                     if (image == null || image.isBlank()) yield false;
+                    // Cache the user-id once — keeps the entity.User boundary surface
+                    // (ArchUnit UserDomainBoundaryTest) to a single call site for FACE.
+                    java.util.UUID faceUserId = user.getId();
                     byte[] imageBytes = java.util.Base64.getDecoder().decode(
                             image.contains(",") ? image.substring(image.indexOf(",") + 1) : image);
                     MultipartFile faceFile = new InMemoryMultipartFile(
                             "file", "face.jpg", "image/jpeg", imageBytes);
-                    Map<String, Object> faceResult = biometricService.verifyFace(user.getId(), faceFile);
+                    Map<String, Object> faceResult = biometricService.verifyFace(faceUserId, faceFile);
                     // Check spoof detection
                     String errorCode2fa = faceResult.get("error_code") instanceof String ec ? ec : null;
                     if ("SPOOF_DETECTED".equals(errorCode2fa)) {
                         log.warn("AUDIT: 2FA face spoof detected — userId={}, ip={}",
-                                user.getId(), getClientIP(httpRequest));
+                                faceUserId, getClientIP(httpRequest));
                         yield false;
                     }
-                    boolean faceVerified2fa = Boolean.TRUE.equals(faceResult.get("verified"))
-                            || "true".equalsIgnoreCase(String.valueOf(faceResult.get("verified")));
-                    // Confidence fallback (same threshold as FaceAuthHandler)
-                    if (!faceVerified2fa) {
-                        Object conf = faceResult.get("confidence");
-                        if (conf instanceof Number num && num.doubleValue() >= 0.7) {
-                            faceVerified2fa = true;
-                        }
+                    // SECURITY (P0-#10): trust ONLY the bio processor's `verified` field.
+                    // No client-side confidence fallback — the bio processor already
+                    // applies adaptive aging thresholds (VERIFICATION_THRESHOLD_AGED_*).
+                    // See INVESTIGATION_FAILOPEN_2026-05-07.md F3.
+                    Object verified2fa = faceResult.get("verified");
+                    if (verified2fa == null) {
+                        log.error("AUDIT: 2FA face verify missing `verified` field — userId={}, ip={}, rejecting",
+                                faceUserId, getClientIP(httpRequest));
+                        yield false;
                     }
-                    yield faceVerified2fa;
+                    yield Boolean.TRUE.equals(verified2fa)
+                            || "true".equalsIgnoreCase(String.valueOf(verified2fa));
                 }
                 case VOICE -> {
                     String voiceData = (String) data.get("voiceData");
