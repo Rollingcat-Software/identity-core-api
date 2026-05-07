@@ -44,6 +44,45 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(error);
     }
 
+    /**
+     * P0-#5 (INVESTIGATION_MASTER_2026-05-07): surface a dedicated 423 Locked
+     * response when the user account is locked, carrying the remaining-seconds
+     * value so the frontend can render its localized
+     * {@code errors.ACCOUNT_LOCKED} message with a {{minutes}} interpolation.
+     *
+     * <p>Response shape (extends the standard ErrorResponse envelope with one
+     * extra field):
+     * <pre>
+     * {
+     *   "timestamp": "...",
+     *   "status": 423,
+     *   "error": "ACCOUNT_LOCKED",
+     *   "errorCode": "ACCOUNT_LOCKED",
+     *   "message": "Account is temporarily locked due to multiple failed login attempts. Please try again later.",
+     *   "remainingLockTimeSeconds": 873,
+     *   "path": "/api/v1/auth/login"
+     * }
+     * </pre>
+     */
+    @ExceptionHandler(AccountLockedException.class)
+    public ResponseEntity<java.util.Map<String, Object>> handleAccountLocked(
+            AccountLockedException ex,
+            HttpServletRequest request) {
+        log.warn("Account locked: path={}, remainingSeconds={}",
+                request.getRequestURI(), ex.getRemainingLockTimeSeconds());
+
+        java.util.Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("timestamp", java.time.Instant.now().toString());
+        body.put("status", HttpStatus.LOCKED.value());
+        body.put("error", ex.getErrorCode());
+        body.put("errorCode", ex.getErrorCode());
+        body.put("message", ex.getMessage());
+        body.put("remainingLockTimeSeconds", ex.getRemainingLockTimeSeconds());
+        body.put("path", request.getRequestURI());
+
+        return ResponseEntity.status(HttpStatus.LOCKED).body(body);
+    }
+
     @ExceptionHandler(InvalidCredentialsException.class)
     public ResponseEntity<ErrorResponse> handleInvalidCredentials(
             InvalidCredentialsException ex,

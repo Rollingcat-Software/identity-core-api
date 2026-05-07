@@ -8,6 +8,7 @@ import com.fivucsas.identity.application.port.output.AuditLogPort;
 import com.fivucsas.identity.application.port.output.AuthFlowRepositoryPort;
 import com.fivucsas.identity.application.port.output.PasswordEncoderPort;
 import com.fivucsas.identity.application.port.output.TokenGenerationPort;
+import com.fivucsas.identity.domain.exception.AccountLockedException;
 import com.fivucsas.identity.domain.exception.InvalidCredentialsException;
 import com.fivucsas.identity.domain.exception.NeedsEnrollmentException;
 import com.fivucsas.identity.domain.model.auth.AuthMethodType;
@@ -68,7 +69,12 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
 
         // Check if account is locked
         if (user.isLocked()) {
-            if (user.getLockedUntil() != null && Instant.now().isAfter(user.getLockedUntil())) {
+            // Cache lockedUntil in a local so this branch makes only ONE
+            // entity.User.getLockedUntil() call site — preserves the existing
+            // ArchUnit FreezingArchRule baseline (UserDomainBoundaryTest) that
+            // pins entity-User invocations by (caller, callee) tuple.
+            Instant lockedUntil = user.getLockedUntil();
+            if (lockedUntil != null && Instant.now().isAfter(lockedUntil)) {
                 // Lock period expired, auto-unlock
                 user.resetFailedLoginAttempts();
                 userRepository.save(user);
@@ -76,7 +82,15 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
             } else {
                 log.warn("AUDIT: Login failed — email={}, reason: account_locked, ip={}", command.getEmail(), command.getIpAddress());
                 auditLogPort.logAuthenticationFailed(command.getEmail(), command.getIpAddress(), "Account locked");
-                throw new InvalidCredentialsException("Account is temporarily locked due to too many failed login attempts. Please try again later.");
+                // P0-#5 (INVESTIGATION_MASTER_2026-05-07): surface a dedicated
+                // AccountLockedException carrying the remaining-seconds value so
+                // GlobalExceptionHandler can return HTTP 423 with a structured
+                // body. Previously this path threw InvalidCredentialsException
+                // and the frontend's i18n key `errors.ACCOUNT_LOCKED` was dead.
+                long remainingSeconds = lockedUntil != null
+                        ? Math.max(0L, Duration.between(Instant.now(), lockedUntil).getSeconds())
+                        : 0L;
+                throw new AccountLockedException(remainingSeconds);
             }
         }
 
@@ -122,8 +136,10 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
         if (!passwordEncoder.matches(command.getPassword(), user.getPasswordHash())) {
             // Increment failed attempts and potentially lock account
             user.incrementFailedLoginAttempts();
+            boolean justLocked = false;
             if (user.getFailedLoginAttempts() >= MAX_FAILED_ATTEMPTS) {
                 user.lockAccount(LOCKOUT_DURATION);
+                justLocked = true;
                 log.warn("AUDIT: Account locked — email={}, failedAttempts={}, ip={}", command.getEmail(), MAX_FAILED_ATTEMPTS, command.getIpAddress());
                 auditLogPort.logAuthenticationFailed(command.getEmail(), command.getIpAddress(),
                         "Account locked after " + MAX_FAILED_ATTEMPTS + " failed attempts");
@@ -134,6 +150,18 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
             userRepository.save(user);
             log.warn("AUDIT: Login failed — email={}, reason: invalid_password, attempt: {}/{}, ip={}",
                     command.getEmail(), user.getFailedLoginAttempts(), MAX_FAILED_ATTEMPTS, command.getIpAddress());
+            // P0-#5: when this very attempt triggered the lockout, surface
+            // AccountLockedException so the user gets the lockout message
+            // instead of "invalid credentials" on the 5th wrong-password try.
+            if (justLocked) {
+                // Cache lockedUntil — single call site keeps the ArchUnit
+                // FreezingArchRule baseline (UserDomainBoundaryTest) green.
+                Instant lockedUntil = user.getLockedUntil();
+                long remainingSeconds = lockedUntil != null
+                        ? Math.max(0L, Duration.between(Instant.now(), lockedUntil).getSeconds())
+                        : LOCKOUT_DURATION.getSeconds();
+                throw new AccountLockedException(remainingSeconds);
+            }
             throw new InvalidCredentialsException();
         }
 

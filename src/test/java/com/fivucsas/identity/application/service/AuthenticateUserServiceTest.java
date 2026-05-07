@@ -8,6 +8,7 @@ import com.fivucsas.identity.application.port.output.EventPublisherPort;
 import com.fivucsas.identity.application.port.output.OAuth2ClientRepositoryPort;
 import com.fivucsas.identity.application.port.output.PasswordEncoderPort;
 import com.fivucsas.identity.application.port.output.TokenGenerationPort;
+import com.fivucsas.identity.domain.exception.AccountLockedException;
 import com.fivucsas.identity.domain.exception.InvalidCredentialsException;
 import com.fivucsas.identity.domain.repository.UserRepository;
 import com.fivucsas.identity.entity.RefreshToken;
@@ -248,6 +249,111 @@ class AuthenticateUserServiceTest {
             // When/Then - Should also throw InvalidCredentialsException (same type)
             assertThatThrownBy(() -> authenticateUserService.execute(wrongPasswordCommand))
                 .isInstanceOf(InvalidCredentialsException.class);
+        }
+    }
+
+    @Nested
+    @DisplayName("Account Lockout (P0-#5)")
+    class AccountLockout {
+
+        @Test
+        @DisplayName("Should throw AccountLockedException with remaining seconds when account is locked")
+        void shouldThrowAccountLockedExceptionWhenAccountIsLocked() {
+            // Given — user is locked with ~600 seconds remaining
+            Instant lockedUntil = Instant.now().plusSeconds(600);
+            User lockedUser = User.builder()
+                .id(UUID.randomUUID())
+                .email("test@example.com")
+                .passwordHash(VALID_BCRYPT_HASH)
+                .firstName("John")
+                .lastName("Doe")
+                .status(UserStatus.ACTIVE)
+                .isLocked(true)
+                .lockedUntil(lockedUntil)
+                .failedLoginAttempts(5)
+                .createdAt(Instant.now())
+                .updatedAt(Instant.now())
+                .build();
+
+            when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(lockedUser));
+
+            // When/Then
+            assertThatThrownBy(() -> authenticateUserService.execute(validCommand))
+                .isInstanceOf(AccountLockedException.class)
+                .satisfies(ex -> {
+                    AccountLockedException ale = (AccountLockedException) ex;
+                    assertThat(ale.getRemainingLockTimeSeconds())
+                        .isBetween(595L, 600L);
+                    assertThat(ale.getErrorCode()).isEqualTo("ACCOUNT_LOCKED");
+                });
+
+            // Password should never be checked when account is locked
+            verify(passwordEncoder, never()).matches(any(), any());
+            verify(tokenGenerator, never()).generateAccessToken(any(), any());
+        }
+
+        @Test
+        @DisplayName("Should throw AccountLockedException on the 5th wrong-password attempt")
+        void shouldThrowAccountLockedOnFifthFailure() {
+            // Given — user already at 4 failed attempts, this is the 5th
+            User userOnVerge = User.builder()
+                .id(UUID.randomUUID())
+                .email("test@example.com")
+                .passwordHash(VALID_BCRYPT_HASH)
+                .firstName("John")
+                .lastName("Doe")
+                .status(UserStatus.ACTIVE)
+                .isLocked(false)
+                .failedLoginAttempts(4)
+                .createdAt(Instant.now())
+                .updatedAt(Instant.now())
+                .build();
+
+            when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(userOnVerge));
+            when(passwordEncoder.matches("Password123!", VALID_BCRYPT_HASH)).thenReturn(false);
+
+            // When/Then — must surface AccountLockedException, NOT InvalidCredentialsException
+            assertThatThrownBy(() -> authenticateUserService.execute(validCommand))
+                .isInstanceOf(AccountLockedException.class)
+                .satisfies(ex -> {
+                    AccountLockedException ale = (AccountLockedException) ex;
+                    // 15-min lockout duration → ~900s remaining
+                    assertThat(ale.getRemainingLockTimeSeconds())
+                        .isBetween(890L, 900L);
+                });
+
+            verify(userRepository).save(any(User.class));
+        }
+
+        @Test
+        @DisplayName("Should auto-unlock and proceed when lockedUntil has passed")
+        void shouldAutoUnlockWhenLockedUntilExpired() {
+            // Given — user was locked, but lockedUntil is in the past
+            User expiredLockUser = User.builder()
+                .id(UUID.randomUUID())
+                .email("test@example.com")
+                .passwordHash(VALID_BCRYPT_HASH)
+                .firstName("John")
+                .lastName("Doe")
+                .status(UserStatus.ACTIVE)
+                .isLocked(true)
+                .lockedUntil(Instant.now().minusSeconds(1))
+                .failedLoginAttempts(5)
+                .createdAt(Instant.now())
+                .updatedAt(Instant.now())
+                .build();
+
+            when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(expiredLockUser));
+            when(passwordEncoder.matches("Password123!", VALID_BCRYPT_HASH)).thenReturn(true);
+            when(tokenGenerator.generateAccessToken("test@example.com", List.of("pwd"))).thenReturn("access-token");
+            when(refreshTokenService.createRefreshToken(any(), any(), any())).thenReturn(refreshToken);
+
+            // When — should succeed (auto-unlock path)
+            AuthenticationResponse response = authenticateUserService.execute(validCommand);
+
+            // Then
+            assertThat(response).isNotNull();
+            assertThat(response.getAccessToken()).isEqualTo("access-token");
         }
     }
 
