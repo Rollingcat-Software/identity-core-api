@@ -23,8 +23,6 @@ public class FaceAuthHandler implements AuthMethodHandler {
 
     private final BiometricServicePort biometricServicePort;
 
-    private static final double DEFAULT_CONFIDENCE_THRESHOLD = 0.7;
-
     @Override
     public AuthMethodType getMethodType() {
         return AuthMethodType.FACE;
@@ -62,22 +60,28 @@ public class FaceAuthHandler implements AuthMethodHandler {
                 return StepResult.failure("Spoof detected: please use a live face, not a photo or screen");
             }
 
+            // SECURITY (P0-#10): Trust ONLY the bio processor's `verified` field.
+            // The bio processor applies the adaptive aging threshold
+            // (VERIFICATION_THRESHOLD_AGED_*) server-side. A client/handler-side
+            // confidence fallback (e.g., >= 0.7) silently overrides that policy and
+            // is a fail-open vector — see INVESTIGATION_FAILOPEN_2026-05-07.md F3.
+            // If `verified` is missing/null, treat it as a hard reject and log loudly.
             Object verified = result.get("verified");
+            if (verified == null) {
+                log.error("AUDIT: face verify missing `verified` field — userId={}, rejecting. response keys={}",
+                        session.getUser().getId(), result.keySet());
+                return StepResult.failure("Face verification failed");
+            }
+
             boolean isVerified = Boolean.TRUE.equals(verified)
                     || "true".equalsIgnoreCase(String.valueOf(verified));
-
-            if (!isVerified) {
-                Object confidence = result.get("confidence");
-                if (confidence instanceof Number num) {
-                    isVerified = num.doubleValue() >= DEFAULT_CONFIDENCE_THRESHOLD;
-                }
-            }
 
             if (isVerified) {
                 log.info("Face verification successful for user: {}", session.getUser().getEmail());
                 return StepResult.success(Map.of("verified", "true"));
             } else {
-                log.warn("Face verification failed for user: {}", session.getUser().getEmail());
+                log.warn("Face verification failed for user: {} (server verified=false)",
+                        session.getUser().getEmail());
                 return StepResult.failure("Face verification failed");
             }
         } catch (Exception e) {

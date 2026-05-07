@@ -506,16 +506,18 @@ public class AuthController {
                                 user.getId(), getClientIP(httpRequest));
                         yield false;
                     }
-                    boolean faceVerified2fa = Boolean.TRUE.equals(faceResult.get("verified"))
-                            || "true".equalsIgnoreCase(String.valueOf(faceResult.get("verified")));
-                    // Confidence fallback (same threshold as FaceAuthHandler)
-                    if (!faceVerified2fa) {
-                        Object conf = faceResult.get("confidence");
-                        if (conf instanceof Number num && num.doubleValue() >= 0.7) {
-                            faceVerified2fa = true;
-                        }
+                    // SECURITY (P0-#10): trust ONLY the bio processor's `verified` field.
+                    // No client-side confidence fallback — the bio processor already
+                    // applies adaptive aging thresholds (VERIFICATION_THRESHOLD_AGED_*).
+                    // See INVESTIGATION_FAILOPEN_2026-05-07.md F3.
+                    Object verified2fa = faceResult.get("verified");
+                    if (verified2fa == null) {
+                        log.error("AUDIT: 2FA face verify missing `verified` field — userId={}, ip={}, rejecting",
+                                user.getId(), getClientIP(httpRequest));
+                        yield false;
                     }
-                    yield faceVerified2fa;
+                    yield Boolean.TRUE.equals(verified2fa)
+                            || "true".equalsIgnoreCase(String.valueOf(verified2fa));
                 }
                 case VOICE -> {
                     String voiceData = (String) data.get("voiceData");
