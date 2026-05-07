@@ -466,8 +466,12 @@ class OAuth2ServiceTest {
 
     @Test
     void getUserInfo_WhenValidToken_ShouldReturnUserClaims() {
-        // given
-        when(jwtService.extractClaim(eq("valid-token"), any())).thenReturn("oauth2");
+        // given — token carries both "openid email profile" so the response
+        // should include sub + email + name (T-P1-SEC Fix C: scope filter).
+        // First extractClaim call returns the token type ("oauth2"); second
+        // returns the scope claim. Mockito returns the stubbed values in order.
+        when(jwtService.extractClaim(eq("valid-token"), any()))
+                .thenReturn("oauth2", "openid email profile");
         when(jwtService.extractEmail("valid-token")).thenReturn("user@test.com");
         User user = mock(User.class);
         UUID userId = UUID.randomUUID();
@@ -477,7 +481,8 @@ class OAuth2ServiceTest {
         when(user.getFullName()).thenReturn("Test User");
         when(user.getFirstName()).thenReturn("Test");
         when(user.getLastName()).thenReturn("User");
-        when(user.getPhoneNumber()).thenReturn(null);
+        // Note: getPhoneNumber() is NOT stubbed — the token has no "phone"
+        // scope so the phone branch is skipped (T-P1-SEC Fix C scope filter).
         when(user.getUpdatedAt()).thenReturn(null);
         when(userRepository.findByEmail("user@test.com")).thenReturn(Optional.of(user));
 
@@ -489,6 +494,64 @@ class OAuth2ServiceTest {
         assertThat(claims).containsEntry("email", "user@test.com");
         assertThat(claims).containsEntry("email_verified", true);
         assertThat(claims).containsEntry("name", "Test User");
+    }
+
+    /**
+     * T-P1-SEC Fix C (2026-05-07): {@code /userinfo} must honour OIDC Core §5.4
+     * scope-to-claims mapping. Pre-fix it returned email + name + phone for
+     * every token, contradicting the scope filter at the token-issuance path
+     * ({@code exchangeCode():372-384}). A token whose only scopes are
+     * {@code openid email} must yield {@code sub} + email claims and no
+     * {@code name}/profile claims.
+     */
+    @Test
+    void getUserInfo_WhenScopeIsEmailOnly_ShouldOmitProfileClaims() {
+        // given
+        when(jwtService.extractClaim(eq("email-only-token"), any()))
+                .thenReturn("oauth2", "openid email");
+        when(jwtService.extractEmail("email-only-token")).thenReturn("user@test.com");
+        User user = mock(User.class);
+        UUID userId = UUID.randomUUID();
+        when(user.getId()).thenReturn(userId);
+        when(user.getEmail()).thenReturn("user@test.com");
+        when(user.isEmailVerified()).thenReturn(true);
+        when(userRepository.findByEmail("user@test.com")).thenReturn(Optional.of(user));
+
+        // when
+        Map<String, Object> claims = service.getUserInfo("email-only-token");
+
+        // then — sub + email present, profile/phone NOT present
+        assertThat(claims).containsEntry("sub", userId.toString());
+        assertThat(claims).containsEntry("email", "user@test.com");
+        assertThat(claims).containsEntry("email_verified", true);
+        assertThat(claims).doesNotContainKey("name");
+        assertThat(claims).doesNotContainKey("given_name");
+        assertThat(claims).doesNotContainKey("family_name");
+        assertThat(claims).doesNotContainKey("phone_number");
+    }
+
+    /**
+     * T-P1-SEC Fix C: a token issued without {@code email} or {@code profile}
+     * scopes (e.g. {@code openid} only) must return ONLY {@code sub} per OIDC
+     * Core §5.3.
+     */
+    @Test
+    void getUserInfo_WhenScopeIsOpenidOnly_ShouldReturnOnlySub() {
+        // given
+        when(jwtService.extractClaim(eq("openid-only"), any()))
+                .thenReturn("oauth2", "openid");
+        when(jwtService.extractEmail("openid-only")).thenReturn("user@test.com");
+        User user = mock(User.class);
+        UUID userId = UUID.randomUUID();
+        when(user.getId()).thenReturn(userId);
+        when(userRepository.findByEmail("user@test.com")).thenReturn(Optional.of(user));
+
+        // when
+        Map<String, Object> claims = service.getUserInfo("openid-only");
+
+        // then
+        assertThat(claims).containsOnlyKeys("sub");
+        assertThat(claims).containsEntry("sub", userId.toString());
     }
 
     @Test

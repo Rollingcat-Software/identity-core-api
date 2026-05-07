@@ -457,18 +457,34 @@ public class OAuth2Service {
         User user = userRepository.findByEmail(email)
                 .orElseThrow(() -> new IllegalArgumentException("User not found"));
 
+        // T-P1-SEC Fix C (2026-05-07): filter UserInfo claims by the access
+        // token's authorised scopes (OIDC Core §5.4 — Requesting Claims using
+        // Scope Values). Previously /userinfo returned email/name/phone
+        // unconditionally regardless of which scopes the client was granted at
+        // /token, contradicting the scope filter at exchangeCode():372-384.
+        String scopeClaim = jwtService.extractClaim(accessToken, c -> c.get("scope", String.class));
+        String scope = scopeClaim != null ? scopeClaim : "";
+
         Map<String, Object> claims = new LinkedHashMap<>();
+        // Always include `sub` per OIDC Core §5.3
         claims.put("sub", user.getId().toString());
-        claims.put("email", user.getEmail());
-        claims.put("email_verified", user.isEmailVerified());
-        claims.put("name", user.getFullName());
-        claims.put("given_name", user.getFirstName());
-        claims.put("family_name", user.getLastName());
-        if (user.getPhoneNumber() != null) {
+
+        if (scope.contains("email")) {
+            claims.put("email", user.getEmail());
+            claims.put("email_verified", user.isEmailVerified());
+        }
+        if (scope.contains("profile")) {
+            claims.put("name", user.getFullName());
+            claims.put("given_name", user.getFirstName());
+            claims.put("family_name", user.getLastName());
+            // `picture` and `locale` left out: not yet modelled on User entity.
+            claims.put("updated_at",
+                    user.getUpdatedAt() != null ? user.getUpdatedAt().getEpochSecond() : null);
+        }
+        if (scope.contains("phone") && user.getPhoneNumber() != null) {
             claims.put("phone_number", user.getPhoneNumber());
             claims.put("phone_number_verified", user.isPhoneVerified());
         }
-        claims.put("updated_at", user.getUpdatedAt() != null ? user.getUpdatedAt().getEpochSecond() : null);
 
         return claims;
     }

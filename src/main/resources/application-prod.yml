@@ -78,8 +78,12 @@ app:
 
 # JWT Configuration (Production)
 # CRITICAL: JWT secret MUST come from environment variable (see JwtSecretProvider)
+# T-P1-SEC Fix A (2026-05-07): access-token TTL hardened from 1h → 15min in prod.
+# Refresh-token rotation + family-revoke (V55) keeps UX silent: clients use the
+# refresh endpoint to mint a fresh access token before expiry. Smaller TTL =
+# smaller blast radius if an access token leaks.
 jwt:
-  expiration: ${JWT_EXPIRATION:3600000}  # Default 1 hour, override via env var
+  expiration: ${JWT_EXPIRATION:900000}  # Default 15 minutes, override via env var
   refresh-expiration: ${JWT_REFRESH_EXPIRATION:86400000}  # Default 24 hours
 
 # AUDIT_2026-04-28_SECURITY.md SEC-P1 #3: lock prod signing algorithm to
