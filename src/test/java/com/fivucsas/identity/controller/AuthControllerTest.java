@@ -850,7 +850,8 @@ class AuthControllerTest {
                         .principal(authFor(TEST_EMAIL))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
-                .andExpect(status().isOk()) // contract today: 200 with success:false (see F7 in same audit)
+                // P1 hygiene 2026-05-07: failed 2FA now returns 401 (was 200/success:false).
+                .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.success").value(false));
 
         // Audit must record the failure, NOT a success.
@@ -873,7 +874,8 @@ class AuthControllerTest {
                         .principal(authFor(TEST_EMAIL))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
-                .andExpect(status().isOk())
+                // P1 hygiene 2026-05-07: failed 2FA now returns 401 (was 200/success:false).
+                .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.success").value(false));
 
         verify(auditLogPort, times(1)).logTwoFactorFailed(
@@ -895,7 +897,8 @@ class AuthControllerTest {
                         .principal(authFor(TEST_EMAIL))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
-                .andExpect(status().isOk())
+                // P1 hygiene 2026-05-07: failed 2FA now returns 401 (was 200/success:false).
+                .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.success").value(false));
 
         verify(auditLogPort, times(1)).logTwoFactorFailed(

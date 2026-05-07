@@ -3,12 +3,13 @@ package com.fivucsas.identity.infrastructure.audit;
 import com.fivucsas.identity.entity.AuditLog;
 import com.fivucsas.identity.infrastructure.multitenancy.TenantContext;
 import com.fivucsas.identity.repository.AuditLogRepository;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.invocation.InvocationOnMock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -47,12 +48,14 @@ class AuditEventPublisherTest {
     @Mock
     private AuditLogRepository auditLogRepository;
 
-    @InjectMocks
+    private MeterRegistry meterRegistry;
     private AuditEventPublisher publisher;
 
     @BeforeEach
     void setUp() {
         TenantContext.clear();
+        meterRegistry = new SimpleMeterRegistry();
+        publisher = new AuditEventPublisher(auditLogRepository, meterRegistry);
     }
 
     @AfterEach
@@ -148,6 +151,78 @@ class AuditEventPublisherTest {
 
         // Must not throw.
         publisher.publish(log, UUID.randomUUID());
+    }
+
+    @Test
+    @DisplayName("Repository failure increments audit.publish.failure counter tagged by exception type (P1)")
+    void repositoryFailureIncrementsCounter() {
+        when(auditLogRepository.save(any(AuditLog.class)))
+                .thenThrow(new IllegalStateException("RLS rejected insert"));
+
+        AuditLog log = AuditLog.builder()
+                .action("USER_LOGIN").resourceType("USER").success(true).build();
+
+        publisher.publish(log, UUID.randomUUID());
+
+        double count = meterRegistry.counter(
+                "audit.publish.failure",
+                "exception", "IllegalStateException"
+        ).count();
+        assertThat(count)
+                .as("audit.publish.failure{exception=IllegalStateException} must increment when save throws — observability gate for silent audit drops")
+                .isEqualTo(1.0);
+    }
+
+    @Test
+    @DisplayName("Counter is tagged by exception class — different failures produce distinct series")
+    void counterTagsAreDistinctPerExceptionType() {
+        when(auditLogRepository.save(any(AuditLog.class)))
+                .thenThrow(new IllegalArgumentException("bad payload"))
+                .thenThrow(new IllegalStateException("rls"))
+                .thenThrow(new IllegalStateException("rls again"));
+
+        AuditLog log = AuditLog.builder()
+                .action("USER_LOGIN").resourceType("USER").success(true).build();
+
+        publisher.publish(log, UUID.randomUUID());
+        publisher.publish(log, UUID.randomUUID());
+        publisher.publish(log, UUID.randomUUID());
+
+        assertThat(meterRegistry.counter("audit.publish.failure",
+                "exception", "IllegalArgumentException").count())
+                .isEqualTo(1.0);
+        assertThat(meterRegistry.counter("audit.publish.failure",
+                "exception", "IllegalStateException").count())
+                .isEqualTo(2.0);
+    }
+
+    @Test
+    @DisplayName("Successful publish does NOT increment the failure counter")
+    void successfulPublishDoesNotIncrementCounter() {
+        AuditLog log = AuditLog.builder()
+                .action("USER_LOGIN").resourceType("USER").success(true).build();
+
+        publisher.publish(log, UUID.randomUUID());
+
+        // No tag-specific counter created → search returns nothing.
+        assertThat(meterRegistry.find("audit.publish.failure").counters())
+                .as("a successful publish must leave the failure counter untouched")
+                .isEmpty();
+    }
+
+    @Test
+    @DisplayName("Test-only single-arg constructor tolerates absent MeterRegistry (counter increment is a no-op)")
+    void singleArgConstructorTolerantOfMissingRegistry() {
+        AuditEventPublisher noMetricsPublisher = new AuditEventPublisher(auditLogRepository);
+        when(auditLogRepository.save(any(AuditLog.class)))
+                .thenThrow(new RuntimeException("boom"));
+
+        AuditLog log = AuditLog.builder()
+                .action("USER_LOGIN").resourceType("USER").success(true).build();
+
+        // Must not throw — the recordFailure path must short-circuit when
+        // meterRegistry is null.
+        noMetricsPublisher.publish(log, UUID.randomUUID());
     }
 
     @Test
