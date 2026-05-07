@@ -45,12 +45,16 @@ public class FaceAuthHandler implements AuthMethodHandler {
             return StepResult.failure("User must be identified before face verification");
         }
 
+        // Cache the user-id once — keeps the entity.User boundary surface (ArchUnit
+        // UserDomainBoundaryTest) to a single call site within this method.
+        java.util.UUID userId = session.getUser().getId();
+
         try {
             byte[] imageBytes = Base64.getDecoder().decode(imageBase64);
             MultipartFile imageFile = new Base64MultipartFile(imageBytes, "face.jpg", "image/jpeg");
 
             Map<String, Object> result = biometricServicePort.verifyFace(
-                    session.getUser().getId(), imageFile);
+                    userId, imageFile);
 
             // Check for spoof detection (anti-spoofing from biometric processor)
             String errorCode = result.get("error_code") instanceof String ec ? ec : null;
@@ -69,7 +73,7 @@ public class FaceAuthHandler implements AuthMethodHandler {
             Object verified = result.get("verified");
             if (verified == null) {
                 log.error("AUDIT: face verify missing `verified` field — userId={}, rejecting. response keys={}",
-                        session.getUser().getId(), result.keySet());
+                        userId, result.keySet());
                 return StepResult.failure("Face verification failed");
             }
 

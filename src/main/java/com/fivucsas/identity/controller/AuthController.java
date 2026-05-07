@@ -494,16 +494,19 @@ public class AuthController {
                 case FACE -> {
                     String image = (String) data.get("image");
                     if (image == null || image.isBlank()) yield false;
+                    // Cache the user-id once — keeps the entity.User boundary surface
+                    // (ArchUnit UserDomainBoundaryTest) to a single call site for FACE.
+                    java.util.UUID faceUserId = user.getId();
                     byte[] imageBytes = java.util.Base64.getDecoder().decode(
                             image.contains(",") ? image.substring(image.indexOf(",") + 1) : image);
                     MultipartFile faceFile = new InMemoryMultipartFile(
                             "file", "face.jpg", "image/jpeg", imageBytes);
-                    Map<String, Object> faceResult = biometricService.verifyFace(user.getId(), faceFile);
+                    Map<String, Object> faceResult = biometricService.verifyFace(faceUserId, faceFile);
                     // Check spoof detection
                     String errorCode2fa = faceResult.get("error_code") instanceof String ec ? ec : null;
                     if ("SPOOF_DETECTED".equals(errorCode2fa)) {
                         log.warn("AUDIT: 2FA face spoof detected — userId={}, ip={}",
-                                user.getId(), getClientIP(httpRequest));
+                                faceUserId, getClientIP(httpRequest));
                         yield false;
                     }
                     // SECURITY (P0-#10): trust ONLY the bio processor's `verified` field.
@@ -513,7 +516,7 @@ public class AuthController {
                     Object verified2fa = faceResult.get("verified");
                     if (verified2fa == null) {
                         log.error("AUDIT: 2FA face verify missing `verified` field — userId={}, ip={}, rejecting",
-                                user.getId(), getClientIP(httpRequest));
+                                faceUserId, getClientIP(httpRequest));
                         yield false;
                     }
                     yield Boolean.TRUE.equals(verified2fa)
