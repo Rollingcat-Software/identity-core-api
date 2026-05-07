@@ -524,11 +524,26 @@ public class AuthController {
                     yield Boolean.TRUE.equals(voiceResult.get("verified"));
                 }
                 case FINGERPRINT, HARDWARE_KEY -> {
-                    // WebAuthn assertion verification
-                    String assertion = (String) data.get("assertion");
-                    yield assertion != null && !assertion.isBlank();
-                    // WebAuthn verification would be done client-side via navigator.credentials.get()
-                    // The fact that we received a valid assertion means the browser verified it
+                    // P0 FIX (Investigation 2026-05-07 F1): the previous implementation
+                    // accepted ANY non-empty `assertion` string as a passing 2FA factor —
+                    // no signature check, no credentialId lookup, no public-key
+                    // verification, no sign-counter validation. This bypassed 2FA
+                    // entirely for any logged-in user whose flow landed here.
+                    //
+                    // The legacy /2fa/verify-method route does NOT carry a
+                    // server-side WebAuthn challenge handshake (no MfaSession,
+                    // no /webauthn/authenticate-options call), so we cannot
+                    // safely verify here even with the canonical
+                    // WebAuthnVerifySupport.verifyAssertion(...).
+                    //
+                    // We FAIL CLOSED. Callers MUST migrate to either:
+                    //   - POST /api/v1/auth/mfa/step (N-step flow → WebAuthnVerifySupport)
+                    //   - POST /api/v1/webauthn/authenticate (post-login WebAuthn)
+                    // both of which perform full RFC 8176-compliant verification.
+                    log.warn("AUDIT: 2FA FINGERPRINT/HARDWARE_KEY rejected on legacy /2fa/verify-method — " +
+                            "legacy route cannot verify WebAuthn assertions (no challenge handshake). " +
+                            "userId={}, method={}", user.getId(), method);
+                    yield false;
                 }
                 case QR_CODE -> {
                     String token = (String) data.get("token");
@@ -1081,8 +1096,10 @@ public class AuthController {
                 yield (voiceData == null || voiceData.isBlank()) ? "missing_voice_data" : "voice_verification_failed";
             }
             case FINGERPRINT, HARDWARE_KEY -> {
-                String assertion = data != null ? (String) data.get("assertion") : null;
-                yield (assertion == null || assertion.isBlank()) ? "missing_webauthn_assertion" : "webauthn_verification_failed";
+                // P0 FIX (Investigation 2026-05-07 F1): the legacy /2fa/verify-method
+                // route cannot verify WebAuthn assertions (no challenge handshake);
+                // we now fail closed and steer callers to the canonical paths.
+                yield "legacy_route_unsupported_use_webauthn_authenticate";
             }
             case QR_CODE -> {
                 String token = data != null ? (String) data.get("token") : null;
