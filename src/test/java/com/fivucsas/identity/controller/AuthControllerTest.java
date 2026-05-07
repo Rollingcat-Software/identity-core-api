@@ -742,4 +742,92 @@ class AuthControllerTest {
                 .andExpect(jsonPath("$.error").doesNotExist())
                 .andExpect(jsonPath("$.status").value(org.hamcrest.Matchers.not("ERROR")));
     }
+
+    // ============== LEGACY /2fa/verify-method WEBAUTHN BYPASS REGRESSION TESTS ==============
+    // INVESTIGATION_FAILOPEN_2026-05-07.md F1 (P0):
+    //   The legacy /api/v1/auth/2fa/verify-method route used to accept ANY
+    //   non-empty string in `data.assertion` for FINGERPRINT/HARDWARE_KEY as a
+    //   passing 2FA factor — full 2FA bypass for any logged-in user. The fix is
+    //   to fail closed on this route for WebAuthn methods (no challenge handshake
+    //   exists here); callers MUST use /api/v1/auth/mfa/step or
+    //   /api/v1/webauthn/authenticate which perform real signature verification.
+
+    /** Build an Authentication instance scoped to TEST_EMAIL — addFilters=false
+     *  in this test class means @WithMockUser does NOT propagate to the
+     *  controller's Authentication parameter via the filter chain. Inject it
+     *  directly as the request principal. */
+    private static org.springframework.security.core.Authentication authFor(String email) {
+        return new org.springframework.security.authentication.UsernamePasswordAuthenticationToken(
+                email, "n/a",
+                java.util.List.of(new org.springframework.security.core.authority.SimpleGrantedAuthority("ROLE_USER")));
+    }
+
+    @Test
+    @DisplayName("[P0 SECURITY] POST /api/v1/auth/2fa/verify-method - FINGERPRINT with arbitrary assertion REJECTED")
+    void testVerify2FAMethod_Fingerprint_RejectsArbitraryAssertion() throws Exception {
+        // BUG (Investigation 2026-05-07 F1): pre-fix, the legacy route returned
+        // `success: true` for any non-empty assertion string with no
+        // signature/credentialId/sign-counter verification. This test pins the
+        // fail-closed behaviour.
+        java.util.UUID userId = java.util.UUID.randomUUID();
+        com.fivucsas.identity.entity.User user = userWithEmailOtp(userId);
+        when(userRepository.findByEmail(TEST_EMAIL)).thenReturn(java.util.Optional.of(user));
+
+        String body = "{\"method\":\"FINGERPRINT\",\"data\":{\"assertion\":\"this-is-not-a-real-webauthn-assertion\"}}";
+        mockMvc.perform(post("/api/v1/auth/2fa/verify-method")
+                        .with(csrf())
+                        .principal(authFor(TEST_EMAIL))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isOk()) // contract today: 200 with success:false (see F7 in same audit)
+                .andExpect(jsonPath("$.success").value(false));
+
+        // Audit must record the failure, NOT a success.
+        verify(auditLogPort, times(1)).logTwoFactorFailed(
+                eq(userId.toString()), eq("FINGERPRINT"), anyString(), anyString(), anyString());
+        verify(auditLogPort, never()).logTwoFactorVerified(
+                eq(userId.toString()), eq("FINGERPRINT"), anyString(), anyString());
+    }
+
+    @Test
+    @DisplayName("[P0 SECURITY] POST /api/v1/auth/2fa/verify-method - HARDWARE_KEY with arbitrary assertion REJECTED")
+    void testVerify2FAMethod_HardwareKey_RejectsArbitraryAssertion() throws Exception {
+        java.util.UUID userId = java.util.UUID.randomUUID();
+        com.fivucsas.identity.entity.User user = userWithEmailOtp(userId);
+        when(userRepository.findByEmail(TEST_EMAIL)).thenReturn(java.util.Optional.of(user));
+
+        String body = "{\"method\":\"HARDWARE_KEY\",\"data\":{\"assertion\":\"x\"}}";
+        mockMvc.perform(post("/api/v1/auth/2fa/verify-method")
+                        .with(csrf())
+                        .principal(authFor(TEST_EMAIL))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(false));
+
+        verify(auditLogPort, times(1)).logTwoFactorFailed(
+                eq(userId.toString()), eq("HARDWARE_KEY"), anyString(), anyString(), anyString());
+        verify(auditLogPort, never()).logTwoFactorVerified(
+                eq(userId.toString()), eq("HARDWARE_KEY"), anyString(), anyString());
+    }
+
+    @Test
+    @DisplayName("[P0 SECURITY] POST /api/v1/auth/2fa/verify-method - FINGERPRINT with empty assertion REJECTED")
+    void testVerify2FAMethod_Fingerprint_RejectsEmptyAssertion() throws Exception {
+        java.util.UUID userId = java.util.UUID.randomUUID();
+        com.fivucsas.identity.entity.User user = userWithEmailOtp(userId);
+        when(userRepository.findByEmail(TEST_EMAIL)).thenReturn(java.util.Optional.of(user));
+
+        String body = "{\"method\":\"FINGERPRINT\",\"data\":{\"assertion\":\"\"}}";
+        mockMvc.perform(post("/api/v1/auth/2fa/verify-method")
+                        .with(csrf())
+                        .principal(authFor(TEST_EMAIL))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(false));
+
+        verify(auditLogPort, times(1)).logTwoFactorFailed(
+                eq(userId.toString()), eq("FINGERPRINT"), anyString(), anyString(), anyString());
+    }
 }
