@@ -540,9 +540,13 @@ public class AuthController {
                     //   - POST /api/v1/auth/mfa/step (N-step flow → WebAuthnVerifySupport)
                     //   - POST /api/v1/webauthn/authenticate (post-login WebAuthn)
                     // both of which perform full RFC 8176-compliant verification.
+                    // Log user identity via authentication name (email) to avoid a
+                    // new entity.User.getId() call site — the UserDomainBoundary
+                    // ArchUnit ratchet (ANALYSIS_2026-05-02_USER_DOMAIN_AND_JWT_ROTATION.md)
+                    // pins existing call sites and rejects new ones from controller.
                     log.warn("AUDIT: 2FA FINGERPRINT/HARDWARE_KEY rejected on legacy /2fa/verify-method — " +
                             "legacy route cannot verify WebAuthn assertions (no challenge handshake). " +
-                            "userId={}, method={}", user.getId(), method);
+                            "user={}, method={}", authentication.getName(), method);
                     yield false;
                 }
                 case QR_CODE -> {
