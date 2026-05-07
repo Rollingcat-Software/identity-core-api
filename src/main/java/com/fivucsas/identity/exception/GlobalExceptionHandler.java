@@ -159,6 +159,84 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.CONFLICT).body(error);
     }
 
+    /**
+     * P0-#7 (INVESTIGATION_MASTER_2026-05-07): tenant user-quota exceeded.
+     * Mapped to HTTP 409 Conflict — same status family as
+     * {@link DuplicateEmailException} (the request cannot be fulfilled given
+     * the current resource state). The body carries {@code maxUsers} so the
+     * admin UI can render "Tenant capped at N users" without a second API
+     * round-trip.
+     *
+     * <pre>
+     * {
+     *   "timestamp": "...",
+     *   "status": 409,
+     *   "error": "TENANT_USER_QUOTA_EXCEEDED",
+     *   "errorCode": "TENANT_USER_QUOTA_EXCEEDED",
+     *   "message": "Tenant has reached its maximum user quota (100)",
+     *   "maxUsers": 100,
+     *   "path": "/api/v1/auth/register"
+     * }
+     * </pre>
+     */
+    @ExceptionHandler(TenantUserQuotaExceededException.class)
+    public ResponseEntity<java.util.Map<String, Object>> handleTenantUserQuotaExceeded(
+            TenantUserQuotaExceededException ex,
+            HttpServletRequest request) {
+        log.warn("Tenant user quota exceeded: maxUsers={}, path={}",
+                ex.getMaxUsers(), request.getRequestURI());
+
+        java.util.Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("timestamp", java.time.Instant.now().toString());
+        body.put("status", HttpStatus.CONFLICT.value());
+        body.put("error", ex.getErrorCode());
+        body.put("errorCode", ex.getErrorCode());
+        body.put("message", ex.getMessage());
+        body.put("maxUsers", ex.getMaxUsers());
+        body.put("path", request.getRequestURI());
+
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(body);
+    }
+
+    /**
+     * P0-#8 (INVESTIGATION_MASTER_2026-05-07): tenant suspended / inactive /
+     * pending. Mapped to HTTP 423 Locked — mirrors {@link AccountLockedException}
+     * (the resource is intact but temporarily inaccessible). The body carries
+     * the {@link com.fivucsas.identity.entity.TenantStatus} enum value as a
+     * string so the frontend / operator tooling can branch on
+     * {@code SUSPENDED} vs {@code INACTIVE} vs {@code PENDING}.
+     *
+     * <pre>
+     * {
+     *   "timestamp": "...",
+     *   "status": 423,
+     *   "error": "TENANT_SUSPENDED",
+     *   "errorCode": "TENANT_SUSPENDED",
+     *   "message": "Tenant is currently SUSPENDED and cannot authenticate users",
+     *   "tenantStatus": "SUSPENDED",
+     *   "path": "/api/v1/auth/login"
+     * }
+     * </pre>
+     */
+    @ExceptionHandler(TenantSuspendedException.class)
+    public ResponseEntity<java.util.Map<String, Object>> handleTenantSuspended(
+            TenantSuspendedException ex,
+            HttpServletRequest request) {
+        log.warn("Auth refused — tenant not active: status={}, path={}",
+                ex.getStatus(), request.getRequestURI());
+
+        java.util.Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("timestamp", java.time.Instant.now().toString());
+        body.put("status", HttpStatus.LOCKED.value());
+        body.put("error", ex.getErrorCode());
+        body.put("errorCode", ex.getErrorCode());
+        body.put("message", ex.getMessage());
+        body.put("tenantStatus", ex.getStatus() != null ? ex.getStatus().name() : null);
+        body.put("path", request.getRequestURI());
+
+        return ResponseEntity.status(HttpStatus.LOCKED).body(body);
+    }
+
     @ExceptionHandler({TokenExpiredException.class, TokenRevokedException.class})
     public ResponseEntity<ErrorResponse> handleTokenException(
             DomainException ex,

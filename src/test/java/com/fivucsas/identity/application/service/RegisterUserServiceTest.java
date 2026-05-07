@@ -8,6 +8,7 @@ import com.fivucsas.identity.application.port.output.PasswordEncoderPort;
 import com.fivucsas.identity.application.port.output.TokenGenerationPort;
 import com.fivucsas.identity.domain.exception.DuplicateEmailException;
 import com.fivucsas.identity.domain.exception.InvalidEmailException;
+import com.fivucsas.identity.domain.exception.TenantUserQuotaExceededException;
 import com.fivucsas.identity.infrastructure.email.EmailService;
 import com.fivucsas.identity.infrastructure.otp.OtpService;
 import com.fivucsas.identity.repository.JpaTenantRepository;
@@ -29,6 +30,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.Instant;
 import java.time.Duration;
@@ -133,6 +135,10 @@ class RegisterUserServiceTest {
         // Configure tenant repository mock to return test tenant
         lenient().when(tenantRepository.findBySlug("test-tenant")).thenReturn(Optional.of(testTenant));
         lenient().when(tenantRepository.findAll()).thenReturn(List.of(testTenant));
+        // P0-#7: tenant user-quota count defaults to 0 (well below max_users
+        // = 100) for the existing happy-path tests. The dedicated quota
+        // exceedance test below overrides this stub explicitly.
+        lenient().when(userRepository.countByTenantId(any())).thenReturn(0L);
     }
 
     @Nested
@@ -349,6 +355,101 @@ class RegisterUserServiceTest {
             // Then
             assertThat(response.getUser().getFirstName()).isEqualTo("José-María");
             assertThat(response.getUser().getLastName()).isEqualTo("O'Connor");
+        }
+    }
+
+    /**
+     * P0-#7 (INVESTIGATION_MASTER_2026-05-07): tenant.max_users enforcement.
+     *
+     * <p>Asserts that registration fails with HTTP 409
+     * {@link TenantUserQuotaExceededException} when the tenant has already
+     * reached its configured user-quota ceiling, AND that the user is never
+     * persisted nor a token issued in that case.</p>
+     */
+    @Nested
+    @DisplayName("Tenant user-quota enforcement (P0-#7)")
+    class TenantUserQuotaEnforcement {
+
+        @Test
+        @DisplayName("Should throw TenantUserQuotaExceededException when count >= maxUsers")
+        void shouldThrowWhenQuotaExhausted() {
+            // Given — tenant has maxUsers=5 and is already at 5 users
+            Tenant cappedTenant = Tenant.builder()
+                .id(UUID.randomUUID())
+                .name("Capped Tenant")
+                .slug("capped-tenant")
+                .contactEmail("admin@capped.com")
+                .status(TenantStatus.ACTIVE)
+                .maxUsers(5)
+                .build();
+            lenient().when(tenantRepository.findBySlug("capped-tenant"))
+                .thenReturn(Optional.of(cappedTenant));
+            lenient().when(tenantRepository.findAll()).thenReturn(List.of(cappedTenant));
+            // Override the default-zero stub for THIS tenant's id only.
+            when(userRepository.countByTenantId(cappedTenant.getId())).thenReturn(5L);
+            when(userRepository.existsByEmail("test@example.com")).thenReturn(false);
+
+            // Wire RegisterUserService to land on this tenant: no V44
+            // mapping, no legacy mapping → falls back to default slug, which
+            // we now point at cappedTenant.
+            ReflectionTestUtils.setField(registerUserService, "defaultTenantSlug", "capped-tenant");
+            when(tenantEmailDomainRepository.findByIdEmailDomainIgnoreCase("example.com"))
+                .thenReturn(Optional.empty());
+            when(tenantRepository.findByLegacyDomainIgnoreCase("example.com"))
+                .thenReturn(Optional.empty());
+
+            // When/Then
+            assertThatThrownBy(() -> registerUserService.execute(validCommand))
+                .isInstanceOf(TenantUserQuotaExceededException.class)
+                .satisfies(ex -> {
+                    TenantUserQuotaExceededException tqe =
+                        (TenantUserQuotaExceededException) ex;
+                    assertThat(tqe.getMaxUsers()).isEqualTo(5);
+                    assertThat(tqe.getErrorCode()).isEqualTo("TENANT_USER_QUOTA_EXCEEDED");
+                });
+
+            // Critical: count must have been queried; user must NOT be saved;
+            // no token issued.
+            verify(userRepository).countByTenantId(cappedTenant.getId());
+            verify(userRepository, never()).save(any(User.class));
+            verify(tokenGenerator, never()).generateAccessToken(any());
+            verify(refreshTokenService, never()).createRefreshToken(any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("Should allow registration when count is one below maxUsers")
+        void shouldAllowWhenJustBelowQuota() {
+            // Given — maxUsers=5, currently 4 users → registration should succeed.
+            Tenant nearCapTenant = Tenant.builder()
+                .id(UUID.randomUUID())
+                .name("Near Cap Tenant")
+                .slug("near-cap-tenant")
+                .contactEmail("admin@nearcap.com")
+                .status(TenantStatus.ACTIVE)
+                .maxUsers(5)
+                .build();
+            lenient().when(tenantRepository.findBySlug("near-cap-tenant"))
+                .thenReturn(Optional.of(nearCapTenant));
+            when(userRepository.countByTenantId(nearCapTenant.getId())).thenReturn(4L);
+            when(userRepository.existsByEmail("test@example.com")).thenReturn(false);
+            when(passwordEncoder.encode("Password123!")).thenReturn(VALID_BCRYPT_HASH);
+            when(userRepository.save(any(User.class))).thenReturn(savedUser);
+            when(tokenGenerator.generateAccessToken("test@example.com")).thenReturn("access-token");
+            when(refreshTokenService.createRefreshToken(any(), any(), any())).thenReturn(refreshToken);
+
+            ReflectionTestUtils.setField(registerUserService, "defaultTenantSlug", "near-cap-tenant");
+            when(tenantEmailDomainRepository.findByIdEmailDomainIgnoreCase("example.com"))
+                .thenReturn(Optional.empty());
+            when(tenantRepository.findByLegacyDomainIgnoreCase("example.com"))
+                .thenReturn(Optional.empty());
+
+            // When
+            AuthenticationResponse response = registerUserService.execute(validCommand);
+
+            // Then
+            assertThat(response).isNotNull();
+            assertThat(response.getAccessToken()).isEqualTo("access-token");
+            verify(userRepository).save(any(User.class));
         }
     }
 

@@ -8,6 +8,7 @@ import com.fivucsas.identity.application.port.output.AuditLogPort;
 import com.fivucsas.identity.application.port.output.PasswordEncoderPort;
 import com.fivucsas.identity.application.port.output.TokenGenerationPort;
 import com.fivucsas.identity.domain.exception.DuplicateEmailException;
+import com.fivucsas.identity.domain.exception.TenantUserQuotaExceededException;
 import com.fivucsas.identity.domain.model.user.Email;
 import com.fivucsas.identity.domain.model.user.FullName;
 import com.fivucsas.identity.domain.model.user.HashedPassword;
@@ -71,10 +72,6 @@ public class RegisterUserService implements RegisterUserUseCase {
         Email email = Email.of(command.getEmail());
         FullName fullName = FullName.of(command.getFirstName(), command.getLastName());
 
-        // Hash password
-        String hashedPasswordString = passwordEncoder.encode(command.getPassword());
-        HashedPassword hashedPassword = HashedPassword.of(hashedPasswordString);
-
         // Resolve tenant. Order of precedence:
         //   1. Explicit TenantContext (e.g. invitation flow, multi-tenant header).
         //   2. tenant_email_domains (V44) — multi-domain lookup keyed on the
@@ -99,6 +96,27 @@ public class RegisterUserService implements RegisterUserUseCase {
                     return fallback;
                 });
         }
+
+        // P0-#7 (INVESTIGATION_MASTER_2026-05-07): enforce tenant.max_users
+        // BEFORE inserting (and before bcrypt-hashing the password — saves a
+        // CPU-bound round on the rejected path). The field defaulted to 100
+        // and was admin-editable but had ZERO insert-path readers — every
+        // tenant could grow beyond its license unchecked. countByTenantId is
+        // a single COUNT query; any race where two concurrent registrations
+        // land on N == max_users will be caught by the next attempt (we
+        // check >= so we never silently exceed by more than one within the
+        // same transaction window).
+        long currentUserCount = userRepository.countByTenantId(defaultTenant.getId());
+        if (currentUserCount >= defaultTenant.getMaxUsers()) {
+            log.warn("AUDIT: Registration refused — tenant quota exceeded, tenantId={}, currentUsers={}, maxUsers={}",
+                defaultTenant.getId(), currentUserCount, defaultTenant.getMaxUsers());
+            throw new TenantUserQuotaExceededException(defaultTenant.getMaxUsers());
+        }
+
+        // Hash password (deferred until AFTER the quota gate so a flooded
+        // tenant doesn't pay for a bcrypt round per rejected registration).
+        String hashedPasswordString = passwordEncoder.encode(command.getPassword());
+        HashedPassword hashedPassword = HashedPassword.of(hashedPasswordString);
 
         // Create user entity
         User user = User.builder()
