@@ -107,15 +107,47 @@ public class OtpController {
             return ResponseEntity.badRequest().body(Map.of("success", false, "message", "code is required"));
         }
 
-        boolean valid = otpService.validate(EMAIL_OTP_PREFIX + userId, code);
-        if (!valid) {
-            log.warn("Email OTP mismatch for user: {} (reason=OTP_MISMATCH_OR_EXPIRED)", userId);
+        OtpService.ValidationResult result =
+                otpService.validateWithResult(EMAIL_OTP_PREFIX + userId, code);
+        if (!result.isValid()) {
+            log.warn(
+                    "Email OTP mismatch for user: {} (reason={}, remaining={})",
+                    userId,
+                    result.isExhausted() ? "OTP_ATTEMPTS_EXHAUSTED" : "OTP_MISMATCH_OR_EXPIRED",
+                    result.getRemainingAttempts());
         }
 
-        return ResponseEntity.ok(Map.of(
-                "success", valid,
-                "message", valid ? "OTP verified successfully" : "Invalid or expired OTP code"
-        ));
+        return ResponseEntity.ok(buildVerifyResponse(result));
+    }
+
+    /**
+     * Shape the verify response so the frontend can render the
+     * remaining-attempts hint and short-circuit to "request a new code"
+     * when the counter is burned. The {@code success}/{@code message}
+     * fields stay backwards-compatible with the previous contract; the new
+     * fields ({@code errorCode}, {@code remainingAttempts}) are additive.
+     */
+    private static Map<String, Object> buildVerifyResponse(OtpService.ValidationResult result) {
+        if (result.isValid()) {
+            return Map.of(
+                    "success", true,
+                    "message", "OTP verified successfully"
+            );
+        }
+        if (result.isExhausted()) {
+            return Map.of(
+                    "success", false,
+                    "errorCode", "OTP_ATTEMPTS_EXHAUSTED",
+                    "remainingAttempts", 0,
+                    "message", "Too many invalid attempts. Please request a new OTP code."
+            );
+        }
+        return Map.of(
+                "success", false,
+                "errorCode", "OTP_INVALID",
+                "remainingAttempts", result.getRemainingAttempts(),
+                "message", "Invalid or expired OTP code"
+        );
     }
 
     @PostMapping("/api/v1/otp/sms/send/{userId}")
@@ -210,10 +242,23 @@ public class OtpController {
                 }
             }
         } else {
-            valid = otpService.validate(SMS_OTP_PREFIX + userId, code);
+            // Local OTP path: use the structured result so we can surface
+            // remainingAttempts / OTP_ATTEMPTS_EXHAUSTED. The Twilio Verify
+            // path above intentionally does not go through OtpService —
+            // Twilio enforces its own per-code attempt counter at the
+            // provider, and its result enum already maps INVALID_CODE vs
+            // PROVIDER_ERROR independently.
+            OtpService.ValidationResult result =
+                    otpService.validateWithResult(SMS_OTP_PREFIX + userId, code);
+            valid = result.isValid();
             if (!valid) {
-                log.warn("SMS OTP mismatch for user: {} via local OTP store (reason=OTP_MISMATCH_OR_EXPIRED)", userId);
+                log.warn(
+                        "SMS OTP mismatch for user: {} via local OTP store (reason={}, remaining={})",
+                        userId,
+                        result.isExhausted() ? "OTP_ATTEMPTS_EXHAUSTED" : "OTP_MISMATCH_OR_EXPIRED",
+                        result.getRemainingAttempts());
             }
+            return ResponseEntity.ok(buildVerifyResponse(result));
         }
 
         return ResponseEntity.ok(Map.of(
