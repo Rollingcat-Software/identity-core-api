@@ -10,6 +10,9 @@ import com.fivucsas.identity.application.port.output.PasswordEncoderPort;
 import com.fivucsas.identity.application.port.output.TokenGenerationPort;
 import com.fivucsas.identity.domain.exception.AccountLockedException;
 import com.fivucsas.identity.domain.exception.InvalidCredentialsException;
+import com.fivucsas.identity.domain.exception.TenantMismatchException;
+import com.fivucsas.identity.entity.OAuth2Client;
+import com.fivucsas.identity.entity.Tenant;
 import com.fivucsas.identity.domain.repository.UserRepository;
 import com.fivucsas.identity.entity.RefreshToken;
 import com.fivucsas.identity.entity.User;
@@ -354,6 +357,184 @@ class AuthenticateUserServiceTest {
             // Then
             assertThat(response).isNotNull();
             assertThat(response.getAccessToken()).isEqualTo("access-token");
+        }
+    }
+
+    @Nested
+    @DisplayName("Tenant Mismatch (T-TENANT-GATE 2026-05-07)")
+    class TenantMismatch {
+
+        @Test
+        @DisplayName("Should throw TenantMismatchException with required tenant name when user tenant != client tenant")
+        void shouldThrowTenantMismatchWhenUserTenantDiffersFromClientTenant() {
+            // Given — user belongs to Fivucsas system tenant, but the OAuth
+            // client (Marmara hosted login) is bound to Marmara University.
+            UUID userTenantId = UUID.randomUUID();
+            UUID marmaraTenantId = UUID.randomUUID();
+
+            Tenant userTenant = Tenant.builder().id(userTenantId).name("Fivucsas").build();
+            Tenant marmaraTenant = Tenant.builder().id(marmaraTenantId).name("Marmara University").build();
+
+            User gmailUser = User.builder()
+                    .id(UUID.randomUUID())
+                    .email("alice@gmail.com")
+                    .passwordHash(VALID_BCRYPT_HASH)
+                    .firstName("Alice")
+                    .lastName("Doe")
+                    .status(UserStatus.ACTIVE)
+                    .tenant(userTenant)
+                    .createdAt(Instant.now())
+                    .updatedAt(Instant.now())
+                    .build();
+
+            OAuth2Client marmaraClient = OAuth2Client.builder()
+                    .clientId("marmara-bys-demo")
+                    .clientName("Marmara BYS")
+                    .tenant(marmaraTenant)
+                    .build();
+
+            AuthenticateUserCommand command = AuthenticateUserCommand.builder()
+                    .email("alice@gmail.com")
+                    .password("Password123!")
+                    .ipAddress("10.0.0.1")
+                    .userAgent("ua")
+                    .clientId("marmara-bys-demo")
+                    .build();
+
+            when(userRepository.findByEmail("alice@gmail.com")).thenReturn(Optional.of(gmailUser));
+            when(oAuth2ClientRepository.findByClientId("marmara-bys-demo"))
+                    .thenReturn(Optional.of(marmaraClient));
+
+            // When/Then — must surface TenantMismatchException with the
+            // tenant display name; password must NEVER be checked.
+            assertThatThrownBy(() -> authenticateUserService.execute(command))
+                    .isInstanceOf(TenantMismatchException.class)
+                    .satisfies(ex -> {
+                        TenantMismatchException tme = (TenantMismatchException) ex;
+                        assertThat(tme.getRequiredTenant()).isEqualTo("Marmara University");
+                        assertThat(tme.getErrorCode()).isEqualTo("TENANT_MISMATCH");
+                    });
+
+            // Critical: password must NOT be checked, MFA session must NOT be
+            // created, and no token must be issued.
+            verify(passwordEncoder, never()).matches(any(), any());
+            verify(tokenGenerator, never()).generateAccessToken(any());
+            verify(tokenGenerator, never()).generateAccessToken(any(), any());
+            verify(refreshTokenService, never()).createRefreshToken(any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("Should NOT throw when user tenant matches client tenant")
+        void shouldAllowLoginWhenUserAndClientShareTenant() {
+            // Given — user and client both belong to Marmara
+            UUID marmaraTenantId = UUID.randomUUID();
+            Tenant marmaraTenant = Tenant.builder().id(marmaraTenantId).name("Marmara University").build();
+
+            User marmaraUser = User.builder()
+                    .id(UUID.randomUUID())
+                    .email("staff@marmara.edu.tr")
+                    .passwordHash(VALID_BCRYPT_HASH)
+                    .firstName("Staff")
+                    .lastName("Member")
+                    .status(UserStatus.ACTIVE)
+                    .tenant(marmaraTenant)
+                    .createdAt(Instant.now())
+                    .updatedAt(Instant.now())
+                    .build();
+
+            OAuth2Client marmaraClient = OAuth2Client.builder()
+                    .clientId("marmara-bys-demo")
+                    .clientName("Marmara BYS")
+                    .tenant(marmaraTenant)
+                    .build();
+
+            AuthenticateUserCommand command = AuthenticateUserCommand.builder()
+                    .email("staff@marmara.edu.tr")
+                    .password("Password123!")
+                    .ipAddress("10.0.0.1")
+                    .userAgent("ua")
+                    .clientId("marmara-bys-demo")
+                    .build();
+
+            when(userRepository.findByEmail("staff@marmara.edu.tr"))
+                    .thenReturn(Optional.of(marmaraUser));
+            when(oAuth2ClientRepository.findByClientId("marmara-bys-demo"))
+                    .thenReturn(Optional.of(marmaraClient));
+            when(passwordEncoder.matches("Password123!", VALID_BCRYPT_HASH)).thenReturn(true);
+            when(tokenGenerator.generateAccessToken("staff@marmara.edu.tr", List.of("pwd")))
+                    .thenReturn("access-token");
+            when(refreshTokenService.createRefreshToken(any(), any(), any())).thenReturn(refreshToken);
+
+            // When
+            AuthenticationResponse response = authenticateUserService.execute(command);
+
+            // Then
+            assertThat(response).isNotNull();
+            assertThat(response.getAccessToken()).isEqualTo("access-token");
+        }
+
+        @Test
+        @DisplayName("Should skip tenant check when clientId is blank (no OAuth flow)")
+        void shouldSkipTenantCheckWhenClientIdBlank() {
+            // Given — vanilla password login from the dashboard (no client_id)
+            when(userRepository.findByEmail("test@example.com"))
+                    .thenReturn(Optional.of(existingUser));
+            when(passwordEncoder.matches("Password123!", VALID_BCRYPT_HASH)).thenReturn(true);
+            when(tokenGenerator.generateAccessToken("test@example.com", List.of("pwd")))
+                    .thenReturn("access-token");
+            when(refreshTokenService.createRefreshToken(any(), any(), any())).thenReturn(refreshToken);
+
+            // When — validCommand has no clientId
+            AuthenticationResponse response = authenticateUserService.execute(validCommand);
+
+            // Then — tenant lookup must never happen
+            assertThat(response).isNotNull();
+            verify(oAuth2ClientRepository, never()).findByClientId(any());
+        }
+
+        @Test
+        @DisplayName("Should fall back to client name when tenant has no display name")
+        void shouldFallBackToClientNameWhenTenantNameMissing() {
+            // Given — pathological case: tenant exists but its name is empty.
+            UUID userTenantId = UUID.randomUUID();
+            UUID otherTenantId = UUID.randomUUID();
+
+            Tenant userTenant = Tenant.builder().id(userTenantId).name("Fivucsas").build();
+            Tenant nameMissing = Tenant.builder().id(otherTenantId).name("").build();
+
+            User user = User.builder()
+                    .id(UUID.randomUUID())
+                    .email("alice@gmail.com")
+                    .passwordHash(VALID_BCRYPT_HASH)
+                    .firstName("Alice")
+                    .lastName("Doe")
+                    .status(UserStatus.ACTIVE)
+                    .tenant(userTenant)
+                    .createdAt(Instant.now())
+                    .updatedAt(Instant.now())
+                    .build();
+
+            OAuth2Client client = OAuth2Client.builder()
+                    .clientId("acme-portal")
+                    .clientName("Acme Portal")
+                    .tenant(nameMissing)
+                    .build();
+
+            AuthenticateUserCommand command = AuthenticateUserCommand.builder()
+                    .email("alice@gmail.com")
+                    .password("x")
+                    .clientId("acme-portal")
+                    .build();
+
+            when(userRepository.findByEmail("alice@gmail.com")).thenReturn(Optional.of(user));
+            when(oAuth2ClientRepository.findByClientId("acme-portal"))
+                    .thenReturn(Optional.of(client));
+
+            // Then
+            assertThatThrownBy(() -> authenticateUserService.execute(command))
+                    .isInstanceOf(TenantMismatchException.class)
+                    .satisfies(ex -> assertThat(((TenantMismatchException) ex).getRequiredTenant())
+                            .isEqualTo("Acme Portal"));
         }
     }
 

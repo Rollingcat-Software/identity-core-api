@@ -99,6 +99,50 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(error);
     }
 
+    /**
+     * T-TENANT-GATE (2026-05-07): tenant-mismatch surface. Mapped to HTTP 403
+     * Forbidden — semantically distinct from 401 (which the frontend treats as
+     * "wrong password") and from 423 (account locked).
+     *
+     * <p>Response body extends the standard envelope with a
+     * {@code requiredTenant} field so the frontend can interpolate the tenant
+     * display name into a localized message
+     * ("This account is not a {{tenant}} member."). Does not leak whether the
+     * email exists — the 403 is fired only after the email is found, but the
+     * tenant identity on the hosted login surface is already public knowledge
+     * (the user is literally on that tenant's branded login page).</p>
+     *
+     * <pre>
+     * {
+     *   "timestamp": "...",
+     *   "status": 403,
+     *   "error": "TENANT_MISMATCH",
+     *   "errorCode": "TENANT_MISMATCH",
+     *   "message": "Account does not belong to the requested tenant",
+     *   "requiredTenant": "Marmara University",
+     *   "path": "/api/v1/auth/login"
+     * }
+     * </pre>
+     */
+    @ExceptionHandler(TenantMismatchException.class)
+    public ResponseEntity<java.util.Map<String, Object>> handleTenantMismatch(
+            TenantMismatchException ex,
+            HttpServletRequest request) {
+        log.warn("Tenant mismatch on login: requiredTenant={}, path={}",
+                ex.getRequiredTenant(), request.getRequestURI());
+
+        java.util.Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("timestamp", java.time.Instant.now().toString());
+        body.put("status", HttpStatus.FORBIDDEN.value());
+        body.put("error", ex.getErrorCode());
+        body.put("errorCode", ex.getErrorCode());
+        body.put("message", ex.getMessage());
+        body.put("requiredTenant", ex.getRequiredTenant());
+        body.put("path", request.getRequestURI());
+
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(body);
+    }
+
     @ExceptionHandler(DuplicateEmailException.class)
     public ResponseEntity<ErrorResponse> handleDuplicateEmail(
             DuplicateEmailException ex,
