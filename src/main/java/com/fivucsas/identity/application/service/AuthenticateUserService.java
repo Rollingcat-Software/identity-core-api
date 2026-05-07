@@ -11,6 +11,7 @@ import com.fivucsas.identity.application.port.output.TokenGenerationPort;
 import com.fivucsas.identity.domain.exception.AccountLockedException;
 import com.fivucsas.identity.domain.exception.InvalidCredentialsException;
 import com.fivucsas.identity.domain.exception.NeedsEnrollmentException;
+import com.fivucsas.identity.domain.exception.TenantMismatchException;
 import com.fivucsas.identity.domain.model.auth.AuthMethodType;
 import com.fivucsas.identity.domain.model.auth.OperationType;
 import com.fivucsas.identity.domain.model.auth.StepType;
@@ -100,8 +101,18 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
         // different tenant. Without this gate any user from any tenant could
         // sign in on a tenant-branded surface (the user reported logging into
         // demo.fivucsas.com with their Fivucsas-tenant account on 2026-04-28).
-        // Reject BEFORE the password check so we don't leak whether the email
-        // exists; surface the same InvalidCredentialsException.
+        // Reject BEFORE the password check so the user gets a clear inline
+        // error at the password step — instead of passing password + MFA only
+        // to fail at /oauth2/authorize/complete with no enrollment in the
+        // foreign tenant.
+        //
+        // 2026-05-07 (T-TENANT-GATE): switched from InvalidCredentialsException
+        // (which made the password step look like a wrong-password retry loop)
+        // to a dedicated TenantMismatchException carrying the required-tenant
+        // display name so the frontend can render
+        // "This account is not a {{tenant}} member." inline. The tenant
+        // identity is already known to the user (they're on the tenant's own
+        // hosted login surface) so there is no enumeration leak.
         if (command.getClientId() != null && !command.getClientId().isBlank()) {
             try {
                 Optional<OAuth2Client> tenantBoundClient =
@@ -115,6 +126,14 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
                             && !clientTenantId.equals(systemTenantId)
                             && user.getTenant() != null
                             && !clientTenantId.equals(user.getTenant().getId())) {
+                        String requiredTenantName = tenantBoundClient.get().getTenant().getName();
+                        if (requiredTenantName == null || requiredTenantName.isBlank()) {
+                            // Fall back to the client's display name, then to client_id.
+                            requiredTenantName = tenantBoundClient.get().getClientName();
+                        }
+                        if (requiredTenantName == null || requiredTenantName.isBlank()) {
+                            requiredTenantName = command.getClientId();
+                        }
                         log.warn("AUDIT: Login refused — tenant mismatch, email={}, " +
                                         "userTenant={}, clientTenant={}, clientId={}, ip={}",
                                 command.getEmail(), user.getTenant().getId(), clientTenantId,
@@ -122,10 +141,10 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
                         auditLogPort.logAuthenticationFailed(command.getEmail(),
                                 command.getIpAddress(),
                                 "Tenant mismatch for OAuth client " + command.getClientId());
-                        throw new InvalidCredentialsException();
+                        throw new TenantMismatchException(requiredTenantName);
                     }
                 }
-            } catch (InvalidCredentialsException e) {
+            } catch (TenantMismatchException e) {
                 throw e;
             } catch (Exception e) {
                 log.warn("Tenant-lock check failed for client '{}': {}",

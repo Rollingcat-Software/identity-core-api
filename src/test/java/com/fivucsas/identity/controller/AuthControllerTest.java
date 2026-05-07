@@ -20,6 +20,7 @@ import com.fivucsas.identity.application.port.output.WebAuthnCredentialRepositor
 import com.fivucsas.identity.application.service.EnrollmentHealthService;
 import com.fivucsas.identity.domain.exception.DuplicateEmailException;
 import com.fivucsas.identity.domain.exception.InvalidCredentialsException;
+import com.fivucsas.identity.domain.exception.TenantMismatchException;
 import com.fivucsas.identity.domain.repository.TenantRepository;
 import com.fivucsas.identity.domain.repository.UserRepository;
 import com.fivucsas.identity.dto.LoginRequest;
@@ -359,6 +360,76 @@ class AuthControllerTest {
                 .andExpect(status().isUnauthorized());
 
         verify(authenticateUserUseCase, times(1)).execute(any(AuthenticateUserCommand.class));
+    }
+
+    @Test
+    @DisplayName("POST /api/v1/auth/login - Tenant Mismatch (403) — T-TENANT-GATE")
+    void testLogin_TenantMismatch() throws Exception {
+        // Arrange — gmail user submits password on Marmara hosted login
+        // (clientId=marmara-bys-demo). Service rejects with structured 403
+        // carrying the required tenant name so the frontend can render
+        // "This account is not a Marmara University member." inline.
+        LoginRequest request = new LoginRequest();
+        request.setEmail("alice@gmail.com");
+        request.setPassword(TEST_PASSWORD);
+        request.setClientId("marmara-bys-demo");
+
+        when(authenticateUserUseCase.execute(any(AuthenticateUserCommand.class)))
+                .thenThrow(new TenantMismatchException("Marmara University"));
+
+        // Act & Assert
+        mockMvc.perform(post("/api/v1/auth/login")
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.errorCode").value("TENANT_MISMATCH"))
+                .andExpect(jsonPath("$.error").value("TENANT_MISMATCH"))
+                .andExpect(jsonPath("$.requiredTenant").value("Marmara University"))
+                .andExpect(jsonPath("$.message")
+                        .value("Account does not belong to the requested tenant"))
+                .andExpect(jsonPath("$.path").value("/api/v1/auth/login"));
+
+        verify(authenticateUserUseCase, times(1)).execute(any(AuthenticateUserCommand.class));
+    }
+
+    @Test
+    @DisplayName("POST /api/v1/auth/login - Forwards clientId from request to command — T-TENANT-GATE")
+    void testLogin_ForwardsClientIdToUseCase() throws Exception {
+        // Arrange — verify the AuthController actually copies request.clientId
+        // into the AuthenticateUserCommand so the tenant-lock branch can fire.
+        LoginRequest request = new LoginRequest();
+        request.setEmail(TEST_EMAIL);
+        request.setPassword(TEST_PASSWORD);
+        request.setClientId("marmara-bys-demo");
+
+        UserResponse userResponse = UserResponse.builder()
+                .id("123e4567-e89b-12d3-a456-426614174000")
+                .email(TEST_EMAIL)
+                .firstName(TEST_FIRST_NAME)
+                .lastName(TEST_LAST_NAME)
+                .status("ACTIVE")
+                .build();
+
+        AuthenticationResponse authResponse = AuthenticationResponse.of(
+                TEST_ACCESS_TOKEN, TEST_REFRESH_TOKEN, 86400000L, userResponse);
+
+        when(authenticateUserUseCase.execute(any(AuthenticateUserCommand.class)))
+                .thenReturn(authResponse);
+
+        // Act
+        mockMvc.perform(post("/api/v1/auth/login")
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isOk());
+
+        // Assert — captor confirms clientId reached the use case unchanged
+        org.mockito.ArgumentCaptor<AuthenticateUserCommand> captor =
+                org.mockito.ArgumentCaptor.forClass(AuthenticateUserCommand.class);
+        verify(authenticateUserUseCase).execute(captor.capture());
+        org.assertj.core.api.Assertions.assertThat(captor.getValue().getClientId())
+                .isEqualTo("marmara-bys-demo");
     }
 
     @Test
