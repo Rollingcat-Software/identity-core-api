@@ -4,6 +4,7 @@ import com.fivucsas.identity.application.service.verification.VerificationStepHa
 import com.fivucsas.identity.application.service.verification.VerificationStepResult;
 import com.fivucsas.identity.entity.VerificationSession;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -11,13 +12,28 @@ import java.util.Map;
 
 /**
  * Handles WATCHLIST_CHECK verification step.
- * Mock implementation that always clears the check.
  *
- * TODO: Integrate with real sanctions/watchlist APIs (OFAC, EU sanctions list, UN Security Council)
- * TODO: Add configurable watchlist providers per tenant
- * TODO: Implement fuzzy name matching with transliteration support
+ * <p><b>STUB / DEV-ONLY.</b> This is a mock that always returns {@code cleared=true,
+ * match_count=0}. There is no real sanctions/watchlist provider wired (Refinitiv, Dow Jones,
+ * Sayari, OpenSanctions, etc. — none are integrated). Returning a hard-coded "cleared"
+ * verdict in production would silently false-pass any KYC/AML pipeline that includes a
+ * {@code WATCHLIST_CHECK} step — a regulatory and security defect.
+ *
+ * <p>To make the silent-mock-in-prod failure mode impossible, this bean is gated to the
+ * {@code dev} Spring profile only. In any non-dev profile (notably {@code prod}) the bean
+ * is NOT registered, and {@code VerificationStepHandlerRegistry.getHandler("WATCHLIST_CHECK")}
+ * will throw {@link UnsupportedOperationException} — surfacing an explicit "feature not
+ * implemented" error rather than a counterfeit pass.
+ *
+ * <p>P0 fix: see {@code INVESTIGATION_MASTER_2026-05-07.md} P0-#3.
+ *
+ * <p>TODO: Integrate with real sanctions/watchlist APIs (OFAC, EU sanctions list, UN Security
+ *          Council, PEP database). Replace this stub with a profile-agnostic component once a
+ *          provider is contracted. Add configurable provider per tenant + fuzzy name matching
+ *          with transliteration support.
  */
 @Component
+@Profile("dev")
 @Slf4j
 public class WatchlistCheckHandler implements VerificationStepHandler {
 
