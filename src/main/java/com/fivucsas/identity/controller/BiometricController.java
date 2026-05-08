@@ -377,6 +377,11 @@ public class BiometricController {
             .verified(response.isSuccess())
             .confidence(response.getConfidence() != null ? response.getConfidence() : 0.0)
             .message(response.getMessage())
+            // INVESTIGATION_MASTER_2026-05-07 §wires: forward the bio
+            // processor's real distance/threshold so the SPA stops faking
+            // distance=1, threshold=0.4 sentinels (BiometricService.ts:218).
+            .distance(response.getDistance())
+            .threshold(response.getThreshold())
             .build();
     }
 

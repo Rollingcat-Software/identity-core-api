@@ -427,9 +427,20 @@ public class OAuth2Controller {
         public String clientId;
 
         @NotBlank(message = "redirectUri is required")
+        // RFC 3986 absolute-URI sanity check. Permits any scheme followed by
+        // ":" and at least one further character — covers https://, http://
+        // (loopback per RFC 8252 §7.3) AND custom-scheme native-app URIs
+        // like {@code com.example.app://auth} that RFC 8252 §7.1 mandates
+        // for installed mobile apps. The earlier regex hard-coded {@code ^https?://}
+        // and rejected the very URI shapes our own developer docs advertise
+        // (INVESTIGATION_MASTER_2026-05-07 §wires).
+        //
+        // This is only a sanity filter; the load-bearing security check
+        // remains the per-client allowlist enforced by
+        // {@link com.fivucsas.identity.entity.OAuth2Client#isRedirectUriAllowed}.
         @Pattern(
-            regexp = "^https?://[\\w.-]+(:\\d+)?(/[\\w./?%&=#:+~,@!$'()*;\\[\\]-]*)?$",
-            message = "redirectUri must be a valid http(s) URL"
+            regexp = "^[A-Za-z][A-Za-z0-9+.-]*:.+",
+            message = "redirectUri must be a valid absolute URI (RFC 3986)"
         )
         @Size(max = 2048, message = "redirectUri too long")
         public String redirectUri;

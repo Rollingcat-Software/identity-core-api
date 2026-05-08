@@ -82,7 +82,16 @@ public class FaceAuthHandler implements AuthMethodHandler {
 
             if (isVerified) {
                 log.info("Face verification successful for user: {}", session.getUser().getEmail());
-                return StepResult.success(Map.of("verified", "true"));
+                // Forward the real distance/threshold (when present) so the
+                // SPA can render telemetry without faking sentinels — see
+                // INVESTIGATION_MASTER_2026-05-07 §wires.
+                java.util.Map<String, Object> payload = new java.util.LinkedHashMap<>();
+                payload.put("verified", "true");
+                Object distance = result.get("distance");
+                Object threshold = result.get("threshold");
+                if (distance instanceof Number) payload.put("distance", ((Number) distance).doubleValue());
+                if (threshold instanceof Number) payload.put("threshold", ((Number) threshold).doubleValue());
+                return StepResult.success(payload);
             } else {
                 log.warn("Face verification failed for user: {} (server verified=false)",
                         session.getUser().getEmail());

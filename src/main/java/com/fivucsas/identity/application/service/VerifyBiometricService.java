@@ -54,14 +54,19 @@ public class VerifyBiometricService implements VerifyBiometricUseCase {
                 command.getClientEmbedding(),
                 command.getClientEmbeddings());
 
-        // biometric-processor returns "verified" (boolean) and "confidence" (double)
+        // biometric-processor returns "verified" (boolean), "confidence" (double),
+        // "distance" (cosine distance, lower is better) and "threshold"
+        // (the value distance was compared against). The latter two are
+        // surfaced to the SPA via BiometricVerificationResponse so the UI can
+        // stop synthesising fake sentinels (INVESTIGATION_MASTER_2026-05-07
+        // §wires).
         Boolean verified = response.get("verified") != null
             ? (Boolean) response.get("verified")
             : (Boolean) response.get("success");
         String message = (String) response.get("message");
-        Double confidence = response.get("confidence") != null
-            ? ((Number) response.get("confidence")).doubleValue()
-            : null;
+        Double confidence = numericOrNull(response.get("confidence"));
+        Double distance = numericOrNull(response.get("distance"));
+        Double threshold = numericOrNull(response.get("threshold"));
 
         if (!Boolean.TRUE.equals(verified)) {
             throw new BiometricVerificationException("Face verification failed: " + message);
@@ -78,7 +83,19 @@ public class VerifyBiometricService implements VerifyBiometricUseCase {
             .success(true)
             .message(message != null ? message : "Biometric verification successful")
             .confidence(confidence)
+            .distance(distance)
+            .threshold(threshold)
             .userId(command.getUserId())
             .build();
+    }
+
+    /**
+     * Defensive numeric coercion — bio processor responses are loose maps,
+     * so a value can land as {@link Number}, missing, or unexpectedly typed.
+     * Returns {@code null} on any non-Number / null input rather than blowing
+     * the verify response up over a telemetry field.
+     */
+    private static Double numericOrNull(Object value) {
+        return value instanceof Number n ? n.doubleValue() : null;
     }
 }
