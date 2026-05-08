@@ -31,42 +31,52 @@ public class PasswordPolicy {
     /**
      * Validates password against policy rules.
      *
+     * <p>On failure throws {@link com.fivucsas.identity.domain.exception.PasswordPolicyViolationException}
+     * carrying a list of locale-independent violation keys (e.g.
+     * {@code MIN_LENGTH}, {@code REQUIRE_UPPERCASE}). The frontend renders
+     * the user-facing copy via i18n — see
+     * INVESTIGATION_MASTER_2026-05-07 §"user constraints".
+     *
      * @param password the password to validate
-     * @throws IllegalArgumentException if password doesn't meet policy
+     * @throws com.fivucsas.identity.domain.exception.PasswordPolicyViolationException
+     *         if password violates any rule
      */
     public static void validate(String password) {
-        List<String> violations = new ArrayList<>();
+        List<String> violationKeys = new ArrayList<>();
 
         if (password == null || password.isEmpty()) {
-            throw new IllegalArgumentException("Password cannot be null or empty");
+            // Empty password is its own dedicated key — distinct from
+            // length-too-short so the i18n copy can be more specific.
+            throw new com.fivucsas.identity.domain.exception.PasswordPolicyViolationException(
+                    List.of("EMPTY"));
         }
 
         if (password.length() < MIN_LENGTH) {
-            violations.add(String.format("Password must be at least %d characters long", MIN_LENGTH));
+            violationKeys.add("MIN_LENGTH");
         }
 
         if (password.length() > MAX_LENGTH) {
-            violations.add(String.format("Password must not exceed %d characters", MAX_LENGTH));
+            violationKeys.add("MAX_LENGTH");
         }
 
         if (!UPPERCASE_PATTERN.matcher(password).find()) {
-            violations.add("Password must contain at least one uppercase letter");
+            violationKeys.add("REQUIRE_UPPERCASE");
         }
 
         if (!LOWERCASE_PATTERN.matcher(password).find()) {
-            violations.add("Password must contain at least one lowercase letter");
+            violationKeys.add("REQUIRE_LOWERCASE");
         }
 
         if (!DIGIT_PATTERN.matcher(password).find()) {
-            violations.add("Password must contain at least one digit");
+            violationKeys.add("REQUIRE_DIGIT");
         }
 
         if (!SPECIAL_CHAR_PATTERN.matcher(password).find()) {
-            violations.add("Password must contain at least one special character (!@#$%^&*...)");
+            violationKeys.add("REQUIRE_SPECIAL_CHAR");
         }
 
-        if (!violations.isEmpty()) {
-            throw new IllegalArgumentException("Password does not meet policy requirements: " + String.join("; ", violations));
+        if (!violationKeys.isEmpty()) {
+            throw new com.fivucsas.identity.domain.exception.PasswordPolicyViolationException(violationKeys);
         }
     }
 
@@ -80,7 +90,7 @@ public class PasswordPolicy {
         try {
             validate(password);
             return true;
-        } catch (IllegalArgumentException e) {
+        } catch (com.fivucsas.identity.domain.exception.PasswordPolicyViolationException e) {
             return false;
         }
     }

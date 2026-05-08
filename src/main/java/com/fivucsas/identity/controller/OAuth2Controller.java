@@ -427,9 +427,20 @@ public class OAuth2Controller {
         public String clientId;
 
         @NotBlank(message = "redirectUri is required")
+        // RFC 3986 absolute-URI sanity check. Permits any scheme followed by
+        // ":" and at least one further character — covers https://, http://
+        // (loopback per RFC 8252 §7.3) AND custom-scheme native-app URIs
+        // like {@code com.example.app://auth} that RFC 8252 §7.1 mandates
+        // for installed mobile apps. The earlier regex hard-coded {@code ^https?://}
+        // and rejected the very URI shapes our own developer docs advertise
+        // (INVESTIGATION_MASTER_2026-05-07 §wires).
+        //
+        // This is only a sanity filter; the load-bearing security check
+        // remains the per-client allowlist enforced by
+        // {@link com.fivucsas.identity.entity.OAuth2Client#isRedirectUriAllowed}.
         @Pattern(
-            regexp = "^https?://[\\w.-]+(:\\d+)?(/[\\w./?%&=#:+~,@!$'()*;\\[\\]-]*)?$",
-            message = "redirectUri must be a valid http(s) URL"
+            regexp = "^[A-Za-z][A-Za-z0-9+.-]*:.+",
+            message = "redirectUri must be a valid absolute URI (RFC 3986)"
         )
         @Size(max = 2048, message = "redirectUri too long")
         public String redirectUri;
@@ -539,6 +550,21 @@ public class OAuth2Controller {
             // unchanged from previous build, so existing clients see the same
             // response shape.
             return errorResponse(400, "invalid_grant", e.getMessage(), null);
+        } catch (com.fivucsas.identity.application.service.TenantTokenRateLimitException e) {
+            // INVESTIGATION_MASTER_2026-05-07 §"developer/tenant constraints":
+            // per-tenant /oauth2/token bucket exhausted. RFC 6585 / RFC 6749
+            // §5.2 — surface 429 with Retry-After so smart clients back off
+            // rather than spinning. Mapped to invalid_grant per RFC 6749 §5.2
+            // (closest standard error code; clients see Retry-After).
+            log.warn("OAuth2 token rejected by per-tenant rate limit: clientId={}, retryAfter={}s",
+                    clientId, e.getRetryAfterSeconds());
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("error", "invalid_grant");
+            body.put("error_description",
+                    "Per-tenant token-issuance rate limit exceeded. Please retry after the indicated interval.");
+            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                    .header("Retry-After", String.valueOf(e.getRetryAfterSeconds()))
+                    .body(body);
         } catch (com.fivucsas.identity.domain.exception.OAuth2Exception e) {
             // BE-M2 (2026-04-19): explicit status (e.g. 401 for missing
             // confidential-client secret) rather than blanket 400.

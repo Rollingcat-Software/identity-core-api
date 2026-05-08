@@ -52,6 +52,9 @@ class ManageUserServiceTest {
     @Mock
     private RbacAuthorizationService rbacService;
 
+    @Mock
+    private com.fivucsas.identity.application.port.output.AuditLogPort auditLogPort;
+
     @InjectMocks
     private ManageUserService manageUserService;
 

@@ -406,6 +406,73 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(error);
     }
 
+    /**
+     * Password-policy violation: surface the stable error code + a
+     * machine-readable list of violation keys so the frontend can render
+     * each via i18n (errors.password.<KEY>) without parsing English copy.
+     *
+     * <p>INVESTIGATION_MASTER_2026-05-07 §"user constraints":
+     * the legacy shape concatenated English from PasswordPolicy.java:69 and
+     * Turkish-locale users saw raw English. Now: errorCode is stable,
+     * details.violations is the i18n key list.</p>
+     */
+    /**
+     * Per-user device-cap exceeded: 409 Conflict with a structured details
+     * block carrying the cap and current count so the SPA can prompt the
+     * user to remove an existing device. The user-facing copy is rendered
+     * via i18n keyed off {@code errorCode = DEVICE_LIMIT_EXCEEDED};
+     * {@code message} is short English for log greppability.
+     *
+     * <p>INVESTIGATION_MASTER_2026-05-07 §"user constraints":
+     * "device count per user unbounded → bloated WebAuthn allowList".</p>
+     */
+    @ExceptionHandler(DeviceLimitExceededException.class)
+    public ResponseEntity<java.util.Map<String, Object>> handleDeviceLimit(
+            DeviceLimitExceededException ex,
+            HttpServletRequest request) {
+        log.warn("Device limit exceeded: current={}, max={}",
+                ex.getCurrentDevices(), ex.getMaxDevices());
+
+        java.util.Map<String, Object> details = new java.util.LinkedHashMap<>();
+        details.put("currentDevices", ex.getCurrentDevices());
+        details.put("maxDevices", ex.getMaxDevices());
+
+        java.util.Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("timestamp", java.time.Instant.now().toString());
+        body.put("status", HttpStatus.CONFLICT.value());
+        body.put("error", ex.getErrorCode());
+        body.put("errorCode", ex.getErrorCode());
+        body.put("message", "Device registration refused — per-user device cap reached");
+        body.put("details", details);
+        body.put("path", request.getRequestURI());
+
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(body);
+    }
+
+    @ExceptionHandler(PasswordPolicyViolationException.class)
+    public ResponseEntity<java.util.Map<String, Object>> handlePasswordPolicy(
+            PasswordPolicyViolationException ex,
+            HttpServletRequest request) {
+        log.warn("Password policy violation: keys={}", ex.getViolationKeys());
+
+        java.util.Map<String, Object> details = new java.util.LinkedHashMap<>();
+        details.put("violations", ex.getViolationKeys());
+
+        java.util.Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("timestamp", java.time.Instant.now().toString());
+        body.put("status", HttpStatus.BAD_REQUEST.value());
+        body.put("error", ex.getErrorCode());
+        body.put("errorCode", ex.getErrorCode());
+        // Stable English short-string for log greppability — frontend MUST
+        // render UI copy from details.violations via i18n keys, not from
+        // this field. Kept short and locale-neutral.
+        body.put("message", "Password does not meet policy requirements");
+        body.put("details", details);
+        body.put("path", request.getRequestURI());
+
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(body);
+    }
+
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<ErrorResponse> handleIllegalArgument(
             IllegalArgumentException ex,

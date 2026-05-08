@@ -342,6 +342,39 @@ class OAuth2ControllerTest {
     }
 
     @Test
+    @DisplayName("POST /authorize/complete - RFC 8252 custom-scheme redirectUri (com.example://callback) is NOT rejected by Bean Validation")
+    void authorizeComplete_WhenCustomSchemeRedirectUri_ShouldNotBeRejectedByValidation() throws Exception {
+        // INVESTIGATION_MASTER_2026-05-07 §wires: the legacy regex hard-coded
+        // `^https?://` and rejected the very URI shapes our developer docs
+        // advertise (RFC 8252 §7.1 mandates custom schemes for installed
+        // mobile apps). The relaxed regex permits any RFC 3986 absolute URI;
+        // the per-client allowlist remains the load-bearing security check.
+        //
+        // Test contract: send com.example://callback. Bean Validation must
+        // NOT short-circuit with `redirectUri must be a valid absolute URI`.
+        // The downstream client/session validation produces a different
+        // failure mode (here we expect either a real client lookup failure or
+        // success). Either way, the field-validation error message must NOT
+        // be present.
+        when(mfaSessionRepository.findBySessionToken("s-token"))
+                .thenReturn(java.util.Optional.empty());
+
+        String body = "{" +
+                "\"mfaSessionToken\":\"s-token\"," +
+                "\"clientId\":\"native-app\"," +
+                "\"redirectUri\":\"com.example://callback\"," +
+                "\"state\":\"st\"" +
+                "}";
+
+        mockMvc.perform(post("/api/v1/oauth2/authorize/complete")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(jsonPath("$.error_description",
+                        org.hamcrest.Matchers.not(
+                                org.hamcrest.Matchers.containsString("must be a valid absolute URI"))));
+    }
+
+    @Test
     @DisplayName("POST /authorize/complete - blank mfaSessionToken returns OAuth2 400 with state echo")
     void authorizeComplete_WhenMfaSessionTokenBlank_ShouldReturn400() throws Exception {
         String body = "{" +

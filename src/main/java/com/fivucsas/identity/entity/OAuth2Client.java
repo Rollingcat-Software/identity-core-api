@@ -81,6 +81,22 @@ public class OAuth2Client {
     @Column(name = "expires_at")
     private Instant expiresAt;
 
+    /**
+     * bcrypt hash of the prior client_secret retained during the
+     * post-rotation grace window. NULL when no rotation has occurred or
+     * the grace window has compacted. See V58 migration + the
+     * {@code rotateSecret(...)} endpoint on {@link com.fivucsas.identity.controller.OAuth2ClientController}.
+     */
+    @Column(name = "previous_secret")
+    private String previousSecret;
+
+    /**
+     * UTC instant after which {@link #previousSecret} is rejected. NULL
+     * when {@code previousSecret} is NULL.
+     */
+    @Column(name = "previous_secret_expires_at")
+    private Instant previousSecretExpiresAt;
+
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
@@ -246,5 +262,37 @@ public class OAuth2Client {
     public void activate() {
         this.active = true;
         this.revokedAt = null;
+    }
+
+    /**
+     * Rotates the client_secret. The prior secret is retained until
+     * {@code grace} elapses so deployed integrations can roll over.
+     *
+     * @param newHashedSecret bcrypt hash of the freshly-generated secret
+     * @param grace duration the prior secret remains valid (e.g. 24h)
+     */
+    public void rotateSecret(String newHashedSecret, java.time.Duration grace) {
+        // Compact: if the existing previous_secret has already expired, drop
+        // it before we shift the current secret in. Prevents two stale
+        // secrets piling up after a fast-double-rotation.
+        if (this.previousSecretExpiresAt != null
+                && Instant.now().isAfter(this.previousSecretExpiresAt)) {
+            this.previousSecret = null;
+            this.previousSecretExpiresAt = null;
+        }
+        this.previousSecret = this.clientSecret;
+        this.previousSecretExpiresAt = Instant.now().plus(grace);
+        this.clientSecret = newHashedSecret;
+    }
+
+    /**
+     * Returns true if {@code previousSecret} is set AND the grace window
+     * has not lapsed. Verification paths can consult this when
+     * {@code clientSecret} fails to match.
+     */
+    public boolean isPreviousSecretValid() {
+        return this.previousSecret != null
+                && this.previousSecretExpiresAt != null
+                && Instant.now().isBefore(this.previousSecretExpiresAt);
     }
 }

@@ -131,7 +131,7 @@ class ResetPasswordServiceTest {
     }
 
     @Test
-    void execute_WhenWeakPassword_ShouldThrowIllegalArgumentException() {
+    void execute_WhenWeakPassword_ShouldThrowPasswordPolicyViolation() {
         // given
         User user = mock(User.class);
         when(user.isPasswordResetTokenExpired()).thenReturn(false);
@@ -143,9 +143,10 @@ class ResetPasswordServiceTest {
                 .ipAddress("127.0.0.1")
                 .build();
 
-        // when/then
+        // when/then — INVESTIGATION_MASTER_2026-05-07 §"user constraints":
+        // policy violation now surfaces as a typed exception carrying
+        // locale-independent violation keys instead of concatenated English.
         assertThatThrownBy(() -> service.execute(command))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("Password does not meet policy");
+                .isInstanceOf(com.fivucsas.identity.domain.exception.PasswordPolicyViolationException.class);
     }
 }

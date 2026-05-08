@@ -7,6 +7,7 @@ import com.fivucsas.identity.application.dto.query.GetUserByIdQuery;
 import com.fivucsas.identity.application.dto.query.SearchUsersQuery;
 import com.fivucsas.identity.application.dto.response.UserResponse;
 import com.fivucsas.identity.application.port.input.ManageUserUseCase;
+import com.fivucsas.identity.application.port.output.AuditLogPort;
 import com.fivucsas.identity.application.port.output.AuditLogQueryPort;
 import com.fivucsas.identity.application.port.output.PasswordEncoderPort;
 import com.fivucsas.identity.domain.exception.DuplicateEmailException;
@@ -53,6 +54,7 @@ public class ManageUserService implements ManageUserUseCase {
     private final RoleRepositoryPort roleRepository;
     private final UserRoleRepositoryPort userRoleRepository;
     private final AuditLogQueryPort auditLogQueryPort;
+    private final AuditLogPort auditLogPort;
     private final RbacAuthorizationService rbacService;
 
     @Override
@@ -299,8 +301,35 @@ public class ManageUserService implements ManageUserUseCase {
 
         enforceTenantScope(user, userId);
 
+        // Capture actor + tenant context BEFORE the soft-delete write so the
+        // audit row reflects who initiated the action and which tenant the
+        // target user belonged to. We use the entity.User-free helpers
+        // (RbacAuthorizationService.getCurrentUserTenantId,
+        // resolveTenantScope) so the hexagonal-boundary ratchet
+        // (UserDomainBoundaryTest) does not register new violations.
+        // resolveTenantScope() returns null for SUPER_ADMIN — keep that
+        // as "ROOT" for log readability.
+        UUID scopeTenantId = resolveTenantScope();
+        String actorTenantId = scopeTenantId == null
+                ? "ROOT"
+                : scopeTenantId.toString();
+
         userRepository.delete(user);
         log.info("User deleted successfully: {}", userId);
+
+        // INVESTIGATION_MASTER_2026-05-07 §"audit-log blind spots":
+        // ManageUserService imported only AuditLogReadPort; soft-deletes
+        // wrote zero audit rows. Emit USER_DELETED with target userId,
+        // actor userId, and tenantId via the existing logSecurityEvent
+        // pattern. We don't have a request IP here (the use-case API is
+        // String-only), so the IP slot is left null — the actor is the
+        // load-bearing "who" attribution.
+        auditLogPort.logSecurityEvent(
+                userId,
+                "USER_DELETED",
+                null,
+                String.format("Soft-deleted; actorTenant=%s", actorTenantId)
+        );
     }
 
     private UserResponse mapToUserResponse(User user) {

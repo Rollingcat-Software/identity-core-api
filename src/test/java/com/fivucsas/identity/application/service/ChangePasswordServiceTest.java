@@ -31,6 +31,7 @@ class ChangePasswordServiceTest {
     @Mock private UserRepository userRepository;
     @Mock private PasswordHistoryRepositoryPort passwordHistoryRepository;
     @Mock private PasswordEncoder passwordEncoder;
+    @Mock private com.fivucsas.identity.application.port.output.AuditLogPort auditLogPort;
 
     @InjectMocks
     private ChangePasswordService service;
