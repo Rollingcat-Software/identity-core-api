@@ -50,6 +50,9 @@ class ManageTenantServiceSoftDeleteTest {
     @Mock
     private UserRepository userRepository;
 
+    @Mock
+    private com.fivucsas.identity.application.port.output.AuditLogPort auditLogPort;
+
     @InjectMocks
     private ManageTenantService service;
 

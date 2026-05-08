@@ -4,6 +4,7 @@ import com.fivucsas.identity.application.dto.command.CreateTenantCommand;
 import com.fivucsas.identity.application.dto.command.UpdateTenantCommand;
 import com.fivucsas.identity.application.dto.response.TenantResponse;
 import com.fivucsas.identity.application.port.input.ManageTenantUseCase;
+import com.fivucsas.identity.application.port.output.AuditLogPort;
 import com.fivucsas.identity.domain.exception.DuplicateTenantException;
 import com.fivucsas.identity.domain.exception.TenantNotFoundException;
 import com.fivucsas.identity.domain.model.tenant.Tenant;
@@ -31,6 +32,7 @@ public class ManageTenantService implements ManageTenantUseCase {
 
     private final TenantRepository tenantRepository;
     private final com.fivucsas.identity.repository.UserRepository userRepository;
+    private final AuditLogPort auditLogPort;
 
     @Override
     @Transactional
@@ -66,6 +68,19 @@ public class ManageTenantService implements ManageTenantUseCase {
 
         tenant = tenantRepository.save(tenant);
         log.info("Tenant created successfully: {}", tenant.getId());
+
+        // INVESTIGATION_MASTER_2026-05-07 §"audit-log blind spots":
+        // ManageTenantService had no AuditLogPort wiring at all. Emit
+        // TENANT_CREATED via the existing logSecurityEvent pattern. The
+        // userId slot carries the tenant id (no per-user actor available
+        // at the use-case API today; the controller's @PreAuthorize
+        // chain has already verified SUPER_ADMIN/ROOT scope).
+        auditLogPort.logSecurityEvent(
+                tenant.getId().toString(),
+                "TENANT_CREATED",
+                null,
+                String.format("Tenant '%s' (slug=%s) created", tenant.getName(), tenant.getSlug())
+        );
 
         return mapToResponse(tenant);
     }
@@ -191,7 +206,7 @@ public class ManageTenantService implements ManageTenantUseCase {
         // findById() call goes through the @SQLRestriction filter, so a
         // soft-deleted row is reported as "not found" (which is the
         // semantically correct behaviour for callers).
-        tenantRepository.findById(tenantId)
+        Tenant tenant = tenantRepository.findById(tenantId)
             .orElseThrow(() -> new TenantNotFoundException(tenantId.toString()));
 
         // deleteById triggers @SQLDelete (UPDATE tenants SET deleted_at = NOW()).
@@ -199,6 +214,18 @@ public class ManageTenantService implements ManageTenantUseCase {
         tenantRepository.deleteById(tenantId);
         log.info("Tenant soft-deleted successfully: {} "
             + "(child tables intact — cascade chain not triggered)", tenantId);
+
+        // INVESTIGATION_MASTER_2026-05-07 §"audit-log blind spots":
+        // emit TENANT_DELETED. We capture the tenant slug+name BEFORE
+        // delete (it is still in scope here, the @SQLRestriction filter
+        // hides the row from subsequent reads but the in-memory entity
+        // is intact for this attribution).
+        auditLogPort.logSecurityEvent(
+                tenantId.toString(),
+                "TENANT_DELETED",
+                null,
+                String.format("Tenant '%s' (slug=%s) soft-deleted", tenant.getName(), tenant.getSlug())
+        );
     }
 
     private TenantResponse mapToResponse(Tenant tenant) {

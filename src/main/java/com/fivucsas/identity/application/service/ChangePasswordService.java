@@ -2,6 +2,7 @@ package com.fivucsas.identity.application.service;
 
 import com.fivucsas.identity.application.dto.command.ChangePasswordCommand;
 import com.fivucsas.identity.application.port.input.ChangePasswordUseCase;
+import com.fivucsas.identity.application.port.output.AuditLogPort;
 import com.fivucsas.identity.application.port.output.PasswordHistoryRepositoryPort;
 import com.fivucsas.identity.domain.exception.InvalidCredentialsException;
 import com.fivucsas.identity.domain.exception.UserNotFoundException;
@@ -34,6 +35,7 @@ public class ChangePasswordService implements ChangePasswordUseCase {
     private final UserRepository userRepository;
     private final PasswordHistoryRepositoryPort passwordHistoryRepository;
     private final PasswordEncoder passwordEncoder;
+    private final AuditLogPort auditLogPort;
 
     @Override
     @Transactional
@@ -66,5 +68,20 @@ public class ChangePasswordService implements ChangePasswordUseCase {
         userRepository.save(user);
 
         log.info("Password changed successfully for user: {}", uuid);
+
+        // INVESTIGATION_MASTER_2026-05-07 §"audit-log blind spots":
+        // ChangePasswordService had no AuditLogPort wiring at all, so a
+        // self-service password change left zero audit trail. Emit
+        // PASSWORD_CHANGED with userId+IP via the existing logSecurityEvent
+        // pattern (mirrors ResetPasswordService for symmetry). Tenant id is
+        // resolved from the User entity inside AuditLogAdapter.saveAuditLog
+        // — we don't pass it explicitly because logSecurityEvent's signature
+        // is shared across all callers.
+        auditLogPort.logSecurityEvent(
+                uuid.toString(),
+                "PASSWORD_CHANGED",
+                command.getIpAddress(),
+                "User self-service password change"
+        );
     }
 }
