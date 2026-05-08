@@ -60,6 +60,15 @@ public class RateLimitService {
     // against per-step OTP/biometric brute-force without throttling a legitimate
     // user re-trying an OTP they fat-fingered (which is single-digit per minute).
     private final ConcurrentHashMap<String, TimedBucket> mfaStepBuckets = new ConcurrentHashMap<>();
+    // INVESTIGATION_MASTER_2026-05-07 §"developer/tenant constraints":
+    // /oauth2/token success path was unbounded per-tenant. Per-IP/userId/
+    // clientId buckets exist, but a tenant with a runaway integration that
+    // distributes load across IPs+clientIds could mint tokens unbounded.
+    // 6000/min/tenant is generous: at ~100 RPS sustained per tenant (a very
+    // active SaaS deployment) it never trips, but stops a pathological loop
+    // from chewing the whole pool. Enforced AFTER PKCE/secret validation
+    // succeeds so it only counts genuine token mints.
+    private final ConcurrentHashMap<String, TimedBucket> tenantTokenBuckets = new ConcurrentHashMap<>();
 
     /**
      * Checks if a login attempt is allowed for the given identifier (usually IP address).
@@ -216,6 +225,42 @@ public class RateLimitService {
      * @return true if the failure is allowed (within budget), false if the
      *         client is now over the threshold and the response should be 429
      */
+    /**
+     * Charges one token-mint against the per-tenant /oauth2/token bucket
+     * and reports whether the tenant is now over budget. Called from the
+     * success path of {@code POST /oauth2/token} so only legitimate mints
+     * count — failure paths never reach this method.
+     *
+     * <p>Threshold: 6000 mints per minute per tenantId. Rationale:</p>
+     * <ul>
+     *   <li>Sustained 100 RPS per tenant is two orders of magnitude beyond
+     *       any current FIVUCSAS deployment (largest tenant runs single-
+     *       digit RPS at peak hosted-login traffic). The cap is essentially
+     *       free for legitimate use.</li>
+     *   <li>An attacker exploiting a compromised confidential client can
+     *       still mint at most 6000/min before being throttled — that's a
+     *       hard ceiling on blast radius for a single tenant compromise
+     *       while the operator rotates the secret (see also the new V58
+     *       rotation endpoint).</li>
+     *   <li>Window aligns with the per-IP login bucket cadence (1m) so SOC
+     *       dashboards plot apples to apples.</li>
+     * </ul>
+     *
+     * @param tenantId tenant UUID (string form) of the token being minted
+     * @return true if within budget, false if the tenant should be 429'd
+     */
+    public boolean allowTenantTokenMint(String tenantId) {
+        Bucket bucket = getOrCreateBucket(tenantTokenBuckets, tenantId,
+                this::createTenantTokenBucket, Duration.ofMinutes(1));
+        boolean allowed = bucket.tryConsume(1);
+
+        if (!allowed) {
+            log.warn("Rate limit exceeded for /oauth2/token mint from tenantId: {}", tenantId);
+        }
+
+        return allowed;
+    }
+
     public boolean recordAndAllowPkceFailure(String clientId) {
         Bucket bucket = getOrCreateBucket(pkceFailureBuckets, clientId,
                 this::createPkceFailureBucket, Duration.ofMinutes(5));
@@ -274,6 +319,7 @@ public class RateLimitService {
         cleaned += evictExpired(exportBuckets, now, Duration.ofHours(1).toMillis());
         cleaned += evictExpired(pkceFailureBuckets, now, Duration.ofMinutes(5).toMillis());
         cleaned += evictExpired(mfaStepBuckets, now, Duration.ofMinutes(1).toMillis());
+        cleaned += evictExpired(tenantTokenBuckets, now, Duration.ofMinutes(1).toMillis());
         if (cleaned > 0) {
             log.debug("Evicted {} expired rate limit bucket entries", cleaned);
         }
@@ -367,6 +413,15 @@ public class RateLimitService {
             .build();
     }
 
+    private Bucket createTenantTokenBucket() {
+        // 6000 successful token mints per minute per tenantId.
+        // See allowTenantTokenMint() Javadoc for the rationale.
+        Bandwidth limit = Bandwidth.classic(6000, Refill.intervally(6000, Duration.ofMinutes(1)));
+        return Bucket.builder()
+            .addLimit(limit)
+            .build();
+    }
+
     private Bucket createPkceFailureBucket() {
         // 30 PKCE/code-exchange failures per 5 minutes per clientId (Phase D5b).
         // See recordAndAllowPkceFailure() Javadoc for threshold rationale.
@@ -386,6 +441,7 @@ public class RateLimitService {
             case EXPORT -> exportBuckets;
             case PKCE_FAILURE -> pkceFailureBuckets;
             case MFA_STEP -> mfaStepBuckets;
+            case TENANT_TOKEN -> tenantTokenBuckets;
         };
     }
 
@@ -405,6 +461,7 @@ public class RateLimitService {
         API,
         EXPORT,
         PKCE_FAILURE,
-        MFA_STEP
+        MFA_STEP,
+        TENANT_TOKEN
     }
 }

@@ -50,6 +50,15 @@ public class OAuth2ClientController {
 
     private static final SecureRandom SECURE_RANDOM = new SecureRandom();
 
+    /**
+     * Grace window during which the prior client_secret remains valid
+     * after rotation. 24h is a defensible default: long enough for a
+     * typical CI/CD rollout to ship and warm caches, short enough that a
+     * leaked old secret can't be re-used indefinitely. See
+     * INVESTIGATION_MASTER_2026-05-07 §"developer/tenant constraints".
+     */
+    private static final java.time.Duration SECRET_ROTATION_GRACE = java.time.Duration.ofHours(24);
+
     // ========== Endpoints ==========
 
     /**
@@ -158,6 +167,45 @@ public class OAuth2ClientController {
         log.info("OAuth2 client deleted: {} (tenant: {})", client.getClientId(), tenantId);
 
         return ResponseEntity.noContent().build();
+    }
+
+    /**
+     * Rotate an OAuth2 client's secret. Generates a fresh secret, persists
+     * the bcrypt hash, and returns the plaintext secret ONCE. The previous
+     * secret remains valid for 24h so deployed integrations can roll over
+     * without downtime — see {@link OAuth2Client#rotateSecret} +
+     * {@link OAuth2Client#isPreviousSecretValid}, and the V58 migration.
+     *
+     * <p>Admin-only — gated by {@code @rbac.isTenantAdmin()} like the rest
+     * of this controller. Tenant scope is enforced exactly like the other
+     * mutation endpoints (filter by tenantId from the authenticated user).</p>
+     *
+     * <p>INVESTIGATION_MASTER_2026-05-07 §"developer/tenant constraints":
+     * "No client_secret rotation endpoint — operators must delete+recreate
+     * clients, breaking active integrations."</p>
+     */
+    @PostMapping("/{id}/rotate-secret")
+    @PreAuthorize("@rbac.isTenantAdmin()")
+    @Operation(summary = "Rotate OAuth2 client_secret. New secret returned ONCE; old secret valid for 24h grace window. Admin only.")
+    public ResponseEntity<OAuth2ClientCreatedResponse> rotateSecret(@PathVariable UUID id) {
+        User currentUser = rbacService.getCurrentUser()
+                .orElseThrow(() -> new IllegalStateException("Not authenticated"));
+        UUID tenantId = currentUser.getTenant().getId();
+
+        OAuth2Client client = clientRepository.findById(id)
+                .filter(c -> c.getTenant().getId().equals(tenantId))
+                .orElseThrow(() -> new NoSuchElementException("Client not found"));
+
+        String newRawSecret = generateSecureHex(64);
+        String newHashedSecret = passwordEncoder.encode(newRawSecret);
+
+        client.rotateSecret(newHashedSecret, SECRET_ROTATION_GRACE);
+        client = clientRepository.save(client);
+
+        log.info("OAuth2 client_secret rotated: clientId={} (tenant: {}, grace: {})",
+                client.getClientId(), tenantId, SECRET_ROTATION_GRACE);
+
+        return ResponseEntity.ok(OAuth2ClientCreatedResponse.from(client, newRawSecret));
     }
 
     /**

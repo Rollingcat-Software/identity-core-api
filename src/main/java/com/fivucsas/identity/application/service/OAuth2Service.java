@@ -55,6 +55,7 @@ public class OAuth2Service {
     private final StringRedisTemplate redisTemplate;
     private final PasswordEncoder passwordEncoder;
     private final MfaSessionRepository mfaSessionRepository;
+    private final com.fivucsas.identity.security.RateLimitService rateLimitService;
 
     @Value("${app.base-url:https://api.fivucsas.com}")
     private String issuer;
@@ -306,14 +307,14 @@ public class OAuth2Service {
         // the flow finished it.
         if (client.isConfidential()) {
             if (clientSecret == null || clientSecret.isEmpty()
-                    || !passwordEncoder.matches(clientSecret, client.getClientSecret())) {
+                    || !matchesCurrentOrPreviousSecret(client, clientSecret)) {
                 throw new OAuth2Exception(HttpStatus.UNAUTHORIZED,
                         "client_secret required for confidential client");
             }
         } else if (clientSecret != null && !clientSecret.isEmpty()) {
             // Public client supplied a client_secret. If it doesn't match,
             // reject — the caller clearly intended to authenticate.
-            if (!passwordEncoder.matches(clientSecret, client.getClientSecret())) {
+            if (!matchesCurrentOrPreviousSecret(client, clientSecret)) {
                 throw new IllegalArgumentException("Invalid client_secret");
             }
         } else {
@@ -343,6 +344,23 @@ public class OAuth2Service {
         // Find user
         User user = userRepository.findByEmail(userEmail)
                 .orElseThrow(() -> new IllegalArgumentException("User not found"));
+
+        // INVESTIGATION_MASTER_2026-05-07 §"developer/tenant constraints":
+        // per-tenant /oauth2/token success-path rate limit. Charged AFTER
+        // PKCE + secret validation succeeds so only legitimate mints count.
+        // Tenant id is taken from the OAuth2Client (the integration owning
+        // the client_id), not the user — a single tenant's client may mint
+        // tokens for users from any tenant the client targets, but the
+        // throttle is on the integration's tenant pool.
+        String rateLimitTenantId = client.getTenant() != null
+                ? client.getTenant().getId().toString()
+                : null;
+        if (rateLimitTenantId != null && !rateLimitService.allowTenantTokenMint(rateLimitTenantId)) {
+            long retryAfter = rateLimitService.getSecondsUntilRefill(
+                    rateLimitTenantId,
+                    com.fivucsas.identity.security.RateLimitService.RateLimitType.TENANT_TOKEN);
+            throw new TenantTokenRateLimitException(retryAfter);
+        }
 
         // Generate access token
         Map<String, Object> claims = new HashMap<>();
@@ -487,5 +505,27 @@ public class OAuth2Service {
         }
 
         return claims;
+    }
+
+    /**
+     * Returns true if {@code presentedSecret} matches the client's current
+     * secret OR (during the post-rotation grace window) the previous
+     * secret. Used by the /oauth2/token path so a freshly rotated
+     * confidential client doesn't black-hole in-flight integrations.
+     *
+     * <p>See V58 migration + {@code OAuth2Client.rotateSecret(...)} +
+     * {@code OAuth2Client.isPreviousSecretValid()}.</p>
+     */
+    private boolean matchesCurrentOrPreviousSecret(OAuth2Client client, String presentedSecret) {
+        if (passwordEncoder.matches(presentedSecret, client.getClientSecret())) {
+            return true;
+        }
+        if (client.isPreviousSecretValid()
+                && passwordEncoder.matches(presentedSecret, client.getPreviousSecret())) {
+            log.warn("OAuth2 client_secret matched the prior (rotation grace) secret: clientId={}",
+                    client.getClientId());
+            return true;
+        }
+        return false;
     }
 }
