@@ -188,9 +188,11 @@ public class OAuth2ClientController {
     @PreAuthorize("@rbac.isTenantAdmin()")
     @Operation(summary = "Rotate OAuth2 client_secret. New secret returned ONCE; old secret valid for 24h grace window. Admin only.")
     public ResponseEntity<OAuth2ClientCreatedResponse> rotateSecret(@PathVariable UUID id) {
-        User currentUser = rbacService.getCurrentUser()
+        // Use the entity.User-free helper added for the hexagonal-boundary
+        // ratchet (UserDomainBoundaryTest); we do not need anything from
+        // the User entity beyond the tenant scope here.
+        UUID tenantId = rbacService.getCurrentUserTenantId()
                 .orElseThrow(() -> new IllegalStateException("Not authenticated"));
-        UUID tenantId = currentUser.getTenant().getId();
 
         OAuth2Client client = clientRepository.findById(id)
                 .filter(c -> c.getTenant().getId().equals(tenantId))

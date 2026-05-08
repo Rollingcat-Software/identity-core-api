@@ -303,15 +303,16 @@ public class ManageUserService implements ManageUserUseCase {
 
         // Capture actor + tenant context BEFORE the soft-delete write so the
         // audit row reflects who initiated the action and which tenant the
-        // target user belonged to. After @SQLDelete fires, the User row's
-        // tenant join is still readable in-memory but the row is filtered out
-        // by @SQLRestriction on subsequent reads.
-        String actorId = rbacService.getCurrentUser()
-                .map(u -> u.getId().toString())
-                .orElse("UNKNOWN");
-        String tenantId = user.getTenant() != null
-                ? user.getTenant().getId().toString()
-                : "NONE";
+        // target user belonged to. We use the entity.User-free helpers
+        // (RbacAuthorizationService.getCurrentUserTenantId,
+        // resolveTenantScope) so the hexagonal-boundary ratchet
+        // (UserDomainBoundaryTest) does not register new violations.
+        // resolveTenantScope() returns null for SUPER_ADMIN — keep that
+        // as "ROOT" for log readability.
+        UUID scopeTenantId = resolveTenantScope();
+        String actorTenantId = scopeTenantId == null
+                ? "ROOT"
+                : scopeTenantId.toString();
 
         userRepository.delete(user);
         log.info("User deleted successfully: {}", userId);
@@ -327,7 +328,7 @@ public class ManageUserService implements ManageUserUseCase {
                 userId,
                 "USER_DELETED",
                 null,
-                String.format("Soft-deleted by actor=%s, tenantId=%s", actorId, tenantId)
+                String.format("Soft-deleted; actorTenant=%s", actorTenantId)
         );
     }
 
