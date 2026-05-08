@@ -42,6 +42,13 @@ app:
     jwt:
       active-hs-kid: ${APP_SECURITY_JWT_ACTIVE_HS_KID:hs-2026-04}
       retired-hs-kids: ${APP_SECURITY_JWT_RETIRED_HS_KIDS:}
+    # INVESTIGATION_MASTER_2026-05-07 §"user constraints":
+    # cap on active devices a single user may register. WebAuthn allowList
+    # bloat (the per-user list of credentialIds the browser must include in
+    # every authentication request) was unbounded; ~10 devices is the
+    # practical ceiling beyond which the assertion blob becomes wire-heavy
+    # and credentials.get() picker UX degrades.
+    max-devices-per-user: ${APP_SECURITY_MAX_DEVICES_PER_USER:10}
 
 # Redis Configuration
 redis:
