@@ -70,8 +70,8 @@ BEGIN
         WHERE conname = 'audit_logs_pkey'
           AND conrelid = 'audit_logs_legacy'::regclass
     ) THEN
-        EXECUTE 'ALTER TABLE audit_logs_legacy '
-             || 'RENAME CONSTRAINT audit_logs_pkey TO audit_logs_legacy_pkey';
+        ALTER TABLE audit_logs_legacy
+            RENAME CONSTRAINT audit_logs_pkey TO audit_logs_legacy_pkey;
     END IF;
 END $$;
 
