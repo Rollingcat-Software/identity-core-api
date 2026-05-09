@@ -53,6 +53,10 @@ services:
       # schema_history and the current migration files. Restore to default
       # (true) once `flyway repair` has been run.
       SPRING_FLYWAY_VALIDATE_ON_MIGRATE: ${SPRING_FLYWAY_VALIDATE_ON_MIGRATE:-true}
+      # GDPR Art. 17 / KVKK permanent purge of soft-deleted users >30 days old.
+      # Daily cron at 03:30 server time. Operator must run dry-run first via
+      # DELETE /api/v1/admin/purge/dry-run before flipping to true.
+      APP_PURGE_SOFT_DELETE_ENABLED: ${APP_PURGE_SOFT_DELETE_ENABLED:-false}
       CORS_ALLOWED_ORIGINS: https://api.fivucsas.com,https://app.fivucsas.com,https://demo.fivucsas.com,https://verify.fivucsas.com
       CORS_ALLOWED_METHODS: GET,POST,PUT,DELETE,OPTIONS,PATCH
       CORS_ALLOWED_HEADERS: Authorization,Content-Type,X-Tenant-ID,X-Request-ID,Accept
