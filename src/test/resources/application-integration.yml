@@ -20,7 +20,10 @@ spring:
 
   flyway:
     enabled: true
-    locations: classpath:db/migration
+    # Test-only fixtures live in db/test-fixtures and are NOT on the prod
+    # classpath. V28_5__align_default_login_flow_for_v29.sql back-fills the
+    # hardcoded UUIDs that V29 references (see fixture file header).
+    locations: classpath:db/migration,classpath:db/test-fixtures
     baseline-on-migrate: false
     validate-on-migrate: true
 
