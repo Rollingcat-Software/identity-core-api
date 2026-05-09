@@ -63,7 +63,7 @@ ALTER TABLE audit_logs RENAME TO audit_logs_legacy;
 -- Idempotent: the constraint is named `audit_logs_pkey` only when the
 -- original V5 created it that way; some installs (where the original PK
 -- was declared inline as `id UUID PRIMARY KEY`) auto-named it that way too.
-DO $$
+DO $rename_legacy_pkey$
 BEGIN
     IF EXISTS (
         SELECT 1 FROM pg_constraint
@@ -73,7 +73,7 @@ BEGIN
         ALTER TABLE audit_logs_legacy
             RENAME CONSTRAINT audit_logs_pkey TO audit_logs_legacy_pkey;
     END IF;
-END $$;
+END $rename_legacy_pkey$;
 
 -- Rename old indexes so they don't clash with the clones we're about to make.
 -- (INCLUDING ALL below would try to create indexes with identical names.)
