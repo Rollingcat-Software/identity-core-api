@@ -1,4 +1,6 @@
-# Identity Core API
+# FIVUCSAS — Face and Identity Verification Using Cloud-based SaaS
+
+## Identity Core API
 
 ![Java](https://img.shields.io/badge/Java-21-orange.svg)
 ![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.4.7-green.svg)
