@@ -129,35 +129,33 @@ class RefreshTokenFamilyRevocationTest {
     }
 
     @Nested
-    @DisplayName("dual-read legacy path interplay (P1-1)")
-    class LegacyDualRead {
+    @DisplayName("post-V60 hashed-wire path (T4-D)")
+    class HashedWireRotation {
 
         @Test
-        @DisplayName("legacy plaintext token still rotates correctly into the new wire format")
-        void legacyToken_rotatesIntoHashedWire() {
+        @DisplayName("hashed-wire token rotates into a new hashed-wire token, family inherited")
+        void hashedWireRotatesIntoHashedWire() {
             User user = stubUser();
             UUID legacyFamilyId = UUID.randomUUID();
-            String legacyRaw = UUID.randomUUID().toString();   // pre-V55: no '.', no hash
-            RefreshToken legacy = RefreshToken.builder()
-                    .id(UUID.randomUUID())
-                    .user(user)
-                    .token(legacyRaw)
-                    .familyId(legacyFamilyId)
-                    .expiryDate(Instant.now().plusSeconds(3600))
-                    .build();
-            when(refreshTokenRepository.findByToken(legacyRaw)).thenReturn(Optional.of(legacy));
+
+            // Mint a token through the normal createRefreshToken path so the
+            // wire-format + hash + transient token field are all populated
+            // the way the real RefreshTokenService does it.
             when(refreshTokenRepository.save(any(RefreshToken.class)))
                     .thenAnswer(inv -> inv.getArgument(0));
+            RefreshToken minted = service.createRefreshToken(user, "1.2.3.4", "JUnit");
+            // Force the family id so the assertion below pins inheritance.
+            minted.setFamilyId(legacyFamilyId);
+            when(refreshTokenRepository.findById(minted.getId())).thenReturn(Optional.of(minted));
 
-            // Locate via dual-read
-            RefreshToken found = service.findByToken(legacyRaw);
-            // Then rotate — the new token must be hashed-wire and inherit the legacy family.
+            // Locate via hashed-wire path, then rotate.
+            RefreshToken found = service.findByToken(minted.getToken());
             RefreshToken rotated = service.rotateRefreshToken(found, "1.2.3.4", "JUnit");
 
             assertThat(rotated.getToken()).contains(".");
             assertThat(rotated.getTokenSecretHash()).isNotNull();
             assertThat(rotated.getFamilyId()).isEqualTo(legacyFamilyId);
-            assertThat(legacy.isRevoked()).isTrue();
+            assertThat(minted.isRevoked()).isTrue();
         }
     }
 
@@ -172,14 +170,18 @@ class RefreshTokenFamilyRevocationTest {
     }
 
     private static RefreshToken aPersistedToken(User user, UUID familyId, boolean revoked) {
+        // T4-D: builder no longer persists `.token(...)` (column dropped by V60).
+        // The transient field is set via setToken() to mirror the in-memory
+        // state right after createRefreshToken — non-empty for the just-minted
+        // ref returned to the caller, null after a fresh findById().
         RefreshToken rt = RefreshToken.builder()
                 .id(UUID.randomUUID())
                 .user(user)
-                .token(UUID.randomUUID() + ".secret-stub")
                 .familyId(familyId)
                 .expiryDate(Instant.now().plusSeconds(3600))
                 .ipAddress("1.2.3.4")
                 .build();
+        rt.setToken(rt.getId() + ".secret-stub");
         if (revoked) {
             rt.revoke();
         }

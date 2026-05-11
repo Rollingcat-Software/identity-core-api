@@ -9,7 +9,6 @@ import org.springframework.stereotype.Repository;
 
 import java.time.Instant;
 import java.util.List;
-import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -23,7 +22,13 @@ public interface RefreshTokenRepository extends
         JpaRepository<RefreshToken, UUID>,
         com.fivucsas.identity.domain.repository.RefreshTokenRepository {
 
-    Optional<RefreshToken> findByToken(String token);
+    // Note (T4-D, 2026-05-11): {@code findByToken(String)} and
+    // {@code existsByTokenAndIsRevokedFalse(String)} were derived queries that
+    // resolved against {@code refresh_tokens.token} (the plaintext column).
+    // V60 dropped that column; lookups now go by id +
+    // {@code token_secret_hash} via {@code RefreshTokenService.findByToken}.
+    // Leaving these methods in place would cause Hibernate metadata
+    // validation to fail at boot.
 
     List<RefreshToken> findByUser(User user);
 
@@ -38,7 +43,7 @@ public interface RefreshTokenRepository extends
     @Query("DELETE FROM RefreshToken rt WHERE rt.expiryDate < :expiryDate")
     int deleteExpiredTokens(Instant expiryDate);
 
-    boolean existsByTokenAndIsRevokedFalse(String token);
+    // existsByTokenAndIsRevokedFalse removed by T4-D — see note above.
 
     @Modifying
     @Query("UPDATE RefreshToken rt SET rt.isRevoked = true, rt.revokedAt = :revokedAt WHERE rt.user = :user AND rt.id = :tokenId AND rt.isRevoked = false")
