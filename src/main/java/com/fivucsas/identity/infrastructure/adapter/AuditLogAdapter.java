@@ -32,6 +32,24 @@ import java.util.UUID;
 @Slf4j
 public class AuditLogAdapter implements AuditLogPort {
 
+    /**
+     * Well-known "system" sentinel tenant UUID used for audit rows that are
+     * truly cross-tenant / pre-authentication (failed-login attempts, PKCE
+     * failures, /oauth2/token errors, scheduled jobs).
+     *
+     * <p>V59 (2026-05-11) backfilled historical NULL rows with this value and
+     * the writer below now stamps it on new rows where the tenant cannot be
+     * resolved. The constant intentionally does NOT correspond to a real row
+     * in the {@code tenants} table — it is a logical marker. Admin views that
+     * want to filter it out (per-tenant audit view) compare against this
+     * literal; root-admin views surface it as "system".
+     *
+     * <p>See {@code src/main/resources/db/migration/V59__backfill_audit_logs_tenant_id.sql}
+     * and SENIOR_DB_REVIEW_2026-05-04 §Appendix C.</p>
+     */
+    public static final UUID SYSTEM_TENANT_ID =
+            UUID.fromString("00000000-0000-0000-0000-000000000000");
+
     private final AuditLogRepository auditLogRepository;
     private final UserRepository userRepository;
 
@@ -65,8 +83,16 @@ public class AuditLogAdapter implements AuditLogPort {
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void logAuthenticationFailed(String email, String ipAddress, String reason) {
         log.warn("AUDIT: Login failed — email={}, reason={}, ip={}", email, reason, ipAddress);
-        saveAuditLog("FAILED_LOGIN_ATTEMPT", "USER", null, false, ipAddress,
-                Map.of("email", email, "reason", reason));
+        // T4-C (2026-05-11): try to resolve tenant from the email so the
+        // row is visible to that tenant's admin. Falls back to the system
+        // sentinel inside saveAuditLog when the email is unknown (genuine
+        // attacker probe). Email-based resolution can never identify the
+        // user (we still pass userId=null so MFA correlation works), but
+        // the tenant binding gives tenant admins visibility into attack
+        // attempts targeting their users.
+        UUID tenantFromEmail = resolveTenantIdByEmail(email);
+        saveAuditLogWithTenant("FAILED_LOGIN_ATTEMPT", "USER", null, false, ipAddress,
+                null, Map.of("email", email, "reason", reason), tenantFromEmail);
     }
 
     @Override
@@ -171,9 +197,30 @@ public class AuditLogAdapter implements AuditLogPort {
 
     private void saveAuditLog(String action, String resourceType, String userId,
                               boolean success, String ipAddress, String userAgent, Map<String, Object> metadata) {
+        saveAuditLogWithTenant(action, resourceType, userId, success, ipAddress, userAgent, metadata, null);
+    }
+
+    /**
+     * Overload used by anonymous-context emitters (failed login, PKCE
+     * failure) that can resolve the tenant out-of-band (e.g. by email or
+     * by oauth2 client) BEFORE this method runs. The supplied
+     * {@code preResolvedTenantId} short-circuits the userId-based lookup;
+     * if it is {@code null} the standard fallback chain
+     * (userId → user-row lookup → SYSTEM_TENANT_ID) still applies.
+     *
+     * <p>The contract was previously that NULL tenant was acceptable for
+     * anonymous events. V59 (2026-05-11) introduced the
+     * {@link #SYSTEM_TENANT_ID} sentinel so audit rows are never NULL —
+     * see {@code resolveTenantId} below.</p>
+     */
+    private void saveAuditLogWithTenant(String action, String resourceType, String userId,
+                                        boolean success, String ipAddress, String userAgent,
+                                        Map<String, Object> metadata, UUID preResolvedTenantId) {
         try {
             UUID userUuid = userId != null ? UUID.fromString(userId) : null;
-            UUID tenantUuid = resolveTenantId(userUuid);
+            UUID tenantUuid = preResolvedTenantId != null
+                    ? preResolvedTenantId
+                    : resolveTenantId(userUuid);
 
             AuditLog auditLog = AuditLog.builder()
                     // SECURITY_REVIEW_2026-05-01 §P2-1: action / resourceType
@@ -227,30 +274,55 @@ public class AuditLogAdapter implements AuditLogPort {
      * <p>Background: tenant-admin's {@code /api/v1/audit-logs} endpoint filters
      * by {@code tenant_id = X}. Audit rows with NULL tenant_id are invisible to
      * every tenant admin, even though they describe activity inside a tenant.
-     * Prior to this fix the writer never set tenant_id, so ~99% of rows were
-     * NULL. See V46 backfill migration.</p>
+     * V46 (2026-04-25) backfilled user-scoped NULLs; V59 (2026-05-11) backfilled
+     * anonymous-event NULLs with the {@link #SYSTEM_TENANT_ID} sentinel.</p>
      *
-     * <p>Resolution rules:</p>
+     * <p>Resolution rules (T4-C, 2026-05-11):</p>
      * <ul>
      *   <li>If a {@code userId} is supplied, look up the user's tenant_id via
      *       {@link UserRepository#findTenantIdById}. This covers USER_LOGIN,
      *       USER_LOGOUT, MFA_*, BIOMETRIC_*, USER_CREATED, etc.</li>
-     *   <li>If no {@code userId} is supplied (anonymous failed login,
-     *       scheduled job, system event), tenant_id stays NULL. The audit row
-     *       is intentionally cross-tenant.</li>
-     *   <li>If the user lookup fails for any reason (deleted user, transient
-     *       DB error), tenant_id stays NULL — we never let an audit write fail
-     *       because of a tenant-resolution problem.</li>
+     *   <li>If no {@code userId} is supplied, or the user lookup returns
+     *       empty / throws (deleted user, transient DB error), return
+     *       {@link #SYSTEM_TENANT_ID} — the well-known sentinel for
+     *       cross-tenant / system rows. This guarantees the column is
+     *       never NULL, which is the prerequisite for a future NOT NULL
+     *       constraint (P2 follow-up post-soak).</li>
      * </ul>
      */
     private UUID resolveTenantId(UUID userId) {
         if (userId == null) {
+            return SYSTEM_TENANT_ID;
+        }
+        try {
+            return userRepository.findTenantIdById(userId).orElse(SYSTEM_TENANT_ID);
+        } catch (Exception e) {
+            log.warn("Failed to resolve tenant_id for audit row userId={}: {}", userId, e.getMessage());
+            return SYSTEM_TENANT_ID;
+        }
+    }
+
+    /**
+     * Best-effort lookup of a tenant_id from an email. Used by
+     * {@link #logAuthenticationFailed} so that a failed-login audit row can be
+     * filed under the targeted user's tenant — making the row visible to that
+     * tenant's admin (rather than invisible behind the system sentinel).
+     *
+     * <p>Returns {@code null} when the email is null/blank or no user matches,
+     * in which case {@link #saveAuditLogWithTenant} falls through to
+     * {@link #resolveTenantId} which yields {@link #SYSTEM_TENANT_ID}. Never
+     * throws — exceptions are swallowed and logged.</p>
+     */
+    private UUID resolveTenantIdByEmail(String email) {
+        if (email == null || email.isBlank()) {
             return null;
         }
         try {
-            return userRepository.findTenantIdById(userId).orElse(null);
+            return userRepository.findByEmail(email)
+                    .map(u -> u.getTenantId() != null ? u.getTenantId().getValue() : null)
+                    .orElse(null);
         } catch (Exception e) {
-            log.warn("Failed to resolve tenant_id for audit row userId={}: {}", userId, e.getMessage());
+            log.warn("Failed to resolve tenant_id for audit row by email={}: {}", email, e.getMessage());
             return null;
         }
     }

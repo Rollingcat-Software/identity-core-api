@@ -20,6 +20,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -192,21 +193,55 @@ class AuditLogAdapterTest {
     }
 
     @Nested
-    @DisplayName("System / anonymous events leave tenant_id NULL")
+    @DisplayName("System / anonymous events stamp tenant_id with the SYSTEM_TENANT_ID sentinel [T4-C]")
     class SystemEvents {
 
         @Test
-        @DisplayName("logAuthenticationFailed (anonymous) leaves tenant_id NULL")
-        void anonymousFailedLoginIsCrossTenant() {
-            // No user is known yet — failed login pre-resolution.
+        @DisplayName("logAuthenticationFailed (unknown email) stamps SYSTEM_TENANT_ID sentinel")
+        void anonymousFailedLoginUsesSentinel() {
+            // No user is known yet — failed login pre-resolution, email
+            // does not match any tenant user.
+            when(userRepository.findByEmail("attacker@example.com"))
+                    .thenReturn(Optional.empty());
+
             adapter.logAuthenticationFailed("attacker@example.com", "1.2.3.4",
                     "Invalid credentials");
 
             AuditLog saved = captureSaved();
-            assertThat(saved.getTenantId()).isNull();
+            assertThat(saved.getTenantId()).isEqualTo(AuditLogAdapter.SYSTEM_TENANT_ID);
             assertThat(saved.getUserId()).isNull();
             assertThat(saved.getAction()).isEqualTo("FAILED_LOGIN_ATTEMPT");
             verify(userRepository, never()).findTenantIdById(any());
+        }
+
+        @Test
+        @DisplayName("logAuthenticationFailed: known email routes audit row to that user's tenant")
+        void failedLoginWithKnownEmailUsesTenantOfUser() {
+            // Targeted account: the user exists but the password was wrong.
+            // We must stamp the row with that user's tenant so the tenant
+            // admin sees the attack attempt.
+            com.fivucsas.identity.entity.User u = mock(com.fivucsas.identity.entity.User.class);
+            when(u.getTenantId())
+                    .thenReturn(com.fivucsas.identity.domain.model.tenant.TenantId.of(tenantId));
+            when(userRepository.findByEmail("victim@example.com"))
+                    .thenReturn(Optional.of(u));
+
+            adapter.logAuthenticationFailed("victim@example.com", "1.2.3.4",
+                    "Invalid credentials");
+
+            AuditLog saved = captureSaved();
+            assertThat(saved.getTenantId()).isEqualTo(tenantId);
+            assertThat(saved.getUserId()).isNull();
+            assertThat(saved.getAction()).isEqualTo("FAILED_LOGIN_ATTEMPT");
+        }
+
+        @Test
+        @DisplayName("logPkceFailure (no userId) stamps SYSTEM_TENANT_ID sentinel")
+        void pkceFailureUsesSentinel() {
+            adapter.logPkceFailure("client-x", "1.2.3.4", "VERIFIER_MISMATCH");
+
+            AuditLog saved = captureSaved();
+            assertThat(saved.getTenantId()).isEqualTo(AuditLogAdapter.SYSTEM_TENANT_ID);
         }
     }
 
@@ -215,7 +250,7 @@ class AuditLogAdapterTest {
     class Resilience {
 
         @Test
-        @DisplayName("Missing user record leaves tenant_id NULL but still saves the row")
+        @DisplayName("Missing user record stamps SYSTEM_TENANT_ID sentinel but still saves the row [T4-C]")
         void missingUserRecordStillSaves() {
             when(userRepository.findTenantIdById(userId)).thenReturn(Optional.empty());
 
@@ -223,12 +258,12 @@ class AuditLogAdapterTest {
                     "1.2.3.4", "Mozilla/5.0");
 
             AuditLog saved = captureSaved();
-            assertThat(saved.getTenantId()).isNull();
+            assertThat(saved.getTenantId()).isEqualTo(AuditLogAdapter.SYSTEM_TENANT_ID);
             assertThat(saved.getUserId()).isEqualTo(userId);
         }
 
         @Test
-        @DisplayName("Repository throwing on lookup leaves tenant_id NULL but still saves")
+        @DisplayName("Repository throwing on lookup stamps SYSTEM_TENANT_ID sentinel but still saves [T4-C]")
         void repositoryThrowingStillSaves() {
             when(userRepository.findTenantIdById(userId))
                     .thenThrow(new RuntimeException("transient db error"));
@@ -237,7 +272,20 @@ class AuditLogAdapterTest {
                     "1.2.3.4", "Mozilla/5.0");
 
             AuditLog saved = captureSaved();
-            assertThat(saved.getTenantId()).isNull();
+            assertThat(saved.getTenantId()).isEqualTo(AuditLogAdapter.SYSTEM_TENANT_ID);
+        }
+
+        @Test
+        @DisplayName("logAuthenticationFailed: email-resolution failure falls through to sentinel [T4-C]")
+        void failedLoginEmailLookupThrowingFallsToSentinel() {
+            when(userRepository.findByEmail("victim@example.com"))
+                    .thenThrow(new RuntimeException("transient db error"));
+
+            adapter.logAuthenticationFailed("victim@example.com", "1.2.3.4",
+                    "Invalid credentials");
+
+            AuditLog saved = captureSaved();
+            assertThat(saved.getTenantId()).isEqualTo(AuditLogAdapter.SYSTEM_TENANT_ID);
         }
     }
 

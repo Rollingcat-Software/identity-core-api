@@ -1,0 +1,36 @@
+-- V60: Drop refresh_tokens.token plaintext column
+-- ---------------------------------------------------------------------------
+-- V55 (PR #56, 2026-05-02) introduced the hashed wire-format <id>.<secret>
+-- with SHA-256 of the secret-half persisted in `token_secret_hash`. The
+-- plaintext `token` column was kept under V55 + V56 (reserved no-op) for a
+-- dual-read soak window: any token minted before V55 still verified via the
+-- plaintext fallback path in RefreshTokenService.findByToken().
+--
+-- V55 was applied to prod ~2026-05-02. PR #71 (2026-05-04) shipped the
+-- Persistable<UUID> isNew() fix and was rebuilt the same day. Token TTL is
+-- jwt.refresh-expiration = 7 days. As of 2026-05-11 the soak window has
+-- closed: every legacy plaintext token has either rolled off via TTL or
+-- been rotated into the hashed wire-format by normal rotation traffic.
+--
+-- This migration drops the plaintext column. The companion code change in
+-- the same PR:
+--   * removes RefreshTokenRepository.findByToken(String) JPA derived query,
+--   * removes RefreshTokenRepository.existsByTokenAndIsRevokedFalse(String),
+--   * removes the entity field RefreshToken.token,
+--   * removes the dual-read fallback in RefreshTokenService.findByToken,
+--   * removes the dual-write of `wireToken` into the plaintext column at mint.
+--
+-- Hibernate metadata validation would fail at boot if any of those mappings
+-- remained while the column is gone — so the column drop and the code drop
+-- ship together. The operator MUST rebuild the api container after merge
+-- (see PR description) so V59+V60 apply at boot with the new code.
+--
+-- Idempotency: IF EXISTS makes this safe to re-run on environments that
+-- somehow already lost the column.
+-- ---------------------------------------------------------------------------
+
+ALTER TABLE refresh_tokens DROP COLUMN IF EXISTS token;
+
+-- The unique index that backed `token` (created automatically by the
+-- `unique = true` JPA annotation on the original column) is dropped by
+-- Postgres as a side-effect of DROP COLUMN. No explicit DROP INDEX needed.

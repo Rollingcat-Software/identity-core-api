@@ -69,9 +69,15 @@ public class RefreshTokenService implements com.fivucsas.identity.application.po
 
         // P1-1 (2026-05-02): wire format is `<id>.<secret>` where `<secret>` is
         // a 32-byte URL-safe random. Only sha256(secret) is persisted in
-        // token_secret_hash. The plaintext `token` column is dual-written for
-        // backwards-compat reads of rows minted before this PR; it will be
-        // dropped in a follow-up migration after operator soak.
+        // token_secret_hash.
+        //
+        // T4-D (2026-05-11, V60): the dual-written plaintext `token` column was
+        // dropped after the 7-day soak window closed. The wire token is now
+        // carried back to the caller via the {@code @Transient} {@code token}
+        // field on the entity — set BEFORE save so the response body can read
+        // it via {@code refreshToken.getToken()}, never persisted, never
+        // re-hydrated. After this method returns the secret is unrecoverable
+        // outside of what the calling controller wrote into the HTTP response.
         UUID tokenId = UUID.randomUUID();
         String secret = generateSecret();
         String wireToken = tokenId + "." + secret;
@@ -80,7 +86,6 @@ public class RefreshTokenService implements com.fivucsas.identity.application.po
         RefreshToken refreshToken = RefreshToken.builder()
                 .id(tokenId)
                 .user(user)
-                .token(wireToken)
                 .tokenSecretHash(secretHash)
                 .familyId(familyId)
                 .expiryDate(Instant.now().plusMillis(refreshTokenDurationMs))
@@ -88,7 +93,13 @@ public class RefreshTokenService implements com.fivucsas.identity.application.po
                 .userAgent(userAgent)
                 .build();
 
-        return refreshTokenRepository.save(refreshToken);
+        RefreshToken saved = refreshTokenRepository.save(refreshToken);
+        // Transient one-shot exposure of the wire token. JPA does not persist
+        // this field (it is annotated @Transient); a subsequent findById()
+        // returns a row with token == null. The wire token lives only on this
+        // in-memory reference until the caller finishes building the response.
+        saved.setToken(wireToken);
+        return saved;
     }
 
     private static String generateSecret() {
@@ -128,15 +139,15 @@ public class RefreshTokenService implements com.fivucsas.identity.application.po
     /**
      * Locate a refresh token by the raw value the client presented.
      *
-     * <p>P1-1 (2026-05-02) dual-read:
-     * <ul>
-     *   <li>If the raw value matches the new {@code <id>.<secret>} wire format,
-     *       look up by id and constant-time-compare {@code sha256(secret)}
-     *       against {@code token_secret_hash}.</li>
-     *   <li>Otherwise (legacy tokens issued before this PR), fall back to the
-     *       plaintext-column equality lookup. Those tokens will roll off via
-     *       TTL within {@code jwt.refresh-expiration}.</li>
-     * </ul>
+     * <p>P1-1 (2026-05-02) wire format: {@code <id>.<secret>}. Lookup goes by
+     * id and constant-time-compares {@code sha256(secret)} against
+     * {@code token_secret_hash}.</p>
+     *
+     * <p>T4-D (2026-05-11, V60): the legacy plaintext-column dual-read
+     * fallback was removed after the 7-day soak. Any token presented in a
+     * pre-V55 shape (no {@code .} separator, no id prefix) now resolves to
+     * {@link TokenRevokedException} — by 2026-05-11 every such token has
+     * either rolled off via the 7-day TTL or been rotated.</p>
      *
      * <p>A hash mismatch on a known id is treated as "wrong token" (404-shaped),
      * not "reused token" — only an explicit revoked-and-presented token triggers
@@ -144,12 +155,7 @@ public class RefreshTokenService implements com.fivucsas.identity.application.po
      */
     @Transactional(readOnly = true)
     public RefreshToken findByToken(String token) {
-        Optional<RefreshToken> hashed = findByHashedWireToken(token);
-        if (hashed.isPresent()) {
-            return hashed.get();
-        }
-        // Legacy fallback: plaintext-column equality match.
-        return refreshTokenRepository.findByToken(token)
+        return findByHashedWireToken(token)
                 .orElseThrow(() -> new TokenRevokedException("Refresh token not found or has been revoked"));
     }
 

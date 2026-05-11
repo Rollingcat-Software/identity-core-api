@@ -104,8 +104,6 @@ class RefreshTokenServiceTest {
         RefreshToken found = service.findByToken(minted.getToken());
 
         assertThat(found).isSameAs(minted);
-        // Plaintext fallback must not have been used.
-        verify(refreshTokenRepository, never()).findByToken(anyString());
     }
 
     @Test
@@ -120,7 +118,6 @@ class RefreshTokenServiceTest {
         when(refreshTokenRepository.findById(minted.getId())).thenReturn(Optional.of(minted));
         // Tampered token: keep id, scramble secret.
         String tampered = minted.getId() + ".obviously-not-the-secret";
-        when(refreshTokenRepository.findByToken(tampered)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> service.findByToken(tampered))
                 .isInstanceOf(TokenRevokedException.class);
@@ -132,36 +129,32 @@ class RefreshTokenServiceTest {
     }
 
     @Test
-    @DisplayName("findByToken: legacy plaintext token still verifies via dual-read [P1-1]")
-    void findByToken_LegacyPlaintext_FallsBack() {
-        // Simulates a row minted before V55: tokenSecretHash is null and the
-        // raw value has no `.` separator (UUID.toString — no dots).
-        User user = mock(User.class);
-        String legacyToken = UUID.randomUUID().toString();
-        RefreshToken legacy = RefreshToken.builder()
-                .id(UUID.randomUUID())
-                .user(user)
-                .token(legacyToken)
-                .familyId(UUID.randomUUID())
-                .expiryDate(Instant.now().plusSeconds(3600))
-                .build();
-        when(refreshTokenRepository.findByToken(legacyToken)).thenReturn(Optional.of(legacy));
+    @DisplayName("findByToken: legacy plaintext token now rejected after V60 drop [T4-D]")
+    void findByToken_LegacyPlaintextRejectedAfterV60() {
+        // T4-D (2026-05-11, V60): the plaintext column + dual-read fallback
+        // were dropped after the 7-day soak window closed (V55 shipped
+        // 2026-05-02). A pre-V55 token (no '.' separator) now resolves to
+        // TokenRevokedException — by 2026-05-11 every such row has rolled
+        // off via the 7-day TTL.
+        String legacyToken = UUID.randomUUID().toString();  // no '.'
 
-        RefreshToken found = service.findByToken(legacyToken);
+        assertThatThrownBy(() -> service.findByToken(legacyToken))
+                .isInstanceOf(TokenRevokedException.class);
 
-        assertThat(found).isSameAs(legacy);
+        // The dropped JPA derived query must not be invoked.
+        verifyNoMoreInteractions(refreshTokenRepository);
     }
 
     @Test
-    @DisplayName("findByToken: malformed wire token (bad uuid) falls through to plaintext lookup")
-    void findByToken_MalformedWire_FallsThrough() {
+    @DisplayName("findByToken: malformed wire token (bad uuid) yields TokenRevokedException [T4-D]")
+    void findByToken_MalformedWire_Rejected() {
+        // After V60 there is no plaintext fallback. Malformed wire tokens
+        // resolve directly to TokenRevokedException via the not-found path.
         String malformed = "not-a-uuid.anything";
-        when(refreshTokenRepository.findByToken(malformed)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> service.findByToken(malformed))
                 .isInstanceOf(TokenRevokedException.class);
 
-        verify(refreshTokenRepository).findByToken(malformed);
         verify(refreshTokenRepository, never()).findById(any(UUID.class));
     }
 }

@@ -5,7 +5,6 @@ import com.fivucsas.identity.entity.User;
 
 import java.time.Instant;
 import java.util.List;
-import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -18,13 +17,9 @@ import java.util.UUID;
  */
 public interface RefreshTokenRepository {
 
-    /**
-     * Finds a refresh token by its token string.
-     *
-     * @param token the token string
-     * @return Optional containing the token if found
-     */
-    Optional<RefreshToken> findByToken(String token);
+    // T4-D (2026-05-11): findByToken(String) removed. The plaintext token
+    // column was dropped by V60; lookups now go via id +
+    // token_secret_hash inside RefreshTokenService.findByToken.
 
     /**
      * Finds all refresh tokens for a user.
@@ -61,13 +56,8 @@ public interface RefreshTokenRepository {
      */
     int deleteExpiredTokens(Instant expiryDate);
 
-    /**
-     * Checks if a non-revoked token exists.
-     *
-     * @param token the token string
-     * @return true if active token exists
-     */
-    boolean existsByTokenAndIsRevokedFalse(String token);
+    // T4-D (2026-05-11): existsByTokenAndIsRevokedFalse(String) removed —
+    // dropped along with the plaintext column in V60.
 
     int revokeUserToken(User user, UUID tokenId, Instant revokedAt);
 
