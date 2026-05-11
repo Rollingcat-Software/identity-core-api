@@ -113,7 +113,7 @@ services:
       - "traefik.http.routers.identity-api.rule=Host(`api.fivucsas.com`)"
       - "traefik.http.routers.identity-api.entrypoints=websecure"
       - "traefik.http.routers.identity-api.tls.certresolver=letsencrypt"
-      - "traefik.http.routers.identity-api.middlewares=secure-headers@file,rate-limit@file"
+      - "traefik.http.routers.identity-api.middlewares=secure-headers@file,noindex@file,rate-limit@file"
       - "traefik.http.services.identity-api.loadbalancer.server.port=8080"
     deploy:
       resources:
