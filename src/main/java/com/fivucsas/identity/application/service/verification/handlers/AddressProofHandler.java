@@ -12,7 +12,14 @@ import java.util.Map;
 /**
  * Handles ADDRESS_PROOF verification step.
  *
- * <p><b>STUB / DEV-ONLY.</b> The current implementation accepts any non-empty
+ * <p><b>STUB IMPLEMENTATION — gated to dev profile only.</b> Real KYC/AML provider
+ * (Refinitiv / Dow Jones / OCR-and-address-validation / S3-backed media storage / etc.)
+ * integration is Phase 4 scope. Loading this bean under {@code prod} = bug — the
+ * {@code @Profile("dev")} annotation below is the production safety ratchet. If you
+ * are looking at this class because something exploded at boot under {@code prod},
+ * the answer is NOT to remove the annotation; the answer is to ship a real impl.
+ *
+ * <p>The current implementation accepts any non-empty
  * image payload and returns {@code status=PENDING_REVIEW, document_stored=true}
  * without actually persisting the image, validating the document, or extracting
  * the address. The inline comment ("would be stored via a media storage service
