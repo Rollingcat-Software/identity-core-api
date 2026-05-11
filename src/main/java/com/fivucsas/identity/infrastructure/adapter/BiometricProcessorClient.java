@@ -18,6 +18,7 @@ import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
 import java.util.Base64;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
@@ -103,6 +104,59 @@ public class BiometricProcessorClient {
         MultiValueMap<String, String> formData = new LinkedMultiValueMap<>();
         formData.add("mrz_text", mrzText);
         return postFormData("/verification/data-extract", formData);
+    }
+
+    /**
+     * Parse an NFC document MRZ via biometric-processor.
+     *
+     * <p>This is the structured, JSON-based MRZ parser dedicated to the NFC
+     * auth flow (T2-A, INVESTIGATION 2026-05-07 P1). It is distinct from
+     * {@link #dataExtractMrz(String)} which targets the manual-KYC
+     * verification pipeline and shares its OCR-driven fallback path. The
+     * NFC route accepts exactly one of {@code mrz_text} or
+     * {@code dg1_bytes_b64} and returns ICAO 9303 check-digit verification
+     * results that the caller uses to gate success/failure.</p>
+     *
+     * @param mrzText      raw MRZ string (may be {@code null} when {@code dg1BytesB64} is set)
+     * @param dg1BytesB64  base64-encoded DG1 bytes (may be {@code null} when {@code mrzText} is set)
+     * @return JSON body from biometric-processor; contains {@code checksum_valid}
+     *         on success or {@code success=false, error=...} on transport failure
+     */
+    public Map<String, Object> verifyMrz(String mrzText, String dg1BytesB64) {
+        log.info("Calling biometric-processor /nfc/mrz");
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("mrz_text", mrzText);
+        body.put("dg1_bytes_b64", dg1BytesB64);
+        return postJson("/nfc/mrz", body);
+    }
+
+    /**
+     * Post a JSON body. Mirrors {@link #postFormData} but for endpoints
+     * that accept JSON instead of multipart/form. Returns the same
+     * error-shaped Map on transport failure so callers can branch on
+     * {@code success == false}.
+     */
+    private Map<String, Object> postJson(String path, Map<String, Object> body) {
+        try {
+            return restClient.post()
+                    .uri(path)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(body)
+                    .retrieve()
+                    .body(MAP_TYPE);
+        } catch (HttpClientErrorException e) {
+            log.warn("Biometric processor client error for {}: {} {}", path, e.getStatusCode(), e.getMessage());
+            return errorResponse("Biometric processor rejected request: " + e.getResponseBodyAsString());
+        } catch (HttpServerErrorException e) {
+            log.error("Biometric processor server error for {}: {} {}", path, e.getStatusCode(), e.getMessage());
+            return errorResponse("Biometric processor error, please retry");
+        } catch (ResourceAccessException e) {
+            log.error("Biometric processor unreachable for {}: {}", path, e.getMessage());
+            return errorResponse("Biometric processor unavailable");
+        } catch (RestClientException e) {
+            log.error("Biometric processor communication error for {}: {}", path, e.getMessage());
+            return errorResponse("Biometric processor communication error");
+        }
     }
 
     /**

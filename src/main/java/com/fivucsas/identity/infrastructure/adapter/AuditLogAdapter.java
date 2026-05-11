@@ -164,6 +164,34 @@ public class AuditLogAdapter implements AuditLogPort {
         saveAuditLog("PKCE_FAILURE", "OAUTH2", null, false, actorIp, null, metadata);
     }
 
+    @Override
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void logNfcDocumentVerified(String userId, String documentNumberMasked,
+                                       String issuingCountry, String mrzFormat,
+                                       boolean checksumValid,
+                                       String ipAddress, String userAgent) {
+        // T2-A — never persist the full document number. The masked form is
+        // last-4-chars and is built by the controller before it ever reaches
+        // this adapter. The audit row still carries enough context (issuing
+        // country, MRZ format, success bit) for SOC analysts to spot anomalous
+        // sources without exposing PII.
+        String action = checksumValid
+                ? "NFC_DOCUMENT_VERIFIED"
+                : "NFC_DOCUMENT_VERIFICATION_FAILED";
+        log.info("AUDIT: NFC document {} — userId={}, country={}, format={}, masked={}, ip={}",
+                checksumValid ? "verified" : "verification failed",
+                userId, issuingCountry, mrzFormat, documentNumberMasked, ipAddress);
+        Map<String, Object> metadata = new java.util.LinkedHashMap<>();
+        metadata.put("documentNumberMasked",
+                documentNumberMasked != null ? documentNumberMasked : "");
+        metadata.put("issuingCountry",
+                issuingCountry != null ? issuingCountry : "");
+        metadata.put("mrzFormat", mrzFormat != null ? mrzFormat : "");
+        metadata.put("checksumValid", checksumValid);
+        saveAuditLog(action, "NFC_DOCUMENT", userId, checksumValid,
+                ipAddress, userAgent, metadata);
+    }
+
     private void saveAuditLog(String action, String resourceType, String userId,
                               boolean success, String ipAddress, Map<String, Object> metadata) {
         saveAuditLog(action, resourceType, userId, success, ipAddress, null, metadata);

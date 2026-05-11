@@ -41,6 +41,13 @@ public enum AuditAction {
     BIOMETRIC_VERIFICATION_FAILED,
     BIOMETRIC_DELETED,
 
+    // NFC document (T2-A, INVESTIGATION 2026-05-07 P1)
+    // Emitted by NfcController#verifyMrz. Metadata carries a masked document
+    // number (last 4 only) and the issuing country so audit consumers can
+    // spot anomalous sources without storing the full document identifier.
+    NFC_DOCUMENT_VERIFIED,
+    NFC_DOCUMENT_VERIFICATION_FAILED,
+
     // Settings
     SETTINGS_UPDATED,
     SECURITY_SETTINGS_UPDATED,
