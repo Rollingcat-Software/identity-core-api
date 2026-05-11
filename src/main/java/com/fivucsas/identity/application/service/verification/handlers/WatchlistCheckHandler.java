@@ -13,7 +13,14 @@ import java.util.Map;
 /**
  * Handles WATCHLIST_CHECK verification step.
  *
- * <p><b>STUB / DEV-ONLY.</b> This is a mock that always returns {@code cleared=true,
+ * <p><b>STUB IMPLEMENTATION — gated to dev profile only.</b> Real KYC/AML provider
+ * (Refinitiv / Dow Jones / Sayari / OpenSanctions / etc.) integration is Phase 4 scope.
+ * Loading this bean under {@code prod} = bug — the {@code @Profile("dev")} annotation
+ * below is the production safety ratchet. If you are looking at this class because
+ * something exploded at boot under {@code prod}, the answer is NOT to remove the
+ * annotation; the answer is to ship a real impl.
+ *
+ * <p>This is a mock that always returns {@code cleared=true,
  * match_count=0}. There is no real sanctions/watchlist provider wired (Refinitiv, Dow Jones,
  * Sayari, OpenSanctions, etc. — none are integrated). Returning a hard-coded "cleared"
  * verdict in production would silently false-pass any KYC/AML pipeline that includes a
