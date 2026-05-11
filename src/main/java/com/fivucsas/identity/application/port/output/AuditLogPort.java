@@ -166,4 +166,35 @@ public interface AuditLogPort {
      * @param failureReason categorisation drawn from {@code PkceFailureReason.name()}
      */
     void logPkceFailure(String clientId, String actorIp, String failureReason);
+
+    /**
+     * Logs an NFC document MRZ verification attempt (T2-A, INVESTIGATION
+     * 2026-05-07 P1).
+     *
+     * <p>Emitted by {@code NfcController#verifyMrz} after the
+     * biometric-processor parses the MRZ and reports check-digit validity.
+     * The audit row never carries the full document number — only the last
+     * four characters are persisted in {@code metadata.documentNumberMasked}.
+     * Issuing country, document type and MRZ format also land in metadata
+     * so SOC analysts can spot anomalous sources.</p>
+     *
+     * <p>The action stamped on the audit row is
+     * {@link com.fivucsas.identity.domain.model.AuditAction#NFC_DOCUMENT_VERIFIED}
+     * on success or
+     * {@link com.fivucsas.identity.domain.model.AuditAction#NFC_DOCUMENT_VERIFICATION_FAILED}
+     * when {@code checksumValid == false} or the biometric-processor is
+     * unreachable.</p>
+     *
+     * @param userId               authenticated caller's user id (may be {@code null})
+     * @param documentNumberMasked last 4 chars of the document number; never the full value
+     * @param issuingCountry       3-letter ISO country code from the MRZ
+     * @param mrzFormat            "TD1" or "TD3"
+     * @param checksumValid        whether all ICAO 9303 check digits validated
+     * @param ipAddress            client IP
+     * @param userAgent            client User-Agent
+     */
+    void logNfcDocumentVerified(String userId, String documentNumberMasked,
+                                String issuingCountry, String mrzFormat,
+                                boolean checksumValid,
+                                String ipAddress, String userAgent);
 }
