@@ -510,8 +510,8 @@ Response:
 
 ```json
 {
-  "accessToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-  "refreshToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "accessToken": "<JWT_ACCESS_TOKEN>",
+  "refreshToken": "<JWT_REFRESH_TOKEN>",
   "tokenType": "Bearer",
   "expiresIn": 3600,
   "user": {
@@ -528,7 +528,7 @@ Response:
 
 ```bash
 curl -X GET http://localhost:8080/api/v1/users/me \
-  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." \
+  -H "Authorization: Bearer <JWT_ACCESS_TOKEN>" \
   -H "X-Tenant-ID: tenant-123"
 ```
 
