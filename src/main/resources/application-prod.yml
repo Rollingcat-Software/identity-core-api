@@ -84,10 +84,22 @@ app:
   # - allow-hs512: HS512 verification OFF in prod once 30-day soak completes.
   # - issuer: pinned so tokens forged against a different deployment's RSA key
   #   (e.g. staging) are rejected at the parser, not just at signature time.
+  # SECURITY_REVIEW / BACKEND_REVIEW 2026-05-12 §aud-claim / §P1:
+  # - audience: every minted access token carries `aud=fivucsas-api`; the
+  #   parser rejects tokens whose audience does not contain it. Closes the
+  #   RFC 7519 §4.1.3 binding gap that memory missed three times.
+  # - allow-hs512: pinned to false explicitly (was relying on application.yml
+  #   default). The leaked f8ee668:.env.gcp HS secret is no longer a forge
+  #   surface even if APP_SECURITY_JWT_ALLOW_HS512 is unset in .env.prod.
+  # - revoked-kids: explicit defence-in-depth for the leaked hs-2026-04 kid.
+  #   Any JWT carrying that kid is rejected during validation regardless of
+  #   allow-hs512 state.
   security:
     jwt:
-      allow-hs512: ${APP_SECURITY_JWT_ALLOW_HS512:false}
+      allow-hs512: false
       issuer: ${APP_SECURITY_JWT_ISSUER:https://api.fivucsas.com}
+      audience: ${APP_SECURITY_JWT_AUDIENCE:fivucsas-api}
+      revoked-kids: ${APP_SECURITY_JWT_REVOKED_KIDS:hs-2026-04}
 
 # JWT Configuration (Production)
 # CRITICAL: JWT secret MUST come from environment variable (see JwtSecretProvider)

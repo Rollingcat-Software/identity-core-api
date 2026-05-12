@@ -14,11 +14,17 @@ import org.springframework.stereotype.Service;
 
 import javax.crypto.SecretKey;
 import java.security.Key;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 
 /**
  * JWT sign + verify service supporting dual-algorithm coexistence (BE-H1):
@@ -75,6 +81,30 @@ public class JwtService implements TokenGenerationPort {
     @Value("${app.security.jwt.issuer:}")
     private String expectedIssuer;
 
+    /**
+     * SECURITY_REVIEW / BACKEND_REVIEW 2026-05-12 — bind {@code aud} (RFC 7519
+     * §4.1.3). Memory has missed this fix three times (2026-04-20, 2026-05-02,
+     * 2026-05-12). Tokens now carry an {@code aud} claim, and the parser
+     * requires that the configured audience appears in the token's {@code aud}
+     * set (single-string for now, comma-separated for future multi-tenant
+     * audiences). Empty value disables the requirement for dev/test parity
+     * with {@link #expectedIssuer}.
+     */
+    @Value("${app.security.jwt.audience:}")
+    private String expectedAudience;
+
+    /**
+     * SECURITY_REVIEW 2026-05-12 §P1 — explicitly revoked HS512 kids. The
+     * leaked f8ee668:.env.gcp secret tagged {@code hs-2026-04} should be
+     * rejected even if {@link #allowHs512} is somehow flipped back on for an
+     * emergency rollback window. Comma-separated list of kid strings; default
+     * empty so non-prod profiles stay unaffected.
+     */
+    @Value("${app.security.jwt.revoked-kids:}")
+    private String revokedKidsCsv;
+
+    private Set<String> revokedKids = Collections.emptySet();
+
     public JwtService(HsKeyRegistry hsKeyRegistry,
                       RsaKeyProvider rsaKeyProvider,
                       Environment environment) {
@@ -106,6 +136,23 @@ public class JwtService implements TokenGenerationPort {
             log.warn("JWT verification: no issuer requirement configured "
                     + "(set app.security.jwt.issuer=https://api.fivucsas.com in prod)");
         }
+        if (expectedAudience != null && !expectedAudience.isEmpty()) {
+            log.info("JWT verification: audience pinned to '{}'", expectedAudience);
+        } else {
+            log.warn("JWT verification: no audience requirement configured "
+                    + "(set app.security.jwt.audience=fivucsas-api in prod)");
+        }
+
+        // Parse revoked-kids CSV once at startup.
+        if (revokedKidsCsv != null && !revokedKidsCsv.isBlank()) {
+            this.revokedKids = Arrays.stream(revokedKidsCsv.split(","))
+                    .map(String::trim)
+                    .filter(s -> !s.isEmpty())
+                    .collect(Collectors.toCollection(HashSet::new));
+            log.warn("JWT verification: explicit kid revocation list = {}", revokedKids);
+        } else {
+            this.revokedKids = Collections.emptySet();
+        }
     }
 
     @PostConstruct
@@ -134,6 +181,39 @@ public class JwtService implements TokenGenerationPort {
             throw new IllegalStateException(msg);
         }
         log.info("JWT signing algo locked to RS256 (prod profile)");
+    }
+
+    /**
+     * SECURITY_REVIEW / BACKEND_REVIEW 2026-05-12 §aud-claim — prod must pin
+     * {@code app.security.jwt.audience}. Fail-fast at boot so a misconfigured
+     * deploy can't silently mint tokens with no audience binding (a known
+     * forge surface when the same RSA private key is reused across
+     * deployments). Mirrors the {@link #assertProdAlgoIsRs256} contract.
+     */
+    @PostConstruct
+    void assertProdAudienceIsConfigured() {
+        if (environment == null) {
+            return;
+        }
+        boolean prodActive = false;
+        for (String p : environment.getActiveProfiles()) {
+            if ("prod".equals(p)) {
+                prodActive = true;
+                break;
+            }
+        }
+        if (!prodActive) {
+            return;
+        }
+        if (expectedAudience == null || expectedAudience.isBlank()) {
+            String msg = "CRITICAL SECURITY ERROR: prod profile is active but "
+                    + "app.security.jwt.audience is blank. Production MUST bind an "
+                    + "audience claim on every minted token. Check application-prod.yml "
+                    + "and the APP_SECURITY_JWT_AUDIENCE env var.";
+            log.error(msg);
+            throw new IllegalStateException(msg);
+        }
+        log.info("JWT audience binding locked to '{}' (prod profile)", expectedAudience);
     }
 
     public String extractEmail(String token) {
@@ -181,6 +261,16 @@ public class JwtService implements TokenGenerationPort {
         // deployment (e.g. a staging RSA key mistakenly reused in dev).
         if (expectedIssuer != null && !expectedIssuer.isEmpty()) {
             builder = builder.issuer(expectedIssuer);
+        }
+
+        // SECURITY_REVIEW / BACKEND_REVIEW 2026-05-12 §aud-claim — bind the
+        // audience claim (RFC 7519 §4.1.3) so the verification side can reject
+        // tokens minted for a different deployment. Missed three times
+        // (2026-04-20, 2026-05-02, 2026-05-12) before this commit — see the
+        // companion unit test JwtServiceAudienceTest to keep it from
+        // disappearing again.
+        if (expectedAudience != null && !expectedAudience.isEmpty()) {
+            builder = builder.audience().add(expectedAudience).and();
         }
 
         String alg = defaultAlgo == null ? "HS512" : defaultAlgo.trim().toUpperCase();
@@ -237,10 +327,63 @@ public class JwtService implements TokenGenerationPort {
         if (expectedIssuer != null && !expectedIssuer.isEmpty()) {
             parserBuilder = parserBuilder.requireIssuer(expectedIssuer);
         }
-        return parserBuilder
+        // SECURITY_REVIEW / BACKEND_REVIEW 2026-05-12 §aud-claim — when the
+        // audience is configured we require the token's `aud` to contain it.
+        // JJWT's requireAudience asserts membership in the audience SET so a
+        // multi-audience token (future-compat) still verifies as long as our
+        // configured audience is one of its entries.
+        if (expectedAudience != null && !expectedAudience.isEmpty()) {
+            parserBuilder = parserBuilder.requireAudience(expectedAudience);
+        }
+        Claims claims = parserBuilder
                 .build()
                 .parseSignedClaims(token)
                 .getPayload();
+
+        // SECURITY_REVIEW 2026-05-12 §P1 — defence-in-depth: even when the alg
+        // is RS256 (i.e. the HS leaked-kid branch is unreachable in normal
+        // ops), refuse any token whose `kid` is on the explicit revocation
+        // list. Captures the f8ee668:.env.gcp `hs-2026-04` exposure in a
+        // single place that survives future allow-hs512 toggles.
+        if (!revokedKids.isEmpty()) {
+            // The kid lives in the JWS header; we can't read it off Claims
+            // directly, so re-parse the compact form's header segment. Cheap:
+            // it's just a base64 decode of the first dot-separated chunk.
+            String kid = peekKidUnsafely(token);
+            if (kid != null && revokedKids.contains(kid)) {
+                throw new io.jsonwebtoken.security.SignatureException(
+                        "Rejected revoked JWT kid: " + kid);
+            }
+        }
+        return claims;
+    }
+
+    /**
+     * Extract the {@code kid} header from a compact JWS without verifying the
+     * signature. We've already verified the token by the time this is called
+     * (it's on the post-parse path), so this is only used as a final
+     * defence-in-depth check against revoked kids.
+     */
+    private static String peekKidUnsafely(String compactJws) {
+        try {
+            int dot = compactJws.indexOf('.');
+            if (dot <= 0) return null;
+            String headerJson = new String(
+                    java.util.Base64.getUrlDecoder().decode(compactJws.substring(0, dot)),
+                    java.nio.charset.StandardCharsets.UTF_8);
+            // Crude but dependency-free: find "kid":"..."
+            int idx = headerJson.indexOf("\"kid\"");
+            if (idx < 0) return null;
+            int colon = headerJson.indexOf(':', idx);
+            if (colon < 0) return null;
+            int q1 = headerJson.indexOf('"', colon + 1);
+            if (q1 < 0) return null;
+            int q2 = headerJson.indexOf('"', q1 + 1);
+            if (q2 < 0) return null;
+            return headerJson.substring(q1 + 1, q2);
+        } catch (RuntimeException e) {
+            return null;
+        }
     }
 
     /**
