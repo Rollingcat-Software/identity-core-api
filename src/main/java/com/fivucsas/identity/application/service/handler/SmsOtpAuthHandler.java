@@ -1,5 +1,6 @@
 package com.fivucsas.identity.application.service.handler;
 
+import com.fivucsas.identity.domain.exception.OtpAttemptsExhaustedException;
 import com.fivucsas.identity.domain.model.auth.AuthMethodType;
 import com.fivucsas.identity.entity.AuthFlowStep;
 import com.fivucsas.identity.entity.AuthSession;
@@ -56,10 +57,17 @@ public class SmsOtpAuthHandler implements AuthMethodHandler {
 
         // Fallback: local Redis-based OTP validation
         String otpKey = buildOtpKey(session.getId().toString(), step.getStepOrder());
-        boolean valid = otpService.validate(otpKey, code);
-
-        if (!valid) {
-            log.warn("SMS OTP validation failed for session: {}", session.getId());
+        // SECURITY_REVIEW / BACKEND_REVIEW 2026-05-12 §OTP-exhausted — surface
+        // NIST 800-63B 5-strike exhaustion instead of the boolean overload.
+        OtpService.ValidationResult result = otpService.validateWithResult(otpKey, code);
+        if (result.isExhausted()) {
+            log.warn("SMS OTP attempts exhausted for session: {} (user must request a new code)",
+                    session.getId());
+            throw new OtpAttemptsExhaustedException();
+        }
+        if (!result.isValid()) {
+            log.warn("SMS OTP validation failed for session: {} (remaining={})",
+                    session.getId(), result.getRemainingAttempts());
             return StepResult.failure("Invalid or expired SMS OTP code");
         }
 

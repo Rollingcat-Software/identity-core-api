@@ -96,7 +96,8 @@ class EmailOtpAuthHandlerEdgeCasesTest {
         UUID sessionId = UUID.randomUUID();
         when(session.getId()).thenReturn(sessionId);
         when(step.getStepOrder()).thenReturn(1);
-        when(otpService.validate("otp:" + sessionId + ":1:EMAIL_OTP", "123456")).thenReturn(false);
+        when(otpService.validateWithResult("otp:" + sessionId + ":1:EMAIL_OTP", "123456"))
+                .thenReturn(OtpService.ValidationResult.invalid(2L));
 
         StepResult result = handler.validate(session, step, Map.of("code", "123456"));
 
@@ -111,7 +112,8 @@ class EmailOtpAuthHandlerEdgeCasesTest {
         UUID sessionId = UUID.randomUUID();
         when(session.getId()).thenReturn(sessionId);
         when(step.getStepOrder()).thenReturn(2);
-        when(otpService.validate("otp:" + sessionId + ":2:EMAIL_OTP", "007890")).thenReturn(true);
+        when(otpService.validateWithResult("otp:" + sessionId + ":2:EMAIL_OTP", "007890"))
+                .thenReturn(OtpService.ValidationResult.valid());
 
         StepResult result = handler.validate(session, step, Map.of("code", "007890"));
 
@@ -123,7 +125,8 @@ class EmailOtpAuthHandlerEdgeCasesTest {
         UUID sessionId = UUID.randomUUID();
         when(session.getId()).thenReturn(sessionId);
         when(step.getStepOrder()).thenReturn(2);
-        when(otpService.validate("otp:" + sessionId + ":2:EMAIL_OTP", "000000")).thenReturn(true);
+        when(otpService.validateWithResult("otp:" + sessionId + ":2:EMAIL_OTP", "000000"))
+                .thenReturn(OtpService.ValidationResult.valid());
 
         StepResult result = handler.validate(session, step, Map.of("code", "000000"));
 
@@ -198,16 +201,18 @@ class EmailOtpAuthHandlerEdgeCasesTest {
 
         // Step order 1
         when(step.getStepOrder()).thenReturn(1);
-        when(otpService.validate("otp:" + sessionId + ":1:EMAIL_OTP", "111111")).thenReturn(false);
+        when(otpService.validateWithResult("otp:" + sessionId + ":1:EMAIL_OTP", "111111"))
+                .thenReturn(OtpService.ValidationResult.invalid(2L));
         handler.validate(session, step, Map.of("code", "111111"));
-        verify(otpService).validate("otp:" + sessionId + ":1:EMAIL_OTP", "111111");
+        verify(otpService).validateWithResult("otp:" + sessionId + ":1:EMAIL_OTP", "111111");
 
         // Step order 3
         when(step.getStepOrder()).thenReturn(3);
-        when(otpService.validate("otp:" + sessionId + ":3:EMAIL_OTP", "222222")).thenReturn(true);
+        when(otpService.validateWithResult("otp:" + sessionId + ":3:EMAIL_OTP", "222222"))
+                .thenReturn(OtpService.ValidationResult.valid());
         StepResult result = handler.validate(session, step, Map.of("code", "222222"));
         assertThat(result.isSuccess()).isTrue();
-        verify(otpService).validate("otp:" + sessionId + ":3:EMAIL_OTP", "222222");
+        verify(otpService).validateWithResult("otp:" + sessionId + ":3:EMAIL_OTP", "222222");
     }
 
     // ── Case sensitivity of OTP code ────────────────────────────────────
@@ -219,13 +224,14 @@ class EmailOtpAuthHandlerEdgeCasesTest {
         UUID sessionId = UUID.randomUUID();
         when(session.getId()).thenReturn(sessionId);
         when(step.getStepOrder()).thenReturn(2);
-        when(otpService.validate("otp:" + sessionId + ":2:EMAIL_OTP", "AbCdEf")).thenReturn(false);
+        when(otpService.validateWithResult("otp:" + sessionId + ":2:EMAIL_OTP", "AbCdEf"))
+                .thenReturn(OtpService.ValidationResult.invalid(2L));
 
         StepResult result = handler.validate(session, step, Map.of("code", "AbCdEf"));
 
         assertThat(result.isSuccess()).isFalse();
         // Verify the exact string was passed (no toLowerCase or toUpperCase)
-        verify(otpService).validate("otp:" + sessionId + ":2:EMAIL_OTP", "AbCdEf");
+        verify(otpService).validateWithResult("otp:" + sessionId + ":2:EMAIL_OTP", "AbCdEf");
     }
 
     // ── Unknown action should fall through to code validation ───────────
@@ -235,7 +241,8 @@ class EmailOtpAuthHandlerEdgeCasesTest {
         UUID sessionId = UUID.randomUUID();
         when(session.getId()).thenReturn(sessionId);
         when(step.getStepOrder()).thenReturn(1);
-        when(otpService.validate(anyString(), eq("123456"))).thenReturn(true);
+        when(otpService.validateWithResult(anyString(), eq("123456")))
+                .thenReturn(OtpService.ValidationResult.valid());
 
         StepResult result = handler.validate(session, step,
                 Map.of("action", "unknown", "code", "123456"));

@@ -64,6 +64,44 @@ public class GlobalExceptionHandler {
      * }
      * </pre>
      */
+    /**
+     * SECURITY_REVIEW / BACKEND_REVIEW 2026-05-12 §OTP-exhausted — NIST 800-63B
+     * §5.1.1.2 5-strike counter trip. The primitive ({@code OtpService.validateWithResult})
+     * surfaces an {@code exhausted=true} terminal state when the user has
+     * burned through {@code MAX_ATTEMPTS} mismatches on a single issued code.
+     * Previously the 5 MFA OTP call-sites used the boolean {@code validate()}
+     * overload and threw the flag away — users waited 5min for TTL instead of
+     * getting "send another OTP".
+     *
+     * <p>Maps to HTTP 429 with a {@code Retry-After} hint and the existing
+     * {@code OTP_ATTEMPTS_EXHAUSTED} error code so the frontend can short-
+     * circuit to "request a new code" instead of looping on the verify form.
+     */
+    @ExceptionHandler(OtpAttemptsExhaustedException.class)
+    public ResponseEntity<java.util.Map<String, Object>> handleOtpExhausted(
+            OtpAttemptsExhaustedException ex,
+            HttpServletRequest request) {
+        log.warn("OTP attempts exhausted: path={}, ip={}",
+                request.getRequestURI(), request.getRemoteAddr());
+
+        java.util.Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("timestamp", java.time.Instant.now().toString());
+        body.put("status", HttpStatus.TOO_MANY_REQUESTS.value());
+        body.put("error", ex.getErrorCode());
+        body.put("errorCode", ex.getErrorCode());
+        body.put("message", ex.getMessage());
+        body.put("action", "resend");
+        body.put("remainingAttempts", 0);
+        body.put("path", request.getRequestURI());
+
+        // RFC 6585 §4: 429 responses SHOULD carry Retry-After. OTP TTL is 5
+        // minutes so a fresh /send must wait at most that long; clients can
+        // use this as a hint for when re-sending becomes useful.
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                .header("Retry-After", "300")
+                .body(body);
+    }
+
     @ExceptionHandler(AccountLockedException.class)
     public ResponseEntity<java.util.Map<String, Object>> handleAccountLocked(
             AccountLockedException ex,

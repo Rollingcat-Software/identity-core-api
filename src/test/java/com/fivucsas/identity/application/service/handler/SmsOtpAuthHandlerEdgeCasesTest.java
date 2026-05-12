@@ -96,8 +96,9 @@ class SmsOtpAuthHandlerEdgeCasesTest {
         UUID sessionId = UUID.randomUUID();
         when(session.getId()).thenReturn(sessionId);
         when(step.getStepOrder()).thenReturn(1);
-        // OtpService.validate returns false when code is expired (not in Redis)
-        when(otpService.validate("otp:" + sessionId + ":1:SMS_OTP", "123456")).thenReturn(false);
+        // OtpService.validateWithResult returns invalid when code is expired (not in Redis)
+        when(otpService.validateWithResult("otp:" + sessionId + ":1:SMS_OTP", "123456"))
+                .thenReturn(OtpService.ValidationResult.notFound());
 
         StepResult result = handler.validate(session, step, Map.of("code", "123456"));
 
@@ -112,7 +113,8 @@ class SmsOtpAuthHandlerEdgeCasesTest {
         UUID sessionId = UUID.randomUUID();
         when(session.getId()).thenReturn(sessionId);
         when(step.getStepOrder()).thenReturn(2);
-        when(otpService.validate("otp:" + sessionId + ":2:SMS_OTP", "007890")).thenReturn(true);
+        when(otpService.validateWithResult("otp:" + sessionId + ":2:SMS_OTP", "007890"))
+                .thenReturn(OtpService.ValidationResult.valid());
 
         StepResult result = handler.validate(session, step, Map.of("code", "007890"));
 
@@ -124,7 +126,8 @@ class SmsOtpAuthHandlerEdgeCasesTest {
         UUID sessionId = UUID.randomUUID();
         when(session.getId()).thenReturn(sessionId);
         when(step.getStepOrder()).thenReturn(2);
-        when(otpService.validate("otp:" + sessionId + ":2:SMS_OTP", "000000")).thenReturn(true);
+        when(otpService.validateWithResult("otp:" + sessionId + ":2:SMS_OTP", "000000"))
+                .thenReturn(OtpService.ValidationResult.valid());
 
         StepResult result = handler.validate(session, step, Map.of("code", "000000"));
 
@@ -213,16 +216,18 @@ class SmsOtpAuthHandlerEdgeCasesTest {
 
         // Step order 1
         when(step.getStepOrder()).thenReturn(1);
-        when(otpService.validate("otp:" + sessionId + ":1:SMS_OTP", "111111")).thenReturn(false);
+        when(otpService.validateWithResult("otp:" + sessionId + ":1:SMS_OTP", "111111"))
+                .thenReturn(OtpService.ValidationResult.invalid(2L));
         handler.validate(session, step, Map.of("code", "111111"));
-        verify(otpService).validate("otp:" + sessionId + ":1:SMS_OTP", "111111");
+        verify(otpService).validateWithResult("otp:" + sessionId + ":1:SMS_OTP", "111111");
 
         // Step order 3
         when(step.getStepOrder()).thenReturn(3);
-        when(otpService.validate("otp:" + sessionId + ":3:SMS_OTP", "222222")).thenReturn(true);
+        when(otpService.validateWithResult("otp:" + sessionId + ":3:SMS_OTP", "222222"))
+                .thenReturn(OtpService.ValidationResult.valid());
         StepResult result = handler.validate(session, step, Map.of("code", "222222"));
         assertThat(result.isSuccess()).isTrue();
-        verify(otpService).validate("otp:" + sessionId + ":3:SMS_OTP", "222222");
+        verify(otpService).validateWithResult("otp:" + sessionId + ":3:SMS_OTP", "222222");
     }
 
     // ── Unknown action should fall through to code validation ───────────
@@ -232,7 +237,8 @@ class SmsOtpAuthHandlerEdgeCasesTest {
         UUID sessionId = UUID.randomUUID();
         when(session.getId()).thenReturn(sessionId);
         when(step.getStepOrder()).thenReturn(1);
-        when(otpService.validate(anyString(), eq("123456"))).thenReturn(true);
+        when(otpService.validateWithResult(anyString(), eq("123456")))
+                .thenReturn(OtpService.ValidationResult.valid());
 
         StepResult result = handler.validate(session, step,
                 Map.of("action", "unknown", "code", "123456"));

@@ -27,6 +27,7 @@ import com.fivucsas.identity.infrastructure.sms.SmsService;
 import com.fivucsas.identity.infrastructure.sms.VerifiableSmsService;
 import com.fivucsas.identity.infrastructure.web.InMemoryMultipartFile;
 import com.fivucsas.identity.domain.repository.UserRepository;
+import com.fivucsas.identity.domain.exception.OtpAttemptsExhaustedException;
 import com.fivucsas.identity.domain.exception.UserNotFoundException;
 import com.fivucsas.identity.security.RateLimitService;
 import com.fivucsas.identity.security.TotpSecretCipher;
@@ -499,7 +500,15 @@ public class AuthController {
                         if (phone == null || phone.isBlank()) yield false;
                         yield verifiableSms.verifyCode(phone, code);
                     }
-                    yield otpService.validate("2fa-sms:" + user.getId(), code);
+                    // SECURITY_REVIEW / BACKEND_REVIEW 2026-05-12 §OTP-exhausted —
+                    // propagate the NIST 800-63B 5-strike exhaustion so the user
+                    // gets "request a new code" instead of waiting the full TTL.
+                    OtpService.ValidationResult smsResult =
+                            otpService.validateWithResult("2fa-sms:" + user.getId(), code);
+                    if (smsResult.isExhausted()) {
+                        throw new OtpAttemptsExhaustedException();
+                    }
+                    yield smsResult.isValid();
                 }
                 case FACE -> {
                     String image = (String) data.get("image");
@@ -570,7 +579,16 @@ public class AuthController {
                 }
                 case EMAIL_OTP -> {
                     String code = (String) data.get("code");
-                    yield code != null && otpService.validate(TWO_FA_OTP_PREFIX + user.getId(), code);
+                    if (code == null || code.isBlank()) yield false;
+                    // SECURITY_REVIEW / BACKEND_REVIEW 2026-05-12 §OTP-exhausted —
+                    // propagate the NIST 800-63B 5-strike exhaustion so the user
+                    // gets "request a new code" instead of waiting the full TTL.
+                    OtpService.ValidationResult emailResult =
+                            otpService.validateWithResult(TWO_FA_OTP_PREFIX + user.getId(), code);
+                    if (emailResult.isExhausted()) {
+                        throw new OtpAttemptsExhaustedException();
+                    }
+                    yield emailResult.isValid();
                 }
                 default -> false;
             };
@@ -594,6 +612,22 @@ public class AuthController {
                 return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                         .body(Map.of("success", false, "message", "Verification failed for " + method));
             }
+        } catch (OtpAttemptsExhaustedException e) {
+            // SECURITY_REVIEW / BACKEND_REVIEW 2026-05-12 §OTP-exhausted —
+            // NIST 800-63B 5-strike trip is a known/contracted state, not a
+            // 5xx error. Rethrow so GlobalExceptionHandler maps it to HTTP 429
+            // + Retry-After + action:resend (matches OtpController contract).
+            // Cache user-id once so this branch does not add net-new
+            // entity.User.getId() call-sites to the UserDomainBoundary
+            // ArchUnit baseline (matches the FACE case pattern above).
+            String clientIp = getClientIP(httpRequest);
+            String ua = getUserAgent(httpRequest);
+            String exhaustedUid = user.getId().toString();
+            log.warn("AUDIT: 2FA OTP attempts exhausted — method: {}, userId={}, ip={}, userAgent={}",
+                    method, exhaustedUid, clientIp, ua);
+            auditLogPort.logTwoFactorFailed(exhaustedUid, method,
+                    "otp_attempts_exhausted", clientIp, ua);
+            throw e;
         } catch (Exception e) {
             String clientIp = getClientIP(httpRequest);
             String ua = getUserAgent(httpRequest);

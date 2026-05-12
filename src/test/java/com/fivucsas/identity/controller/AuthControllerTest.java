@@ -701,9 +701,11 @@ class AuthControllerTest {
         when(authFlowRepository.findById(flowId)).thenReturn(java.util.Optional.of(flow));
 
         // First attempt: wrong OTP — otpService rejects
-        when(otpService.validate(anyString(), eq("000000"))).thenReturn(false);
+        when(otpService.validateWithResult(anyString(), eq("000000")))
+                .thenReturn(com.fivucsas.identity.infrastructure.otp.OtpService.ValidationResult.invalid(2L));
         // Retry: correct OTP — otpService accepts
-        when(otpService.validate(anyString(), eq("123456"))).thenReturn(true);
+        when(otpService.validateWithResult(anyString(), eq("123456")))
+                .thenReturn(com.fivucsas.identity.infrastructure.otp.OtpService.ValidationResult.valid());
 
         // Needed for successful step-advance path on the second call
         when(mfaSessionRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
@@ -795,7 +797,8 @@ class AuthControllerTest {
                 .thenReturn(java.util.Optional.of(session));
         when(userRepository.findById(userId)).thenReturn(java.util.Optional.of(user));
         when(authFlowRepository.findById(flowId)).thenReturn(java.util.Optional.of(flow));
-        when(otpService.validate(anyString(), anyString())).thenReturn(true);
+        when(otpService.validateWithResult(anyString(), anyString()))
+                .thenReturn(com.fivucsas.identity.infrastructure.otp.OtpService.ValidationResult.valid());
         when(mfaSessionRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
         when(tokenGenerator.generateAccessToken(anyString(), any()))
                 .thenReturn("jwt-after-mfa");
