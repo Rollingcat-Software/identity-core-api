@@ -12,6 +12,7 @@ import com.fivucsas.identity.entity.OAuth2Client;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.repository.MfaSessionRepository;
 import com.fivucsas.identity.security.JwtService;
+import io.jsonwebtoken.Claims;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -461,7 +462,13 @@ public class OAuth2Service {
      * @return map of OIDC standard claims
      */
     public Map<String, Object> getUserInfo(String accessToken) {
-        String type = jwtService.extractClaim(accessToken, c -> c.get("type", String.class));
+        // #47 (2026-05-21): parse + signature-verify the access token exactly
+        // once, then read every claim (type / subject / scope) from this single
+        // Claims object. The previous code invoked jwtService three times, each
+        // of which re-parsed and re-verified the same JWT.
+        Claims tokenClaims = jwtService.parseAllClaims(accessToken);
+
+        String type = tokenClaims.get("type", String.class);
         if (!"oauth2".equals(type)) {
             // RFC 6750 §3.1 — Bearer-token errors at a resource endpoint use
             // `invalid_token`, not `invalid_client` (which is only for the auth
@@ -471,7 +478,7 @@ public class OAuth2Service {
                     "invalid_token",
                     "userinfo requires an OAuth2 access token");
         }
-        String email = jwtService.extractEmail(accessToken);
+        String email = tokenClaims.getSubject();
         User user = userRepository.findByEmail(email)
                 .orElseThrow(() -> new IllegalArgumentException("User not found"));
 
@@ -480,7 +487,7 @@ public class OAuth2Service {
         // Scope Values). Previously /userinfo returned email/name/phone
         // unconditionally regardless of which scopes the client was granted at
         // /token, contradicting the scope filter at exchangeCode():372-384.
-        String scopeClaim = jwtService.extractClaim(accessToken, c -> c.get("scope", String.class));
+        String scopeClaim = tokenClaims.get("scope", String.class);
         String scope = scopeClaim != null ? scopeClaim : "";
 
         Map<String, Object> claims = new LinkedHashMap<>();

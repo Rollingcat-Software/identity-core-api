@@ -225,6 +225,17 @@ public class JwtService implements TokenGenerationPort {
         return claimsResolver.apply(claims);
     }
 
+    /**
+     * Parses and signature-verifies {@code token} once, returning the full
+     * {@link Claims} payload. Callers that need several claims from the same
+     * token should use this and read each claim from the returned object,
+     * rather than invoking {@link #extractClaim} repeatedly (which re-parses
+     * and re-verifies the JWT on every call).
+     */
+    public Claims parseAllClaims(String token) {
+        return extractAllClaims(token);
+    }
+
     @Override
     public String generateAccessToken(String email) {
         return buildToken(new HashMap<>(), email, jwtExpiration);
