@@ -132,7 +132,26 @@ public class ManageUserService implements ManageUserUseCase {
             }
         }
 
-        return mapToUserResponse(user);
+        UserResponse createdResponse = mapToUserResponse(user);
+
+        // #9 (2026-05-21): admin-create was a silent mutation — no audit row.
+        // Mirror the deleteUser() USER_DELETED emission: emit USER_CREATED with
+        // the new user's id, the acting tenant scope, and the assigned tenant.
+        // IP slot is null because the use-case API is String-only (no request
+        // context), matching deleteUser(). The target id is read from the
+        // response DTO (not entity.User) to respect the hexagonal-boundary
+        // ratchet enforced by UserDomainBoundaryTest.
+        UUID createScopeTenantId = resolveTenantScope();
+        auditLogPort.logSecurityEvent(
+                createdResponse.getId(),
+                "USER_CREATED",
+                null,
+                String.format("Created; actorTenant=%s, targetTenant=%s",
+                        createScopeTenantId == null ? "ROOT" : createScopeTenantId.toString(),
+                        tenant == null ? "NONE" : tenant.getId().toString())
+        );
+
+        return createdResponse;
     }
 
     @Override
@@ -285,7 +304,20 @@ public class ManageUserService implements ManageUserUseCase {
         }
 
         user = userRepository.save(user);
-        log.info("User updated successfully: {}", user.getId());
+        log.info("User updated successfully: {}", command.getUserId());
+
+        // #9 (2026-05-21): admin-update was a silent mutation — no audit row.
+        // Mirror deleteUser(): emit USER_UPDATED with target id (the command's
+        // userId, avoiding entity.User per the hexagonal-boundary ratchet) +
+        // actor tenant scope. IP slot null (use-case API is String-only).
+        UUID updateScopeTenantId = resolveTenantScope();
+        auditLogPort.logSecurityEvent(
+                command.getUserId(),
+                "USER_UPDATED",
+                null,
+                String.format("Updated; actorTenant=%s",
+                        updateScopeTenantId == null ? "ROOT" : updateScopeTenantId.toString())
+        );
 
         return mapToUserResponse(user);
     }
