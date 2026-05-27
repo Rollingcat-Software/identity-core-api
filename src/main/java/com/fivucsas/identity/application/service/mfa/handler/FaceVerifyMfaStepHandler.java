@@ -21,9 +21,6 @@ import java.util.Map;
 @Slf4j
 public class FaceVerifyMfaStepHandler implements VerifyMfaStepHandler {
 
-    /** Same threshold as FaceAuthHandler — confidence fallback when {@code verified} is false. */
-    private static final double CONFIDENCE_FALLBACK_THRESHOLD = 0.7;
-
     private final BiometricServicePort biometricService;
 
     @Override
@@ -41,22 +38,38 @@ public class FaceVerifyMfaStepHandler implements VerifyMfaStepHandler {
                 image.contains(",") ? image.substring(image.indexOf(",") + 1) : image);
         MultipartFile faceFile = new InMemoryFaceImage(bytes);
 
-        Map<String, Object> faceResult = biometricService.verifyFace(user.getId(), faceFile);
+        // Cache user-id once to keep the entity.User boundary surface
+        // (ArchUnit UserDomainBoundaryTest) at one call site per method —
+        // matches the pattern in FaceAuthHandler.
+        java.util.UUID userId = user.getId();
+        Map<String, Object> faceResult = biometricService.verifyFace(userId, faceFile);
 
         // Anti-spoof: hard-fail if biometric-processor flagged the frame.
         Object errorCode = faceResult.get("error_code");
         if (errorCode instanceof String ec && "SPOOF_DETECTED".equals(ec)) {
-            log.warn("AUDIT: MFA face spoof detected — userId={}", user.getId());
+            log.warn("AUDIT: MFA face spoof detected — userId={}", userId);
             return MfaStepResult.fail();
         }
 
-        boolean verified = Boolean.TRUE.equals(faceResult.get("verified"))
-                || "true".equalsIgnoreCase(String.valueOf(faceResult.get("verified")));
+        // SECURITY (P0, BACKEND_REVIEW 2026-05-12): Trust ONLY the bio
+        // processor's `verified` field. PR #83 removed the 0.7 cosine
+        // confidence fallback in FaceAuthHandler + AuthController.verify2FAMethod
+        // but missed this N-step MFA handler — which is the one hosted login
+        // actually uses. The bio processor applies the adaptive aging
+        // threshold (VERIFICATION_THRESHOLD_AGED_*) server-side; a
+        // handler-side confidence fallback silently overrides that policy and
+        // is a fail-open vector (INVESTIGATION_FAILOPEN_2026-05-07.md F3).
+        // If `verified` is missing/null, treat it as a hard reject and log loudly.
+        Object verifiedClaim = faceResult.get("verified");
+        if (verifiedClaim == null) {
+            log.error("AUDIT: MFA face verify missing `verified` field — userId={}, rejecting. response keys={}",
+                    userId, faceResult.keySet());
+            return MfaStepResult.fail();
+        }
+        boolean verified = Boolean.TRUE.equals(verifiedClaim)
+                || "true".equalsIgnoreCase(String.valueOf(verifiedClaim));
         if (!verified) {
-            Object conf = faceResult.get("confidence");
-            if (conf instanceof Number num && num.doubleValue() >= CONFIDENCE_FALLBACK_THRESHOLD) {
-                verified = true;
-            }
+            log.warn("AUDIT: MFA face verify failed (server verified=false) — userId={}", userId);
         }
         return verified ? MfaStepResult.ok() : MfaStepResult.fail();
     }

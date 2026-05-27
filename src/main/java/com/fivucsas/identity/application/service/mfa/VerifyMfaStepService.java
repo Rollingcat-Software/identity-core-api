@@ -5,6 +5,7 @@ import com.fivucsas.identity.application.port.output.AuditLogPort;
 import com.fivucsas.identity.application.port.output.AuthFlowRepositoryPort;
 import com.fivucsas.identity.application.port.output.TokenGenerationPort;
 import com.fivucsas.identity.application.service.EnrollmentHealthService;
+import com.fivucsas.identity.domain.exception.OtpAttemptsExhaustedException;
 import com.fivucsas.identity.domain.exception.UserNotFoundException;
 import com.fivucsas.identity.domain.model.auth.AuthMethodType;
 import com.fivucsas.identity.domain.repository.UserRepository;
@@ -188,6 +189,11 @@ public class VerifyMfaStepService {
                         "challenge-handler-contract-violation", req.clientIp(), req.userAgent());
                 return VerifyMfaStepResponse.badRequest(
                         "Challenge action is not supported for method " + req.method());
+            } catch (OtpAttemptsExhaustedException e) {
+                // OTP attempt budget exhausted — surface as 429 via
+                // GlobalExceptionHandler (with Retry-After); never swallow into
+                // a generic 200 ERROR. Re-throw to honour the rate-limit contract.
+                throw e;
             } catch (RuntimeException e) {
                 // Handler signature is `verify(...) throws nothing` — only
                 // RuntimeExceptions can escape. We re-set the interrupt flag
@@ -234,6 +240,11 @@ public class VerifyMfaStepService {
         MfaStepResult result;
         try {
             result = handler.verify(session, user, data);
+        } catch (OtpAttemptsExhaustedException e) {
+            // OTP attempt budget exhausted — surface as 429 via
+            // GlobalExceptionHandler (with Retry-After); never swallow into a
+            // generic 200 ERROR. Re-throw to honour the rate-limit contract.
+            throw e;
         } catch (RuntimeException e) {
             if (containsInterrupted(e)) {
                 Thread.currentThread().interrupt();

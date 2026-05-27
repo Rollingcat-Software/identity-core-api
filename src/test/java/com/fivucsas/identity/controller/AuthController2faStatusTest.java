@@ -233,7 +233,8 @@ class AuthController2faStatusTest {
         UUID userId = UUID.randomUUID();
         User user = userMock(userId);
         when(userRepository.findByEmail(TEST_EMAIL)).thenReturn(Optional.of(user));
-        when(otpService.validate(anyString(), anyString())).thenReturn(false);
+        when(otpService.validateWithResult(anyString(), anyString()))
+                .thenReturn(com.fivucsas.identity.infrastructure.otp.OtpService.ValidationResult.invalid(2L));
 
         String body = "{\"method\":\"EMAIL_OTP\",\"data\":{\"code\":\"000000\"}}";
         mockMvc.perform(post("/api/v1/auth/2fa/verify-method")

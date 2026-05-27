@@ -41,7 +41,8 @@ class EmailOtpAuthHandlerTest {
         UUID sessionId = UUID.randomUUID();
         when(session.getId()).thenReturn(sessionId);
         when(step.getStepOrder()).thenReturn(2);
-        when(otpService.validate("otp:" + sessionId + ":2:EMAIL_OTP", "123456")).thenReturn(true);
+        when(otpService.validateWithResult("otp:" + sessionId + ":2:EMAIL_OTP", "123456"))
+                .thenReturn(OtpService.ValidationResult.valid());
 
         StepResult result = handler.validate(session, step, Map.of("code", "123456"));
 
@@ -53,7 +54,8 @@ class EmailOtpAuthHandlerTest {
         UUID sessionId = UUID.randomUUID();
         when(session.getId()).thenReturn(sessionId);
         when(step.getStepOrder()).thenReturn(2);
-        when(otpService.validate(anyString(), eq("999999"))).thenReturn(false);
+        when(otpService.validateWithResult(anyString(), eq("999999")))
+                .thenReturn(OtpService.ValidationResult.invalid(2L));
 
         StepResult result = handler.validate(session, step, Map.of("code", "999999"));
 

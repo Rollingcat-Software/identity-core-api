@@ -42,6 +42,17 @@ app:
     jwt:
       active-hs-kid: ${APP_SECURITY_JWT_ACTIVE_HS_KID:hs-2026-04}
       retired-hs-kids: ${APP_SECURITY_JWT_RETIRED_HS_KIDS:}
+      # SECURITY_REVIEW / BACKEND_REVIEW 2026-05-12 §aud-claim — bind the
+      # RFC 7519 §4.1.3 audience claim on every minted access token. Empty
+      # default in base config keeps dev/test parity with the existing
+      # issuer config; application-prod.yml pins a real value and the
+      # JwtService boot assertion enforces it for the prod profile.
+      audience: ${APP_SECURITY_JWT_AUDIENCE:}
+      # SECURITY_REVIEW 2026-05-12 §P1 — explicit kid revocation list.
+      # Comma-separated. Any JWT carrying a kid in this set is rejected
+      # during validation regardless of allow-hs512. Empty by default;
+      # application-prod.yml revokes the leaked hs-2026-04 kid.
+      revoked-kids: ${APP_SECURITY_JWT_REVOKED_KIDS:}
     # INVESTIGATION_MASTER_2026-05-07 §"user constraints":
     # cap on active devices a single user may register. WebAuthn allowList
     # bloat (the per-user list of credentialIds the browser must include in
