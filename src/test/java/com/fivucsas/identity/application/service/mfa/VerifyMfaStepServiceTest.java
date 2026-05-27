@@ -4,6 +4,7 @@ import com.fivucsas.identity.application.port.output.AuditLogPort;
 import com.fivucsas.identity.application.port.output.AuthFlowRepositoryPort;
 import com.fivucsas.identity.application.port.output.TokenGenerationPort;
 import com.fivucsas.identity.application.service.EnrollmentHealthService;
+import com.fivucsas.identity.domain.exception.OtpAttemptsExhaustedException;
 import com.fivucsas.identity.domain.model.auth.AuthMethodCategory;
 import com.fivucsas.identity.domain.model.auth.AuthMethodType;
 import com.fivucsas.identity.domain.model.auth.OperationType;
@@ -35,6 +36,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -220,6 +222,33 @@ class VerifyMfaStepServiceTest {
         verify(mfaSessionRepository, never()).save(any());
         verify(auditLogPort, never())
                 .logMfaStepCompleted(anyString(), anyString(), anyInt(), anyInt(), anyString(), anyString());
+    }
+
+    // ====== OTP exhaustion must surface as 429, not be swallowed into 200 ======
+
+    @Test
+    void otpAttemptsExhausted_isRethrown_notSwallowedInto200() {
+        // Regression (PR #100 review): the EMAIL_OTP handler throws
+        // OtpAttemptsExhaustedException once the per-code attempt budget is
+        // burned. The orchestrator MUST let it propagate (→ 429 via
+        // GlobalExceptionHandler), NOT collapse it into a generic 200 ERROR.
+        UUID userId = UUID.randomUUID();
+        UUID flowId = UUID.randomUUID();
+        MfaSession session = mfaSessionAt(SESSION_TOKEN, userId, flowId, 1, 2, "[]");
+        AuthFlow flow = flowOf(flowId,
+                stepOf(1, AuthMethodType.EMAIL_OTP),
+                stepOf(2, AuthMethodType.PASSWORD));
+        User user = userMock(userId);
+
+        when(mfaSessionRepository.findBySessionTokenForUpdate(SESSION_TOKEN))
+                .thenReturn(Optional.of(session));
+        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+        when(authFlowRepository.findById(flowId)).thenReturn(Optional.of(flow));
+        when(emailOtpHandler.verify(eq(session), eq(user), any()))
+                .thenThrow(new OtpAttemptsExhaustedException());
+
+        assertThatThrownBy(() -> service.execute(req("EMAIL_OTP", Map.of("code", "000000"))))
+                .isInstanceOf(OtpAttemptsExhaustedException.class);
     }
 
     // ============== Final-step completion ==============
