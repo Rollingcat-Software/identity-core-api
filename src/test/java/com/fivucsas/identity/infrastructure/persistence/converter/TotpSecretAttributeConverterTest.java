@@ -37,7 +37,7 @@ class TotpSecretAttributeConverterTest {
 
     @BeforeEach
     void setUp() {
-        cipher = new TotpSecretCipher(TEST_KEK_B64);
+        cipher = new TotpSecretCipher(TEST_KEK_B64, false);
         ReflectionTestUtils.invokeMethod(cipher, "init");
         TotpSecretAttributeConverter.setCipherForTesting(cipher);
         converter = new TotpSecretAttributeConverter();
