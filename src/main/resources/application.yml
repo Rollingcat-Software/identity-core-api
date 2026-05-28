@@ -120,6 +120,10 @@ fivucsas:
   totp:
     enc-key: ${FIVUCSAS_TOTP_ENC_KEY:}
     migrate-on-boot: ${FIVUCSAS_TOTP_MIGRATE_ON_BOOT:false}
+    # S14 (security review): when true, decryptIfNeeded() throws on a plaintext
+    # (un-encrypted) TOTP secret instead of silently accepting it. Enable once
+    # the legacy plaintext rows have been migrated (see migrate-on-boot).
+    reject-plaintext: ${FIVUCSAS_TOTP_REJECT_PLAINTEXT:false}
 
 # FastAPI Integration
 biometric:

@@ -8,6 +8,7 @@ import com.fivucsas.identity.entity.NfcCard;
 import com.fivucsas.identity.entity.Tenant;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.security.RbacAuthorizationService;
+import com.fivucsas.identity.security.TenantScopeResolver;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -51,6 +52,7 @@ class ManageNfcCardServiceTest {
     @Mock private NfcCardRepositoryPort nfcCardRepository;
     @Mock private UserRepository userRepository;
     @Mock private RbacAuthorizationService rbacService;
+    @Mock private TenantScopeResolver tenantScopeResolver;
     @Mock private ManageEnrollmentUseCase manageEnrollmentUseCase;
 
     @InjectMocks
@@ -71,6 +73,9 @@ class ManageNfcCardServiceTest {
         when(currentUser.getId()).thenReturn(currentUserId);
         when(currentUser.getTenant()).thenReturn(tenant);
         when(rbacService.getCurrentUser()).thenReturn(Optional.of(currentUser));
+        // Default: a tenant-bound caller (scoped to `tenantId`, not ROOT).
+        when(tenantScopeResolver.isUnrestricted()).thenReturn(false);
+        when(tenantScopeResolver.currentScope()).thenReturn(tenantId);
     }
 
     @Test
@@ -154,5 +159,40 @@ class ManageNfcCardServiceTest {
                 service.deactivateCard(UUID.randomUUID());
 
         assertThat(outcome).isEqualTo(ManageNfcCardService.DeactivateOutcome.NOT_FOUND);
+    }
+
+    // ------------------------------------------------------------------
+    // S11 (security review): searchByCardSerial must be tenant-scoped so a
+    // tenant-bound caller cannot enumerate card owners in other tenants.
+    // ------------------------------------------------------------------
+
+    @Test
+    @DisplayName("searchByCardSerial → tenant-scoped lookup for a tenant-bound caller (S11 cross-tenant leak)")
+    void searchByCardSerial_WhenCallerHasTenant_ShouldOnlyQueryOwnTenant() {
+        NfcCard inTenantCard = mock(NfcCard.class);
+        when(nfcCardRepository.findAllByCardSerialAndTenantId("SERIAL-1", tenantId))
+                .thenReturn(List.of(inTenantCard));
+
+        List<NfcCard> results = service.searchByCardSerial("SERIAL-1");
+
+        assertThat(results).containsExactly(inTenantCard);
+        verify(nfcCardRepository, times(1)).findAllByCardSerialAndTenantId("SERIAL-1", tenantId);
+        // Must NOT fall back to the unscoped cross-tenant query.
+        verify(nfcCardRepository, never()).findByCardSerial(any());
+    }
+
+    @Test
+    @DisplayName("searchByCardSerial → unscoped global lookup for ROOT (no tenant attached)")
+    void searchByCardSerial_WhenCallerHasNoTenant_ShouldQueryGlobally() {
+        // ROOT / SUPER_ADMIN: unrestricted scope → unscoped global lookup.
+        when(tenantScopeResolver.isUnrestricted()).thenReturn(true);
+        NfcCard anyCard = mock(NfcCard.class);
+        when(nfcCardRepository.findByCardSerial("SERIAL-2")).thenReturn(List.of(anyCard));
+
+        List<NfcCard> results = service.searchByCardSerial("SERIAL-2");
+
+        assertThat(results).containsExactly(anyCard);
+        verify(nfcCardRepository, times(1)).findByCardSerial("SERIAL-2");
+        verify(nfcCardRepository, never()).findAllByCardSerialAndTenantId(any(), any());
     }
 }

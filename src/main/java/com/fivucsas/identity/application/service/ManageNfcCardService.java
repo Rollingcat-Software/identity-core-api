@@ -9,6 +9,7 @@ import com.fivucsas.identity.entity.NfcCard;
 import com.fivucsas.identity.entity.Tenant;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.security.RbacAuthorizationService;
+import com.fivucsas.identity.security.TenantScopeResolver;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -41,6 +42,7 @@ public class ManageNfcCardService {
     private final NfcCardRepositoryPort nfcCardRepository;
     private final UserRepository userRepository;
     private final RbacAuthorizationService rbacService;
+    private final TenantScopeResolver tenantScopeResolver;
     private final ManageEnrollmentUseCase manageEnrollmentUseCase;
 
     /**
@@ -111,9 +113,33 @@ public class ManageNfcCardService {
         return nfcCardRepository.findByCardSerialAndIsActiveTrue(cardSerial);
     }
 
+    /**
+     * Looks up enrollments for a card serial, scoped to the caller's tenant.
+     *
+     * <p>S11 (security review): the previous implementation called
+     * {@code findByCardSerial} with no tenant filter, so any authenticated
+     * user could discover who owns a card serial in <em>any</em> tenant —
+     * a cross-tenant PII leak. This now restricts the result set to the
+     * caller's own tenant. ROOT (no tenant attached, cross-tenant by design)
+     * retains the unscoped global view used by platform operators.</p>
+     *
+     * <p>The {@code @PreAuthorize} on the controller endpoint additionally
+     * requires the {@code device:read} admin permission, so an ordinary
+     * tenant member cannot reach this lookup at all.</p>
+     */
     @Transactional(readOnly = true)
     public List<NfcCard> searchByCardSerial(String serial) {
-        return nfcCardRepository.findByCardSerial(serial);
+        // Resolve the caller's tenant scope via the security layer rather than
+        // entity.User, so this application service stays within the hexagonal
+        // boundary (UserDomainBoundaryTest). ROOT / SUPER_ADMIN has an
+        // unrestricted scope and keeps the unscoped global view used by
+        // platform operators; everyone else is confined to their own tenant
+        // (a non-super-admin with no resolvable tenant gets the fail-closed
+        // empty scope, which the scoped query returns no rows for).
+        if (tenantScopeResolver.isUnrestricted()) {
+            return nfcCardRepository.findByCardSerial(serial);
+        }
+        return nfcCardRepository.findAllByCardSerialAndTenantId(serial, tenantScopeResolver.currentScope());
     }
 
     /**

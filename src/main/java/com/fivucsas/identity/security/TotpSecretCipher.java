@@ -43,11 +43,15 @@ public class TotpSecretCipher {
     private static final int KEY_LENGTH_BYTES = 32;
 
     private final String rawKey;
+    private final boolean rejectPlaintext;
     private final SecureRandom rng = new SecureRandom();
     private SecretKey secretKey;
 
-    public TotpSecretCipher(@Value("${fivucsas.totp.enc-key:}") String rawKey) {
+    public TotpSecretCipher(
+            @Value("${fivucsas.totp.enc-key:}") String rawKey,
+            @Value("${fivucsas.totp.reject-plaintext:false}") boolean rejectPlaintext) {
         this.rawKey = rawKey;
+        this.rejectPlaintext = rejectPlaintext;
     }
 
     @PostConstruct
@@ -110,12 +114,26 @@ public class TotpSecretCipher {
      * Dual-read. If {@code stored} starts with {@link #CIPHERTEXT_PREFIX},
      * decrypt and return plaintext. Otherwise treat as legacy plaintext and
      * return unchanged. Null in → null out.
+     *
+     * <p>S14 (security review): when {@code fivucsas.totp.reject-plaintext} is
+     * {@code true}, a legacy (un-encrypted) value is treated as a fatal data
+     * integrity error and this method throws {@link IllegalStateException}
+     * instead of silently returning the plaintext. Enable only after every
+     * legacy row has been migrated to {@code enc:v1:...}.</p>
      */
     public String decryptIfNeeded(String stored) {
         if (stored == null) {
             return null;
         }
         if (!isEncrypted(stored)) {
+            if (rejectPlaintext) {
+                throw new IllegalStateException(
+                        "Plaintext TOTP secret rejected: "
+                                + "fivucsas.totp.reject-plaintext is enabled but a "
+                                + "non-encrypted secret was encountered. Migrate legacy "
+                                + "rows (fivucsas.totp.migrate-on-boot) before enabling "
+                                + "reject-plaintext.");
+            }
             return stored; // legacy plaintext row — re-encrypted on next write
         }
         String payload = stored.substring(CIPHERTEXT_PREFIX.length());

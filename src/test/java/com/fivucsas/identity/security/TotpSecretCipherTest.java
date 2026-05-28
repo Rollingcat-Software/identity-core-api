@@ -34,7 +34,7 @@ class TotpSecretCipherTest {
 
     @BeforeEach
     void setUp() {
-        cipher = new TotpSecretCipher(TEST_KEK_B64);
+        cipher = new TotpSecretCipher(TEST_KEK_B64, false);
         ReflectionTestUtils.invokeMethod(cipher, "init");
     }
 
@@ -119,7 +119,7 @@ class TotpSecretCipherTest {
 
     @Test
     void init_WithMissingKey_ShouldFailFast() {
-        TotpSecretCipher noKey = new TotpSecretCipher("");
+        TotpSecretCipher noKey = new TotpSecretCipher("", false);
 
         assertThatThrownBy(() -> ReflectionTestUtils.invokeMethod(noKey, "init"))
                 .isInstanceOf(IllegalStateException.class)
@@ -128,7 +128,7 @@ class TotpSecretCipherTest {
 
     @Test
     void init_WithNullKey_ShouldFailFast() {
-        TotpSecretCipher noKey = new TotpSecretCipher(null);
+        TotpSecretCipher noKey = new TotpSecretCipher(null, false);
 
         assertThatThrownBy(() -> ReflectionTestUtils.invokeMethod(noKey, "init"))
                 .isInstanceOf(IllegalStateException.class)
@@ -137,7 +137,7 @@ class TotpSecretCipherTest {
 
     @Test
     void init_WithInvalidBase64_ShouldFailFast() {
-        TotpSecretCipher bad = new TotpSecretCipher("!!!not-base64!!!");
+        TotpSecretCipher bad = new TotpSecretCipher("!!!not-base64!!!", false);
 
         assertThatThrownBy(() -> ReflectionTestUtils.invokeMethod(bad, "init"))
                 .isInstanceOf(IllegalStateException.class)
@@ -148,11 +148,55 @@ class TotpSecretCipherTest {
     void init_WithWrongKeyLength_ShouldFailFast() {
         // 16 bytes → 128 bits; we require 256.
         String shortKey = Base64.getEncoder().encodeToString(new byte[16]);
-        TotpSecretCipher bad = new TotpSecretCipher(shortKey);
+        TotpSecretCipher bad = new TotpSecretCipher(shortKey, false);
 
         assertThatThrownBy(() -> ReflectionTestUtils.invokeMethod(bad, "init"))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("32 bytes");
+    }
+
+    // ------------------------------------------------------------------
+    // S14 (security review): fivucsas.totp.reject-plaintext flag.
+    // ------------------------------------------------------------------
+
+    @Test
+    void decryptIfNeeded_WhenRejectPlaintextDisabled_ShouldReturnLegacyPlaintext() {
+        // Default flag = false (the setUp() cipher) — legacy behaviour preserved.
+        String legacy = "JBSWY3DPEHPK3PXP";
+
+        assertThat(cipher.decryptIfNeeded(legacy)).isEqualTo(legacy);
+    }
+
+    @Test
+    void decryptIfNeeded_WhenRejectPlaintextEnabled_ShouldThrowOnPlaintext() {
+        TotpSecretCipher strict = new TotpSecretCipher(TEST_KEK_B64, true);
+        ReflectionTestUtils.invokeMethod(strict, "init");
+
+        String legacy = "JBSWY3DPEHPK3PXP";
+
+        assertThatThrownBy(() -> strict.decryptIfNeeded(legacy))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Plaintext TOTP secret rejected");
+    }
+
+    @Test
+    void decryptIfNeeded_WhenRejectPlaintextEnabled_ShouldStillDecryptCiphertext() {
+        TotpSecretCipher strict = new TotpSecretCipher(TEST_KEK_B64, true);
+        ReflectionTestUtils.invokeMethod(strict, "init");
+
+        String plaintext = "JBSWY3DPEHPK3PXPABCDEFGHIJKLMNOP";
+        String ciphertext = strict.encrypt(plaintext);
+
+        // Encrypted values are unaffected by the reject-plaintext guard.
+        assertThat(strict.decryptIfNeeded(ciphertext)).isEqualTo(plaintext);
+    }
+
+    @Test
+    void decryptIfNeeded_WhenRejectPlaintextEnabled_NullStillReturnsNull() {
+        TotpSecretCipher strict = new TotpSecretCipher(TEST_KEK_B64, true);
+        ReflectionTestUtils.invokeMethod(strict, "init");
+
+        assertThat(strict.decryptIfNeeded(null)).isNull();
     }
 
     @Test

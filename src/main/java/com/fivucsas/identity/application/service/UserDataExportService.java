@@ -2,6 +2,7 @@ package com.fivucsas.identity.application.service;
 
 import com.fivucsas.identity.application.port.input.UserDataExportUseCase;
 import com.fivucsas.identity.domain.exception.UserNotFoundException;
+import com.fivucsas.identity.domain.model.auth.AuthMethodType;
 import com.fivucsas.identity.entity.AuditLog;
 import com.fivucsas.identity.entity.AuthSession;
 import com.fivucsas.identity.entity.OAuth2Client;
@@ -77,10 +78,14 @@ public class UserDataExportService implements UserDataExportUseCase {
         bundle.put("auditLogs", serializeAuditLogs(userId));
         bundle.put("verificationSessions", serializeVerificationSessions(userId));
         bundle.put("oauth2Clients", serializeOAuth2Clients(user));
-        // Biometric face/voice embeddings live in biometric_db (managed by biometric-processor).
-        // Per-method enrollment metadata (status, quality, liveness, timestamps) is already
-        // covered by the "enrollments" section above.
-        bundle.put("voiceEnrollments", List.of());
+        // Raw face/voice embedding VECTORS live in biometric_db (managed by
+        // biometric-processor) and remain out of scope here. The per-method
+        // enrollment METADATA (status, quality, liveness, timestamps) that
+        // identity-core owns in user_enrollments IS in scope — F14 surfaces it
+        // under the dedicated key GDPR consumers expect. Previously this was
+        // hardcoded to an empty list, so voice enrollments never appeared in
+        // the export.
+        bundle.put("voiceEnrollments", serializeEnrollmentsForMethod(userId, AuthMethodType.VOICE));
         bundle.put("biometricEnrollments", List.of());
         return bundle;
     }
@@ -117,19 +122,37 @@ public class UserDataExportService implements UserDataExportUseCase {
     private List<Map<String, Object>> serializeEnrollments(UUID userId) {
         List<UserEnrollment> enrollments = userEnrollmentRepository.findAllByUserId(userId);
         return enrollments.stream()
-            .map(e -> {
-                Map<String, Object> m = new LinkedHashMap<>();
-                m.put("id", e.getId().toString());
-                m.put("authMethodType", e.getAuthMethodType() != null ? e.getAuthMethodType().name() : null);
-                m.put("status", e.getStatus() != null ? e.getStatus().name() : null);
-                m.put("enrolledAt", toStringOrNull(e.getEnrolledAt()));
-                m.put("expiresAt", toStringOrNull(e.getExpiresAt()));
-                m.put("revokedAt", toStringOrNull(e.getRevokedAt()));
-                m.put("createdAt", toStringOrNull(e.getCreatedAt()));
-                // enrollmentData intentionally omitted — may contain keyed secrets per method
-                return m;
-            })
+            .map(this::serializeEnrollment)
             .toList();
+    }
+
+    /**
+     * F14: per-method slice of a user's enrollments, used to surface biometric
+     * enrollment metadata (e.g. VOICE) under its own export key. Raw embedding
+     * vectors are NOT included — only the metadata identity-core owns in
+     * {@code user_enrollments} (status, quality_score, liveness_score, timestamps).
+     */
+    private List<Map<String, Object>> serializeEnrollmentsForMethod(UUID userId, AuthMethodType method) {
+        List<UserEnrollment> enrollments = userEnrollmentRepository.findAllByUserId(userId);
+        return enrollments.stream()
+            .filter(e -> e.getAuthMethodType() == method)
+            .map(this::serializeEnrollment)
+            .toList();
+    }
+
+    private Map<String, Object> serializeEnrollment(UserEnrollment e) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("id", e.getId() != null ? e.getId().toString() : null);
+        m.put("authMethodType", e.getAuthMethodType() != null ? e.getAuthMethodType().name() : null);
+        m.put("status", e.getStatus() != null ? e.getStatus().name() : null);
+        m.put("qualityScore", e.getQualityScore() != null ? e.getQualityScore().toPlainString() : null);
+        m.put("livenessScore", e.getLivenessScore() != null ? e.getLivenessScore().toPlainString() : null);
+        m.put("enrolledAt", toStringOrNull(e.getEnrolledAt()));
+        m.put("expiresAt", toStringOrNull(e.getExpiresAt()));
+        m.put("revokedAt", toStringOrNull(e.getRevokedAt()));
+        m.put("createdAt", toStringOrNull(e.getCreatedAt()));
+        // enrollmentData intentionally omitted — may contain keyed secrets per method
+        return m;
     }
 
     private List<Map<String, Object>> serializeAuthSessions(UUID userId) {
