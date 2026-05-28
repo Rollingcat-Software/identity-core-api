@@ -45,7 +45,7 @@ not a real biometric. The `AuthMethodType.FINGERPRINT` enum value is retained
 - **NFC enrollment**: Auto-creates user_enrollments record. Reactivates existing inactive card on re-enrollment.
 - **CORS**: api.fivucsas.com, app.fivucsas.com, demo.fivucsas.com, verify.fivucsas.com
 
-## Flyway Migrations (V1-V60)
+## Flyway Migrations (V1-V61)
 
 V1-V15: Core schema | V16: Auth methods/flows | V17: Devices | V24: OAuth2 | V25: Enrollments
 V26-V28: Verification pipeline | V29: EMAIL_OTP default | V30: Adaptive MFA (CHOICE steps)
@@ -63,6 +63,8 @@ V57: audit_logs handed to pg_partman — fail-soft when extension missing
 V58: oauth2_clients secret-rotation grace window (backs POST `/{id}/rotate-secret`).
 V59: backfill audit_logs.tenant_id NULLs + introduce "system" sentinel tenant.
 V60: drop refresh_tokens.token plaintext column (hashed wire-format fully active since V55).
+V61: audit_logs.tenant_id SET NOT NULL (#99) — self-gating: pre-checks 0 NULLs and
+     fails loud, no DEFAULT, metadata-only ALTER on PG12+. Applies on the next rebuild.
 
 **V34-V60 applied in prod. Last rebuild included V60 (drop refresh_tokens.token plaintext).**
 
