@@ -490,7 +490,8 @@ public class AuthController {
                     String code = (String) data.get("code");
                     if (code == null || code.isBlank()) yield false;
                     String secret = resolveTotpSecret(user);
-                    yield secret != null && totpService.verifyCode(secret, code);
+                    // S13: single-use (anti-replay) verify bound to the user.
+                    yield secret != null && totpService.verifyCodeForUser(user.getId(), secret, code);
                 }
                 case SMS_OTP -> {
                     String code = (String) data.get("code");

@@ -35,7 +35,10 @@ public class TotpVerifyMfaStepHandler implements VerifyMfaStepHandler {
             return MfaStepResult.fail();
         }
         String secret = resolveTotpSecret(user);
-        boolean ok = secret != null && totpService.verifyCode(secret, code);
+        // S13: verifyCodeForUser enforces single-use (anti-replay) on the matched
+        // time-step, so a code that already authenticated cannot be replayed
+        // within its ~90s validity window.
+        boolean ok = secret != null && totpService.verifyCodeForUser(user.getId(), secret, code);
         return ok ? MfaStepResult.ok() : MfaStepResult.fail();
     }
 
