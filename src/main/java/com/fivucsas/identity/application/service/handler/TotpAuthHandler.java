@@ -56,7 +56,10 @@ public class TotpAuthHandler implements AuthMethodHandler {
             return StepResult.failure("TOTP not configured for this user");
         }
 
-        boolean valid = totpService.verifyCode(secret, code);
+        // S13: verifyCodeForUser enforces single-use (anti-replay) on the matched
+        // time-step. A replayed (already-consumed) code fails here exactly like an
+        // invalid one, so the response shape is unchanged.
+        boolean valid = totpService.verifyCodeForUser(session.getUser().getId(), secret, code);
         if (!valid) {
             log.warn("TOTP validation failed for session: {}", session.getId());
             return StepResult.failure("Invalid TOTP code");

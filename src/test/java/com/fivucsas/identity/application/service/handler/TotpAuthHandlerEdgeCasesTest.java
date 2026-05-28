@@ -81,7 +81,7 @@ class TotpAuthHandlerEdgeCasesTest {
         when(userRepository.findById(userId)).thenReturn(Optional.of(user));
         // BE-H3 dual-read: legacy plaintext → cipher returns unchanged.
         when(totpSecretCipher.decryptIfNeeded("DB_SECRET_VALUE")).thenReturn("DB_SECRET_VALUE");
-        when(totpService.verifyCode("DB_SECRET_VALUE", "123456")).thenReturn(true);
+        when(totpService.verifyCodeForUser(userId, "DB_SECRET_VALUE", "123456")).thenReturn(true);
 
         StepResult result = handler.validate(session, step, Map.of("code", "123456"));
 
@@ -104,7 +104,7 @@ class TotpAuthHandlerEdgeCasesTest {
         when(valueOperations.get("totp:secret:" + userId)).thenReturn(null);
         when(userRepository.findById(userId)).thenReturn(Optional.of(user));
         when(totpSecretCipher.decryptIfNeeded(ciphertext)).thenReturn("PLAINTEXT_SEED");
-        when(totpService.verifyCode("PLAINTEXT_SEED", "654321")).thenReturn(true);
+        when(totpService.verifyCodeForUser(userId, "PLAINTEXT_SEED", "654321")).thenReturn(true);
 
         StepResult result = handler.validate(session, step, Map.of("code", "654321"));
 
@@ -156,7 +156,7 @@ class TotpAuthHandlerEdgeCasesTest {
         when(session.getId()).thenReturn(UUID.randomUUID());
         when(redisTemplate.opsForValue()).thenReturn(valueOperations);
         when(valueOperations.get("totp:secret:" + userId)).thenReturn("JBSWY3DPEHPK3PXP");
-        when(totpService.verifyCode("JBSWY3DPEHPK3PXP", "abcdef")).thenReturn(false);
+        when(totpService.verifyCodeForUser(userId, "JBSWY3DPEHPK3PXP", "abcdef")).thenReturn(false);
 
         StepResult result = handler.validate(session, step, Map.of("code", "abcdef"));
 
@@ -174,7 +174,7 @@ class TotpAuthHandlerEdgeCasesTest {
         when(session.getId()).thenReturn(UUID.randomUUID());
         when(redisTemplate.opsForValue()).thenReturn(valueOperations);
         when(valueOperations.get("totp:secret:" + userId)).thenReturn("JBSWY3DPEHPK3PXP");
-        when(totpService.verifyCode("JBSWY3DPEHPK3PXP", longCode)).thenReturn(false);
+        when(totpService.verifyCodeForUser(userId, "JBSWY3DPEHPK3PXP", longCode)).thenReturn(false);
 
         StepResult result = handler.validate(session, step, Map.of("code", longCode));
 
@@ -191,7 +191,7 @@ class TotpAuthHandlerEdgeCasesTest {
         when(session.getId()).thenReturn(UUID.randomUUID());
         when(redisTemplate.opsForValue()).thenReturn(valueOperations);
         when(valueOperations.get("totp:secret:" + userId)).thenReturn("JBSWY3DPEHPK3PXP");
-        when(totpService.verifyCode("JBSWY3DPEHPK3PXP", "12 34")).thenReturn(false);
+        when(totpService.verifyCodeForUser(userId, "JBSWY3DPEHPK3PXP", "12 34")).thenReturn(false);
 
         StepResult result = handler.validate(session, step, Map.of("code", "12 34"));
 
@@ -210,8 +210,8 @@ class TotpAuthHandlerEdgeCasesTest {
         when(session.getId()).thenReturn(UUID.randomUUID());
         when(redisTemplate.opsForValue()).thenReturn(valueOperations);
         when(valueOperations.get("totp:secret:" + userId)).thenReturn("JBSWY3DPEHPK3PXP");
-        // TotpService.verifyCode() catches exceptions and returns false
-        when(totpService.verifyCode("JBSWY3DPEHPK3PXP", "123456")).thenReturn(false);
+        // TotpService.verifyCodeForUser() catches exceptions and returns false
+        when(totpService.verifyCodeForUser(userId, "JBSWY3DPEHPK3PXP", "123456")).thenReturn(false);
 
         StepResult result = handler.validate(session, step, Map.of("code", "123456"));
 
@@ -281,8 +281,8 @@ class TotpAuthHandlerEdgeCasesTest {
         when(session.getId()).thenReturn(UUID.randomUUID());
         when(redisTemplate.opsForValue()).thenReturn(valueOperations);
         when(valueOperations.get("totp:secret:" + userId)).thenReturn("SECRET");
-        when(totpService.verifyCode("SECRET", "000000")).thenReturn(false);
-        when(totpService.verifyCode("SECRET", "123456")).thenReturn(true);
+        when(totpService.verifyCodeForUser(userId, "SECRET", "000000")).thenReturn(false);
+        when(totpService.verifyCodeForUser(userId, "SECRET", "123456")).thenReturn(true);
 
         // First attempt: wrong
         StepResult wrongResult = handler.validate(session, step, Map.of("code", "000000"));

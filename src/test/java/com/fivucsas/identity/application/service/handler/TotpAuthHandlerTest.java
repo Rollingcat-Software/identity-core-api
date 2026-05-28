@@ -49,7 +49,7 @@ class TotpAuthHandlerTest {
         when(session.getUser()).thenReturn(user);
         when(redisTemplate.opsForValue()).thenReturn(valueOperations);
         when(valueOperations.get("totp:secret:" + userId)).thenReturn("JBSWY3DPEHPK3PXP");
-        when(totpService.verifyCode("JBSWY3DPEHPK3PXP", "123456")).thenReturn(true);
+        when(totpService.verifyCodeForUser(userId, "JBSWY3DPEHPK3PXP", "123456")).thenReturn(true);
 
         StepResult result = handler.validate(session, step, Map.of("code", "123456"));
 
@@ -65,7 +65,7 @@ class TotpAuthHandlerTest {
         when(session.getId()).thenReturn(UUID.randomUUID());
         when(redisTemplate.opsForValue()).thenReturn(valueOperations);
         when(valueOperations.get("totp:secret:" + userId)).thenReturn("JBSWY3DPEHPK3PXP");
-        when(totpService.verifyCode("JBSWY3DPEHPK3PXP", "000000")).thenReturn(false);
+        when(totpService.verifyCodeForUser(userId, "JBSWY3DPEHPK3PXP", "000000")).thenReturn(false);
 
         StepResult result = handler.validate(session, step, Map.of("code", "000000"));
 
