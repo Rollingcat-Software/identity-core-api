@@ -14,7 +14,14 @@ COPY pom.xml .
 # Pre-fetch dependencies into a cached layer; subsequent src changes don't
 # redownload them. Plugin resolution may still hit the network on the
 # package step, so we deliberately avoid `--offline` to stay robust (P3.7).
-RUN mvn dependency:go-offline -B
+# `go-offline` over-eagerly walks the FULL transitive closure (pre-mediation)
+# and can choke on an upstream artifact that points at a now-purged SNAPSHOT
+# (e.g. jackson-dataformat-cbor -> jackson-databind:2.19.5-SNAPSHOT, whose
+# parent pom was removed from central-snapshots). The real `mvn package` below
+# resolves those via dependencyManagement mediation (jackson-bom pin) and never
+# needs the snapshot — so a go-offline miss must NOT fail the build; it only
+# warms the cache. Keep it best-effort.
+RUN mvn dependency:go-offline -B || echo "go-offline incomplete (transitive snapshot rot); package step resolves via dependencyManagement"
 
 # Copy source code
 COPY src ./src
