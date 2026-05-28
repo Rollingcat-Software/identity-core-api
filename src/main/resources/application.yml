@@ -124,6 +124,14 @@ fivucsas:
     # (un-encrypted) TOTP secret instead of silently accepting it. Enable once
     # the legacy plaintext rows have been migrated (see migrate-on-boot).
     reject-plaintext: ${FIVUCSAS_TOTP_REJECT_PLAINTEXT:false}
+  # S9 (security review): NFC_DOCUMENT serial-only verification is security
+  # theater — a card serial is readable/cloneable, not a secret. The step is
+  # fail-closed by default (returns FAILED regardless of serial match) until
+  # genuine on-chip authentication (ICAO passive auth) is implemented. Set to
+  # true ONLY as an explicit, documented-risk opt-in to restore the legacy
+  # serial-match behavior; keep false in production.
+  nfc:
+    serial-only-auth-enabled: ${FIVUCSAS_NFC_SERIAL_ONLY_AUTH_ENABLED:false}
 
 # FastAPI Integration
 biometric:
