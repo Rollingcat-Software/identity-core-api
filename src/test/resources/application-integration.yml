@@ -21,8 +21,14 @@ spring:
   flyway:
     enabled: true
     # Test-only fixtures live in db/test-fixtures and are NOT on the prod
-    # classpath. V28_5__align_default_login_flow_for_v29.sql back-fills the
-    # hardcoded UUIDs that V29 references (see fixture file header).
+    # classpath. Two fixtures currently:
+    #   - V28_5__align_default_login_flow_for_v29.sql back-fills the
+    #     hardcoded UUIDs that V29 references (see fixture file header).
+    #   - V39_5__rename_audit_logs_pkey_for_v40.sql frees the
+    #     audit_logs_pkey constraint name so V40's composite-PK ADD does
+    #     not collide on a fresh Testcontainers DB (prod skipped V40 via
+    #     a BASELINE marker so it never hit the collision; CI runs V40
+    #     end-to-end so it does).
     locations: classpath:db/migration,classpath:db/test-fixtures
     baseline-on-migrate: false
     validate-on-migrate: true
