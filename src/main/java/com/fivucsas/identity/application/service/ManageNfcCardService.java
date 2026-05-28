@@ -111,9 +111,31 @@ public class ManageNfcCardService {
         return nfcCardRepository.findByCardSerialAndIsActiveTrue(cardSerial);
     }
 
+    /**
+     * Looks up enrollments for a card serial, scoped to the caller's tenant.
+     *
+     * <p>S11 (security review): the previous implementation called
+     * {@code findByCardSerial} with no tenant filter, so any authenticated
+     * user could discover who owns a card serial in <em>any</em> tenant —
+     * a cross-tenant PII leak. This now restricts the result set to the
+     * caller's own tenant. ROOT (no tenant attached, cross-tenant by design)
+     * retains the unscoped global view used by platform operators.</p>
+     *
+     * <p>The {@code @PreAuthorize} on the controller endpoint additionally
+     * requires the {@code device:read} admin permission, so an ordinary
+     * tenant member cannot reach this lookup at all.</p>
+     */
     @Transactional(readOnly = true)
     public List<NfcCard> searchByCardSerial(String serial) {
-        return nfcCardRepository.findByCardSerial(serial);
+        User currentUser = rbacService.getCurrentUser()
+                .orElseThrow(UnauthorizedException::new);
+
+        Tenant tenant = currentUser.getTenant();
+        if (tenant == null) {
+            // ROOT / platform super-admin: no tenant attached, cross-tenant by design.
+            return nfcCardRepository.findByCardSerial(serial);
+        }
+        return nfcCardRepository.findAllByCardSerialAndTenantId(serial, tenant.getId());
     }
 
     /**

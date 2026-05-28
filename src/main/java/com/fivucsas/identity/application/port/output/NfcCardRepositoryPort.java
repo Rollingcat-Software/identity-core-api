@@ -30,6 +30,8 @@ public interface NfcCardRepositoryPort {
 
     List<NfcCard> findByCardSerial(String cardSerial);
 
+    List<NfcCard> findAllByCardSerialAndTenantId(String cardSerial, UUID tenantId);
+
     List<NfcCard> findByUserIdAndIsActiveTrue(UUID userId);
 
     List<NfcCard> findByUserId(UUID userId);

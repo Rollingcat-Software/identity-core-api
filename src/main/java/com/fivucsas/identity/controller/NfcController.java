@@ -116,8 +116,13 @@ public class NfcController {
     }
 
     @GetMapping("/search/{serial}")
-    @Operation(summary = "Look up who owns a specific NFC card serial")
-    @PreAuthorize("isAuthenticated()")
+    @Operation(summary = "Look up who owns a specific NFC card serial (admin, tenant-scoped)")
+    // S11 (security review): this lookup exposes who owns a card serial — PII.
+    // Previously gated only by isAuthenticated(), so any logged-in user could
+    // enumerate card owners across every tenant. Require the device:read admin
+    // permission (an NFC card is a physical credential/device); the service
+    // additionally restricts results to the caller's own tenant (ROOT excepted).
+    @PreAuthorize("@rbac.hasPermission('device:read')")
     public ResponseEntity<Map<String, Object>> searchCard(@PathVariable String serial) {
         List<NfcCard> cards = manageNfcCardService.searchByCardSerial(serial);
 
