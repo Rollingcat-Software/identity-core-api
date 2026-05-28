@@ -9,6 +9,7 @@ import com.fivucsas.identity.entity.NfcCard;
 import com.fivucsas.identity.entity.Tenant;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.security.RbacAuthorizationService;
+import com.fivucsas.identity.security.TenantScopeResolver;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -41,6 +42,7 @@ public class ManageNfcCardService {
     private final NfcCardRepositoryPort nfcCardRepository;
     private final UserRepository userRepository;
     private final RbacAuthorizationService rbacService;
+    private final TenantScopeResolver tenantScopeResolver;
     private final ManageEnrollmentUseCase manageEnrollmentUseCase;
 
     /**
@@ -127,15 +129,17 @@ public class ManageNfcCardService {
      */
     @Transactional(readOnly = true)
     public List<NfcCard> searchByCardSerial(String serial) {
-        User currentUser = rbacService.getCurrentUser()
-                .orElseThrow(UnauthorizedException::new);
-
-        Tenant tenant = currentUser.getTenant();
-        if (tenant == null) {
-            // ROOT / platform super-admin: no tenant attached, cross-tenant by design.
+        // Resolve the caller's tenant scope via the security layer rather than
+        // entity.User, so this application service stays within the hexagonal
+        // boundary (UserDomainBoundaryTest). ROOT / SUPER_ADMIN has an
+        // unrestricted scope and keeps the unscoped global view used by
+        // platform operators; everyone else is confined to their own tenant
+        // (a non-super-admin with no resolvable tenant gets the fail-closed
+        // empty scope, which the scoped query returns no rows for).
+        if (tenantScopeResolver.isUnrestricted()) {
             return nfcCardRepository.findByCardSerial(serial);
         }
-        return nfcCardRepository.findAllByCardSerialAndTenantId(serial, tenant.getId());
+        return nfcCardRepository.findAllByCardSerialAndTenantId(serial, tenantScopeResolver.currentScope());
     }
 
     /**

@@ -8,6 +8,7 @@ import com.fivucsas.identity.entity.NfcCard;
 import com.fivucsas.identity.entity.Tenant;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.security.RbacAuthorizationService;
+import com.fivucsas.identity.security.TenantScopeResolver;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -51,6 +52,7 @@ class ManageNfcCardServiceTest {
     @Mock private NfcCardRepositoryPort nfcCardRepository;
     @Mock private UserRepository userRepository;
     @Mock private RbacAuthorizationService rbacService;
+    @Mock private TenantScopeResolver tenantScopeResolver;
     @Mock private ManageEnrollmentUseCase manageEnrollmentUseCase;
 
     @InjectMocks
@@ -71,6 +73,9 @@ class ManageNfcCardServiceTest {
         when(currentUser.getId()).thenReturn(currentUserId);
         when(currentUser.getTenant()).thenReturn(tenant);
         when(rbacService.getCurrentUser()).thenReturn(Optional.of(currentUser));
+        // Default: a tenant-bound caller (scoped to `tenantId`, not ROOT).
+        when(tenantScopeResolver.isUnrestricted()).thenReturn(false);
+        when(tenantScopeResolver.currentScope()).thenReturn(tenantId);
     }
 
     @Test
@@ -179,9 +184,8 @@ class ManageNfcCardServiceTest {
     @Test
     @DisplayName("searchByCardSerial → unscoped global lookup for ROOT (no tenant attached)")
     void searchByCardSerial_WhenCallerHasNoTenant_ShouldQueryGlobally() {
-        User rootUser = mock(User.class);
-        when(rootUser.getTenant()).thenReturn(null);
-        when(rbacService.getCurrentUser()).thenReturn(Optional.of(rootUser));
+        // ROOT / SUPER_ADMIN: unrestricted scope → unscoped global lookup.
+        when(tenantScopeResolver.isUnrestricted()).thenReturn(true);
         NfcCard anyCard = mock(NfcCard.class);
         when(nfcCardRepository.findByCardSerial("SERIAL-2")).thenReturn(List.of(anyCard));
 
