@@ -98,6 +98,16 @@ V60: drop refresh_tokens.token plaintext column (hashed wire-format fully active
   since the 2026-05-04 pending note — V56 through V60 all applied.
 - pg_partman (V57) is fail-soft. `ALTER DATABASE identity_core SET app.skip_partman_v57='on'`
   is available for explicit opt-out if partman extension is absent.
+- **`APP_SECURITY_JWT_AUDIENCE` MUST be non-blank in `.env.prod`** (set to `fivucsas-api`).
+  Since the JWT-aud bundle (2026-05-12), the `prod` profile fails fast on boot with
+  "CRITICAL SECURITY ERROR: ...jwt.audience is blank" if it's empty. NOTE: an *empty*
+  `APP_SECURITY_JWT_AUDIENCE=` in `.env.prod` OVERRIDES the `:fivucsas-api` default in
+  `application-prod.yml` — leaving the var blank is worse than omitting it. This crash-looped
+  prod for ~11 min on 2026-05-28 during the rebuild that first shipped the enforcement. The
+  minter and parser use the same value, so keep them in lockstep if you ever change it.
+- **Docker builds:** `mvn dependency:go-offline` is best-effort (a purged upstream
+  `jackson-databind:*-SNAPSHOT` in the transitive closure can make it miss); `mvn package`
+  resolves via the `jackson-bom` pin and is authoritative. A go-offline miss does not fail the build.
 
 ## Cross-Repo Dependencies
 
