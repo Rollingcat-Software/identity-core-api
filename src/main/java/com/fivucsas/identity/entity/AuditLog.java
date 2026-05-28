@@ -41,8 +41,10 @@ public class AuditLog {
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
 
-    // Tenant isolation
-    @Column(name = "tenant_id")
+    // Tenant isolation. Sentinel UUID 00000000-0000-0000-0000-000000000000 is
+    // used by AuditLogAdapter for truly anonymous events (pre-auth /oauth2/*,
+    // failed login, PKCE failures). DB constraint enforced by V61 NOT NULL.
+    @Column(name = "tenant_id", nullable = false)
     private UUID tenantId;
 
     // User context (nullable for anonymous operations)
