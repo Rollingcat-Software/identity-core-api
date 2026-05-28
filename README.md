@@ -165,10 +165,10 @@ identity-core-api/
 ### Core Technologies
 
 - **Java 21**: Latest LTS version with modern language features
-- **Spring Boot 3.2+**: Enterprise-grade framework
+- **Spring Boot 3.4.7**: Enterprise-grade framework
 - **Spring Security 6**: Authentication and authorization
 - **Spring Data JPA**: Data persistence layer
-- **PostgreSQL 16**: Primary relational database
+- **PostgreSQL 16** (dev/CI; prod ships pgvector/pgvector:pg16): Primary relational database
 - **pgvector**: Vector similarity search for biometric data
 - **Redis 7**: Caching and message queue
 - **Maven**: Build automation tool
@@ -207,7 +207,7 @@ Before setting up the project, ensure you have the following installed:
 
 - **Java Development Kit (JDK) 21** or higher
 - **Maven 3.9+** (or use the included Maven wrapper)
-- **PostgreSQL 16+** with pgvector extension
+- **PostgreSQL 16+** with pgvector extension (docker-compose uses pgvector/pgvector:pg16)
 - **Redis 7+**
 - **Docker & Docker Compose** (for containerized deployment)
 - **Git** for version control
@@ -269,6 +269,20 @@ LOGGING_LEVEL_APP=DEBUG
 
 # Multi-tenancy
 TENANT_ISOLATION_LEVEL=SCHEMA  # SCHEMA or ROW_LEVEL
+
+# JWT RSA keys (REQUIRED in prod — app fails fast when missing)
+# Generate: openssl genrsa -out jwt_rs256.pem 2048
+JWT_RSA_PRIVATE_KEY_PEM=
+JWT_RSA_PUBLIC_KEY_PEM=
+JWT_RSA_KID=rs-2026-04
+JWT_DEFAULT_ALGO=RS256
+
+# TOTP encryption key (REQUIRED — AES-GCM-256, base64 32 bytes)
+# Generate: openssl rand -base64 32
+FIVUCSAS_TOTP_ENC_KEY=
+
+# WebAuthn allowed origins (comma-separated)
+WEBAUTHN_ALLOWED_ORIGINS=https://app.fivucsas.com,https://verify.fivucsas.com,https://demo.fivucsas.com
 ```
 
 ### 3. Set Up the Database
@@ -428,54 +442,65 @@ http://localhost:8080/api/v1
 
 | Method | Endpoint                 | Description                         | Auth Required       |
 |--------|--------------------------|-------------------------------------|---------------------|
-| POST   | `/auth/register`         | Register a new user                 | No                  |
-| POST   | `/auth/login`            | Authenticate and receive JWT tokens | No                  |
-| POST   | `/auth/logout`           | Invalidate refresh token            | Yes                 |
-| POST   | `/auth/refresh`          | Refresh access token                | Yes (Refresh Token) |
-| POST   | `/auth/forgot-password`  | Request password reset              | No                  |
-| POST   | `/auth/reset-password`   | Reset password with token           | No                  |
-| POST   | `/auth/verify-email`     | Verify email address                | No                  |
-| POST   | `/auth/verify-biometric` | Verify biometric authentication     | No                  |
+| POST   | `/auth/register`                    | Register a new user                 | No                  |
+| POST   | `/auth/login`                       | Authenticate and receive JWT tokens | No                  |
+| POST   | `/auth/logout`                      | Invalidate refresh token            | Yes                 |
+| POST   | `/auth/refresh`                     | Refresh access token                | Yes (Refresh Token) |
+| POST   | `/auth/forgot-password`             | Request password reset              | No                  |
+| POST   | `/auth/reset-password`              | Reset password with token           | No                  |
+| POST   | `/auth/verify-email`                | Verify email address                | No                  |
+| POST   | `/api/v1/biometric/verify/{userId}` | Verify biometric authentication     | Yes                 |
 
 ### User Management Endpoints
 
 | Method | Endpoint                               | Description                | Auth Required | Role       |
 |--------|----------------------------------------|----------------------------|---------------|------------|
-| GET    | `/users`                               | List all users (paginated) | Yes           | ADMIN      |
-| GET    | `/users/{id}`                          | Get user by ID             | Yes           | ADMIN/SELF |
-| POST   | `/users`                               | Create new user            | Yes           | ADMIN      |
-| PUT    | `/users/{id}`                          | Update user                | Yes           | ADMIN/SELF |
-| DELETE | `/users/{id}`                          | Delete user                | Yes           | ADMIN      |
-| GET    | `/users/me`                            | Get current user profile   | Yes           | USER       |
-| PUT    | `/users/me`                            | Update current user        | Yes           | USER       |
-| GET    | `/users/{id}/biometrics`               | Get user biometric info    | Yes           | ADMIN/SELF |
-| POST   | `/users/{id}/biometrics`               | Enroll biometric data      | Yes           | ADMIN/SELF |
-| DELETE | `/users/{id}/biometrics/{biometricId}` | Delete biometric           | Yes           | ADMIN/SELF |
+| GET    | `/api/v1/users`                                    | List all users (paginated)            | Yes           | ADMIN      |
+| GET    | `/api/v1/users/{id}`                               | Get user by ID                        | Yes           | ADMIN/SELF |
+| POST   | `/api/v1/users`                                    | Create new user                       | Yes           | ADMIN      |
+| PUT    | `/api/v1/users/{id}`                               | Update user                           | Yes           | ADMIN/SELF |
+| DELETE | `/api/v1/users/{id}`                               | Soft-delete user                      | Yes           | ADMIN      |
+| GET    | `/api/v1/users/me`                                 | Get current user profile              | Yes           | USER       |
+| GET    | `/api/v1/users/{id}/export`                        | GDPR Art. 20 data export              | Yes           | ADMIN/SELF |
+| POST   | `/api/v1/biometric/enroll/{userId}`                | Enroll face biometric                 | Yes           | ADMIN/SELF |
+| POST   | `/api/v1/biometric/enroll/multi/{userId}`          | Multi-frame face enrollment           | Yes           | ADMIN/SELF |
+| POST   | `/api/v1/biometric/verify/{userId}`                | Verify face biometric                 | Yes           | ADMIN/SELF |
+| DELETE | `/api/v1/biometric/face/{userId}`                  | Delete face enrollment                | Yes           | ADMIN/SELF |
+| POST   | `/api/v1/biometric/voice/enroll/{userId}`          | Enroll voice biometric                | Yes           | ADMIN/SELF |
+| POST   | `/api/v1/biometric/voice/verify/{userId}`          | Verify voice biometric                | Yes           | ADMIN/SELF |
+| DELETE | `/api/v1/biometric/voice/{userId}`                 | Delete voice enrollment               | Yes           | ADMIN/SELF |
 
 ### Tenant Management Endpoints
 
 | Method | Endpoint               | Description                 | Auth Required | Role         |
 |--------|------------------------|-----------------------------|---------------|--------------|
-| GET    | `/tenants`             | List all tenants            | Yes           | SUPER_ADMIN  |
-| GET    | `/tenants/{id}`        | Get tenant by ID            | Yes           | TENANT_ADMIN |
-| POST   | `/tenants`             | Create new tenant           | Yes           | SUPER_ADMIN  |
-| PUT    | `/tenants/{id}`        | Update tenant               | Yes           | TENANT_ADMIN |
-| DELETE | `/tenants/{id}`        | Delete tenant               | Yes           | SUPER_ADMIN  |
-| GET    | `/tenants/{id}/users`  | Get tenant users            | Yes           | TENANT_ADMIN |
-| POST   | `/tenants/{id}/config` | Update tenant configuration | Yes           | TENANT_ADMIN |
+| GET    | `/api/v1/tenants`                       | List all tenants              | Yes           | SUPER_ADMIN  |
+| GET    | `/api/v1/tenants/{tenantId}`            | Get tenant by ID              | Yes           | TENANT_ADMIN |
+| GET    | `/api/v1/tenants/slug/{slug}`           | Get tenant by slug            | Yes           | TENANT_ADMIN |
+| POST   | `/api/v1/tenants`                       | Create new tenant             | Yes           | SUPER_ADMIN  |
+| PUT    | `/api/v1/tenants/{tenantId}`            | Update tenant (incl. config)  | Yes           | TENANT_ADMIN |
+| POST   | `/api/v1/tenants/{tenantId}/activate`   | Activate tenant               | Yes           | SUPER_ADMIN  |
+| POST   | `/api/v1/tenants/{tenantId}/suspend`    | Suspend tenant                | Yes           | SUPER_ADMIN  |
+| DELETE | `/api/v1/tenants/{tenantId}`            | Soft-delete tenant            | Yes           | SUPER_ADMIN  |
 
 ### Role & Permission Endpoints
 
 | Method | Endpoint                                 | Description          | Auth Required | Role  |
 |--------|------------------------------------------|----------------------|---------------|-------|
-| GET    | `/roles`                                 | List all roles       | Yes           | ADMIN |
-| GET    | `/roles/{id}`                            | Get role by ID       | Yes           | ADMIN |
-| POST   | `/roles`                                 | Create new role      | Yes           | ADMIN |
-| PUT    | `/roles/{id}`                            | Update role          | Yes           | ADMIN |
-| DELETE | `/roles/{id}`                            | Delete role          | Yes           | ADMIN |
-| GET    | `/roles/{id}/permissions`                | Get role permissions | Yes           | ADMIN |
-| POST   | `/roles/{id}/permissions`                | Assign permissions   | Yes           | ADMIN |
-| DELETE | `/roles/{id}/permissions/{permissionId}` | Remove permission    | Yes           | ADMIN |
+| GET    | `/api/v1/roles`                                            | List all roles            | Yes           | ADMIN |
+| GET    | `/api/v1/roles/{id}`                                       | Get role by ID            | Yes           | ADMIN |
+| GET    | `/api/v1/roles/tenant/{tenantId}`                          | List roles by tenant      | Yes           | ADMIN |
+| POST   | `/api/v1/roles`                                            | Create new role           | Yes           | ADMIN |
+| PUT    | `/api/v1/roles/{id}`                                       | Update role               | Yes           | ADMIN |
+| DELETE | `/api/v1/roles/{id}`                                       | Delete role               | Yes           | ADMIN |
+| GET    | `/api/v1/permissions`                                      | List all permissions      | Yes           | ADMIN |
+| GET    | `/api/v1/permissions/{id}`                                 | Get permission by ID      | Yes           | ADMIN |
+| GET    | `/api/v1/permissions/resource/{resource}`                  | Get permissions by resource | Yes         | ADMIN |
+| POST   | `/api/v1/roles/{roleId}/permissions/{permissionId}`        | Assign permission to role | Yes           | ADMIN |
+| DELETE | `/api/v1/roles/{roleId}/permissions/{permissionId}`        | Remove permission          | Yes           | ADMIN |
+| GET    | `/api/v1/users/{userId}/roles`                             | Get user roles            | Yes           | ADMIN |
+| POST   | `/api/v1/users/{userId}/roles/{roleId}`                    | Assign role to user       | Yes           | ADMIN |
+| DELETE | `/api/v1/users/{userId}/roles/{roleId}`                    | Remove role from user     | Yes           | ADMIN |
 
 ### Example Requests
 
@@ -534,6 +559,22 @@ curl -X GET http://localhost:8080/api/v1/users/me \
 
 For complete API documentation, visit the Swagger UI at `http://localhost:8080/swagger-ui.html` when the application is
 running.
+
+### Additional Controller Base Paths
+
+The following controllers exist but are not fully enumerated above. All paths are prefixed with `/api/v1` unless noted.
+
+| Controller             | Base Path                      | Notes                                          |
+|------------------------|--------------------------------|------------------------------------------------|
+| AuthSessionController  | `/api/v1/auth/sessions`        | MFA session lifecycle (start, step, cancel)    |
+| NfcController          | `/api/v1/nfc`                  | NFC card enroll, verify, verify-mrz, delete    |
+| StepUpController       | `/api/v1/step-up`              | Device step-up challenge / verify              |
+| OAuth2ClientController | `/api/v1/oauth2/clients`       | Admin-only: CRUD + `/{id}/rotate-secret`       |
+| VerificationController | `/api/v1/verification`         | Verification sessions, templates, flows, stats |
+| OtpController          | `/api/v1/otp` + `/api/v1/totp` | Email/SMS OTP send+verify; TOTP setup+status   |
+| QrController           | `/api/v1/qr` + `/api/v1/auth/qr` | QR token generation; QR auth sessions       |
+| UserDataExportController | `/api/v1/users/{id}/export`  | GDPR Art. 20 portability export (GET)          |
+| PurgeAdminController   | `/api/v1/admin/purge`          | Super-admin dry-run soft-delete purge (DELETE) |
 
 ## Database Schema
 
@@ -602,22 +643,13 @@ CREATE TABLE user_roles (
 );
 ```
 
-#### biometric_data
+#### biometric_data (DROPPED — V48)
 
-```sql
-CREATE TABLE biometric_data (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    biometric_type VARCHAR(50) NOT NULL,
-    embedding vector(2622),  -- pgvector for face embeddings
-    quality_score FLOAT,
-    enrolled_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    is_active BOOLEAN DEFAULT TRUE
-);
-
-CREATE INDEX idx_biometric_user ON biometric_data(user_id);
-CREATE INDEX idx_biometric_embedding ON biometric_data USING ivfflat (embedding vector_cosine_ops);
-```
+> **Note:** The `biometric_data` table was dropped in Flyway migration V48
+> (`V48__drop_biometric_data.sql`). Biometric embeddings are stored exclusively
+> in the `biometric-processor` service (Python/FastAPI). The identity API retains
+> enrollment metadata (enrollment counts, scores) in `user_enrollments` but never
+> holds raw vectors.
 
 ### Entity Relationship Diagram
 
@@ -667,7 +699,7 @@ CREATE INDEX idx_biometric_embedding ON biometric_data USING ivfflat (embedding 
 
 #### Token Security
 
-- JWT tokens signed with HS512 algorithm
+- JWT tokens signed with **RS256** in production (hard-coded in `application-prod.yml`); base `application.yml` defaults to HS512 and can be overridden with `JWT_DEFAULT_ALGO=RS256`. Verification always accepts both algorithms via `kid` header lookup.
 - Short-lived access tokens (1 hour)
 - Refresh tokens with longer expiration (7 days)
 - Token blacklisting for logout

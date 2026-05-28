@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Java 21 / Spring Boot 3.2.0 backend API for FIVUCSAS biometric identity platform.
+Java 21 / Spring Boot 3.4.7 backend API for FIVUCSAS biometric identity platform.
 Hexagonal Architecture with Ports and Adapters. Production URL: https://api.fivucsas.com
 
 ## Build & Deploy
@@ -45,7 +45,7 @@ not a real biometric. The `AuthMethodType.FINGERPRINT` enum value is retained
 - **NFC enrollment**: Auto-creates user_enrollments record. Reactivates existing inactive card on re-enrollment.
 - **CORS**: api.fivucsas.com, app.fivucsas.com, demo.fivucsas.com, verify.fivucsas.com
 
-## Flyway Migrations (V1-V57)
+## Flyway Migrations (V1-V60)
 
 V1-V15: Core schema | V16: Auth methods/flows | V17: Devices | V24: OAuth2 | V25: Enrollments
 V26-V28: Verification pipeline | V29: EMAIL_OTP default | V30: Adaptive MFA (CHOICE steps)
@@ -60,9 +60,11 @@ V56: noop placeholder reserved for refresh-token plaintext-column drop (chain-co
 V57: audit_logs handed to pg_partman — fail-soft when extension missing
      (`RAISE WARNING + RETURN`); explicit opt-out via `app.skip_partman_v57=on` GUC.
      See `/opt/projects/infra/RUNBOOK_AUDIT_LOG_PARTMAN.md`.
+V58: oauth2_clients secret-rotation grace window (backs POST `/{id}/rotate-secret`).
+V59: backfill audit_logs.tenant_id NULLs + introduce "system" sentinel tenant.
+V60: drop refresh_tokens.token plaintext column (hashed wire-format fully active since V55).
 
-**V34-V55 applied in prod (rebuilt 2026-05-02 17:50 UTC).**
-**V56 + V57 rebuild PENDING as of 2026-05-04 — operator reality below.**
+**V34-V60 applied in prod. Last rebuild included V60 (drop refresh_tokens.token plaintext).**
 
 ## 2026-05-04 highlights
 
@@ -90,14 +92,12 @@ V57: audit_logs handed to pg_partman — fail-soft when extension missing
   `ahabgu@gmail.com` between 06:34–06:38 UTC on 2026-05-04 (Hibernate was
   treating manually-assigned UUIDs as merge candidates → silent NOOP on insert).
 
-## Operator reality (2026-05-04)
+## Operator reality (2026-05-28 update)
 
-- Last prod rebuild: 2026-05-02 17:50 UTC.
-- **2026-05-04 rebuild PENDING** to pick up PR #63–#71 (notably the P0
-  refresh-token fix #71 — ships V56 placeholder + V57 pg_partman).
-- pg_partman (V57) is fail-soft. Operator can rebuild api safely without first
-  installing partman; `ALTER DATABASE identity_core SET app.skip_partman_v57='on'`
-  is also available for explicit opt-out.
+- V60 (drop refresh_tokens.token plaintext) applied in prod. Prod has been rebuilt
+  since the 2026-05-04 pending note — V56 through V60 all applied.
+- pg_partman (V57) is fail-soft. `ALTER DATABASE identity_core SET app.skip_partman_v57='on'`
+  is available for explicit opt-out if partman extension is absent.
 
 ## Cross-Repo Dependencies
 

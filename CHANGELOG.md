@@ -2,6 +2,34 @@
 
 ## [Unreleased]
 
+### 2026-05-11 — Flyway V58–V60 (ops / DB hygiene)
+
+- **V58** `V58__oauth2_clients_secret_rotation.sql` — adds `previous_secret_hash`
+  + `previous_secret_expires_at` columns to `oauth2_clients`. Backs the new
+  `POST /api/v1/oauth2/clients/{id}/rotate-secret` endpoint: after rotation the
+  old secret remains valid for 24 h so deployed integrations can roll over without
+  downtime.
+- **V59** `V59__backfill_audit_logs_tenant_id.sql` — backfills `audit_logs.tenant_id`
+  NULLs (140/1107 rows in prod, 12.6%) and introduces a "system" sentinel tenant
+  as the fallback owner for system-generated events. Prod NULL count 140 → 0 after
+  apply.
+- **V60** `V60__drop_refresh_tokens_token_plaintext.sql` — drops the
+  `refresh_tokens.token` plaintext column. The hashed wire-format
+  `<id>.<secret>` / `token_secret_hash` has been the live path since V55
+  (2026-05-02); V56 was a reserved no-op placeholder ensuring chain contiguity.
+  Prod rebuilt and healthy with V60 applied.
+
+### Operator notes (updated 2026-05-28)
+
+- **V60 applied in prod.** The 2026-05-04 "rebuild PENDING" note is resolved —
+  prod has been rebuilt and V56 through V60 are all applied and healthy.
+- V57 (pg_partman) is fail-soft, so a rebuild is safe even without
+  `pg_partman` installed in the postgres image — the migration logs a
+  `RAISE WARNING` and returns. To opt out explicitly:
+  `ALTER DATABASE identity_core SET app.skip_partman_v57='on';`
+- Senior DB review (`SENIOR_DB_REVIEW_2026-05-04.md`) Appendix C lists 7 prod
+  queries that need Hetzner SSH to answer.
+
 ### 2026-05-04 — Quality + senior-DB-review wave (9 PRs)
 
 Squash-merged to `main`:
@@ -49,14 +77,10 @@ Squash-merged to `main`:
   6 `MFA_STEP_FAILED` audit-log rows for `ahabgu@gmail.com` between 06:34–06:38
   UTC on 2026-05-04. Rebuild required to take effect in prod.
 
-### Operator notes
+### Operator notes (2026-05-04 wave)
 
-- Last prod rebuild: 2026-05-02 17:50 UTC. **2026-05-04 rebuild PENDING** to
-  pick up #63–#71.
-- V57 (pg_partman) is fail-soft, so a rebuild is safe even without
-  `pg_partman` installed in the postgres image — the migration logs a
-  `RAISE WARNING` and returns. To opt out explicitly:
-  `ALTER DATABASE identity_core SET app.skip_partman_v57='on';`
+- PRs #63–#71 shipped. The 2026-05-04 rebuild referenced here has since completed
+  (see the 2026-05-11 section above for current prod state).
 - Senior DB review (`SENIOR_DB_REVIEW_2026-05-04.md`) Appendix C lists 7 prod
   queries that need Hetzner SSH to answer.
 
@@ -452,7 +476,7 @@ maps it onto the `User` entity and adds the job + endpoints that consume it.
 ### Added
 - **Rate limit** on `/auth/mfa/qr-generate` — defends against broken clients looping on QR generation. Uses biometric bucket (20/min per IP). Sends `Retry-After` header so the widget can surface a friendly countdown instead of re-firing. (RateLimitInterceptor.java)
 
-## [Unreleased] - 2026-03-07
+## [2026-03-07] — Initial audit and documentation
 
 ### Added
 - CLAUDE.md with project context, known issues, and auth handler status

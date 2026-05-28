@@ -1,5 +1,10 @@
 # Identity Core API — Roadmap
 
+> **Historical snapshot — superseded by parent ROADMAP.md**
+> This file reflects the state as of 2026-03-15. Most items listed as "remaining"
+> have since shipped. For current status, see the parent repo's ROADMAP_MASTER.md
+> and this repo's CHANGELOG.md.
+
 > Last updated: 2026-03-15
 
 ## Deployment Status

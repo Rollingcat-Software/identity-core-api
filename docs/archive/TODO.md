@@ -32,7 +32,7 @@
 
 ### Phase E — Performance (CI)
 
-- [ ] **E3.** Add `-T 2C` (parallel threads per CPU core) to Maven invocations in `.github/workflows/ci.yml` — halves CI wall-clock.
+- [x] **E3.** Add `-T 2C` (parallel threads per CPU core) to Maven invocations in `.github/workflows/ci.yml` — halves CI wall-clock. *(Shipped 2026-04-18 — `mvn -B -ntp -T 2C test` in ci.yml unit-test job.)*
 
 ### Phase F — Compliance & observability (server-side)
 

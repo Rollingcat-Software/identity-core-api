@@ -11,12 +11,13 @@
 
 ### Step 1: Run Migrations
 
-```bash
-# Start the Spring Boot application (migrations run automatically)
-./gradlew bootRun
+This project uses **Maven** (not Gradle). There is no `flyway-maven-plugin`
+in `pom.xml` — Flyway runs automatically on application startup via Spring Boot
+auto-configuration.
 
-# OR run migrations manually if Flyway CLI is configured
-flyway migrate
+```bash
+# Start the application — Flyway applies pending migrations automatically
+./mvnw spring-boot:run -Dspring-boot.run.profiles=dev
 ```
 
 ### Step 2: Verify Migration Status
@@ -477,7 +478,7 @@ ROLLBACK;
 
 ---
 
-**Last Updated**: 2024-12-04
+**Last Updated**: 2026-05-28
 **Tested By**: _____________
 **Environment**: _____________
 **Status**: [ ] PASS / [ ] FAIL / [ ] PARTIAL
