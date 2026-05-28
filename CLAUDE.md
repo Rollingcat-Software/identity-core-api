@@ -103,6 +103,6 @@ V60: drop refresh_tokens.token plaintext column (hashed wire-format fully active
 
 - **biometric-processor** (Python/FastAPI, port 8001) — internal Docker network only, `X-API-Key` header
 - **web-app** (React) consumes this API
-- **SMTP**: `smtp.hostinger.com:587`, sender `info@app.fivucsas.com`, creds in `.env.prod`
+- **SMTP**: `smtp.hostinger.com:587`, sender `info@fivucsas.com`, creds in `.env.prod`
 
 See TODO.md for integration audit (49 items).
