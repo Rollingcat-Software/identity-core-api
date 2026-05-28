@@ -29,7 +29,20 @@ public class VerificationController {
     private final ManageVerificationService verificationService;
     private final TenantScopeResolver tenantScopeResolver;
 
+    /**
+     * Creates a verification session ON BEHALF OF a tenant user (admin-on-behalf
+     * model: the admin dashboard posts the target {@code userId}). S2 fix —
+     * previously this endpoint had no {@code @PreAuthorize}, so any authenticated
+     * caller could mint a session for ANY user in ANY tenant (write-side IDOR).
+     *
+     * <p>Defence is two-layered, mirroring the S1 fix on {@code TenantController}:
+     * the {@code verification:create} permission gate here (ROOT and TENANT_ADMIN
+     * hold it; see V45), plus an object-level tenant-scope + user-ownership check
+     * inside {@link ManageVerificationService#createSession} so a TENANT_ADMIN of
+     * tenant A cannot pass tenant B's id.</p>
+     */
     @PostMapping("/sessions")
+    @PreAuthorize("@rbac.hasPermission('verification:create')")
     public ResponseEntity<VerificationSessionResponse> createSession(
             @Valid @RequestBody CreateVerificationSessionCommand command) {
         return ResponseEntity.status(HttpStatus.CREATED)
@@ -44,12 +57,27 @@ public class VerificationController {
         return ResponseEntity.ok(verificationService.submitStepResult(id, stepNumber, command));
     }
 
+    /**
+     * Reads a single verification session. S2 fix — object-level authz lives in
+     * {@link ManageVerificationService#getSession}: the resolved session's tenant
+     * must satisfy {@code tenantScopeResolver.canAccessTenant(...)} (ROOT/SUPER_ADMIN
+     * unrestricted), else 403. Without it any authenticated caller could read any
+     * other tenant's session by guessing the id (read-side IDOR).
+     */
     @GetMapping("/sessions/{id}")
+    @PreAuthorize("isAuthenticated()")
     public ResponseEntity<VerificationSessionResponse> getSession(@PathVariable UUID id) {
         return ResponseEntity.ok(verificationService.getSession(id));
     }
 
+    /**
+     * Completes a verification session (admin-on-behalf). S2 fix — object-level
+     * tenant-scope check inside {@link ManageVerificationService#completeSession}
+     * stops a caller from completing another tenant's session (write-side IDOR
+     * that would also flip that user's {@code identityVerified} flag).
+     */
     @PostMapping("/sessions/{id}/complete")
+    @PreAuthorize("@rbac.hasPermission('verification:create')")
     public ResponseEntity<VerificationSessionResponse> completeSession(@PathVariable UUID id) {
         return ResponseEntity.ok(verificationService.completeSession(id));
     }
@@ -126,7 +154,16 @@ public class VerificationController {
         return ResponseEntity.ok(verificationService.listSessions(effectiveTenantId));
     }
 
+    /**
+     * Returns a user's verification status + session history. S2 fix —
+     * object-level authz inside {@link ManageVerificationService#getUserVerificationStatus}
+     * confirms the target user's tenant is in the caller's scope
+     * ({@code tenantScopeResolver.canAccessTenant(...)}; ROOT/SUPER_ADMIN
+     * unrestricted), else 403. Without it any authenticated caller could read
+     * any user's verification history by guessing their id (read-side IDOR).
+     */
     @GetMapping("/results/{userId}")
+    @PreAuthorize("@rbac.hasPermission('verification:read')")
     public ResponseEntity<VerificationStatusResponse> getUserVerificationStatus(@PathVariable UUID userId) {
         return ResponseEntity.ok(verificationService.getUserVerificationStatus(userId));
     }

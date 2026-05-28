@@ -45,6 +45,7 @@ class ManageVerificationServiceTest {
     @Mock private JpaTenantRepository tenantRepository;
     @Mock private VerificationStepHandlerRegistry handlerRegistry;
     @Spy private ObjectMapper objectMapper = new ObjectMapper();
+    @Mock private com.fivucsas.identity.security.TenantScopeResolver tenantScopeResolver;
 
     @InjectMocks
     private ManageVerificationService service;
@@ -60,6 +61,11 @@ class ManageVerificationServiceTest {
         Tenant tenant = mock(Tenant.class);
         AuthFlow flow = mock(AuthFlow.class);
         when(flow.getFlowType()).thenReturn(FlowType.VERIFICATION);
+
+        // S2: in-scope caller. isUnrestricted()=true (ROOT) short-circuits the
+        // user-ownership re-check so this happy-path test stays focused.
+        when(tenantScopeResolver.canAccessTenant(tenantId)).thenReturn(true);
+        when(tenantScopeResolver.isUnrestricted()).thenReturn(true);
 
         when(userRepository.findById(userId)).thenReturn(Optional.of(user));
         when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
@@ -90,7 +96,10 @@ class ManageVerificationServiceTest {
 
     @Test
     void createSession_WhenUserNotFound_ShouldThrow() {
-        // given
+        // given — caller is in scope (S2 guard passes), unrestricted so the
+        // ownership branch is skipped and we hit the findById-not-found path.
+        when(tenantScopeResolver.canAccessTenant(tenantId)).thenReturn(true);
+        when(tenantScopeResolver.isUnrestricted()).thenReturn(true);
         when(userRepository.findById(userId)).thenReturn(Optional.empty());
 
         // when/then
@@ -106,6 +115,10 @@ class ManageVerificationServiceTest {
         Tenant tenant = mock(Tenant.class);
         AuthFlow flow = mock(AuthFlow.class);
         when(flow.getFlowType()).thenReturn(FlowType.AUTHENTICATION);
+
+        // S2: in-scope + unrestricted so we reach the flow-type validation.
+        when(tenantScopeResolver.canAccessTenant(tenantId)).thenReturn(true);
+        when(tenantScopeResolver.isUnrestricted()).thenReturn(true);
 
         when(userRepository.findById(userId)).thenReturn(Optional.of(user));
         when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
@@ -141,7 +154,9 @@ class ManageVerificationServiceTest {
 
     @Test
     void getUserVerificationStatus_WhenUserNotFound_ShouldThrow() {
-        // given
+        // given — unrestricted (ROOT) so the S2 ownership branch is skipped and
+        // the findById-not-found path is exercised.
+        when(tenantScopeResolver.isUnrestricted()).thenReturn(true);
         when(userRepository.findById(userId)).thenReturn(Optional.empty());
 
         // when/then
@@ -154,6 +169,8 @@ class ManageVerificationServiceTest {
         // given
         UUID sessionId = UUID.randomUUID();
         VerificationSession session = mock(VerificationSession.class);
+        // S2: unrestricted caller skips the session-tenant guard.
+        when(tenantScopeResolver.isUnrestricted()).thenReturn(true);
         when(session.isTerminal()).thenReturn(true);
         when(session.getStatus()).thenReturn(VerificationSessionStatus.COMPLETED);
         when(sessionRepository.findById(sessionId)).thenReturn(Optional.of(session));
@@ -169,6 +186,8 @@ class ManageVerificationServiceTest {
         // given
         UUID sessionId = UUID.randomUUID();
         VerificationSession session = mock(VerificationSession.class);
+        // S2: unrestricted caller skips the session-tenant guard.
+        when(tenantScopeResolver.isUnrestricted()).thenReturn(true);
         when(session.isTerminal()).thenReturn(false);
         when(sessionRepository.findById(sessionId)).thenReturn(Optional.of(session));
 
@@ -205,6 +224,8 @@ class ManageVerificationServiceTest {
         // given
         UUID sessionId = UUID.randomUUID();
         VerificationSession session = mock(VerificationSession.class);
+        // S2: unrestricted caller skips the session-tenant guard.
+        when(tenantScopeResolver.isUnrestricted()).thenReturn(true);
         when(session.isTerminal()).thenReturn(false);
         when(sessionRepository.findById(sessionId)).thenReturn(Optional.of(session));
 

@@ -16,11 +16,13 @@ import com.fivucsas.identity.repository.AuthFlowRepository;
 import com.fivucsas.identity.repository.UserRepository;
 import com.fivucsas.identity.repository.JpaTenantRepository;
 import com.fivucsas.identity.exception.DomainStateConflictException;
+import com.fivucsas.identity.security.TenantScopeResolver;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.persistence.EntityNotFoundException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -78,9 +80,38 @@ public class ManageVerificationService {
     private final JpaTenantRepository tenantRepository;
     private final VerificationStepHandlerRegistry handlerRegistry;
     private final ObjectMapper objectMapper;
+    private final TenantScopeResolver tenantScopeResolver;
 
     @Transactional
     public VerificationSessionResponse createSession(UUID userId, UUID tenantId, UUID flowId) {
+        // S2 — admin-on-behalf write guard (cross-tenant IDOR). The controller's
+        // @PreAuthorize('verification:create') only proves the caller is a
+        // TENANT_ADMIN/ROOT *somewhere*; without this, a tenant-A admin could
+        // mint a session for tenant B by passing B's id. canAccessTenant()
+        // returns true for ROOT/SUPER_ADMIN (null scope), so root keeps
+        // cross-tenant access; everyone else is pinned to their own tenant.
+        // Mirrors the S1 guard in ManageTenantService.updateTenant. Runs BEFORE
+        // any load so nothing is persisted on a violation. → 403 via
+        // GlobalExceptionHandler.
+        if (!tenantScopeResolver.canAccessTenant(tenantId)) {
+            throw new AccessDeniedException(
+                    "You do not have permission to create a verification session for this tenant");
+        }
+
+        // Confirm the target user actually belongs to the requested tenant, so a
+        // caller cannot pair their own tenant id with a foreign user. ROOT /
+        // SUPER_ADMIN (unrestricted) may cross-link. findTenantIdById is a JPQL
+        // projection (no entity.User accessor) to keep the hexagonal boundary
+        // ArchUnit rule green.
+        if (!tenantScopeResolver.isUnrestricted()) {
+            UUID userTenantId = userRepository.findTenantIdById(userId)
+                    .orElseThrow(() -> new EntityNotFoundException("User not found: " + userId));
+            if (!tenantId.equals(userTenantId)) {
+                throw new AccessDeniedException(
+                        "User " + userId + " does not belong to tenant " + tenantId);
+            }
+        }
+
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new EntityNotFoundException("User not found: " + userId));
         Tenant tenant = tenantRepository.findById(tenantId)
@@ -181,6 +212,10 @@ public class ManageVerificationService {
     public VerificationSessionResponse getSession(UUID sessionId) {
         VerificationSession session = sessionRepository.findById(sessionId)
                 .orElseThrow(() -> new EntityNotFoundException("Verification session not found: " + sessionId));
+        // S2 — object-level read guard. The session's tenant must be in the
+        // caller's scope (ROOT/SUPER_ADMIN unrestricted), else a caller could
+        // read any tenant's session by id. → 403 via GlobalExceptionHandler.
+        assertCanAccessSessionTenant(session);
         return VerificationSessionResponse.from(session);
     }
 
@@ -342,6 +377,20 @@ public class ManageVerificationService {
     }
 
     public VerificationStatusResponse getUserVerificationStatus(UUID userId) {
+        // S2 — object-level read guard. Confirm the target user's tenant is in
+        // the caller's scope before exposing their verification history
+        // (ROOT/SUPER_ADMIN unrestricted). findTenantIdById is a JPQL projection
+        // (no entity.User accessor) to keep the hexagonal-boundary ArchUnit rule
+        // green. → 403 via GlobalExceptionHandler.
+        if (!tenantScopeResolver.isUnrestricted()) {
+            UUID userTenantId = userRepository.findTenantIdById(userId)
+                    .orElseThrow(() -> new EntityNotFoundException("User not found: " + userId));
+            if (!tenantScopeResolver.canAccessTenant(userTenantId)) {
+                throw new AccessDeniedException(
+                        "You do not have permission to view this user's verification status");
+            }
+        }
+
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new EntityNotFoundException("User not found: " + userId));
 
@@ -363,6 +412,12 @@ public class ManageVerificationService {
     public VerificationSessionResponse completeSession(UUID sessionId) {
         VerificationSession session = sessionRepository.findById(sessionId)
                 .orElseThrow(() -> new EntityNotFoundException("Verification session not found: " + sessionId));
+
+        // S2 — object-level write guard. Completing a session flips the user's
+        // identityVerified flag, so a cross-tenant complete is a privilege
+        // escalation. Pin to the caller's tenant scope (ROOT/SUPER_ADMIN
+        // unrestricted). → 403 via GlobalExceptionHandler.
+        assertCanAccessSessionTenant(session);
 
         if (session.isTerminal()) {
             throw new DomainStateConflictException("Session " + sessionId + " is already in terminal state: " + session.getStatus());
@@ -488,6 +543,27 @@ public class ManageVerificationService {
             userRepository.save(user);
             log.info("Session {} auto-completed. User {} verified at level {}",
                     session.getId(), user.getId(), level);
+        }
+    }
+
+    /**
+     * S2 — object-level tenant-scope guard for a single session. Resolves the
+     * session's owning tenant and confirms the current caller may access it
+     * (ROOT/SUPER_ADMIN are unrestricted via {@code canAccessTenant} returning
+     * true on null scope). Reads the tenant id off the session's
+     * {@code entity.Tenant} (not {@code entity.User}) so the hexagonal-boundary
+     * ArchUnit rule stays green. Throws {@link AccessDeniedException} (→ 403)
+     * when the session belongs to a tenant outside the caller's scope.
+     */
+    private void assertCanAccessSessionTenant(VerificationSession session) {
+        if (tenantScopeResolver.isUnrestricted()) {
+            return;
+        }
+        Tenant sessionTenant = session.getTenant();
+        UUID sessionTenantId = sessionTenant != null ? sessionTenant.getId() : null;
+        if (!tenantScopeResolver.canAccessTenant(sessionTenantId)) {
+            throw new AccessDeniedException(
+                    "You do not have permission to access verification session " + session.getId());
         }
     }
 
