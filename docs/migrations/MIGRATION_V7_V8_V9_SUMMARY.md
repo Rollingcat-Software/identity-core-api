@@ -228,15 +228,16 @@ Three new Flyway migrations have been added to the identity-core-api project to 
 
 ### 1. Migration Testing
 
+This project uses **Maven**, not Gradle, and there is no `flyway-maven-plugin`
+configured in `pom.xml`. Flyway runs automatically on application startup via
+Spring Boot auto-configuration. To apply migrations, start the application:
+
 ```bash
-# Run migrations with Flyway
-./gradlew flywayMigrate
+# Start the application — Flyway runs automatically on boot
+./mvnw spring-boot:run -Dspring-boot.run.profiles=dev
 
-# Validate migrations
-./gradlew flywayValidate
-
-# Check migration status
-./gradlew flywayInfo
+# To check migration history after startup, query the DB directly:
+# SELECT * FROM flyway_schema_history ORDER BY installed_rank DESC;
 ```
 
 ### 2. Performance Testing
@@ -456,7 +457,7 @@ Expected performance improvements:
 
 ---
 
-**Created**: 2024-12-04
+**Created**: 2026-03-15 (retroactively documented; V7–V9 shipped early 2026)
 **Author**: Claude Code (AI Assistant)
 **Project**: FIVUCSAS Identity Core API
 **Version**: 1.0.0
