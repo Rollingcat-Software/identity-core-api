@@ -24,6 +24,13 @@
         <bucket4j.version>8.10.1</bucket4j.version>
         <totp.version>1.7.1</totp.version>
         <testcontainers.version>1.20.4</testcontainers.version>
+        <jacoco.version>0.8.12</jacoco.version>
+        <!-- #40: minimum line-coverage ratio enforced by jacoco:check.
+             Measured baseline 2026-05-21 (mvn -T 2C test): LINE 4693/11726 =
+             0.4002. Gate set at 0.38 — just below baseline so current CI passes
+             with headroom. Ratchet upward toward the 0.70 target as coverage
+             improves; never set it above the current measured ratio. -->
+        <jacoco.coverage.min>0.38</jacoco.coverage.min>
 
         <!-- Security CVE overrides (2026-03-31) -->
         <spring-security.version>6.4.13</spring-security.version>
@@ -289,7 +296,12 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
                 <configuration>
+                    <!-- @{argLine} is the late-replacement property the JaCoCo
+                         prepare-agent goal populates with its -javaagent flag.
+                         Without it the agent is never attached and coverage is
+                         empty. Keep it first so the existing JVM flags follow. -->
                     <argLine>
+                        @{argLine}
                         -XX:+EnableDynamicAgentLoading
                         -Dnet.bytebuddy.experimental=true
                         --add-opens java.base/java.lang=ALL-UNNAMED
@@ -297,6 +309,59 @@
                         --add-opens java.base/java.util=ALL-UNNAMED
                     </argLine>
                 </configuration>
+            </plugin>
+            <!-- #40 (2026-05-21): code-coverage instrumentation + report.
+                 prepare-agent injects the JaCoCo agent into the surefire JVM via
+                 the @{argLine} property above; report renders HTML/XML at
+                 target/site/jacoco after `test`. The `check` goal enforces a
+                 minimum line-coverage ratio set at/just-below the measured
+                 baseline so it never breaks current CI — ratchet COVERAGE_MIN
+                 upward toward 0.70 as coverage improves. -->
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+                <version>${jacoco.version}</version>
+                <executions>
+                    <execution>
+                        <id>jacoco-prepare-agent</id>
+                        <goals>
+                            <goal>prepare-agent</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>jacoco-report</id>
+                        <phase>test</phase>
+                        <goals>
+                            <goal>report</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>jacoco-check</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>check</goal>
+                        </goals>
+                        <configuration>
+                            <rules>
+                                <rule>
+                                    <element>BUNDLE</element>
+                                    <limits>
+                                        <limit>
+                                            <counter>LINE</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <!-- Baseline measured 2026-05-21
+                                                 (mvn test jacoco:report). Set
+                                                 just below the measured ratio so
+                                                 the gate passes today; raise
+                                                 toward 0.70 over time. -->
+                                            <minimum>${jacoco.coverage.min}</minimum>
+                                        </limit>
+                                    </limits>
+                                </rule>
+                            </rules>
+                        </configuration>
+                    </execution>
+                </executions>
             </plugin>
         </plugins>
     </build>

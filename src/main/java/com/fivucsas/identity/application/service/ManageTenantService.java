@@ -167,6 +167,15 @@ public class ManageTenantService implements ManageTenantUseCase {
         tenant = tenantRepository.save(tenant);
         log.info("Tenant updated successfully: {}", tenant.getId());
 
+        // #9 (2026-05-21): updateTenant was a silent mutation. Mirror the
+        // createTenant() TENANT_CREATED emission with TENANT_UPDATED.
+        auditLogPort.logSecurityEvent(
+                tenant.getId().toString(),
+                "TENANT_UPDATED",
+                null,
+                String.format("Tenant '%s' (slug=%s) updated", tenant.getName(), tenant.getSlug())
+        );
+
         return mapToResponse(tenant);
     }
 
@@ -183,6 +192,16 @@ public class ManageTenantService implements ManageTenantUseCase {
         tenant = tenantRepository.save(tenant);
         log.info("Tenant activated successfully: {}", tenant.getId());
 
+        // #9 (2026-05-21): activateTenant was a silent mutation. Emit
+        // TENANT_STATUS_CHANGED (new status carried in details).
+        auditLogPort.logSecurityEvent(
+                tenant.getId().toString(),
+                "TENANT_STATUS_CHANGED",
+                null,
+                String.format("Tenant '%s' (slug=%s) activated -> %s",
+                        tenant.getName(), tenant.getSlug(), tenant.getStatus().name())
+        );
+
         return mapToResponse(tenant);
     }
 
@@ -198,6 +217,16 @@ public class ManageTenantService implements ManageTenantUseCase {
         tenant.suspend();
         tenant = tenantRepository.save(tenant);
         log.info("Tenant suspended successfully: {}", tenant.getId());
+
+        // #9 (2026-05-21): suspendTenant was a silent mutation. Emit
+        // TENANT_STATUS_CHANGED (new status carried in details).
+        auditLogPort.logSecurityEvent(
+                tenant.getId().toString(),
+                "TENANT_STATUS_CHANGED",
+                null,
+                String.format("Tenant '%s' (slug=%s) suspended -> %s",
+                        tenant.getName(), tenant.getSlug(), tenant.getStatus().name())
+        );
 
         return mapToResponse(tenant);
     }

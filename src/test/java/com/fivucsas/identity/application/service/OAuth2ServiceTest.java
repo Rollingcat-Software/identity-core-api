@@ -11,6 +11,7 @@ import com.fivucsas.identity.entity.Tenant;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.repository.MfaSessionRepository;
 import com.fivucsas.identity.security.JwtService;
+import io.jsonwebtoken.Claims;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InOrder;
@@ -464,15 +465,27 @@ class OAuth2ServiceTest {
                 .hasMessageContaining("code_verifier required for public client");
     }
 
+    /**
+     * Stubs {@code jwtService.parseAllClaims(token)} to return a mocked
+     * {@link Claims} exposing the given type / subject(email) / scope. Mirrors
+     * the production parse-once path (#47, 2026-05-21): getUserInfo now parses
+     * the access token exactly once and reads every claim from that object,
+     * rather than calling extractClaim/extractEmail repeatedly.
+     */
+    private void stubAccessTokenClaims(String token, String type, String email, String scope) {
+        Claims claims = mock(Claims.class);
+        when(claims.get("type", String.class)).thenReturn(type);
+        when(claims.getSubject()).thenReturn(email);
+        when(claims.get("scope", String.class)).thenReturn(scope);
+        when(jwtService.parseAllClaims(token)).thenReturn(claims);
+    }
+
     @Test
     void getUserInfo_WhenValidToken_ShouldReturnUserClaims() {
         // given — token carries both "openid email profile" so the response
         // should include sub + email + name (T-P1-SEC Fix C: scope filter).
-        // First extractClaim call returns the token type ("oauth2"); second
-        // returns the scope claim. Mockito returns the stubbed values in order.
-        when(jwtService.extractClaim(eq("valid-token"), any()))
-                .thenReturn("oauth2", "openid email profile");
-        when(jwtService.extractEmail("valid-token")).thenReturn("user@test.com");
+        // #47: a single parseAllClaims() call yields type + subject + scope.
+        stubAccessTokenClaims("valid-token", "oauth2", "user@test.com", "openid email profile");
         User user = mock(User.class);
         UUID userId = UUID.randomUUID();
         when(user.getId()).thenReturn(userId);
@@ -507,9 +520,7 @@ class OAuth2ServiceTest {
     @Test
     void getUserInfo_WhenScopeIsEmailOnly_ShouldOmitProfileClaims() {
         // given
-        when(jwtService.extractClaim(eq("email-only-token"), any()))
-                .thenReturn("oauth2", "openid email");
-        when(jwtService.extractEmail("email-only-token")).thenReturn("user@test.com");
+        stubAccessTokenClaims("email-only-token", "oauth2", "user@test.com", "openid email");
         User user = mock(User.class);
         UUID userId = UUID.randomUUID();
         when(user.getId()).thenReturn(userId);
@@ -538,9 +549,7 @@ class OAuth2ServiceTest {
     @Test
     void getUserInfo_WhenScopeIsOpenidOnly_ShouldReturnOnlySub() {
         // given
-        when(jwtService.extractClaim(eq("openid-only"), any()))
-                .thenReturn("oauth2", "openid");
-        when(jwtService.extractEmail("openid-only")).thenReturn("user@test.com");
+        stubAccessTokenClaims("openid-only", "oauth2", "user@test.com", "openid");
         User user = mock(User.class);
         UUID userId = UUID.randomUUID();
         when(user.getId()).thenReturn(userId);
@@ -556,9 +565,13 @@ class OAuth2ServiceTest {
 
     @Test
     void getUserInfo_WhenUserNotFound_ShouldThrowIllegalArgument() {
-        // given
-        when(jwtService.extractClaim(eq("token"), any())).thenReturn("oauth2");
-        when(jwtService.extractEmail("token")).thenReturn("no@user.com");
+        // given — #47: rejection happens at findByEmail (after type + subject),
+        // before the scope claim is read, so stub only type + subject here to
+        // satisfy Mockito strict-stubs.
+        Claims claims = mock(Claims.class);
+        when(claims.get("type", String.class)).thenReturn("oauth2");
+        when(claims.getSubject()).thenReturn("no@user.com");
+        when(jwtService.parseAllClaims("token")).thenReturn(claims);
         when(userRepository.findByEmail("no@user.com")).thenReturn(Optional.empty());
 
         // when/then
@@ -572,7 +585,11 @@ class OAuth2ServiceTest {
         // SECURITY_REVIEW_2026-05-01 §"Out-of-scope" #2: an ID token replayed
         // against /oauth2/userinfo must be rejected. Pre-fix, any RS256 token
         // with a valid email subject was accepted.
-        when(jwtService.extractClaim(eq("id-token-replay"), any())).thenReturn("id_token");
+        // #47: parse-once path rejects on the type claim before reading
+        // subject/scope, so only the type stub is needed here.
+        Claims replay = mock(Claims.class);
+        when(replay.get("type", String.class)).thenReturn("id_token");
+        when(jwtService.parseAllClaims("id-token-replay")).thenReturn(replay);
 
         assertThatThrownBy(() -> service.getUserInfo("id-token-replay"))
                 .isInstanceOf(OAuth2Exception.class)
@@ -588,7 +605,11 @@ class OAuth2ServiceTest {
     void getUserInfo_WhenTypeClaimMissing_ShouldReject() {
         // Tokens minted before the type claim was introduced (or by a non-OAuth2
         // path) must also fail closed.
-        when(jwtService.extractClaim(eq("legacy-token"), any())).thenReturn(null);
+        // #47: parse-once path rejects on the (null) type claim before reading
+        // subject/scope.
+        Claims legacy = mock(Claims.class);
+        when(legacy.get("type", String.class)).thenReturn(null);
+        when(jwtService.parseAllClaims("legacy-token")).thenReturn(legacy);
 
         assertThatThrownBy(() -> service.getUserInfo("legacy-token"))
                 .isInstanceOf(OAuth2Exception.class)

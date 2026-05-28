@@ -28,6 +28,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -59,6 +60,18 @@ public class BiometricController {
     private final StepUpAuthUseCase stepUpAuthUseCase;
     private final ManageEnrollmentUseCase manageEnrollmentUseCase;
     private final RbacAuthorizationService rbacService;
+
+    // #11 (2026-05-21): cap inbound voice payloads. Previously the voice-enroll
+    // path only null/blank-checked voiceData, so an oversized base64 blob would
+    // be forwarded straight to the biometric-processor. Mirrors the
+    // app.security.max-devices-per-user @Value style in ManageDeviceService.
+    // Default 10 MB matches the prod servlet max-file-size in application-prod.yml.
+    @Value("${app.security.max-voice-bytes:10485760}")
+    private long maxVoiceBytes;
+
+    // Per-user cap on the number of VOICE enrollments. Mirrors max-devices-per-user.
+    @Value("${app.security.max-voice-enrollments-per-user:5}")
+    private int maxVoiceEnrollmentsPerUser;
 
     @GetMapping("/api/v1/biometric/health")
     @Operation(summary = "Check biometric processor health via proxy")
@@ -163,6 +176,34 @@ public class BiometricController {
                 BiometricVerificationResponse.builder()
                     .verified(false).confidence(0.0)
                     .message("voiceData is required").build());
+        }
+
+        // #11 (2026-05-21): reject oversized payloads with a clean 4xx before
+        // forwarding to the biometric-processor. We size against the decoded
+        // byte length so the limit is independent of base64 inflation.
+        long decodedBytes = estimateBase64DecodedLength(voiceData);
+        if (decodedBytes > maxVoiceBytes) {
+            log.warn("Voice enrollment rejected for user {} — payload {} bytes exceeds cap {} bytes",
+                    userId, decodedBytes, maxVoiceBytes);
+            return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE).body(
+                BiometricVerificationResponse.builder()
+                    .verified(false).confidence(0.0)
+                    .message("voiceData exceeds the maximum allowed size").build());
+        }
+
+        // Per-user voice-enrollment count cap. getUserEnrollments() is already
+        // wired here; counting VOICE rows is trivial. Existing enrollments
+        // count toward the limit, so a user at the cap cannot add another.
+        long existingVoiceEnrollments = manageEnrollmentUseCase.getUserEnrollments(userId).stream()
+                .filter(e -> e.authMethodType() == AuthMethodType.VOICE)
+                .count();
+        if (existingVoiceEnrollments >= maxVoiceEnrollmentsPerUser) {
+            log.warn("Voice enrollment rejected for user {} — {} enrollments at/over cap {}",
+                    userId, existingVoiceEnrollments, maxVoiceEnrollmentsPerUser);
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(
+                BiometricVerificationResponse.builder()
+                    .verified(false).confidence(0.0)
+                    .message("Maximum number of voice enrollments reached").build());
         }
 
         Map<String, Object> result = biometricServicePort.enrollVoice(userId, voiceData);
@@ -399,5 +440,33 @@ public class BiometricController {
             log.warn("Failed to persist enrollment scores for user {} method {}: {}",
                     userId, methodType, e.getMessage());
         }
+    }
+
+    /**
+     * Estimates the decoded byte length of a base64 string without allocating
+     * the decoded buffer. Tolerates an optional {@code data:...;base64,} prefix
+     * and any whitespace/newlines in the payload. Used to enforce the voice
+     * payload size cap (#11) before forwarding the blob downstream.
+     */
+    private static long estimateBase64DecodedLength(String base64) {
+        int comma = base64.indexOf(',');
+        String body = (base64.startsWith("data:") && comma >= 0)
+                ? base64.substring(comma + 1)
+                : base64;
+        long chars = 0;
+        int padding = 0;
+        for (int i = 0; i < body.length(); i++) {
+            char c = body.charAt(i);
+            if (Character.isWhitespace(c)) {
+                continue;
+            }
+            chars++;
+            if (c == '=') {
+                padding++;
+            }
+        }
+        // Every 4 base64 chars encode 3 bytes; trailing '=' padding (0-2) trims
+        // the final group.
+        return (chars / 4) * 3L - padding;
     }
 }

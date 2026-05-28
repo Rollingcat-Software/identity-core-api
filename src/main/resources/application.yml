@@ -60,6 +60,12 @@ app:
     # practical ceiling beyond which the assertion blob becomes wire-heavy
     # and credentials.get() picker UX degrades.
     max-devices-per-user: ${APP_SECURITY_MAX_DEVICES_PER_USER:10}
+    # #11 (2026-05-21): cap inbound voice-enrollment payloads. max-voice-bytes
+    # is the decoded byte ceiling (default 10 MB, matching the prod servlet
+    # max-file-size); max-voice-enrollments-per-user caps how many VOICE
+    # enrollments a single user may hold (mirrors max-devices-per-user).
+    max-voice-bytes: ${APP_SECURITY_MAX_VOICE_BYTES:10485760}
+    max-voice-enrollments-per-user: ${APP_SECURITY_MAX_VOICE_ENROLLMENTS_PER_USER:5}
 
 # Redis Configuration
 redis:
