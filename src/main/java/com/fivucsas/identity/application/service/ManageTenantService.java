@@ -10,8 +10,10 @@ import com.fivucsas.identity.domain.exception.TenantNotFoundException;
 import com.fivucsas.identity.domain.model.tenant.Tenant;
 import com.fivucsas.identity.domain.model.tenant.TenantConfiguration;
 import com.fivucsas.identity.domain.repository.TenantRepository;
+import com.fivucsas.identity.security.TenantScopeResolver;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -33,6 +35,7 @@ public class ManageTenantService implements ManageTenantUseCase {
     private final TenantRepository tenantRepository;
     private final com.fivucsas.identity.repository.UserRepository userRepository;
     private final AuditLogPort auditLogPort;
+    private final TenantScopeResolver tenantScopeResolver;
 
     @Override
     @Transactional
@@ -124,6 +127,20 @@ public class ManageTenantService implements ManageTenantUseCase {
         log.info("Updating tenant: {}", command.getTenantId());
 
         UUID uuid = UUID.fromString(command.getTenantId());
+
+        // S1 — cross-tenant write (IDOR) guard. The controller's
+        // @PreAuthorize only checks the 'tenant:configure' permission, which a
+        // TENANT_ADMIN holds for their OWN tenant — without this check they
+        // could overwrite any other tenant's config by passing its id.
+        // canAccessTenant() returns true for SUPER_ADMIN/ROOT (null scope), so
+        // root retains cross-tenant access; everyone else is restricted to
+        // their own tenant. Mirrors the read-path guard in TenantController and
+        // the AccessDeniedException idiom in EnrollmentService (→ 403 via
+        // GlobalExceptionHandler).
+        if (!tenantScopeResolver.canAccessTenant(uuid)) {
+            throw new AccessDeniedException("You do not have permission to update this tenant");
+        }
+
         Tenant tenant = tenantRepository.findById(uuid)
             .orElseThrow(() -> new TenantNotFoundException(command.getTenantId()));
 
