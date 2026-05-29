@@ -17,6 +17,8 @@ public interface GuestInvitationRepositoryPort {
 
     GuestInvitation save(GuestInvitation invitation);
 
+    Optional<GuestInvitation> findById(UUID id);
+
     Optional<GuestInvitation> findByInvitationToken(String token);
 
     Optional<GuestInvitation> findActiveInvitationByTenantAndEmail(UUID tenantId, String email);

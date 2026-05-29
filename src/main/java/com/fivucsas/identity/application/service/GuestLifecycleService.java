@@ -6,7 +6,9 @@ import com.fivucsas.identity.domain.repository.UserRepository;
 import com.fivucsas.identity.application.port.output.UserRoleRepositoryPort;
 import com.fivucsas.identity.application.port.output.RoleRepositoryPort;
 import com.fivucsas.identity.domain.repository.RefreshTokenRepository;
+import com.fivucsas.identity.domain.exception.ResourceNotFoundException;
 import com.fivucsas.identity.exception.DomainStateConflictException;
+import com.fivucsas.identity.infrastructure.email.EmailService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -44,6 +46,7 @@ public class GuestLifecycleService {
     private final RoleRepositoryPort roleRepository;
     private final RefreshTokenRepository refreshTokenRepository;
     private final PasswordEncoder passwordEncoder;
+    private final EmailService emailService;
 
     private static final SecureRandom SECURE_RANDOM = new SecureRandom();
     private static final String GUEST_ROLE_ID = "20000000-0000-0000-0000-000000000008";
@@ -61,6 +64,21 @@ public class GuestLifecycleService {
     @Transactional
     public GuestInvitation createInvitation(Tenant tenant, String email, User invitedBy,
                                             int accessDurationHours, String message) {
+        return createInvitation(tenant, email, invitedBy, accessDurationHours, message, null);
+    }
+
+    /**
+     * Creates a guest invitation and emails the recipient an accept link.
+     *
+     * @param inviterName display name of the inviting admin, resolved by the
+     *                    caller (controller) so this service stays free of new
+     *                    {@code entity.User} member access (hexagonal boundary).
+     *                    May be {@code null}/blank.
+     */
+    @Transactional
+    public GuestInvitation createInvitation(Tenant tenant, String email, User invitedBy,
+                                            int accessDurationHours, String message,
+                                            String inviterName) {
         // Check for existing active invitation
         if (invitationRepository.existsActiveInvitation(tenant.getId(), email)) {
             throw new DomainStateConflictException("An active invitation already exists for " + email + " in this tenant");
@@ -91,7 +109,56 @@ public class GuestLifecycleService {
         GuestInvitation saved = invitationRepository.save(invitation);
         log.info("Guest invitation created for {} in tenant {} by {}, access until {}",
                 email, tenant.getName(), invitedBy.getEmail(), accessEnds);
+
+        sendInvitationEmail(saved, inviterName);
         return saved;
+    }
+
+    /**
+     * Re-sends the invitation email for a PENDING, non-expired invitation.
+     * Used by admins when the guest never received (or lost) the original email.
+     *
+     * @param invitationId the invitation to resend
+     * @throws ResourceNotFoundException if no invitation with that id exists
+     * @throws DomainStateConflictException if the invitation is not PENDING or has expired
+     */
+    @Transactional(readOnly = true)
+    public void resendInvitation(UUID invitationId) {
+        GuestInvitation invitation = invitationRepository.findById(invitationId)
+                .orElseThrow(() -> new ResourceNotFoundException("GuestInvitation", invitationId.toString()));
+
+        if (invitation.getStatus() != InvitationStatus.PENDING) {
+            throw new DomainStateConflictException(
+                    "Only pending invitations can be resent (status: " + invitation.getStatus() + ")");
+        }
+        if (invitation.isInvitationExpired()) {
+            throw new DomainStateConflictException("Invitation has expired and cannot be resent");
+        }
+
+        // Inviter name is omitted on resend to avoid new entity.User member
+        // access in this service (hexagonal boundary); the email falls back to
+        // a generic "You have been invited" greeting.
+        sendInvitationEmail(invitation, null);
+        log.info("Guest invitation resent for {} (id {})", invitation.getEmail(), invitation.getId());
+    }
+
+    /**
+     * Sends the invitation email. Failures are logged but never propagated:
+     * invitation creation is authoritative and an admin can always resend.
+     */
+    private void sendInvitationEmail(GuestInvitation invitation, String inviterName) {
+        try {
+            emailService.sendGuestInvitation(
+                    invitation.getEmail(),
+                    invitation.getInvitationToken(),
+                    invitation.getAccessStartsAt(),
+                    invitation.getAccessEndsAt(),
+                    invitation.getMessage(),
+                    inviterName);
+        } catch (Exception e) {
+            log.error("Failed to dispatch guest invitation email to {} (id {}): {}",
+                    invitation.getEmail(), invitation.getId(), e.getMessage(), e);
+        }
     }
 
     /**

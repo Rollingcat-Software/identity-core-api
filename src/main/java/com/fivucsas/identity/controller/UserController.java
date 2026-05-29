@@ -332,12 +332,18 @@ public class UserController {
         log.info("POST /api/v1/guests/invite - Inviting guest {} into tenant {} by {}",
                 request.getEmail(), targetTenant.getId(), currentUser.getEmail());
 
+        String inviterName = currentUser.getFullName();
+        if (inviterName == null || inviterName.isBlank()) {
+            inviterName = currentUser.getEmail();
+        }
+
         GuestInvitation invitation = guestLifecycleService.createInvitation(
                 targetTenant,
                 request.getEmail(),
                 currentUser,
                 request.getAccessDurationHours(),
-                request.getMessage()
+                request.getMessage(),
+                inviterName
         );
 
         return ResponseEntity.status(HttpStatus.CREATED)
@@ -359,6 +365,15 @@ public class UserController {
         );
 
         return ResponseEntity.status(HttpStatus.CREATED).build();
+    }
+
+    @PostMapping("/api/v1/guests/{invitationId}/resend")
+    @Operation(summary = "Resend a pending guest invitation email")
+    @PreAuthorize("@rbac.isTenantAdmin() or @rbac.hasPermission('guest:invite')")
+    public ResponseEntity<Void> resendInvitation(@PathVariable UUID invitationId) {
+        log.info("POST /api/v1/guests/{}/resend - Resending guest invitation", invitationId);
+        guestLifecycleService.resendInvitation(invitationId);
+        return ResponseEntity.noContent().build();
     }
 
     @GetMapping("/api/v1/guests")
