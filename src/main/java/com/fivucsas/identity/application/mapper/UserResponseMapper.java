@@ -25,6 +25,26 @@ public final class UserResponseMapper {
      */
     public static UserResponse toResponse(User user) {
         var roleNames = user.getRoleNames();
+        // P1-4 soft-delete / lazy-proxy guard. A user can outlive its tenant
+        // row (tenant soft-deleted — @SQLRestriction hides it, so the lazy
+        // Tenant proxy throws EntityNotFoundException when a non-id field like
+        // getName() initializes it). Reading getTenant().getId() is FK-safe (no
+        // init), but getName() is not. Resolve the tenant name defensively so a
+        // single soft-deleted tenant can't 500 the whole user-list render. The
+        // tenant_id FK still surfaces. Single getTenant() read into a Tenant
+        // local (Tenant is not restricted by UserDomainBoundaryTest).
+        com.fivucsas.identity.entity.Tenant tenant = user.getTenant();
+        String tenantId = null;
+        String tenantName = null;
+        if (tenant != null) {
+            tenantId = tenant.getId().toString();
+            try {
+                org.hibernate.Hibernate.initialize(tenant);
+                tenantName = tenant.getName();
+            } catch (jakarta.persistence.EntityNotFoundException ex) {
+                tenantName = null;
+            }
+        }
         return UserResponse.builder()
                 .id(user.getId().toString())
                 .email(user.getEmail())
@@ -38,8 +58,8 @@ public final class UserResponseMapper {
                 .phoneVerified(user.isPhoneVerified())
                 .role(roleNames.isEmpty() ? "USER" : roleNames.iterator().next())
                 .roles(roleNames.isEmpty() ? java.util.Set.of("USER") : roleNames)
-                .tenantId(user.getTenant() != null ? user.getTenant().getId().toString() : null)
-                .tenantName(user.getTenant() != null ? user.getTenant().getName() : null)
+                .tenantId(tenantId)
+                .tenantName(tenantName)
                 .isBiometricEnrolled(user.isBiometricEnrolled())
                 .enrolledAt(user.getEnrolledAt())
                 .lastVerifiedAt(user.getLastVerifiedAt())

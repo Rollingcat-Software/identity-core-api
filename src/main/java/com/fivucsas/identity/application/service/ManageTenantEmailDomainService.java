@@ -13,6 +13,7 @@ import com.fivucsas.identity.entity.TenantEmailDomain;
 import com.fivucsas.identity.entity.TenantEmailDomainId;
 import com.fivucsas.identity.repository.JpaTenantRepository;
 import com.fivucsas.identity.repository.TenantEmailDomainRepository;
+import com.fivucsas.identity.security.RbacAuthorizationService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -73,6 +74,18 @@ public class ManageTenantEmailDomainService implements ManageTenantEmailDomainUs
     private final JpaTenantRepository tenantRepository;
     private final AuditLogPort auditLogPort;
     private final DnsTxtLookupPort dnsTxtLookupPort;
+    private final RbacAuthorizationService rbacService;
+
+    /**
+     * Resolves the acting admin's user id for audit attribution, or
+     * {@code null} when there is no authenticated user. Read off
+     * {@link RbacAuthorizationService#getCurrentUserId()} (returns a
+     * {@code UUID}, NOT {@code entity.User}) so this service does not regress
+     * the {@code UserDomainBoundaryTest} hexagonal-boundary ratchet.
+     */
+    private String currentActorId() {
+        return rbacService.getCurrentUserId().map(UUID::toString).orElse(null);
+    }
 
     @Override
     @Transactional(readOnly = true)
@@ -130,10 +143,11 @@ public class ManageTenantEmailDomainService implements ManageTenantEmailDomainUs
             throw TenantEmailDomainConflictException.alreadyClaimed(normalized);
         }
 
-        auditLogPort.logSecurityEvent(
-                tenantId.toString(),
+        // P1-4: actor (acting admin) DISTINCT from resource (managed tenant).
+        auditLogPort.logTenantManagementEvent(
+                currentActorId(),
                 "TENANT_EMAIL_DOMAIN_ADDED",
-                null,
+                tenantId.toString(),
                 String.format("Email domain '%s' added (primary=%s)", normalized, isPrimary));
 
         return toResponse(row);
@@ -160,10 +174,11 @@ public class ManageTenantEmailDomainService implements ManageTenantEmailDomainUs
 
         emailDomainRepository.delete(row);
 
-        auditLogPort.logSecurityEvent(
-                tenantId.toString(),
+        // P1-4: actor (acting admin) DISTINCT from resource (managed tenant).
+        auditLogPort.logTenantManagementEvent(
+                currentActorId(),
                 "TENANT_EMAIL_DOMAIN_REMOVED",
-                null,
+                tenantId.toString(),
                 String.format("Email domain '%s' removed", normalized));
     }
 
@@ -191,10 +206,11 @@ public class ManageTenantEmailDomainService implements ManageTenantEmailDomainUs
         target.markPrimary();
         TenantEmailDomain saved = emailDomainRepository.saveAndFlush(target);
 
-        auditLogPort.logSecurityEvent(
-                tenantId.toString(),
+        // P1-4: actor (acting admin) DISTINCT from resource (managed tenant).
+        auditLogPort.logTenantManagementEvent(
+                currentActorId(),
                 "TENANT_EMAIL_DOMAIN_PRIMARY_SET",
-                null,
+                tenantId.toString(),
                 String.format("Email domain '%s' set as primary", normalized));
 
         return toResponse(saved);
@@ -270,12 +286,13 @@ public class ManageTenantEmailDomainService implements ManageTenantEmailDomainUs
 
         if (!match) {
             // Audit the failed attempt under the ACTING ADMIN's user id (or null
-            // for system) — NEVER the tenant id, which is not an FK into users
-            // and would violate audit_logs_user_id_fkey.
-            auditLogPort.logSecurityEvent(
+            // for system) as actor, and the managed tenant as resource. P1-4:
+            // routed through logTenantManagementEvent for consistency with the
+            // other email-domain events (actor=admin, resource=tenant).
+            auditLogPort.logTenantManagementEvent(
                     actingUserId != null ? actingUserId.toString() : null,
                     "TENANT_EMAIL_DOMAIN_VERIFY_FAILED",
-                    null,
+                    tenantId.toString(),
                     String.format("DNS-TXT verification failed for domain '%s' (tenant=%s): "
                             + "expected record not found at %s", normalized, tenantId, host));
             return DomainVerificationResultResponse.builder()
@@ -290,10 +307,11 @@ public class ManageTenantEmailDomainService implements ManageTenantEmailDomainUs
         row.markVerifiedViaDns();
         emailDomainRepository.saveAndFlush(row);
 
-        auditLogPort.logSecurityEvent(
+        // P1-4: actor=acting admin, resource=managed tenant (was logSecurityEvent).
+        auditLogPort.logTenantManagementEvent(
                 actingUserId != null ? actingUserId.toString() : null,
                 "TENANT_EMAIL_DOMAIN_VERIFIED",
-                null,
+                tenantId.toString(),
                 String.format("DNS-TXT ownership verified for domain '%s' (tenant=%s)",
                         normalized, tenantId));
         log.info("DNS-TXT ownership verified for tenant {} domain '{}'", tenantId, normalized);

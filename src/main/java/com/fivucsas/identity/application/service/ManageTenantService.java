@@ -10,6 +10,7 @@ import com.fivucsas.identity.domain.exception.TenantNotFoundException;
 import com.fivucsas.identity.domain.model.tenant.Tenant;
 import com.fivucsas.identity.domain.model.tenant.TenantConfiguration;
 import com.fivucsas.identity.domain.repository.TenantRepository;
+import com.fivucsas.identity.security.RbacAuthorizationService;
 import com.fivucsas.identity.security.TenantScopeResolver;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -37,6 +38,19 @@ public class ManageTenantService implements ManageTenantUseCase {
     private final com.fivucsas.identity.repository.TenantEmailDomainRepository tenantEmailDomainRepository;
     private final AuditLogPort auditLogPort;
     private final TenantScopeResolver tenantScopeResolver;
+    private final RbacAuthorizationService rbacService;
+
+    /**
+     * Resolves the acting admin's user id for audit attribution, or
+     * {@code null} when there is no authenticated user (e.g. self-service
+     * onboarding via {@code createTenant}). Read off
+     * {@link RbacAuthorizationService#getCurrentUserId()} (which returns a
+     * {@code UUID}, NOT {@code entity.User}) so this service does not regress
+     * the {@code UserDomainBoundaryTest} hexagonal-boundary ratchet.
+     */
+    private String currentActorId() {
+        return rbacService.getCurrentUserId().map(UUID::toString).orElse(null);
+    }
 
     @Override
     @Transactional
@@ -73,16 +87,13 @@ public class ManageTenantService implements ManageTenantUseCase {
         tenant = tenantRepository.save(tenant);
         log.info("Tenant created successfully: {}", tenant.getId());
 
-        // INVESTIGATION_MASTER_2026-05-07 §"audit-log blind spots":
-        // ManageTenantService had no AuditLogPort wiring at all. Emit
-        // TENANT_CREATED via the existing logSecurityEvent pattern. The
-        // userId slot carries the tenant id (no per-user actor available
-        // at the use-case API today; the controller's @PreAuthorize
-        // chain has already verified SUPER_ADMIN/ROOT scope).
-        auditLogPort.logSecurityEvent(
-                tenant.getId().toString(),
+        // P1-4: record the acting admin (actor) DISTINCT from the managed
+        // tenant (resource). For self-service onboarding there is no
+        // authenticated admin → actorId is null (correct: anonymous/system).
+        auditLogPort.logTenantManagementEvent(
+                currentActorId(),
                 "TENANT_CREATED",
-                null,
+                tenant.getId().toString(),
                 String.format("Tenant '%s' (slug=%s) created", tenant.getName(), tenant.getSlug())
         );
 
@@ -177,10 +188,11 @@ public class ManageTenantService implements ManageTenantUseCase {
 
         // #9 (2026-05-21): updateTenant was a silent mutation. Mirror the
         // createTenant() TENANT_CREATED emission with TENANT_UPDATED.
-        auditLogPort.logSecurityEvent(
-                tenant.getId().toString(),
+        // P1-4: actor (acting admin) is now DISTINCT from resource (tenant).
+        auditLogPort.logTenantManagementEvent(
+                currentActorId(),
                 "TENANT_UPDATED",
-                null,
+                tenant.getId().toString(),
                 String.format("Tenant '%s' (slug=%s) updated", tenant.getName(), tenant.getSlug())
         );
 
@@ -202,10 +214,11 @@ public class ManageTenantService implements ManageTenantUseCase {
 
         // #9 (2026-05-21): activateTenant was a silent mutation. Emit
         // TENANT_STATUS_CHANGED (new status carried in details).
-        auditLogPort.logSecurityEvent(
-                tenant.getId().toString(),
+        // P1-4: actor (acting admin) is now DISTINCT from resource (tenant).
+        auditLogPort.logTenantManagementEvent(
+                currentActorId(),
                 "TENANT_STATUS_CHANGED",
-                null,
+                tenant.getId().toString(),
                 String.format("Tenant '%s' (slug=%s) activated -> %s",
                         tenant.getName(), tenant.getSlug(), tenant.getStatus().name())
         );
@@ -228,10 +241,11 @@ public class ManageTenantService implements ManageTenantUseCase {
 
         // #9 (2026-05-21): suspendTenant was a silent mutation. Emit
         // TENANT_STATUS_CHANGED (new status carried in details).
-        auditLogPort.logSecurityEvent(
-                tenant.getId().toString(),
+        // P1-4: actor (acting admin) is now DISTINCT from resource (tenant).
+        auditLogPort.logTenantManagementEvent(
+                currentActorId(),
                 "TENANT_STATUS_CHANGED",
-                null,
+                tenant.getId().toString(),
                 String.format("Tenant '%s' (slug=%s) suspended -> %s",
                         tenant.getName(), tenant.getSlug(), tenant.getStatus().name())
         );
@@ -274,10 +288,11 @@ public class ManageTenantService implements ManageTenantUseCase {
         // delete (it is still in scope here, the @SQLRestriction filter
         // hides the row from subsequent reads but the in-memory entity
         // is intact for this attribution).
-        auditLogPort.logSecurityEvent(
-                tenantId.toString(),
+        // P1-4: actor (acting admin) is now DISTINCT from resource (tenant).
+        auditLogPort.logTenantManagementEvent(
+                currentActorId(),
                 "TENANT_DELETED",
-                null,
+                tenantId.toString(),
                 String.format("Tenant '%s' (slug=%s) soft-deleted", tenant.getName(), tenant.getSlug())
         );
     }

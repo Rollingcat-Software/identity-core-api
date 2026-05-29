@@ -89,6 +89,40 @@ public interface AuditLogPort {
     void logSecurityEvent(String userId, String eventType, String ipAddress, String details);
 
     /**
+     * Logs a tenant-management lifecycle event (tenant CRUD, status change,
+     * email-domain CRUD) with a CLEAN actor-vs-resource separation.
+     *
+     * <p>Unlike {@link #logSecurityEvent(String, String, String, String)} —
+     * whose single {@code userId} slot is forced to act as BOTH the audit row's
+     * {@code user_id} (actor FK) and {@code resource_id} — this method records a
+     * DISTINCT acting admin and managed tenant. That is the correct attribution
+     * for "who did what to which tenant": the {@code user_id} column carries the
+     * admin who performed the action; the {@code resource_id} column carries the
+     * tenant the action targeted.</p>
+     *
+     * <p>The audit row's {@code tenant_id} is set to the MANAGED tenant (not the
+     * actor's home tenant). Now that {@code AuditLog} carries the Hibernate
+     * {@code tenantFilter}, this makes the lifecycle event visible to the
+     * managed tenant's own admins — which is the intended audit semantics for a
+     * tenant looking at events about itself.</p>
+     *
+     * @param actorUserId the acting admin's user id; {@code null} for
+     *                    anonymous / system contexts (e.g. self-service
+     *                    onboarding where no authenticated admin exists). A
+     *                    non-existent / non-user id is defensively nulled into
+     *                    the {@code user_id} FK column (same guard as the rest
+     *                    of the adapter) — it never violates
+     *                    {@code audit_logs_user_id_fkey}.
+     * @param eventType   the action performed (e.g. {@code "TENANT_CREATED"})
+     * @param tenantId    the managed tenant id; becomes BOTH the row's
+     *                    {@code resource_id} and its {@code tenant_id}
+     * @param details     human-readable summary stored under
+     *                    {@code metadata.details}
+     */
+    void logTenantManagementEvent(String actorUserId, String eventType,
+                                  String tenantId, String details);
+
+    /**
      * Logs an MFA step completion.
      *
      * @param userId the user ID

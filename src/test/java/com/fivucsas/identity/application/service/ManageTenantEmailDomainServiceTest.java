@@ -40,9 +40,14 @@ class ManageTenantEmailDomainServiceTest {
     private AuditLogPort auditLogPort;
     @Mock
     private com.fivucsas.identity.application.port.output.DnsTxtLookupPort dnsTxtLookupPort;
+    @Mock
+    private com.fivucsas.identity.security.RbacAuthorizationService rbacService;
 
     @InjectMocks
     private ManageTenantEmailDomainService service;
+
+    /** Acting admin returned by rbacService for the CRUD (non-verify) paths. */
+    private static final UUID ACTOR_ID = UUID.fromString("99999999-9999-9999-9999-999999999999");
 
     private Tenant tenant(boolean enforce) {
         return Tenant.builder()
@@ -57,6 +62,9 @@ class ManageTenantEmailDomainServiceTest {
     @BeforeEach
     void setUp() {
         lenient().when(tenantRepository.findById(TENANT_ID)).thenReturn(Optional.of(tenant(false)));
+        // CRUD audit paths resolve the acting admin via rbacService; the verify
+        // paths pass actingUserId explicitly and never consult rbacService.
+        lenient().when(rbacService.getCurrentUserId()).thenReturn(Optional.of(ACTOR_ID));
     }
 
     @Test
@@ -73,7 +81,8 @@ class ManageTenantEmailDomainServiceTest {
 
         assertThat(resp.getDomain()).isEqualTo("marmara.edu.tr");
         assertThat(resp.isPrimary()).isFalse();
-        verify(auditLogPort).logSecurityEvent(eq(TENANT_ID.toString()), eq("TENANT_EMAIL_DOMAIN_ADDED"), any(), any());
+        verify(auditLogPort).logTenantManagementEvent(eq(ACTOR_ID.toString()),
+                eq("TENANT_EMAIL_DOMAIN_ADDED"), eq(TENANT_ID.toString()), any());
     }
 
     @Test
@@ -127,7 +136,8 @@ class ManageTenantEmailDomainServiceTest {
         service.removeDomain(TENANT_ID, "marmara.edu.tr");
 
         verify(emailDomainRepository).delete(only);
-        verify(auditLogPort).logSecurityEvent(eq(TENANT_ID.toString()), eq("TENANT_EMAIL_DOMAIN_REMOVED"), any(), any());
+        verify(auditLogPort).logTenantManagementEvent(eq(ACTOR_ID.toString()),
+                eq("TENANT_EMAIL_DOMAIN_REMOVED"), eq(TENANT_ID.toString()), any());
     }
 
     @Test
@@ -147,7 +157,8 @@ class ManageTenantEmailDomainServiceTest {
         assertThat(resp.isPrimary()).isTrue();
         assertThat(oldPrimary.isPrimary()).isFalse(); // dethroned
         assertThat(target.isPrimary()).isTrue();
-        verify(auditLogPort).logSecurityEvent(eq(TENANT_ID.toString()), eq("TENANT_EMAIL_DOMAIN_PRIMARY_SET"), any(), any());
+        verify(auditLogPort).logTenantManagementEvent(eq(ACTOR_ID.toString()),
+                eq("TENANT_EMAIL_DOMAIN_PRIMARY_SET"), eq(TENANT_ID.toString()), any());
     }
 
     // ==================== DNS-TXT verification (V64) ====================
@@ -203,7 +214,8 @@ class ManageTenantEmailDomainServiceTest {
         assertThat(result.isVerified()).isTrue();
         assertThat(row.isVerified()).isTrue();
         assertThat(row.getVerificationToken()).isNull(); // spent token cleared
-        verify(auditLogPort).logSecurityEvent(eq(admin.toString()), eq("TENANT_EMAIL_DOMAIN_VERIFIED"), any(), any());
+        verify(auditLogPort).logTenantManagementEvent(eq(admin.toString()),
+                eq("TENANT_EMAIL_DOMAIN_VERIFIED"), eq(TENANT_ID.toString()), any());
     }
 
     @Test
@@ -222,7 +234,8 @@ class ManageTenantEmailDomainServiceTest {
         assertThat(result.getReason()).isEqualTo("RECORD_NOT_FOUND");
         assertThat(row.isVerified()).isFalse();
         verify(emailDomainRepository, never()).saveAndFlush(any());
-        verify(auditLogPort).logSecurityEvent(isNull(), eq("TENANT_EMAIL_DOMAIN_VERIFY_FAILED"), any(), any());
+        verify(auditLogPort).logTenantManagementEvent(isNull(),
+                eq("TENANT_EMAIL_DOMAIN_VERIFY_FAILED"), eq(TENANT_ID.toString()), any());
     }
 
     @Test
