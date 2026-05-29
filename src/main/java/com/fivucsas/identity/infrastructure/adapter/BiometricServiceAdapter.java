@@ -312,26 +312,6 @@ public class BiometricServiceAdapter implements BiometricServicePort {
     }
 
     @Override
-    public Map<String, Object> detectCardType(MultipartFile image) {
-        log.info("Calling biometric service to detect card type");
-        try {
-            MultipartBodyBuilder bodyBuilder = new MultipartBodyBuilder();
-            bodyBuilder.part("file", image.getResource()).contentType(MediaType.IMAGE_JPEG);
-
-            return postMultipart("/card-type/detect-live", bodyBuilder.build());
-        } catch (HttpClientErrorException e) {
-            log.warn("Biometric service client error for card detection: {} {}", e.getStatusCode(), e.getMessage());
-            return errorResponse("Card detection rejected: " + e.getResponseBodyAsString());
-        } catch (ResourceAccessException e) {
-            log.error("Biometric service unreachable for card detection: {}", e.getMessage());
-            return errorResponse("Card detection service unavailable");
-        } catch (RestClientException e) {
-            log.error("Biometric service error for card detection: {}", e.getMessage());
-            return errorResponse("Card detection service error");
-        }
-    }
-
-    @Override
     public Map<String, Object> generateLivenessPuzzle(String userId, String difficulty) {
         log.info("Calling biometric service to generate liveness puzzle for user: {}", userId);
         try {
