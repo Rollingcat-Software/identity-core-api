@@ -91,6 +91,28 @@ public class User {
     @JoinColumn(name = "tenant_id", nullable = false)
     private Tenant tenant;
 
+    /**
+     * The platform-level {@link Identity} (person) that owns this tenant
+     * membership (Model A, Phase 1 — see docs/IDENTITY_ACCOUNT_LINKING_DESIGN.md).
+     * Nullable for now; a follow-up migration sets {@code identity_id NOT NULL}
+     * once the prod backfill (V67) is confirmed 100% populated. Auth is unchanged
+     * through Phase 1–2 — this association is additive and read-mostly.
+     */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "identity_id")
+    private Identity identity;
+
+    /**
+     * Read-only view of the raw identity_id FK. Mirrors the {@code userId}
+     * raw-column pattern on {@link UserEnrollment}: lets callers read the owning
+     * identity's id without initializing the lazy {@link #identity} proxy —
+     * important given the soft-delete / lazy-proxy guards (P1-4).
+     * insertable/updatable=false because the {@link #identity} association owns
+     * this column.
+     */
+    @Column(name = "identity_id", insertable = false, updatable = false)
+    private UUID identityId;
+
     @Column(unique = true, nullable = false, length = 255)
     @Setter  // Allow updating
     private String email;  // Will be converted to Email via converter
