@@ -21,6 +21,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -55,6 +56,11 @@ class AuditLogAdapterTest {
     void setUp() {
         userId = UUID.randomUUID();
         tenantId = UUID.randomUUID();
+        // saveAuditLogWithTenant nulls user_id when the id isn't a real user
+        // (FK-resilience, 2026-05-29). These tests' random user ids represent
+        // existing users, so stub existsById=true; lenient() because
+        // anonymous/null-user events never reach the check.
+        lenient().when(userRepository.existsById(any())).thenReturn(true);
     }
 
     @Nested
