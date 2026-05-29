@@ -50,6 +50,9 @@ class VerifyBiometricServiceTest {
     private EventPublisherPort eventPublisher;
 
     @Mock
+    private com.fivucsas.identity.application.port.output.BiometricConsentResolver consentResolver;
+
+    @Mock
     private MultipartFile faceImage;
 
     @InjectMocks

@@ -252,4 +252,19 @@ public class RbacAuthorizationService {
     public Optional<UUID> getCurrentUserId() {
         return getCurrentUser().map(User::getId);
     }
+
+    /**
+     * Returns the platform {@code identity_id} of the currently authenticated
+     * principal (the PERSON behind this tenant membership — Model A), or
+     * {@link Optional#empty()} if unauthenticated / not yet backfilled.
+     *
+     * <p>Exposed (like {@link #getCurrentUserId()}) so the biometric-consent
+     * controller can act on the caller's OWN identity WITHOUT importing
+     * {@code entity.User} — keeping the JPA entity behind the {@code security..}
+     * boundary ratchet ({@code UserDomainBoundaryTest}). Reads the raw
+     * {@code identityId} mirror column (no lazy proxy init).</p>
+     */
+    public Optional<UUID> getCurrentUserIdentityId() {
+        return getCurrentUser().map(User::getIdentityId);
+    }
 }
