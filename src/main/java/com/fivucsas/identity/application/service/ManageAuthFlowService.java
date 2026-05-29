@@ -9,6 +9,9 @@ import com.fivucsas.identity.domain.model.auth.OperationType;
 import com.fivucsas.identity.application.port.output.AuthFlowRepositoryPort;
 import com.fivucsas.identity.application.port.output.AuthFlowStepRepositoryPort;
 import com.fivucsas.identity.application.port.output.AuthMethodRepositoryPort;
+import com.fivucsas.identity.application.port.output.UserEnrollmentRepositoryPort;
+import com.fivucsas.identity.application.dto.response.AuthFlowDefaultImpactResponse;
+import com.fivucsas.identity.domain.model.auth.EnrollmentStatus;
 import com.fivucsas.identity.repository.JpaTenantRepository;
 import com.fivucsas.identity.entity.*;
 import com.fivucsas.identity.application.port.output.TenantAuthMethodRepositoryPort;
@@ -39,6 +42,8 @@ public class ManageAuthFlowService implements ManageAuthFlowUseCase {
     private final AuthMethodRepositoryPort authMethodRepository;
     private final JpaTenantRepository tenantRepository;
     private final TenantAuthMethodRepositoryPort tenantAuthMethodRepository;
+    private final UserEnrollmentRepositoryPort userEnrollmentRepository;
+    private final com.fivucsas.identity.repository.UserRepository userRepository;
 
     @Override
     public List<AuthFlowResponse> listFlows(UUID tenantId, OperationType operationType) {
@@ -162,6 +167,64 @@ public class ManageAuthFlowService implements ManageAuthFlowUseCase {
         AuthFlow flow = authFlowRepository.findByIdAndTenantId(flowId, tenantId)
                 .orElseThrow(() -> new EntityNotFoundException("Auth flow not found: " + flowId));
         authFlowRepository.delete(flow);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public AuthFlowDefaultImpactResponse computeDefaultImpact(UUID tenantId, UUID flowId) {
+        AuthFlow flow = authFlowRepository.findByIdAndTenantId(flowId, tenantId)
+                .orElseThrow(() -> new EntityNotFoundException("Auth flow not found: " + flowId));
+
+        // Each requirement = the set of methods that satisfy one required step.
+        // SEQUENTIAL → size 1; CHOICE → the alternatives (user needs >=1).
+        // PASSWORD is always available so it never constitutes a lockout risk.
+        List<Set<AuthMethodType>> requirements = new java.util.ArrayList<>();
+        for (AuthFlowStep step : flow.getSteps()) {
+            if (!step.isRequired()) continue;
+            Set<AuthMethodType> opts = step.getAvailableMethods().stream()
+                    .map(AuthMethod::getType)
+                    .filter(m -> m != AuthMethodType.PASSWORD)
+                    .collect(java.util.stream.Collectors.toCollection(java.util.LinkedHashSet::new));
+            if (!opts.isEmpty()) requirements.add(opts);
+        }
+
+        List<UUID> activeUserIds = userRepository.findIdsByTenantId(tenantId);
+        long activeUsers = activeUserIds.size();
+
+        // Enrolled methods per user (ENROLLED status only).
+        java.util.Map<UUID, Set<AuthMethodType>> enrolledByUser = new java.util.HashMap<>();
+        for (UserEnrollment e : userEnrollmentRepository.findAllByTenantId(tenantId)) {
+            if (e.getStatus() == EnrollmentStatus.ENROLLED && e.getUserId() != null) {
+                enrolledByUser
+                        .computeIfAbsent(e.getUserId(), k -> java.util.EnumSet.noneOf(AuthMethodType.class))
+                        .add(e.getAuthMethodType());
+            }
+        }
+
+        // A user is "at risk" if they fail to satisfy at least one requirement.
+        long usersAtRisk = activeUserIds.stream().filter(uid -> {
+            Set<AuthMethodType> have = enrolledByUser.getOrDefault(uid, Set.of());
+            return requirements.stream().anyMatch(req -> req.stream().noneMatch(have::contains));
+        }).count();
+
+        // Per-method coverage for every distinct required method.
+        Set<AuthMethodType> choiceMethods = requirements.stream()
+                .filter(r -> r.size() > 1).flatMap(Set::stream)
+                .collect(java.util.stream.Collectors.toSet());
+        Set<AuthMethodType> allRequired = requirements.stream().flatMap(Set::stream)
+                .collect(java.util.stream.Collectors.toCollection(java.util.LinkedHashSet::new));
+
+        List<AuthFlowDefaultImpactResponse.MethodCoverage> coverage = allRequired.stream().map(m -> {
+            long enrolled = activeUserIds.stream()
+                    .filter(uid -> enrolledByUser.getOrDefault(uid, Set.of()).contains(m))
+                    .count();
+            return new AuthFlowDefaultImpactResponse.MethodCoverage(
+                    m.name(), choiceMethods.contains(m), enrolled, activeUsers - enrolled);
+        }).toList();
+
+        return new AuthFlowDefaultImpactResponse(
+                flow.getId().toString(), flow.getName(), flow.getOperationType().name(),
+                activeUsers, usersAtRisk, coverage);
     }
 
     /**

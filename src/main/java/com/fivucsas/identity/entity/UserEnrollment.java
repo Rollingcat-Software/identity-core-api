@@ -29,6 +29,16 @@ public class UserEnrollment {
     @JoinColumn(name = "user_id", nullable = false)
     private User user;
 
+    /**
+     * Read-only view of the raw user_id FK. Lets callers surface the owning
+     * user's id even when the {@link User} row is soft-deleted (and therefore
+     * hidden by {@code @SQLRestriction("deleted_at IS NULL")}), without
+     * initializing the lazy proxy. insertable/updatable=false because the
+     * {@link #user} association already owns this column.
+     */
+    @Column(name = "user_id", insertable = false, updatable = false)
+    private UUID userId;
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "tenant_id", nullable = false)
     private Tenant tenant;
