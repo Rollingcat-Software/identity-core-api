@@ -24,5 +24,14 @@ public class TenantEmailDomainResponse {
      */
     private final boolean isPrimary;
 
+    /**
+     * True once domain ownership is proven (DNS-TXT verification or a trusted
+     * admin/ROOT add). Only verified domains auto-bind other registrants /
+     * satisfy {@code enforce_domain_matching}; self-service onboarding claims
+     * start {@code false}. Surfaced so the admin UI shows status + offers the
+     * "Verify domain" action on unverified rows.
+     */
+    private final boolean verified;
+
     private final Instant createdAt;
 }
