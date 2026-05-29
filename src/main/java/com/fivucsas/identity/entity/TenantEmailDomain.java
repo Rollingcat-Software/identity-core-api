@@ -42,6 +42,16 @@ public class TenantEmailDomain {
     @Builder.Default
     private boolean isPrimary = false;
 
+    /**
+     * Domain-ownership gate (V63). FALSE until ownership is proven (DNS-TXT
+     * verification — Round 2 — or SUPER_ADMIN approval). Only verified domains
+     * auto-bind new registrants and satisfy {@code enforce_domain_matching}.
+     * Self-service onboarding claims a domain as {@code verified=false}.
+     */
+    @Column(name = "verified", nullable = false)
+    @Builder.Default
+    private boolean verified = false;
+
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
@@ -64,13 +74,29 @@ public class TenantEmailDomain {
         this.isPrimary = false;
     }
 
+    /** Flips this domain to verified (DNS-TXT verification or admin approval). */
+    public void markVerified() {
+        this.verified = true;
+    }
+
     /**
      * Factory — normalises the domain to lowercase and trims whitespace.
+     *
+     * <p>Defaults {@code verified=false}: callers that provision a trusted
+     * domain (e.g. ROOT/admin CRUD) should call {@link #markVerified()} or use
+     * {@link #create(UUID, String, boolean, boolean)}. Self-service onboarding
+     * keeps the default (unverified).</p>
      */
     public static TenantEmailDomain create(UUID tenantId, String emailDomain, boolean isPrimary) {
+        return create(tenantId, emailDomain, isPrimary, false);
+    }
+
+    /** Factory with explicit verified state. */
+    public static TenantEmailDomain create(UUID tenantId, String emailDomain, boolean isPrimary, boolean verified) {
         return TenantEmailDomain.builder()
             .id(TenantEmailDomainId.of(tenantId, emailDomain))
             .isPrimary(isPrimary)
+            .verified(verified)
             .build();
     }
 

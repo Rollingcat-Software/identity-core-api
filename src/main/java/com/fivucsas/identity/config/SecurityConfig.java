@@ -136,6 +136,13 @@ public class SecurityConfig {
                                 "/api/v1/guests/accept"
                         ).permitAll()
 
+                        // Public self-service tenant onboarding (rate-limited per IP
+                        // by RateLimitFilter). register = create org + admin;
+                        // verify-email = token-based activation (no JWT).
+                        .requestMatchers(HttpMethod.POST, "/api/v1/onboarding/register").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/v1/onboarding/verify-email").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/v1/onboarding/verify-email").permitAll()
+
                         // H2 console - restricted by profile and expose-docs flag (NEVER public)
                         .requestMatchers("/h2-console/**").access((authentication, context) ->
                                 new org.springframework.security.authorization.AuthorizationDecision(exposeDocs && !isProductionProfile()))

@@ -17,4 +17,18 @@ public interface EmailService {
      */
     void sendGuestInvitation(String to, String token, Instant accessStart, Instant accessEnd,
                              String message, String inviterName);
+
+    /**
+     * Sends the email-verification mail for a self-service tenant onboarding.
+     *
+     * <p>The link points at the frontend's verify-email page; following it
+     * verifies the admin's email and activates the new tenant (unless admin
+     * approval is required).</p>
+     *
+     * @param to          admin email address
+     * @param adminName   admin first name (for the greeting; may be null/blank)
+     * @param orgName     the organisation that was just registered
+     * @param token       the email-verification token (used to build the link)
+     */
+    void sendTenantOnboardingVerification(String to, String adminName, String orgName, String token);
 }

@@ -111,8 +111,10 @@ public class RegisterUserService implements RegisterUserUseCase {
         // domain owned by a DIFFERENT tenant must not satisfy this tenant's gate.
         if (defaultTenant.isEnforceDomainMatching()) {
             String emailDomain = email.getDomain();
+            // Only VERIFIED domains (V63) satisfy the gate — a self-service tenant's
+            // unverified claim must not let arbitrary registrants in.
             boolean domainAllowed = emailDomain != null
-                && tenantEmailDomainRepository.findByIdEmailDomainIgnoreCase(emailDomain)
+                && tenantEmailDomainRepository.findByIdEmailDomainIgnoreCaseAndVerifiedTrue(emailDomain)
                     .map(TenantEmailDomain::getTenantId)
                     .filter(ownerTenantId -> ownerTenantId.equals(defaultTenant.getId()))
                     .isPresent();
@@ -203,11 +205,14 @@ public class RegisterUserService implements RegisterUserUseCase {
         if (emailDomain == null || emailDomain.isBlank()) {
             return java.util.Optional.empty();
         }
+        // Only VERIFIED domains auto-bind a registrant to a tenant (V63). A
+        // self-service onboarded tenant claims its domain unverified, so it must
+        // not silently capture other people's signups until ownership is proven.
         java.util.Optional<TenantEmailDomain> mapped =
-            tenantEmailDomainRepository.findByIdEmailDomainIgnoreCase(emailDomain);
+            tenantEmailDomainRepository.findByIdEmailDomainIgnoreCaseAndVerifiedTrue(emailDomain);
         if (mapped.isPresent()) {
             java.util.UUID tenantId = mapped.get().getTenantId();
-            log.info("Resolved tenant {} for email domain '{}' via tenant_email_domains", tenantId, emailDomain);
+            log.info("Resolved tenant {} for email domain '{}' via tenant_email_domains (verified)", tenantId, emailDomain);
             return tenantRepository.findById(tenantId);
         }
         java.util.Optional<Tenant> legacy =

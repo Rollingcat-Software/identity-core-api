@@ -22,4 +22,10 @@ public class NoOpEmailService implements EmailService {
         log.info("Mail disabled - guest invitation for {} (token={}, access {} -> {}, invitedBy={})",
                 to, token, accessStart, accessEnd, inviterName);
     }
+
+    @Override
+    public void sendTenantOnboardingVerification(String to, String adminName, String orgName, String token) {
+        log.info("Mail disabled - tenant onboarding verification for {} (org='{}', token={})",
+                to, orgName, token);
+    }
 }

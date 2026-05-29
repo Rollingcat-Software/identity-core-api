@@ -97,7 +97,11 @@ public class ManageTenantEmailDomainService implements ManageTenantEmailDomainUs
             dethroneCurrentPrimary(tenantId);
         }
 
-        TenantEmailDomain row = TenantEmailDomain.create(tenantId, normalized, isPrimary);
+        // Admin/ROOT CRUD adds are trusted (an authenticated tenant admin or
+        // ROOT is asserting ownership), so they are verified=true and keep their
+        // existing auto-bind + enforce_domain_matching behaviour. Only the
+        // PUBLIC self-service onboarding claim is verified=false (V63).
+        TenantEmailDomain row = TenantEmailDomain.create(tenantId, normalized, isPrimary, true);
         try {
             row = emailDomainRepository.saveAndFlush(row);
         } catch (DataIntegrityViolationException e) {

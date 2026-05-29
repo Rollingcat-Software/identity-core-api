@@ -69,6 +69,13 @@ V62: tenants.enforce_domain_matching BOOLEAN NOT NULL DEFAULT false — opt-in
      email-domain registration gate. When true, only registrants whose email
      domain is in tenant_email_domains (V44) may join; else graceful (today's
      behaviour). Backs the admin email-domain CRUD + RegisterUserService gate.
+V63: tenant_email_domains.verified BOOLEAN NOT NULL DEFAULT false — domain-
+     ownership gate for self-service onboarding. Only verified=true domains
+     auto-bind new registrants / satisfy enforce_domain_matching. Migration
+     backfills ALL pre-existing rows (Marmara etc.) to verified=true so current
+     behaviour is unchanged; admin/ROOT CRUD adds are verified=true; only the
+     PUBLIC self-service claim is verified=false (flipped later by Round-2 DNS-TXT
+     verification or SUPER_ADMIN approval). Backs POST /api/v1/onboarding/register.
 
 **V34-V60 applied in prod. Last rebuild included V60 (drop refresh_tokens.token plaintext).**
 
