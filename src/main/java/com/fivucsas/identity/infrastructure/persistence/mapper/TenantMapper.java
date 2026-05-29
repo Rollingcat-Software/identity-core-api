@@ -29,7 +29,8 @@ public final class TenantMapper {
             jpa.getSessionTimeoutMinutes(),
             jpa.getRefreshTokenValidityDays(),
             jpa.isMfaRequired(),
-            jpa.isEnforceDomainMatching()
+            jpa.isEnforceDomainMatching(),
+            jpa.getDefaultMemberRole()
         );
 
         return Tenant.reconstitute(
@@ -66,6 +67,7 @@ public final class TenantMapper {
             .refreshTokenValidityDays(domain.getRefreshTokenValidityDays())
             .mfaRequired(domain.isMfaRequired())
             .enforceDomainMatching(domain.isEnforceDomainMatching())
+            .defaultMemberRole(domain.getDefaultMemberRole())
             .createdAt(domain.getCreatedAt())
             .updatedAt(domain.getUpdatedAt())
             .build();

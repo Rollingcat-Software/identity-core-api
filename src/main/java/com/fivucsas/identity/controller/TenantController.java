@@ -155,6 +155,7 @@ public class TenantController {
             .refreshTokenValidityDays(request.getRefreshTokenValidityDays())
             .mfaRequired(request.getMfaRequired())
             .enforceDomainMatching(request.getEnforceDomainMatching())
+            .defaultMemberRole(request.getDefaultMemberRole())
             .build();
 
         TenantResponse response = manageTenantUseCase.updateTenant(command);
@@ -247,5 +248,13 @@ public class TenantController {
          * whose email domain is in this tenant's tenant_email_domains may join.
          */
         private Boolean enforceDomainMatching;
+
+        /**
+         * Per-tenant default member role (V64) auto-assigned to users who join
+         * via a verified email domain. {@code null} = leave unchanged; blank =
+         * clear (fall back to the seeded baseline role).
+         */
+        @Size(max = 100, message = "Default member role must not exceed 100 characters")
+        private String defaultMemberRole;
     }
 }

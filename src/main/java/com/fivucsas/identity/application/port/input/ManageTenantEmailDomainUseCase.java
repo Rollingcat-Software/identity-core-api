@@ -1,5 +1,7 @@
 package com.fivucsas.identity.application.port.input;
 
+import com.fivucsas.identity.application.dto.response.DomainVerificationChallengeResponse;
+import com.fivucsas.identity.application.dto.response.DomainVerificationResultResponse;
 import com.fivucsas.identity.application.dto.response.TenantEmailDomainResponse;
 
 import java.util.List;
@@ -48,4 +50,30 @@ public interface ManageTenantEmailDomainUseCase {
      * any previous primary in the same transaction.
      */
     TenantEmailDomainResponse setPrimaryDomain(UUID tenantId, String domain);
+
+    /**
+     * Generates (or returns the existing) DNS-TXT verification challenge for a
+     * tenant's email domain. Idempotent — repeated calls return the same token
+     * until the domain is verified.
+     *
+     * @return the TXT record the admin must publish to prove ownership
+     * @throws com.fivucsas.identity.exception.ResourceNotFoundException
+     *         if the domain is not in this tenant's registry
+     */
+    DomainVerificationChallengeResponse requestDomainVerification(UUID tenantId, String domain);
+
+    /**
+     * Performs a DNS TXT lookup for the tenant's email domain and, if the
+     * expected {@code fivucsas-domain-verification=<token>} record is present,
+     * flips {@code verified=true} and clears the spent token.
+     *
+     * @param actingUserId the authenticated admin's user id for audit
+     *                     attribution (never the tenant id — that would violate
+     *                     audit_logs_user_id_fkey); may be {@code null}
+     * @return a result with {@code verified=true} on success, or
+     *         {@code verified=false} plus a reason on failure
+     * @throws com.fivucsas.identity.exception.ResourceNotFoundException
+     *         if the domain is not in this tenant's registry
+     */
+    DomainVerificationResultResponse verifyDomain(UUID tenantId, String domain, UUID actingUserId);
 }

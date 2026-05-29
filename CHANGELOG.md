@@ -2,6 +2,44 @@
 
 ## [Unreleased]
 
+### 2026-05-29 — DNS-TXT email-domain verification + default-role-on-join (V64)
+
+Backend only (frontend DNS-verify UI ships separately).
+
+- **DNS-TXT domain-ownership verification.** A tenant admin can now PROVE
+  ownership of a claimed email domain via a DNS TXT record, flipping
+  `tenant_email_domains.verified` to `true`. Only verified domains auto-bind other
+  registrants / satisfy `enforce_domain_matching` (V62) / lift onboarding trial
+  caps. Two NEW endpoints (gated `@rbac.isTenantAdmin() and @rbac.canAccessTenant`,
+  ROOT cross-tenant):
+  - `POST /api/v1/tenants/{tenantId}/email-domains/{domain}/verification` —
+    generates (or returns the existing) token and returns the TXT record to
+    publish. Record name `_fivucsas-verify.{domain}`, type `TXT`, value
+    `fivucsas-domain-verification={token}`. Idempotent.
+  - `POST /api/v1/tenants/{tenantId}/email-domains/{domain}/verify` — performs a
+    DNS TXT lookup; on a match sets `verified=true` and clears the token. Returns
+    `200 {verified:true}`, `422 {verified:false, reason:"RECORD_NOT_FOUND"}`
+    (absent/mismatch), or `409 {verified:false, reason:"NO_CHALLENGE"}` (no token
+    yet). DNS lookup uses the JDK JNDI DNS provider behind a `DnsTxtLookupPort`
+    (no new dependency); NXDOMAIN/timeouts degrade gracefully to not-verified.
+    Verification is audit-logged under the acting admin's user id (or null), never
+    the tenant id (avoids `audit_logs_user_id_fkey`).
+- **default-role-on-join (in-platform JIT).** New per-tenant
+  `tenants.default_member_role` (settable via `PUT /api/v1/tenants/{id}`, surfaced
+  in the tenant response). When a registrant auto-joins a tenant via a VERIFIED
+  email domain, `RegisterUserService` assigns that role (falls back to the seeded
+  `USER` role if unset). Best-effort — never rolls back registration. NOTE: this
+  scopes "JIT" to in-platform auto-provisioning; true external-IdP/SSO JIT does not
+  apply (this platform IS the IdP, not a federation consumer).
+- **Migration V64** — `tenant_email_domains.verification_token` +
+  `verification_requested_at`; `tenants.default_member_role`. All nullable,
+  idempotent (`ADD COLUMN IF NOT EXISTS`), no backfill (defaults preserve current
+  behaviour).
+- Verified-only auto-bind reuses `findByIdEmailDomainIgnoreCaseAndVerifiedTrue`
+  (V63). ArchUnit `UserDomainBoundaryTest` baseline shrank (RegisterUserService
+  `entity.User` call surface reduced); default-role assignment routes through a
+  new `MemberRoleAssignmentPort` infrastructure adapter to keep the boundary clean.
+
 ### 2026-05-29 — Admin 500 fixes, guest-invite email, SUPER_ADMIN /auth/me, tenant email-domain management (5 PRs)
 
 Squash-merged to `main`:

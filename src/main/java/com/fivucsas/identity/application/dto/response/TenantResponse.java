@@ -28,6 +28,11 @@ public class TenantResponse {
     private final boolean mfaRequired;
     private final boolean enforceDomainMatching;
     /**
+     * Name of the per-tenant role auto-assigned to users who join via a
+     * verified email domain (V64). {@code null} = the seeded baseline role.
+     */
+    private final String defaultMemberRole;
+    /**
      * The tenant's email-domain registry (V44). Populated so the admin UI can
      * render current state without a second round-trip. May be {@code null}
      * for list/summary responses that do not eagerly load domains.

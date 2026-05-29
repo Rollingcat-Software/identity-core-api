@@ -84,6 +84,9 @@ class RegisterUserServiceTest {
     @Mock
     private EmailService emailService;
 
+    @Mock
+    private com.fivucsas.identity.application.port.output.MemberRoleAssignmentPort memberRoleAssignmentPort;
+
     @InjectMocks
     private RegisterUserService registerUserService;
 
@@ -540,6 +543,34 @@ class RegisterUserServiceTest {
             verify(tenantRepository, never()).findByLegacyDomainIgnoreCase(anyString());
             // Default-slug fall-back must NOT be used either.
             verify(tenantRepository, never()).findBySlug(anyString());
+
+            // V64 default-role-on-join: a verified-domain auto-bind triggers the
+            // tenant's default member role assignment for the new user (the saved
+            // user's id is non-null; the tenant is the auto-bound one).
+            verify(memberRoleAssignmentPort)
+                .assignDefaultMemberRole(any(UUID.class), eq(MARMARA_TENANT_ID));
+        }
+
+        @Test
+        @DisplayName("default-slug fallback does NOT trigger default-role-on-join (V64)")
+        void defaultFallbackDoesNotAssignDefaultRole() {
+            // Given — an email whose domain matches NO verified tenant_email_domains
+            // row and NO legacy domain → falls back to the default tenant.
+            String emailAddress = "nobody@unknown-domain.example";
+            when(tenantEmailDomainRepository.findByIdEmailDomainIgnoreCaseAndVerifiedTrue("unknown-domain.example"))
+                .thenReturn(Optional.empty());
+            when(tenantRepository.findByLegacyDomainIgnoreCase("unknown-domain.example"))
+                .thenReturn(Optional.empty());
+            ReflectionTestUtils.setField(registerUserService, "defaultTenantSlug", "default");
+            when(tenantRepository.findBySlug("default")).thenReturn(Optional.of(marmaraTenant));
+            stubCommonRegistrationCollaborators(emailAddress);
+
+            // When
+            registerUserService.execute(registrationFor(emailAddress));
+
+            // Then — the fallback path is NOT a verified-domain auto-bind, so no
+            // default role is assigned.
+            verifyNoInteractions(memberRoleAssignmentPort);
         }
 
         @Test

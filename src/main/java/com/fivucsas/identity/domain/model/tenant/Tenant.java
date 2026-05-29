@@ -204,6 +204,11 @@ public class Tenant {
         return configuration.isEnforceDomainMatching();
     }
 
+    /** Per-tenant default member role (V64); {@code null} = seeded baseline. */
+    public String getDefaultMemberRole() {
+        return configuration.getDefaultMemberRole();
+    }
+
     public Instant getCreatedAt() {
         return createdAt;
     }

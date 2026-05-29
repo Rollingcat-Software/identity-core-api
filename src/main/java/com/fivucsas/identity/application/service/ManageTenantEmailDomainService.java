@@ -1,8 +1,11 @@
 package com.fivucsas.identity.application.service;
 
+import com.fivucsas.identity.application.dto.response.DomainVerificationChallengeResponse;
+import com.fivucsas.identity.application.dto.response.DomainVerificationResultResponse;
 import com.fivucsas.identity.application.dto.response.TenantEmailDomainResponse;
 import com.fivucsas.identity.application.port.input.ManageTenantEmailDomainUseCase;
 import com.fivucsas.identity.application.port.output.AuditLogPort;
+import com.fivucsas.identity.application.port.output.DnsTxtLookupPort;
 import com.fivucsas.identity.domain.exception.TenantEmailDomainConflictException;
 import com.fivucsas.identity.domain.exception.TenantNotFoundException;
 import com.fivucsas.identity.entity.Tenant;
@@ -16,6 +19,8 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.security.SecureRandom;
+import java.util.Base64;
 import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
@@ -51,9 +56,23 @@ public class ManageTenantEmailDomainService implements ManageTenantEmailDomainUs
     private static final Pattern DOMAIN_PATTERN = Pattern.compile(
             "^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]{2,63}$");
 
+    /**
+     * DNS host PREFIX under which the verification TXT record must live, e.g.
+     * {@code _fivucsas-verify.example.com}. A dedicated sub-name (rather than the
+     * apex) keeps the verification record out of the way of SPF/DMARC/etc. apex
+     * TXT records and is the industry pattern (Google, AWS ACM, etc.).
+     */
+    static final String VERIFY_HOST_PREFIX = "_fivucsas-verify.";
+
+    /** Prefix of the TXT record VALUE: {@code fivucsas-domain-verification=<token>}. */
+    static final String VERIFY_VALUE_PREFIX = "fivucsas-domain-verification=";
+
+    private static final SecureRandom SECURE_RANDOM = new SecureRandom();
+
     private final TenantEmailDomainRepository emailDomainRepository;
     private final JpaTenantRepository tenantRepository;
     private final AuditLogPort auditLogPort;
+    private final DnsTxtLookupPort dnsTxtLookupPort;
 
     @Override
     @Transactional(readOnly = true)
@@ -181,6 +200,110 @@ public class ManageTenantEmailDomainService implements ManageTenantEmailDomainUs
         return toResponse(saved);
     }
 
+    @Override
+    @Transactional
+    public DomainVerificationChallengeResponse requestDomainVerification(UUID tenantId, String domain) {
+        requireTenant(tenantId);
+        String normalized = normalizeAndValidate(domain);
+
+        TenantEmailDomain row = emailDomainRepository
+                .findById(TenantEmailDomainId.of(tenantId, normalized))
+                .orElseThrow(() -> new com.fivucsas.identity.exception.ResourceNotFoundException(
+                        "Email domain not found for this tenant: " + normalized));
+
+        // Already verified — return a no-op challenge so the UI can show the
+        // verified state without issuing a pointless token.
+        if (row.isVerified()) {
+            return buildChallenge(row, normalized);
+        }
+
+        // Idempotent: reuse the existing token if one was already issued so the
+        // admin who published the record can still verify after a page reload.
+        if (row.getVerificationToken() == null || row.getVerificationToken().isBlank()) {
+            row.issueVerificationToken(generateToken());
+            row = emailDomainRepository.saveAndFlush(row);
+            log.info("Issued DNS-TXT verification token for tenant {} domain '{}'", tenantId, normalized);
+        }
+
+        return buildChallenge(row, normalized);
+    }
+
+    @Override
+    @Transactional
+    public DomainVerificationResultResponse verifyDomain(UUID tenantId, String domain, UUID actingUserId) {
+        requireTenant(tenantId);
+        String normalized = normalizeAndValidate(domain);
+
+        TenantEmailDomain row = emailDomainRepository
+                .findById(TenantEmailDomainId.of(tenantId, normalized))
+                .orElseThrow(() -> new com.fivucsas.identity.exception.ResourceNotFoundException(
+                        "Email domain not found for this tenant: " + normalized));
+
+        if (row.isVerified()) {
+            // Idempotent success — already proven.
+            return DomainVerificationResultResponse.builder()
+                    .domain(normalized)
+                    .verified(true)
+                    .reason("ALREADY_VERIFIED")
+                    .message("Domain is already verified.")
+                    .build();
+        }
+
+        String token = row.getVerificationToken();
+        if (token == null || token.isBlank()) {
+            return DomainVerificationResultResponse.builder()
+                    .domain(normalized)
+                    .verified(false)
+                    .reason("NO_CHALLENGE")
+                    .message("No verification challenge has been requested for this domain. "
+                            + "Request one first, publish the TXT record, then verify.")
+                    .build();
+        }
+
+        String host = VERIFY_HOST_PREFIX + normalized;
+        String expectedValue = VERIFY_VALUE_PREFIX + token;
+        List<String> records = dnsTxtLookupPort.lookupTxtRecords(host);
+        boolean match = records != null && records.stream()
+                .filter(java.util.Objects::nonNull)
+                .map(String::trim)
+                .anyMatch(expectedValue::equals);
+
+        if (!match) {
+            // Audit the failed attempt under the ACTING ADMIN's user id (or null
+            // for system) — NEVER the tenant id, which is not an FK into users
+            // and would violate audit_logs_user_id_fkey.
+            auditLogPort.logSecurityEvent(
+                    actingUserId != null ? actingUserId.toString() : null,
+                    "TENANT_EMAIL_DOMAIN_VERIFY_FAILED",
+                    null,
+                    String.format("DNS-TXT verification failed for domain '%s' (tenant=%s): "
+                            + "expected record not found at %s", normalized, tenantId, host));
+            return DomainVerificationResultResponse.builder()
+                    .domain(normalized)
+                    .verified(false)
+                    .reason("RECORD_NOT_FOUND")
+                    .message("Expected TXT record not found at " + host + ". "
+                            + "DNS changes can take a few minutes to propagate — try again shortly.")
+                    .build();
+        }
+
+        row.markVerifiedViaDns();
+        emailDomainRepository.saveAndFlush(row);
+
+        auditLogPort.logSecurityEvent(
+                actingUserId != null ? actingUserId.toString() : null,
+                "TENANT_EMAIL_DOMAIN_VERIFIED",
+                null,
+                String.format("DNS-TXT ownership verified for domain '%s' (tenant=%s)",
+                        normalized, tenantId));
+        log.info("DNS-TXT ownership verified for tenant {} domain '{}'", tenantId, normalized);
+
+        return DomainVerificationResultResponse.builder()
+                .domain(normalized)
+                .verified(true)
+                .build();
+    }
+
     // ========== Helpers ==========
 
     /**
@@ -194,6 +317,36 @@ public class ManageTenantEmailDomainService implements ManageTenantEmailDomainUs
                     d.clearPrimary();
                     emailDomainRepository.saveAndFlush(d);
                 });
+    }
+
+    /**
+     * Generates a URL-safe, unpadded 256-bit random token suitable for a DNS
+     * TXT value (no '=' padding, which keeps the record clean).
+     */
+    private static String generateToken() {
+        byte[] bytes = new byte[32];
+        SECURE_RANDOM.nextBytes(bytes);
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+    }
+
+    private static DomainVerificationChallengeResponse buildChallenge(TenantEmailDomain row, String normalized) {
+        String host = VERIFY_HOST_PREFIX + normalized;
+        String value = row.getVerificationToken() != null
+                ? VERIFY_VALUE_PREFIX + row.getVerificationToken()
+                : null;
+        String instructions = row.isVerified()
+                ? "Domain '" + normalized + "' is already verified."
+                : "Add a DNS TXT record with host '" + host + "' and value '" + value
+                  + "', then call the verify endpoint. DNS changes may take a few minutes to propagate.";
+        return DomainVerificationChallengeResponse.builder()
+                .domain(normalized)
+                .verified(row.isVerified())
+                .recordName(host)
+                .recordType("TXT")
+                .recordValue(value)
+                .requestedAt(row.getVerificationRequestedAt())
+                .instructions(instructions)
+                .build();
     }
 
     private Tenant requireTenant(UUID tenantId) {

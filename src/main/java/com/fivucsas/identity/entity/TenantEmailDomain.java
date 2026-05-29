@@ -59,6 +59,20 @@ public class TenantEmailDomain {
     @Builder.Default
     private boolean verified = false;
 
+    /**
+     * DNS-TXT verification secret (V64). The admin publishes
+     * {@code fivucsas-domain-verification=<token>} as a TXT record under
+     * {@code _fivucsas-verify.<domain>}; the {@code /verify} endpoint looks it
+     * up and flips {@link #verified} on a match. NULL before a challenge is
+     * requested and after the domain is verified (cleared on success).
+     */
+    @Column(name = "verification_token", length = 128)
+    private String verificationToken;
+
+    /** When the current {@link #verificationToken} was (re)issued (V64). */
+    @Column(name = "verification_requested_at")
+    private Instant verificationRequestedAt;
+
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
@@ -84,6 +98,25 @@ public class TenantEmailDomain {
     /** Flips this domain to verified (DNS-TXT verification or admin approval). */
     public void markVerified() {
         this.verified = true;
+    }
+
+    /**
+     * Records a freshly-issued DNS-TXT verification token and the issue time.
+     * Used by the {@code POST .../{domain}/verification} challenge endpoint.
+     */
+    public void issueVerificationToken(String token) {
+        this.verificationToken = token;
+        this.verificationRequestedAt = Instant.now();
+    }
+
+    /**
+     * Marks the domain verified via DNS-TXT and clears the now-spent token so
+     * it cannot be reused. Called by the {@code /verify} endpoint on a match.
+     */
+    public void markVerifiedViaDns() {
+        this.verified = true;
+        this.verificationToken = null;
+        this.verificationRequestedAt = null;
     }
 
     /**

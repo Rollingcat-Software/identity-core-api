@@ -155,14 +155,20 @@ public class ManageTenantService implements ManageTenantUseCase {
             tenant.updateContactInfo(command.getContactEmail(), command.getContactPhone());
         }
 
-        // Update configuration
+        // Update configuration. V64 — defaultMemberRole: null on the command
+        // leaves the current value untouched; a blank string clears it (falls
+        // back to the seeded baseline role).
+        String resolvedDefaultRole = command.getDefaultMemberRole() != null
+                ? command.getDefaultMemberRole()
+                : tenant.getDefaultMemberRole();
         TenantConfiguration config = TenantConfiguration.of(
             command.getMaxUsers() != null ? command.getMaxUsers() : tenant.getMaxUsers(),
             command.getBiometricEnabled() != null ? command.getBiometricEnabled() : tenant.isBiometricEnabled(),
             command.getSessionTimeoutMinutes() != null ? command.getSessionTimeoutMinutes() : tenant.getSessionTimeoutMinutes(),
             command.getRefreshTokenValidityDays() != null ? command.getRefreshTokenValidityDays() : tenant.getRefreshTokenValidityDays(),
             command.getMfaRequired() != null ? command.getMfaRequired() : tenant.isMfaRequired(),
-            command.getEnforceDomainMatching() != null ? command.getEnforceDomainMatching() : tenant.isEnforceDomainMatching()
+            command.getEnforceDomainMatching() != null ? command.getEnforceDomainMatching() : tenant.isEnforceDomainMatching(),
+            resolvedDefaultRole
         );
         tenant.updateConfiguration(config);
 
@@ -319,6 +325,7 @@ public class ManageTenantService implements ManageTenantUseCase {
             .refreshTokenValidityDays(tenant.getRefreshTokenValidityDays())
             .mfaRequired(tenant.isMfaRequired())
             .enforceDomainMatching(tenant.isEnforceDomainMatching())
+            .defaultMemberRole(tenant.getDefaultMemberRole())
             .emailDomains(domains)
             .createdAt(tenant.getCreatedAt())
             .updatedAt(tenant.getUpdatedAt())
