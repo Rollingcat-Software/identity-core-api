@@ -6,6 +6,7 @@ import com.fivucsas.identity.entity.Tenant;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.entity.UserRole;
 import com.fivucsas.identity.entity.UserType;
+import com.fivucsas.identity.infrastructure.multitenancy.TenantFilterBypass;
 import com.fivucsas.identity.repository.UserRepository;
 import com.fivucsas.identity.repository.UserRoleRepository;
 import lombok.RequiredArgsConstructor;
@@ -46,10 +47,23 @@ public class CustomUserDetailsService implements UserDetailsService {
 
     private final UserRepository userRepository;
     private final UserRoleRepository userRoleRepository;
+    private final TenantFilterBypass tenantFilterBypass;
 
     @Override
     @Transactional(readOnly = true)
     public UserDetails loadUserByUsername(String email) throws UsernameNotFoundException {
+        // Resolve the caller's identity + authorities with the tenant filter
+        // disabled. Authentication and authority loading are keyed by the
+        // caller's unique email and must reflect WHO the caller is — never the
+        // tenant they are currently browsing. If the active X-Tenant-ID (e.g. a
+        // SUPER_ADMIN switching tenants) were allowed to scope this lookup, a
+        // ROOT user (whose row + global SUPER_ADMIN role live in the system
+        // tenant / tenant_id IS NULL) would be filtered out and load zero
+        // authorities → spurious 403. See TenantFilterBypass.
+        return tenantFilterBypass.runWithoutTenantFilter(() -> loadUserDetails(email));
+    }
+
+    private UserDetails loadUserDetails(String email) {
         log.debug("Loading user by email: {}", email);
 
         User user = userRepository.findByEmail(email)

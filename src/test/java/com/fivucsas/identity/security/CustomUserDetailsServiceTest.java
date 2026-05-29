@@ -4,6 +4,7 @@ import com.fivucsas.identity.entity.Tenant;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.entity.UserStatus;
 import com.fivucsas.identity.entity.UserType;
+import com.fivucsas.identity.infrastructure.multitenancy.TenantFilterBypass;
 import com.fivucsas.identity.repository.UserRepository;
 import com.fivucsas.identity.repository.UserRoleRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -20,11 +21,13 @@ import java.time.Instant;
 import java.util.Collections;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Supplier;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.when;
 
 /**
@@ -46,6 +49,9 @@ class CustomUserDetailsServiceTest {
     @Mock
     private UserRoleRepository userRoleRepository;
 
+    @Mock
+    private TenantFilterBypass tenantFilterBypass;
+
     @InjectMocks
     private CustomUserDetailsService service;
 
@@ -56,6 +62,11 @@ class CustomUserDetailsServiceTest {
 
     @BeforeEach
     void setUp() {
+        // The bypass simply runs the supplied work (with the tenant filter
+        // disabled in production); here we execute it directly.
+        lenient().when(tenantFilterBypass.runWithoutTenantFilter(any()))
+                .thenAnswer(inv -> ((Supplier<?>) inv.getArgument(0)).get());
+
         userId = UUID.randomUUID();
         tenantId = UUID.randomUUID();
         tenant = Tenant.builder().id(tenantId).build();

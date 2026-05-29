@@ -25,7 +25,7 @@ import com.fivucsas.identity.entity.UserStatus;
 import com.fivucsas.identity.repository.JpaTenantRepository;
 import com.fivucsas.identity.application.port.output.RoleRepositoryPort;
 import com.fivucsas.identity.application.port.output.UserRoleRepositoryPort;
-import com.fivucsas.identity.security.RbacAuthorizationService;
+import com.fivucsas.identity.security.TenantScopeResolver;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -55,7 +55,7 @@ public class ManageUserService implements ManageUserUseCase {
     private final UserRoleRepositoryPort userRoleRepository;
     private final AuditLogQueryPort auditLogQueryPort;
     private final AuditLogPort auditLogPort;
-    private final RbacAuthorizationService rbacService;
+    private final TenantScopeResolver tenantScopeResolver;
 
     @Override
     @Transactional
@@ -257,15 +257,26 @@ public class ManageUserService implements ManageUserUseCase {
      * return a zero-UUID sentinel that matches no tenant, so the query
      * produces an empty list rather than an unbounded one.</p>
      */
-    private static final UUID FAIL_CLOSED_EMPTY_SCOPE = new UUID(0L, 0L);
+    private static final UUID FAIL_CLOSED_EMPTY_SCOPE = TenantScopeResolver.FAIL_CLOSED_EMPTY_SCOPE;
 
+    /**
+     * Delegates to the shared {@link TenantScopeResolver} so {@code /users}
+     * scopes on the SAME unified {@code X-Tenant-ID} switcher header as every
+     * other admin list view. Semantics:
+     * <ul>
+     *   <li>SUPER_ADMIN + {@code X-Tenant-ID=<t>} → {@code t} (selected tenant).</li>
+     *   <li>SUPER_ADMIN + no header → {@code null} (cross-tenant: see all).</li>
+     *   <li>TENANT_ADMIN / USER → their home tenant (header ignored).</li>
+     *   <li>unresolvable caller → fail-closed sentinel (empty result).</li>
+     * </ul>
+     *
+     * <p>Previously this returned {@code null} for ANY SUPER_ADMIN and leaned on
+     * the implicit Hibernate {@code tenantFilter} to do the scoping — making the
+     * result silently dependent on filter state and inconsistent with the other
+     * controllers. Now the scope is explicit and uniform.</p>
+     */
     private UUID resolveTenantScope() {
-        if (rbacService.isSuperAdmin()) {
-            return null;
-        }
-        return rbacService.getCurrentUser()
-                .map(u -> u.getTenant() != null ? u.getTenant().getId() : FAIL_CLOSED_EMPTY_SCOPE)
-                .orElse(FAIL_CLOSED_EMPTY_SCOPE);
+        return tenantScopeResolver.currentScope();
     }
 
     @Override
