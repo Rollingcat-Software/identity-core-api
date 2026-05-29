@@ -245,7 +245,17 @@ public class AuditLogAdapter implements AuditLogPort {
                                         boolean success, String ipAddress, String userAgent,
                                         Map<String, Object> metadata, UUID preResolvedTenantId) {
         try {
-            UUID userUuid = userId != null ? UUID.fromString(userId) : null;
+            UUID rawId = userId != null ? UUID.fromString(userId) : null;
+            // audit_logs.user_id is an FK→users. Several callers pass a NON-user
+            // id here (e.g. tenant CRUD / email-domain CRUD pass the tenant id),
+            // which violated audit_logs_user_id_fkey AT COMMIT — and because the
+            // violation surfaces at the REQUIRES_NEW tx boundary (after this
+            // try-block), the surrounding try/catch never caught it, so the whole
+            // business operation 500'd + rolled back (observed repeatedly
+            // 2026-05-29). Defensively null the FK column when the id is not a
+            // real (non-deleted) user, but KEEP the original id as resourceId
+            // (resource_id has no FK) so the audited resource is still recorded.
+            UUID userUuid = (rawId != null && userRepository.existsById(rawId)) ? rawId : null;
             UUID tenantUuid = preResolvedTenantId != null
                     ? preResolvedTenantId
                     : resolveTenantId(userUuid);
@@ -260,7 +270,7 @@ public class AuditLogAdapter implements AuditLogPort {
                     .resourceType(AuditEscape.escape(resourceType))
                     .tenantId(tenantUuid)
                     .userId(userUuid)
-                    .resourceId(userUuid)
+                    .resourceId(rawId)
                     .success(success)
                     .ipAddress(ipAddress)
                     // userAgent and metadata can contain user-supplied data
