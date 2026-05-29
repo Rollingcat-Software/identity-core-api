@@ -138,6 +138,26 @@ V64: DNS-TXT domain verification + default-role-on-join.
   the "Make Default" dialog. Paired web-app PRs: #114 (enrollment detail page +
   `/enrollments/:id` route + N/A score columns + guardrail dialog) and #115
   (removed the redundant sidebar "FIVUCSAS suite" bar — launcher FAB covers it).
+- **Tenant switcher + pending-invite revoke (branch `feat/2026-05-29-tenant-switcher-and-pending-invite-revoke`, PR open, NOT merged):**
+  - **SUPER_ADMIN tenant switcher** — `TenantScopeResolver.currentScope()` now reads an
+    OPTIONAL `X-Active-Tenant: <tenantUuid>` request header. Honoured ONLY for
+    ROOT/SUPER_ADMIN: when present + a valid, existing tenant id, the active scope
+    narrows to THAT tenant, so every admin list view that funnels through
+    `currentScope()` (Users, Audit-Logs, Sessions, Devices, Enrollments, Auth-Flows,
+    Email-Domains, Guests) switches in lock-step. For ANY non-ROOT caller the header
+    is IGNORED (always home tenant) — no privilege/tenant escalation. Absent/blank/
+    malformed/unknown-tenant all fall back to today's behaviour. Switcher tenant list
+    reuses `GET /api/v1/tenants` (already SUPER_ADMIN cross-tenant). Header read via
+    `RequestContextHolder`; resolver gained a `JpaTenantRepository` dependency
+    (security pkg is entity.User-boundary-allowed).
+  - **Revoke a PENDING guest invitation** — new `POST /api/v1/guests/invitations/{invitationId}/revoke`
+    (gate `@rbac.isTenantAdmin() or @rbac.hasPermission('guest:revoke')` + tenant-scope
+    guard via `TenantScopeResolver.canAccessTenant`). Calls
+    `GuestLifecycleService.revokeInvitation(invitationId, actorUserId)`: PENDING/EXPIRED→REVOKED,
+    already-REVOKED→idempotent no-op, ACCEPTED→409 (direct to user-revoke), missing→404.
+    Audited as `GUEST_INVITATION_REVOKED` with userId = acting admin's user id (or null),
+    NEVER the invitation/tenant id. The existing `POST /api/v1/guests/{guestUserId}/revoke`
+    (ACCEPTED guests) is unchanged.
 - **OPEN gap:** guest invitations send NO email (`GuestLifecycleService.createInvitation`
   has no email call; `EmailService` only does `sendOtp`). Accept endpoint + token
   exist but the guest can't receive the link → can't log in. Needs EmailService

@@ -142,6 +142,24 @@ public class GuestInvitation {
     }
 
     /**
+     * Revokes the invitation without an attached {@code revokedBy} user.
+     *
+     * <p>Used for cancelling a PENDING/EXPIRED invitation from the
+     * application layer, where the acting admin is identified by id only
+     * (the audit row carries the actor) — this keeps the hexagonal boundary
+     * clean by not forcing the application service to load an
+     * {@code entity.User} just to populate the {@code revoked_by} FK (which
+     * is nullable). Idempotent: a no-op if already REVOKED.</p>
+     */
+    public void revoke() {
+        if (this.status == InvitationStatus.REVOKED) {
+            return;
+        }
+        this.status = InvitationStatus.REVOKED;
+        this.revokedAt = Instant.now();
+    }
+
+    /**
      * Marks the invitation as expired.
      */
     public void expire() {
