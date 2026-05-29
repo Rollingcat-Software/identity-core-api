@@ -128,6 +128,29 @@ V68: Identity & Account-Linking Phase 3 (Model A) —
 
 ## Operator reality (2026-05-29 update)
 
+- **Identity/account-linking Phase 1 DEPLOYED (PR #139, prod via image after `e74cfac`).**
+  Approved Model-A design in `docs/IDENTITY_ACCOUNT_LINKING_DESIGN.md` (#138). Phase 1 =
+  person/identity layer, ZERO behavior change: `V65 identities`, `V66 identity_emails`
+  (unique on `lower(email)`), `V67 users.identity_id` + PL/pgSQL email-grouped backfill
+  (one identity per distinct email → links same-person cross-tenant rows). `Identity`/
+  `IdentityEmail` entities carry **NO `@Filter`** — they are cross-tenant/platform-level BY
+  DESIGN (don't "fix" this). Prod backfill: 31 users → 30 identities (the one cross-tenant
+  duplicate email `glsm.2212@gmail.com` collapsed to 1 identity / 2 user rows), 0 NULL
+  identity_id, login/admin unchanged. `users.identity_id` is nullable for now — a later
+  migration sets NOT NULL once prod backfill is confirmed. Phases 2 (account linking),
+  3 (biometric-on-identity + per-tenant consent, `V68`), 4 (OIDC `sub`, flag-gated) follow.
+- **P1-3 enrollment score persistence DEPLOYED (PR #137, main `f6edc21`, prod image
+  `0ab29095`; bio #123).** All `user_enrollments` had NULL quality/liveness because the web
+  flow is enrollFace→createEnrollment→complete: `recordBiometricScores` no-op'd at
+  enrollFace (no row yet) and `complete`'s `completeEnrollment(data,null,null)` then nulled
+  scores. Fixes: `entity.UserEnrollment.completeEnrollment(data,q,l)` only sets non-null
+  scores (preserves); `ManageEnrollmentService.recordBiometricScores` UPSERTS via
+  `startEnrollment` + `TenantContext` when no row exists. Bio: real VOICE quality metric
+  (duration+loudness+SNR, 0-100) replacing the `1.0` placeholder, shipped via the
+  `Dockerfile.liveness-overlay` (boot-tested, restarts=0). Validated live on staging: a
+  PENDING row with scores survived `createEnrollment` + the `complete` endpoint that
+  previously nulled them. (Dataset-photo FACE e2e is blocked by the correctly-working
+  anti-spoof liveness gate.)
 - **P1-4 audit-attribution + soft-delete/lazy-proxy sweep DEPLOYED (PR #135,
   main `4229eb4`, prod image `11f0f434`).** New `AuditLogPort.logTenantManagementEvent(
   actorUserId, eventType, tenantId, details)` writes audit rows with a SEPARATE

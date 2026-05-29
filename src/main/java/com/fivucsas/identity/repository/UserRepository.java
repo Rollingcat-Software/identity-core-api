@@ -223,4 +223,32 @@ public interface UserRepository extends JpaRepository<User, UUID> {
             nativeQuery = true)
     boolean identityHasMembershipInTenant(@Param("identityId") UUID identityId,
                                           @Param("tenantId") UUID tenantId);
+
+    /**
+     * Re-points a membership's {@code identity_id} FK (Phase-2 account linking).
+     *
+     * <p>Issued as a bulk native UPDATE so the link/unlink flow never has to load
+     * the full {@link User} aggregate (and never has to call a setter on the
+     * intentionally setter-less {@code identity} association). The owning
+     * {@code IdentityLinkUserAdapter} clears the persistence context after
+     * calling this so subsequent reads see the new FK.</p>
+     *
+     * @param userId        the membership to re-point
+     * @param identityId    the identity that should now own the membership
+     * @return rows affected (1 on success, 0 if the id is missing)
+     */
+    @Modifying
+    @Query(value = "UPDATE users SET identity_id = :identityId WHERE id = :userId",
+            nativeQuery = true)
+    int updateIdentityId(@Param("userId") UUID userId,
+                         @Param("identityId") UUID identityId);
+
+    /**
+     * All non-deleted memberships ({@code users} rows) that belong to a given
+     * identity (Phase-2 account linking). Cross-tenant by design — an identity's
+     * memberships span tenants (Model A); callers run this with the Hibernate
+     * tenant filter bypassed because the rows are the one person's own.
+     */
+    @Query("SELECT u FROM User u WHERE u.identity.id = :identityId")
+    List<User> findByIdentityId(@Param("identityId") UUID identityId);
 }
