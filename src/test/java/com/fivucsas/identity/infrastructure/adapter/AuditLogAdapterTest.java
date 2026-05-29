@@ -199,6 +199,116 @@ class AuditLogAdapterTest {
     }
 
     @Nested
+    @DisplayName("Tenant-management events separate actor (user_id) from resource (tenant) [P1-4]")
+    class TenantManagementEvents {
+
+        @Test
+        @DisplayName("actor IS a real user → user_id set; resource_id and tenant_id = managed tenant; resourceType=TENANT")
+        void realActorStampsUserIdAndResourceTenant() {
+            UUID actorId = UUID.randomUUID();
+            UUID managedTenantId = UUID.randomUUID();
+            // existsById is already stubbed lenient(true) in setUp; the actor is a real user.
+
+            adapter.logTenantManagementEvent(actorId.toString(), "TENANT_CREATED",
+                    managedTenantId.toString(), "Tenant 'Acme' (slug=acme) created");
+
+            AuditLog saved = captureSaved();
+            assertThat(saved.getUserId()).isEqualTo(actorId);            // actor → user_id FK
+            assertThat(saved.getResourceId()).isEqualTo(managedTenantId); // tenant → resource_id
+            assertThat(saved.getTenantId()).isEqualTo(managedTenantId);   // tenant → tenant_id (managed tenant)
+            assertThat(saved.getResourceType()).isEqualTo("TENANT");
+            assertThat(saved.getAction()).isEqualTo("TENANT_CREATED");
+            assertThat(saved.getSuccess()).isTrue();
+            // details is HTML-escaped on the way in (defense-in-depth) — the
+            // apostrophes become &#39; per the AuditEscape contract.
+            assertThat(saved.getMetadata())
+                    .containsEntry("details", "Tenant &#39;Acme&#39; (slug=acme) created");
+            // tenant_id is supplied pre-resolved → no user-based tenant lookup.
+            verify(userRepository, never()).findTenantIdById(any());
+        }
+
+        @Test
+        @DisplayName("actor is null (self-service onboarding) → user_id null; resource/tenant still the managed tenant")
+        void nullActorLeavesUserIdNull() {
+            UUID managedTenantId = UUID.randomUUID();
+
+            adapter.logTenantManagementEvent(null, "TENANT_CREATED",
+                    managedTenantId.toString(), "Self-service tenant");
+
+            AuditLog saved = captureSaved();
+            assertThat(saved.getUserId()).isNull();
+            assertThat(saved.getResourceId()).isEqualTo(managedTenantId);
+            assertThat(saved.getTenantId()).isEqualTo(managedTenantId);
+            assertThat(saved.getResourceType()).isEqualTo("TENANT");
+            // existsById must never be consulted for a null actor.
+            verify(userRepository, never()).existsById(any());
+        }
+
+        @Test
+        @DisplayName("actor is a non-existent user → user_id null (FK guard); resource/tenant unchanged")
+        void nonExistentActorIsNulledByFkGuard() {
+            UUID ghostActorId = UUID.randomUUID();
+            UUID managedTenantId = UUID.randomUUID();
+            // Override the lenient default: this actor is NOT a real user row.
+            when(userRepository.existsById(ghostActorId)).thenReturn(false);
+
+            adapter.logTenantManagementEvent(ghostActorId.toString(), "TENANT_UPDATED",
+                    managedTenantId.toString(), "ghost edit");
+
+            AuditLog saved = captureSaved();
+            assertThat(saved.getUserId()).isNull();                       // FK guard nulled it
+            assertThat(saved.getResourceId()).isEqualTo(managedTenantId); // resource preserved
+            assertThat(saved.getTenantId()).isEqualTo(managedTenantId);
+            assertThat(saved.getAction()).isEqualTo("TENANT_UPDATED");
+        }
+
+        @Test
+        @DisplayName("null details → empty metadata, row still saved")
+        void nullDetailsEmptyMetadata() {
+            UUID actorId = UUID.randomUUID();
+            UUID managedTenantId = UUID.randomUUID();
+
+            adapter.logTenantManagementEvent(actorId.toString(), "TENANT_DELETED",
+                    managedTenantId.toString(), null);
+
+            AuditLog saved = captureSaved();
+            assertThat(saved.getMetadata()).isEmpty();
+            assertThat(saved.getResourceId()).isEqualTo(managedTenantId);
+        }
+
+        @Test
+        @DisplayName("HTML in details is escaped on the way in")
+        void detailsAreEscaped() {
+            UUID actorId = UUID.randomUUID();
+            UUID managedTenantId = UUID.randomUUID();
+
+            adapter.logTenantManagementEvent(actorId.toString(), "TENANT_UPDATED",
+                    managedTenantId.toString(), "<script>alert(1)</script>");
+
+            AuditLog saved = captureSaved();
+            assertThat(saved.getMetadata())
+                    .containsEntry("details", "&lt;script&gt;alert(1)&lt;/script&gt;");
+        }
+
+        @Test
+        @DisplayName("malformed tenant id → resource_id null but row still saved (no whole-row drop)")
+        void malformedTenantIdNullsResourceButSaves() {
+            UUID actorId = UUID.randomUUID();
+
+            adapter.logTenantManagementEvent(actorId.toString(), "TENANT_UPDATED",
+                    "not-a-uuid", "bad id");
+
+            AuditLog saved = captureSaved();
+            assertThat(saved.getResourceId()).isNull();
+            // tenant_id pre-resolution also fails to parse → falls back to the
+            // actor's tenant lookup. Actor is a real user (lenient existsById=true)
+            // but findTenantIdById is unstubbed → Optional.empty → SYSTEM sentinel.
+            assertThat(saved.getTenantId()).isEqualTo(AuditLogAdapter.SYSTEM_TENANT_ID);
+            assertThat(saved.getAction()).isEqualTo("TENANT_UPDATED");
+        }
+    }
+
+    @Nested
     @DisplayName("System / anonymous events stamp tenant_id with the SYSTEM_TENANT_ID sentinel [T4-C]")
     class SystemEvents {
 

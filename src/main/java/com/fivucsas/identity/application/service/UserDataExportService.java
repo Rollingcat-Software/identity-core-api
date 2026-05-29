@@ -113,8 +113,27 @@ public class UserDataExportService implements UserDataExportUseCase {
         m.put("createdAt", toStringOrNull(u.getCreatedAt()));
         m.put("updatedAt", toStringOrNull(u.getUpdatedAt()));
         m.put("deletedAt", toStringOrNull(u.getDeletedAt()));
-        m.put("tenantId", u.getTenant() != null ? u.getTenant().getId().toString() : null);
-        m.put("tenantName", u.getTenant() != null ? u.getTenant().getName() : null);
+        // P1-4 soft-delete / lazy-proxy guard. An admin can export a member
+        // whose tenant has since been soft-deleted; getTenant().getId() is
+        // FK-safe but getName() initializes the proxy and throws
+        // EntityNotFoundException for a hidden tenant row. Resolve the name
+        // defensively so the GDPR export never 500s on a soft-deleted tenant.
+        // Single getTenant() read into a Tenant local (Tenant is not restricted
+        // by UserDomainBoundaryTest — only entity.User is).
+        com.fivucsas.identity.entity.Tenant tenant = u.getTenant();
+        String tenantId = null;
+        String tenantName = null;
+        if (tenant != null) {
+            tenantId = tenant.getId().toString();
+            try {
+                org.hibernate.Hibernate.initialize(tenant);
+                tenantName = tenant.getName();
+            } catch (jakarta.persistence.EntityNotFoundException ex) {
+                tenantName = null;
+            }
+        }
+        m.put("tenantId", tenantId);
+        m.put("tenantName", tenantName);
         m.put("roles", u.getRoleNames());
         return m;
     }

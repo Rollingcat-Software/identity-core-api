@@ -127,6 +127,19 @@ public class AuditLogAdapter implements AuditLogPort {
 
     @Override
     @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void logTenantManagementEvent(String actorUserId, String eventType,
+                                         String tenantId, String details) {
+        log.info("AUDIT: Tenant management event — type={}, actor={}, tenant={}, details={}",
+                eventType, actorUserId, tenantId, details);
+        UUID resolvedTenantId = parseUuidOrNull(tenantId);
+        saveAuditLogWithActorAndResource(eventType, "TENANT", actorUserId, tenantId,
+                true, null, null,
+                details != null ? Map.of("details", details) : Map.of(),
+                resolvedTenantId);
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void logMfaStepCompleted(String userId, String method, int stepCurrent, int stepTotal,
                                      String ipAddress, String userAgent) {
         log.info("AUDIT: MFA step completed — method: {}, step: {}/{}, userId={}, ip={}, userAgent={}",
@@ -286,6 +299,83 @@ public class AuditLogAdapter implements AuditLogPort {
             auditLogRepository.save(auditLog);
         } catch (Exception e) {
             log.error("Failed to persist audit log: action={}, error={}", action, e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Writes an audit row with a SEPARATE actor and resource — the correct
+     * shape for "admin X did Y to resource Z" events (e.g. tenant management).
+     *
+     * <p>Modeled on {@link #saveAuditLogWithTenant} but distinguishes the
+     * {@code user_id} (acting admin FK) from the {@code resource_id} (the
+     * managed entity), which the single-id {@code saveAuditLog*} helpers cannot
+     * do — there the one id is forced into both columns.</p>
+     *
+     * <ul>
+     *   <li>{@code actorUserId} → parsed to a UUID and stamped on {@code user_id}
+     *       ONLY when it is a real, existing user (same {@code existsById} FK
+     *       guard as {@link #saveAuditLogWithTenant}); otherwise {@code user_id}
+     *       is null, so a non-user / null actor never violates
+     *       {@code audit_logs_user_id_fkey}.</li>
+     *   <li>{@code resourceId} → parsed to a UUID into {@code resource_id}
+     *       ({@code resource_id} has no FK). A malformed value is nulled rather
+     *       than dropping the whole row.</li>
+     *   <li>{@code tenant_id} ← {@code preResolvedTenantId} when supplied,
+     *       else the actor's resolved tenant.</li>
+     * </ul>
+     *
+     * <p>Keeps all the same escaping ({@link AuditEscape}) and the outer
+     * try/catch that logs-and-swallows, so an audit failure never breaks the
+     * business operation.</p>
+     */
+    private void saveAuditLogWithActorAndResource(String action, String resourceType,
+                                                  String actorUserId, String resourceId,
+                                                  boolean success, String ipAddress, String userAgent,
+                                                  Map<String, Object> metadata, UUID preResolvedTenantId) {
+        try {
+            UUID actorUuid = parseUuidOrNull(actorUserId);
+            // Same FK guard as saveAuditLogWithTenant: only a real (non-deleted)
+            // user lands in the user_id FK column; everything else is nulled so
+            // the audit row never violates audit_logs_user_id_fkey at commit.
+            UUID userUuid = (actorUuid != null && userRepository.existsById(actorUuid)) ? actorUuid : null;
+            // resource_id has no FK — a bad parse must not drop the whole row.
+            UUID resourceUuid = parseUuidOrNull(resourceId);
+            UUID tenantUuid = preResolvedTenantId != null
+                    ? preResolvedTenantId
+                    : resolveTenantId(userUuid);
+
+            AuditLog auditLog = AuditLog.builder()
+                    .action(AuditEscape.escape(action))
+                    .resourceType(AuditEscape.escape(resourceType))
+                    .tenantId(tenantUuid)
+                    .userId(userUuid)
+                    .resourceId(resourceUuid)
+                    .success(success)
+                    .ipAddress(ipAddress)
+                    .userAgent(AuditEscape.escape(userAgent))
+                    .metadata(escapeMetadata(metadata))
+                    .build();
+
+            auditLogRepository.save(auditLog);
+        } catch (Exception e) {
+            log.error("Failed to persist audit log: action={}, error={}", action, e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Parses a UUID string, returning {@code null} for null/blank/malformed
+     * input instead of throwing. Used for the {@code resource_id} (no FK, so a
+     * bad value must not abort the whole audit write) and the
+     * {@code preResolvedTenantId} derivation in tenant-management events.
+     */
+    private static UUID parseUuidOrNull(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        try {
+            return UUID.fromString(value);
+        } catch (IllegalArgumentException e) {
+            return null;
         }
     }
 
