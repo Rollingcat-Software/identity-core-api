@@ -106,6 +106,42 @@ identity (the person)
   flag (or rotating the salt) rotates every RP's view of `sub` — coordinate with RPs.
 - No Flyway migration (flag only). Reversible: flip the flag back to false.
 
+### Phase 5 — Unified login + in-session membership switch  *(APPROVED 2026-05-29)*
+**Goal:** log in ONCE (any one of your linked emails + its credentials/MFA), then move
+between ALL your linked memberships in the same session without re-entering credentials —
+like a Google account switcher / Slack workspace switcher. The login *door* is unchanged;
+what's new is a post-login **"assume membership" token exchange**.
+
+**Pattern — token exchange (NOT an identity-wide JWT).** Keep the per-membership JWT model
+(low risk); add an endpoint that re-issues a session AS another membership of the SAME
+identity. This is account-switch, not privilege grant — you may only assume memberships you
+already own (proven at link time).
+
+- `POST /api/v1/auth/switch-membership {targetUserId}` — authenticated.
+  1. Resolve caller's identity (`getCurrentUserIdentityId`). Load target membership.
+  2. **HARD GATE:** `target.identityId == caller.identityId` (same person) — else **403**.
+     This is the only thing standing between accounts; get it right.
+  3. Target membership must be ACTIVE (not locked/suspended/soft-deleted) AND its tenant
+     ACTIVE — else **409**.
+  4. Mint a NEW access+refresh token pair AS the target membership (its `user_id`, tenant,
+     roles/permissions), CARRYING OVER the caller's `amr` + `auth_time` (the person already
+     authenticated — no re-MFA for your own account) and stamping `act`/`switched_from` =
+     caller user id for traceability. Reuse the existing post-login token-mint path.
+  5. Audit `MEMBERSHIP_SWITCHED` (actor = caller, resource = target user/tenant).
+  6. Return the new token pair; the web swaps tokens → app reloads as the target membership
+     (new role/tenant/permissions).
+- **Step-up option:** config flag `app.identity.require-stepup-on-switch` (default **false**).
+  When true, switching requires a fresh password/MFA (limits blast radius if one session is
+  stolen — relevant because a switch can reach a higher-privileged linked membership). v1
+  ships default-false (ownership already proven); operators can tighten.
+- **Distinct from the SUPER_ADMIN data-switcher.** The existing `X-Tenant-ID` switcher keeps
+  you the SAME user and only re-scopes which tenant's DATA a SUPER_ADMIN reads. Phase 5
+  changes WHO you are (different membership/role), for ANY linked person. Do not conflate the
+  two in the UI: Phase 5 = "Switch account"; X-Tenant-ID = SUPER_ADMIN cross-tenant view.
+- web: a workspace/account switcher in the TopBar shown when `/identity/me` returns >1
+  membership; selecting one calls `switch-membership`, stores the new tokens, reloads context.
+- No Flyway migration. Reversible (remove the endpoint / hide the switcher).
+
 ## Cross-cutting rules
 - **Identities are NOT tenant-scoped** — no `@Filter(tenantFilter)` on `Identity`/
   `IdentityEmail`/consent. They are platform-level. (Tenant isolation is preserved at the
