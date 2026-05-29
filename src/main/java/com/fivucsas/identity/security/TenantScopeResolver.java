@@ -33,19 +33,31 @@ import java.util.UUID;
  *       unbounded data.</li>
  * </ul>
  *
- * <p><b>SUPER_ADMIN tenant switcher ({@value #ACTIVE_TENANT_HEADER}):</b> a
- * SUPER_ADMIN / ROOT caller may scope every admin list view to one selected
- * tenant by sending the optional {@value #ACTIVE_TENANT_HEADER} request header
- * carrying that tenant's UUID. When present and valid, {@link #currentScope()}
- * resolves to THAT tenant instead of {@code null} (cross-tenant), so Users /
- * Audit-Logs / Sessions / Devices / Enrollments / Auth-Flows / Email-Domains
- * all narrow to the selected tenant in lock-step.</p>
+ * <p><b>SUPER_ADMIN tenant switcher — UNIFIED on {@value #TENANT_ID_HEADER}.</b>
+ * A SUPER_ADMIN / ROOT caller scopes every admin view to one selected tenant by
+ * sending the standard {@value #TENANT_ID_HEADER} request header (the SAME header
+ * that drives the Hibernate {@code tenantFilter} on Users/Roles via
+ * {@code TenantContextFilter} + {@code TenantBindFromAuthFilter}). When present
+ * and valid, {@link #currentScope()} resolves to THAT tenant instead of
+ * {@code null} (cross-tenant), so Users / Audit-Logs / Sessions / Devices /
+ * Enrollments / Auth-Flows / Email-Domains / Guests all narrow to the selected
+ * tenant in lock-step — ONE header switches everything.</p>
+ *
+ * <p>{@value #ACTIVE_TENANT_HEADER} is kept as a backward-compatible alias for
+ * the original partial attempt; if both are present, {@value #TENANT_ID_HEADER}
+ * wins (it is the canonical, validated header).</p>
+ *
+ * <p><b>Default (no header) → cross-tenant ({@code null}) for SUPER_ADMIN.</b>
+ * The web switcher always sends {@value #TENANT_ID_HEADER} (defaulting to the
+ * admin's home tenant), so in practice SUPER_ADMIN views are always pinned. The
+ * absent-header fallback stays {@code null} so the existing cross-tenant code
+ * paths (e.g. platform-wide guest listing) are unchanged.</p>
  *
  * <p><b>This is a cross-tenant access-control surface.</b> The override is
  * applied ONLY when {@link RbacAuthorizationService#isSuperAdmin()} is true.
- * For ANY non-ROOT caller the header is ignored outright — they always get
+ * For ANY non-ROOT caller BOTH headers are ignored outright — they always get
  * their home tenant — so a TENANT_ADMIN or USER can never read another
- * tenant's data by spoofing the header. Absent / blank / malformed / unknown
+ * tenant's data by spoofing a header. Absent / blank / malformed / unknown
  * tenant id all fall back to today's behaviour (home tenant for scoped
  * callers, {@code null} cross-tenant for SUPER_ADMIN).</p>
  *
@@ -72,9 +84,15 @@ public class TenantScopeResolver {
     public static final UUID FAIL_CLOSED_EMPTY_SCOPE = new UUID(0L, 0L);
 
     /**
-     * Optional request header that lets a SUPER_ADMIN / ROOT caller scope all
-     * admin list views to one selected tenant (the "tenant switcher").
-     * Ignored for every non-ROOT caller.
+     * Canonical request header for the SUPER_ADMIN tenant switcher. This is the
+     * SAME header that drives the Hibernate {@code tenantFilter} (Users/Roles),
+     * so a single header unifies both scoping layers. Ignored for non-ROOT.
+     */
+    public static final String TENANT_ID_HEADER = "X-Tenant-ID";
+
+    /**
+     * Backward-compatible alias for the original partial attempt. Honoured only
+     * when {@link #TENANT_ID_HEADER} is absent. Ignored for non-ROOT.
      */
     public static final String ACTIVE_TENANT_HEADER = "X-Active-Tenant";
 
@@ -87,14 +105,16 @@ public class TenantScopeResolver {
      * no tenant can be resolved.
      *
      * <p>SUPER_ADMIN / ROOT callers may narrow the scope to a single selected
-     * tenant by sending the {@value #ACTIVE_TENANT_HEADER} header — see the
-     * class Javadoc. The header is authoritatively ignored for everyone else.</p>
+     * tenant by sending the {@value #TENANT_ID_HEADER} header (or the
+     * {@value #ACTIVE_TENANT_HEADER} alias) — see the class Javadoc. The header
+     * is authoritatively ignored for everyone else.</p>
      */
     public UUID currentScope() {
         if (rbacService.isSuperAdmin()) {
             // Tenant switcher: only ROOT/SUPER_ADMIN may override the active
-            // scope. A valid, known tenant id in the header narrows the scope
-            // to that tenant; otherwise stay cross-tenant (null).
+            // scope. A valid, known tenant id in the X-Tenant-ID header (or the
+            // X-Active-Tenant alias) narrows the scope to that tenant; otherwise
+            // stay cross-tenant (null).
             UUID active = resolveActiveTenantOverride();
             return active != null ? active : null;
         }
@@ -108,10 +128,12 @@ public class TenantScopeResolver {
     }
 
     /**
-     * Reads and validates the {@value #ACTIVE_TENANT_HEADER} header from the
-     * current request. Returns the selected tenant id when the header is
-     * present, a well-formed UUID, and resolves to an existing tenant;
-     * otherwise {@code null} (meaning "no override — keep default behaviour").
+     * Reads and validates the active-tenant selection from the current request:
+     * the canonical {@value #TENANT_ID_HEADER} header, falling back to the
+     * {@value #ACTIVE_TENANT_HEADER} alias only when the canonical one is absent.
+     * Returns the selected tenant id when present, a well-formed UUID, and an
+     * existing tenant; otherwise {@code null} ("no override — keep default
+     * behaviour").
      *
      * <p>MUST only be consulted after the caller has been confirmed to be
      * SUPER_ADMIN/ROOT (see {@link #currentScope()}). It performs no authz of
@@ -125,7 +147,14 @@ public class TenantScopeResolver {
             return null;
         }
         HttpServletRequest request = servletAttrs.getRequest();
-        String raw = request.getHeader(ACTIVE_TENANT_HEADER);
+
+        // Canonical header wins; X-Active-Tenant only consulted as a fallback.
+        String headerName = TENANT_ID_HEADER;
+        String raw = request.getHeader(TENANT_ID_HEADER);
+        if (raw == null || raw.isBlank()) {
+            headerName = ACTIVE_TENANT_HEADER;
+            raw = request.getHeader(ACTIVE_TENANT_HEADER);
+        }
         if (raw == null || raw.isBlank()) {
             return null;
         }
@@ -134,15 +163,16 @@ public class TenantScopeResolver {
             candidate = UUID.fromString(raw.trim());
         } catch (IllegalArgumentException e) {
             log.warn("AUDIT: SUPER_ADMIN tenant switcher ignored — malformed {} header value '{}'",
-                    ACTIVE_TENANT_HEADER, raw);
+                    headerName, raw);
             return null;
         }
         if (!tenantRepository.existsById(candidate)) {
             log.warn("AUDIT: SUPER_ADMIN tenant switcher ignored — unknown tenant id {} in {} header",
-                    candidate, ACTIVE_TENANT_HEADER);
+                    candidate, headerName);
             return null;
         }
-        log.debug("SUPER_ADMIN tenant switcher active — scoping to tenant {}", candidate);
+        log.debug("SUPER_ADMIN tenant switcher active — scoping to tenant {} (via {})",
+                candidate, headerName);
         return candidate;
     }
 
@@ -158,9 +188,28 @@ public class TenantScopeResolver {
     }
 
     /**
-     * Convenience — true when the caller has no scope restriction.
+     * Convenience — true when the caller's CURRENT effective scope is
+     * unrestricted (cross-tenant). For a SUPER_ADMIN this is true only when they
+     * have NOT selected a tenant via the switcher header. Use
+     * {@link #isCrossTenantAdmin()} instead when you need the caller's
+     * capability (e.g. "may this caller list every tenant?") independent of the
+     * active selection.
      */
     public boolean isUnrestricted() {
         return currentScope() == null;
+    }
+
+    /**
+     * True iff the caller has the cross-tenant administration CAPABILITY
+     * (SUPER_ADMIN / ROOT), regardless of which tenant they have currently
+     * selected via the switcher header.
+     *
+     * <p>Distinct from {@link #isUnrestricted()}: a SUPER_ADMIN who has selected
+     * a tenant is {@code isCrossTenantAdmin() == true} but
+     * {@code isUnrestricted() == false}. The tenant-switcher dropdown must use
+     * THIS method so the full tenant list stays available after a selection.</p>
+     */
+    public boolean isCrossTenantAdmin() {
+        return rbacService.isSuperAdmin();
     }
 }

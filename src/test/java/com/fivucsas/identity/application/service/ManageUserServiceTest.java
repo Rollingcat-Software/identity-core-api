@@ -12,7 +12,7 @@ import com.fivucsas.identity.domain.exception.UserNotFoundException;
 import com.fivucsas.identity.domain.repository.UserRepository;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.entity.UserStatus;
-import com.fivucsas.identity.security.RbacAuthorizationService;
+import com.fivucsas.identity.security.TenantScopeResolver;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -50,7 +50,7 @@ class ManageUserServiceTest {
     private PasswordEncoderPort passwordEncoder;
 
     @Mock
-    private RbacAuthorizationService rbacService;
+    private TenantScopeResolver tenantScopeResolver;
 
     @Mock
     private com.fivucsas.identity.application.port.output.AuditLogPort auditLogPort;
@@ -211,7 +211,7 @@ class ManageUserServiceTest {
                 .userId(userId.toString())
                 .build();
 
-            when(rbacService.isSuperAdmin()).thenReturn(true);
+            when(tenantScopeResolver.currentScope()).thenReturn(null);
             when(userRepository.findById(userId)).thenReturn(Optional.of(existingUser));
 
             // When
@@ -277,7 +277,7 @@ class ManageUserServiceTest {
                 .updatedAt(Instant.now())
                 .build();
 
-            when(rbacService.isSuperAdmin()).thenReturn(true);
+            when(tenantScopeResolver.currentScope()).thenReturn(null);
             when(userRepository.findAll(0, 20)).thenReturn(Arrays.asList(existingUser, user2));
 
             // When
@@ -295,7 +295,7 @@ class ManageUserServiceTest {
         @DisplayName("Should return empty list when no users")
         void shouldReturnEmptyListWhenNoUsers() {
             // Given
-            when(rbacService.isSuperAdmin()).thenReturn(true);
+            when(tenantScopeResolver.currentScope()).thenReturn(null);
             when(userRepository.findAll(0, 20)).thenReturn(Collections.emptyList());
 
             // When
@@ -318,7 +318,7 @@ class ManageUserServiceTest {
                 .searchQuery("john")
                 .build();
 
-            when(rbacService.isSuperAdmin()).thenReturn(true);
+            when(tenantScopeResolver.currentScope()).thenReturn(null);
             when(userRepository.searchUsers("john")).thenReturn(Arrays.asList(existingUser));
 
             // When
@@ -339,7 +339,7 @@ class ManageUserServiceTest {
                 .searchQuery("nonexistent")
                 .build();
 
-            when(rbacService.isSuperAdmin()).thenReturn(true);
+            when(tenantScopeResolver.currentScope()).thenReturn(null);
             when(userRepository.searchUsers("nonexistent")).thenReturn(Collections.emptyList());
 
             // When
@@ -366,7 +366,7 @@ class ManageUserServiceTest {
                 .address("999 New St")
                 .build();
 
-            when(rbacService.isSuperAdmin()).thenReturn(true);
+            when(tenantScopeResolver.currentScope()).thenReturn(null);
             when(userRepository.findById(userId)).thenReturn(Optional.of(existingUser));
             when(userRepository.save(any(User.class))).thenReturn(existingUser);
 
@@ -411,7 +411,7 @@ class ManageUserServiceTest {
                 .address(null)
                 .build();
 
-            when(rbacService.isSuperAdmin()).thenReturn(true);
+            when(tenantScopeResolver.currentScope()).thenReturn(null);
             when(userRepository.findById(userId)).thenReturn(Optional.of(existingUser));
             when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
@@ -436,7 +436,7 @@ class ManageUserServiceTest {
         @DisplayName("Should delete user successfully")
         void shouldDeleteUserSuccessfully() {
             // Given
-            when(rbacService.isSuperAdmin()).thenReturn(true);
+            when(tenantScopeResolver.currentScope()).thenReturn(null);
             when(userRepository.findById(userId)).thenReturn(Optional.of(existingUser));
             doNothing().when(userRepository).delete(existingUser);
 

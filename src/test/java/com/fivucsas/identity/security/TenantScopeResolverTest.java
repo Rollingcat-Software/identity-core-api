@@ -57,11 +57,32 @@ class TenantScopeResolverTest {
         RequestContextHolder.resetRequestAttributes();
     }
 
-    /** Binds a mock HTTP request carrying the given X-Active-Tenant header value. */
+    /** Binds a mock HTTP request carrying the given X-Active-Tenant alias header value. */
     private void bindRequestWithActiveTenant(String headerValue) {
         MockHttpServletRequest request = new MockHttpServletRequest();
         if (headerValue != null) {
             request.addHeader(TenantScopeResolver.ACTIVE_TENANT_HEADER, headerValue);
+        }
+        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
+    }
+
+    /** Binds a mock HTTP request carrying the canonical X-Tenant-ID header value. */
+    private void bindRequestWithTenantId(String headerValue) {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        if (headerValue != null) {
+            request.addHeader(TenantScopeResolver.TENANT_ID_HEADER, headerValue);
+        }
+        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
+    }
+
+    /** Binds a request carrying BOTH headers (to assert canonical precedence). */
+    private void bindRequestWithBothHeaders(String tenantIdValue, String activeTenantValue) {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        if (tenantIdValue != null) {
+            request.addHeader(TenantScopeResolver.TENANT_ID_HEADER, tenantIdValue);
+        }
+        if (activeTenantValue != null) {
+            request.addHeader(TenantScopeResolver.ACTIVE_TENANT_HEADER, activeTenantValue);
         }
         RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
     }
@@ -194,5 +215,93 @@ class TenantScopeResolverTest {
         bindRequestWithActiveTenant(foreignTenant.toString());
 
         assertThat(resolver.currentScope()).isEqualTo(TenantScopeResolver.FAIL_CLOSED_EMPTY_SCOPE);
+    }
+
+    // ===== Unified switcher: canonical X-Tenant-ID header =====
+
+    @Test
+    @DisplayName("ROOT + valid X-Tenant-ID → scope narrows to the selected tenant")
+    void rootWithCanonicalHeaderScopesToSelectedTenant() {
+        UUID selected = UUID.randomUUID();
+        when(rbacService.isSuperAdmin()).thenReturn(true);
+        when(tenantRepository.existsById(selected)).thenReturn(true);
+        bindRequestWithTenantId(selected.toString());
+
+        assertThat(resolver.currentScope()).isEqualTo(selected);
+        assertThat(resolver.isUnrestricted()).isFalse();
+        assertThat(resolver.canAccessTenant(selected)).isTrue();
+    }
+
+    @Test
+    @DisplayName("ROOT + both headers present → canonical X-Tenant-ID wins over X-Active-Tenant")
+    void canonicalHeaderTakesPrecedenceOverAlias() {
+        UUID canonical = UUID.randomUUID();
+        UUID alias = UUID.randomUUID();
+        when(rbacService.isSuperAdmin()).thenReturn(true);
+        when(tenantRepository.existsById(canonical)).thenReturn(true);
+        bindRequestWithBothHeaders(canonical.toString(), alias.toString());
+
+        assertThat(resolver.currentScope()).isEqualTo(canonical);
+        assertThat(resolver.currentScope()).isNotEqualTo(alias);
+    }
+
+    @Test
+    @DisplayName("ROOT + blank X-Tenant-ID but valid X-Active-Tenant → alias fallback honoured")
+    void aliasHonouredWhenCanonicalBlank() {
+        UUID alias = UUID.randomUUID();
+        when(rbacService.isSuperAdmin()).thenReturn(true);
+        when(tenantRepository.existsById(alias)).thenReturn(true);
+        bindRequestWithBothHeaders("", alias.toString());
+
+        assertThat(resolver.currentScope()).isEqualTo(alias);
+    }
+
+    @Test
+    @DisplayName("SECURITY: TENANT_ADMIN + canonical X-Tenant-ID for a foreign tenant → IGNORED, home tenant returned")
+    void tenantAdminCannotEscalateViaCanonicalHeader() {
+        UUID foreignTenant = UUID.randomUUID();
+        when(rbacService.isSuperAdmin()).thenReturn(false);
+        when(rbacService.getCurrentUser()).thenReturn(Optional.of(tenantUser));
+        lenient().when(tenantRepository.existsById(foreignTenant)).thenReturn(true);
+        bindRequestWithTenantId(foreignTenant.toString());
+
+        assertThat(resolver.currentScope()).isEqualTo(tenantId);
+        assertThat(resolver.currentScope()).isNotEqualTo(foreignTenant);
+        assertThat(resolver.canAccessTenant(foreignTenant)).isFalse();
+    }
+
+    @Test
+    @DisplayName("ROOT + no header → cross-tenant (null) default preserved")
+    void rootNoHeaderStaysCrossTenant() {
+        when(rbacService.isSuperAdmin()).thenReturn(true);
+        bindRequestWithTenantId(null);
+
+        assertThat(resolver.currentScope()).isNull();
+        assertThat(resolver.isUnrestricted()).isTrue();
+    }
+
+    // ===== isCrossTenantAdmin (capability, independent of active selection) =====
+
+    @Test
+    @DisplayName("isCrossTenantAdmin → true for SUPER_ADMIN even AFTER selecting a tenant")
+    void crossTenantAdminCapabilitySurvivesSelection() {
+        UUID selected = UUID.randomUUID();
+        when(rbacService.isSuperAdmin()).thenReturn(true);
+        lenient().when(tenantRepository.existsById(selected)).thenReturn(true);
+        bindRequestWithTenantId(selected.toString());
+
+        // Selected a tenant → not "unrestricted" anymore...
+        assertThat(resolver.currentScope()).isEqualTo(selected);
+        assertThat(resolver.isUnrestricted()).isFalse();
+        // ...but the cross-tenant capability (drives the switcher dropdown) holds.
+        assertThat(resolver.isCrossTenantAdmin()).isTrue();
+    }
+
+    @Test
+    @DisplayName("isCrossTenantAdmin → false for a TENANT_ADMIN")
+    void tenantAdminIsNotCrossTenantAdmin() {
+        when(rbacService.isSuperAdmin()).thenReturn(false);
+
+        assertThat(resolver.isCrossTenantAdmin()).isFalse();
     }
 }

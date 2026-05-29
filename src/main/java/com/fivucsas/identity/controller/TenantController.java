@@ -104,8 +104,14 @@ public class TenantController {
         // non-SUPER_ADMIN callers we return only the caller's own tenant so
         // the dashboard renders a usable list (rather than 403'ing and
         // breaking the page). This never leaks other tenants' data.
+        //
+        // NOTE: use isCrossTenantAdmin() (capability) NOT isUnrestricted()
+        // (current selection). This endpoint backs the tenant-switcher dropdown
+        // itself; if we keyed off the active scope, selecting a tenant via
+        // X-Tenant-ID would collapse the dropdown to that one tenant and trap
+        // the admin there.
         List<TenantResponse> visible;
-        if (tenantScopeResolver.isUnrestricted()) {
+        if (tenantScopeResolver.isCrossTenantAdmin()) {
             visible = manageTenantUseCase.getAllTenants();
         } else {
             UUID scope = tenantScopeResolver.currentScope();

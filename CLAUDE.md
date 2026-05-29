@@ -138,18 +138,51 @@ V64: DNS-TXT domain verification + default-role-on-join.
   the "Make Default" dialog. Paired web-app PRs: #114 (enrollment detail page +
   `/enrollments/:id` route + N/A score columns + guardrail dialog) and #115
   (removed the redundant sidebar "FIVUCSAS suite" bar — launcher FAB covers it).
-- **Tenant switcher + pending-invite revoke (branch `feat/2026-05-29-tenant-switcher-and-pending-invite-revoke`, PR open, NOT merged):**
-  - **SUPER_ADMIN tenant switcher** — `TenantScopeResolver.currentScope()` now reads an
-    OPTIONAL `X-Active-Tenant: <tenantUuid>` request header. Honoured ONLY for
-    ROOT/SUPER_ADMIN: when present + a valid, existing tenant id, the active scope
-    narrows to THAT tenant, so every admin list view that funnels through
-    `currentScope()` (Users, Audit-Logs, Sessions, Devices, Enrollments, Auth-Flows,
-    Email-Domains, Guests) switches in lock-step. For ANY non-ROOT caller the header
-    is IGNORED (always home tenant) — no privilege/tenant escalation. Absent/blank/
-    malformed/unknown-tenant all fall back to today's behaviour. Switcher tenant list
-    reuses `GET /api/v1/tenants` (already SUPER_ADMIN cross-tenant). Header read via
-    `RequestContextHolder`; resolver gained a `JpaTenantRepository` dependency
-    (security pkg is entity.User-boundary-allowed).
+- **SUPER_ADMIN tenant switcher — UNIFIED on `X-Tenant-ID` (branch
+  `feat/2026-05-29-superadmin-tenant-switcher-unified`, PR open, NOT merged):**
+  Supersedes the earlier partial `X-Active-Tenant` attempt (#129). The switcher
+  now uses ONE header — the standard `X-Tenant-ID` — to scope BOTH multi-tenancy
+  layers at once for a SUPER_ADMIN:
+  1. the Hibernate `tenantFilter` (Users/Roles, via `TenantContextFilter` +
+     `TenantBindFromAuthFilter`), and
+  2. `TenantScopeResolver.currentScope()` (Audit-Logs/Sessions/Devices/Enrollments
+     + the guest endpoints).
+  - **403 root cause + fix.** With a foreign `X-Tenant-ID` active, the Hibernate
+    `tenantFilter` was scoping the SUPER_ADMIN's OWN identity lookup
+    (`findByEmail`) to the foreign tenant. A ROOT user's row lives in the system
+    tenant (`000…000`), so it got filtered out → `getCurrentUser()` /
+    `loadUserByUsername()` returned empty → `@PreAuthorize` saw NO authorities →
+    Spring `403 "Access Denied"` on the very endpoint that drives the switcher.
+    **Fix:** caller self-resolution now runs through new
+    `infrastructure.multitenancy.TenantFilterBypass` (clears `TenantContext` +
+    disables `tenantFilter` for the lookup, restores after — so
+    `TenantHibernateAspect` does not re-enable it on the inner repo call). Wired
+    into `RbacAuthorizationService.getCurrentUser` AND
+    `CustomUserDetailsService.loadUserByUsername`. Identity is keyed by unique
+    email (a caller can only ever resolve THEIR OWN row), and the
+    `@SQLRestriction("deleted_at IS NULL")` soft-delete guard is untouched — so
+    this is not a cross-tenant leak. Defense-in-depth: `Role.tenantFilter`
+    condition widened to `(tenant_id = :tenantId OR tenant_id IS NULL)` so global
+    role DEFINITIONS (SUPER_ADMIN/SYSTEM) stay visible regardless of active tenant
+    (grants are via `user_roles`, so still no leak).
+  - **Unified scope.** `TenantScopeResolver.currentScope()` reads `X-Tenant-ID`
+    (canonical) with `X-Active-Tenant` kept as a back-compat alias (canonical
+    wins if both present). SUPER_ADMIN + valid header → that tenant; no header →
+    `null` (cross-tenant, preserving today's `null`-handling controllers; the web
+    switcher always sends the header, defaulting to home). For ANY non-ROOT caller
+    BOTH headers are IGNORED (home tenant only) — no privilege/tenant escalation.
+  - **`isCrossTenantAdmin()`** (new) = the SUPER_ADMIN CAPABILITY, independent of
+    the active selection. `TenantController.getAllTenants` (the switcher's own
+    dropdown source) now uses it instead of `isUnrestricted()`, so selecting a
+    tenant doesn't collapse the dropdown to one entry.
+  - **`/users` consistency.** `ManageUserService.resolveTenantScope()` now
+    delegates to `TenantScopeResolver.currentScope()` (was: return `null` for any
+    SUPER_ADMIN + lean on the implicit Hibernate filter). Result: list/count/search
+    all scope explicitly to the selected tenant (home by default).
+  - Security tests: `TenantFilterBypassTest`, `RbacAuthorizationServiceTest`,
+    extended `TenantScopeResolverTest` (X-Tenant-ID + precedence + isolation), and
+    `TenantSwitcherIsolationIT` (Testcontainers, `RUN_INTEGRATION=true`) pinning
+    the 403 fix + TENANT_ADMIN cross-tenant isolation end-to-end.
   - **Revoke a PENDING guest invitation** — new `POST /api/v1/guests/invitations/{invitationId}/revoke`
     (gate `@rbac.isTenantAdmin() or @rbac.hasPermission('guest:revoke')` + tenant-scope
     guard via `TenantScopeResolver.canAccessTenant`). Calls

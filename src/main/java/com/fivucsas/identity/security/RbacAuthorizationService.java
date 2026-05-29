@@ -2,6 +2,7 @@ package com.fivucsas.identity.security;
 
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.entity.UserType;
+import com.fivucsas.identity.infrastructure.multitenancy.TenantFilterBypass;
 import com.fivucsas.identity.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -34,6 +35,7 @@ import java.util.UUID;
 public class RbacAuthorizationService {
 
     private final UserRepository userRepository;
+    private final TenantFilterBypass tenantFilterBypass;
 
     /**
      * Checks if the current user has the given permission.
@@ -199,6 +201,16 @@ public class RbacAuthorizationService {
 
     /**
      * Gets the currently authenticated user entity from the database.
+     *
+     * <p><b>Tenant-switcher correctness.</b> The lookup runs with the Hibernate
+     * {@code tenantFilter} disabled (see {@link TenantFilterBypass}). Otherwise,
+     * when a SUPER_ADMIN is browsing a foreign tenant (active {@code X-Tenant-ID}),
+     * the active-tenant filter would scope this self-lookup to the foreign tenant
+     * and filter out the caller's OWN row (a ROOT user lives in the system
+     * tenant) — collapsing their authorities and yielding a spurious 403 on the
+     * very endpoint that drives the switcher. Resolving authz is caller-scoped by
+     * unique email, never a cross-tenant browse, so disabling the filter here is
+     * safe; the {@code @SQLRestriction} soft-delete guard still applies.</p>
      */
     public Optional<User> getCurrentUser() {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
@@ -207,7 +219,8 @@ public class RbacAuthorizationService {
         }
 
         String email = auth.getName();
-        return userRepository.findByEmail(email);
+        return tenantFilterBypass.runWithoutTenantFilter(
+                () -> userRepository.findByEmail(email));
     }
 
     /**
