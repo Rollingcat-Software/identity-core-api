@@ -1,6 +1,7 @@
 package com.fivucsas.identity.application.service;
 
 import com.fivucsas.identity.entity.*;
+import com.fivucsas.identity.application.port.output.AuditLogPort;
 import com.fivucsas.identity.application.port.output.GuestInvitationRepositoryPort;
 import com.fivucsas.identity.domain.repository.UserRepository;
 import com.fivucsas.identity.application.port.output.UserRoleRepositoryPort;
@@ -47,6 +48,7 @@ public class GuestLifecycleService {
     private final RefreshTokenRepository refreshTokenRepository;
     private final PasswordEncoder passwordEncoder;
     private final EmailService emailService;
+    private final AuditLogPort auditLogPort;
 
     private static final SecureRandom SECURE_RANDOM = new SecureRandom();
     private static final String GUEST_ROLE_ID = "20000000-0000-0000-0000-000000000008";
@@ -247,6 +249,70 @@ public class GuestLifecycleService {
         userRepository.save(guestUser);
 
         log.info("Guest access revoked for user {} by {}", guestUser.getEmail(), revokedBy.getEmail());
+    }
+
+    /**
+     * Revokes a PENDING (or EXPIRED) guest invitation that was never accepted.
+     *
+     * <p>This is the counterpart to {@link #revokeGuestAccess(UUID, User)}:
+     * before acceptance there is NO guest user yet (the user row is created
+     * only on accept), so the user-revoke path cannot cancel a pending invite.
+     * This method operates directly on the {@link GuestInvitation} by its id.</p>
+     *
+     * <p>Semantics:</p>
+     * <ul>
+     *   <li>PENDING or EXPIRED → set to {@link InvitationStatus#REVOKED}.</li>
+     *   <li>Already REVOKED → no-op (idempotent), returns normally.</li>
+     *   <li>ACCEPTED → {@link DomainStateConflictException} (409): the guest
+     *       user exists; the caller must use the user-revoke endpoint instead.</li>
+     *   <li>Not found → {@link ResourceNotFoundException} (404).</li>
+     * </ul>
+     *
+     * @param invitationId the invitation to revoke
+     * @param actorUserId  the acting admin's user id, used purely for audit
+     *                     attribution; may be {@code null} for system contexts.
+     *                     A {@code UUID} (not {@code entity.User}) so this new
+     *                     application-layer method respects the hexagonal
+     *                     {@code entity.User} boundary ratchet.
+     */
+    @Transactional
+    public void revokeInvitation(UUID invitationId, UUID actorUserId) {
+        GuestInvitation invitation = invitationRepository.findById(invitationId)
+                .orElseThrow(() -> new ResourceNotFoundException("GuestInvitation", invitationId.toString()));
+
+        // Idempotent: revoking an already-revoked invitation is a success no-op.
+        if (invitation.getStatus() == InvitationStatus.REVOKED) {
+            log.info("Guest invitation {} already REVOKED — no-op", invitationId);
+            return;
+        }
+
+        // An accepted invitation has a real guest user; direct the caller to
+        // the user-revoke flow instead of half-revoking here.
+        if (invitation.getStatus() == InvitationStatus.ACCEPTED) {
+            throw new DomainStateConflictException(
+                    "Invitation has already been accepted; revoke the guest user instead "
+                  + "(POST /api/v1/guests/{guestUserId}/revoke)");
+        }
+
+        invitation.revoke();
+        invitationRepository.save(invitation);
+
+        log.info("Guest invitation {} (email {}) revoked by actor {}",
+                invitationId, invitation.getEmail(),
+                actorUserId != null ? actorUserId : "system");
+
+        // Audit: userId is the ACTING ADMIN's user id (or null for system) —
+        // NEVER the tenant/invitation id (that would violate the
+        // audit_logs.user_id FK; the adapter now nulls non-user ids
+        // defensively, but we pass a correct value anyway). The
+        // invitation/tenant ids live in the human-readable details string.
+        auditLogPort.logSecurityEvent(
+                actorUserId != null ? actorUserId.toString() : null,
+                "GUEST_INVITATION_REVOKED",
+                null,
+                String.format("Pending guest invitation %s (email=%s, tenant=%s) revoked",
+                        invitationId, invitation.getEmail(), invitation.getTenant().getId())
+        );
     }
 
     /**

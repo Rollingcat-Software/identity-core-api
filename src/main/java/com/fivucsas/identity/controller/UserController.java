@@ -25,6 +25,7 @@ import com.fivucsas.identity.entity.InvitationStatus;
 import com.fivucsas.identity.entity.Tenant;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.entity.UserSettings;
+import com.fivucsas.identity.exception.ResourceNotFoundException;
 import com.fivucsas.identity.repository.JpaTenantRepository;
 import com.fivucsas.identity.security.RbacAuthorizationService;
 import com.fivucsas.identity.security.TenantScopeResolver;
@@ -458,6 +459,35 @@ public class UserController {
                 guestUserId, currentUser.getEmail());
 
         guestLifecycleService.revokeGuestAccess(guestUserId, currentUser);
+
+        return ResponseEntity.noContent().build();
+    }
+
+    @PostMapping("/api/v1/guests/invitations/{invitationId}/revoke")
+    @Operation(summary = "Revoke a PENDING (un-accepted) guest invitation")
+    @PreAuthorize("@rbac.isTenantAdmin() or @rbac.hasPermission('guest:revoke')")
+    public ResponseEntity<Void> revokePendingInvitation(@PathVariable UUID invitationId) {
+        // Acting admin id only (no entity.User load) — respects the hexagonal
+        // entity.User boundary ratchet for new controller code.
+        UUID actorUserId = rbacService.getCurrentUserId()
+                .orElseThrow(() -> new UnauthorizedException());
+
+        // Tenant-scope guard: a scoped caller (TENANT_ADMIN) may only revoke
+        // invitations belonging to a tenant they can access. SUPER_ADMIN with
+        // no active scope passes for any tenant; with X-Active-Tenant set, the
+        // invitation must belong to the selected tenant. 404 (not 403) when the
+        // invitation isn't visible to the caller — don't leak existence across
+        // tenants.
+        GuestInvitation invitation = invitationRepository.findById(invitationId).orElse(null);
+        if (invitation == null
+                || !tenantScopeResolver.canAccessTenant(invitation.getTenant().getId())) {
+            throw new ResourceNotFoundException("Guest invitation not found: " + invitationId);
+        }
+
+        log.info("POST /api/v1/guests/invitations/{}/revoke - Revoking pending invitation by actor {}",
+                invitationId, actorUserId);
+
+        guestLifecycleService.revokeInvitation(invitationId, actorUserId);
 
         return ResponseEntity.noContent().build();
     }
