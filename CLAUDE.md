@@ -116,6 +116,39 @@ V64: DNS-TXT domain verification + default-role-on-join.
 
 ## Operator reality (2026-05-29 update)
 
+- **P1-4 audit-attribution + soft-delete/lazy-proxy sweep DEPLOYED (PR #135,
+  main `4229eb4`, prod image `11f0f434`).** New `AuditLogPort.logTenantManagementEvent(
+  actorUserId, eventType, tenantId, details)` writes audit rows with a SEPARATE
+  actor (`user_id` FK, nulled via `existsById` if not a real user) and resource
+  (`resource_id` = the managed tenant, `resource_type` = "TENANT", `tenant_id` =
+  the managed tenant). Fixed 8 wrong-actor call sites that passed the TENANT id
+  into the `user_id` slot (`ManageTenantService` ×5, `ManageTenantEmailDomainService`
+  ×3 add/remove/primary); the 2 DNS-verify calls already passed `actingUserId` and
+  now route through the same method. Services resolve the actor via
+  `rbacService.getCurrentUserId()` (UUID helper — NOT `getCurrentUser().getId()`,
+  which would trip `UserDomainBoundaryTest`); null for self-service onboarding.
+  **Soft-delete/lazy-proxy guards** added (force-init in try/catch, fall back to
+  null, raw FK id preserved — same idiom as `EnrollmentQueryService`) to
+  `UserResponseMapper.toResponse` (/users render, guards `getTenant().getName()`
+  when a tenant is soft-deleted), `EnrollmentResponse` (guards `getUser()` on a
+  soft-deleted owner), and `UserDataExportService.serializeUser`. Validated live on
+  staging: TENANT_UPDATED row now has `user_id`=acting admin, `resource_type`=TENANT,
+  `resource_id`/`tenant_id`=managed tenant; /users + /enrollments still 200.
+- **P0-1 tenant-isolation defense-in-depth DEPLOYED (PR #134, prod image
+  `577acd6b`).** Added the Hibernate `@Filter(tenantFilter)` to the 8 tenant-scoped
+  entities that previously relied on controller `currentScope()` only (`AuditLog`,
+  `AuthSession`, `MfaSession`, `UserEnrollment`, `VerificationSession`,
+  `OAuth2Client`, `UserDevice`, `AuthFlow`; reuses the global `@FilterDef` on
+  `User`). Validated off-prod on staging w/ 2-tenant seed: no-header SUPER_ADMIN
+  reads scope to HOME (filter overrides controller `tenantScope=ALL`), X-Tenant-ID
+  switch partitions correctly, no leak, all 8 endpoints 200. **Behavior change:**
+  SUPER_ADMIN no-header now scopes these to HOME (was cross-tenant null), like
+  `/users`; web always sends X-Tenant-ID so the UI is unaffected. **AuthFlow is the
+  only PATH-scoped list** — the filter intersects to EMPTY when path tenant ≠ active
+  X-Tenant-ID; fixed in web-app #126 (`AuthFlowsPage` uses the active tenant for the
+  path, also fixing a latent switcher-ignored bug). `CrossTenantIsolationIT` exists
+  (RUN_INTEGRATION-gated → P1-1 makes it a CI gate). Staging env (P1-2) at
+  127.0.0.1:18080 — see `docs/RUNBOOK_STAGING.md`.
 - **Rebuilt 2026-05-29 12:25 UTC** (image `7109c30f`, healthy, boot 24s) — shipped
   PR #115 (two admin 500 fixes) + the merged 2026-05-29 delta (#99 V61, #114 dead
   card-detect proxy removal). **V61 applied** (audit_logs.tenant_id → NOT NULL;
