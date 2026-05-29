@@ -45,6 +45,28 @@ class OpenIDConfigControllerTest {
     }
 
     @Test
+    @DisplayName("subject_types_supported defaults to [public] (Phase 4 flag OFF)")
+    @SuppressWarnings("unchecked")
+    void discoverySubjectTypesDefaultsToPublic() {
+        // pairwiseSubjectEnabled left at its default (false).
+        ResponseEntity<Map<String, Object>> resp = controller.openidConfiguration();
+        assertThat(resp.getBody()).isNotNull();
+        List<String> subjectTypes = (List<String>) resp.getBody().get("subject_types_supported");
+        assertThat(subjectTypes).containsExactly("public");
+    }
+
+    @Test
+    @DisplayName("subject_types_supported advertises [pairwise] when Phase 4 flag ON")
+    @SuppressWarnings("unchecked")
+    void discoverySubjectTypesPairwiseWhenFlagOn() {
+        ReflectionTestUtils.setField(controller, "pairwiseSubjectEnabled", true);
+        ResponseEntity<Map<String, Object>> resp = controller.openidConfiguration();
+        assertThat(resp.getBody()).isNotNull();
+        List<String> subjectTypes = (List<String>) resp.getBody().get("subject_types_supported");
+        assertThat(subjectTypes).containsExactly("pairwise");
+    }
+
+    @Test
     @DisplayName("/.well-known/jwks.json publishes RSA public key with kid+alg")
     @SuppressWarnings("unchecked")
     void jwksPublishesRsaKey() {

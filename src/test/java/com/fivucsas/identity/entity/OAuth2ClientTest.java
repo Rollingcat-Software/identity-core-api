@@ -72,6 +72,48 @@ class OAuth2ClientTest {
     }
 
     @Nested
+    @DisplayName("sectorIdentifier — OIDC Core §8.1 pairwise sector (Phase 4)")
+    class SectorIdentifier {
+
+        @Test
+        @DisplayName("derives the lower-cased host of the first redirect URI")
+        void hostOfFirstRedirect() {
+            OAuth2Client client = withRedirects("[\"https://App.Example.com/callback\"]");
+            assertEquals("app.example.com", client.sectorIdentifier());
+        }
+
+        @Test
+        @DisplayName("two clients on the same host share a sector (would link subs)")
+        void sameHostSameSector() {
+            OAuth2Client a = withRedirects("[\"https://app.example.com/cb\"]");
+            OAuth2Client b = withRedirects("[\"https://app.example.com/other\"]");
+            assertEquals(a.sectorIdentifier(), b.sectorIdentifier());
+        }
+
+        @Test
+        @DisplayName("different hosts → different sectors (unlinkable subs)")
+        void differentHostsDifferentSectors() {
+            OAuth2Client a = withRedirects("[\"https://app.rp-a.com/cb\"]");
+            OAuth2Client b = withRedirects("[\"https://portal.rp-b.org/cb\"]");
+            assertNotEquals(a.sectorIdentifier(), b.sectorIdentifier());
+        }
+
+        @Test
+        @DisplayName("falls back to clientId when no usable redirect host")
+        void fallsBackToClientId() {
+            OAuth2Client client = withRedirects("[]");
+            assertEquals("test-client", client.sectorIdentifier());
+        }
+
+        @Test
+        @DisplayName("malformed redirect column falls back to clientId, never crashes")
+        void malformedFallsBackToClientId() {
+            OAuth2Client client = withRedirects("not-json");
+            assertEquals("test-client", client.sectorIdentifier());
+        }
+    }
+
+    @Nested
     @DisplayName("isRedirectUriAllowed — loopback redirect matching (RFC 8252 §7.3)")
     class LoopbackMatch {
 

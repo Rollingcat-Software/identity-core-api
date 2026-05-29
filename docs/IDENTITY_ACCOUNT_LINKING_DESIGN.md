@@ -76,11 +76,35 @@ identity (the person)
 - web: enrolment UX becomes "enrol once"; per-tenant a consent toggle ("Use my FIVUCSAS
   face for Marmara"). Re-enrol only to update the template.
 
-### Phase 4 — OIDC `sub` alignment (flag-gated, LAST)
-- Make the OIDC subject identity-stable per issuer (`sub` = identity-derived pairwise id),
-  so federated relying parties see a consistent person across tenants. Behind
-  `app.identity.oidc-subject-identity` flag (default OFF). Ripples through token mint/parse,
-  sessions, audit `user_id` semantics → ship last, soak behind the flag.
+### Phase 4 — OIDC `sub` alignment (flag-gated, LAST)  *(IMPLEMENTED — ships DORMANT)*
+- Make the OIDC subject identity-stable per relying party (`sub` = identity-derived
+  PAIRWISE id), so federated relying parties see a consistent person across tenants
+  while different RPs get unlinkable subs. Behind `app.identity.oidc-subject-identity`
+  flag (**default OFF**). Soak behind the flag in staging before flipping prod.
+- **Scope:** ONLY the OIDC/OAuth2 surfaces — the id_token `sub` (`OAuth2Service.exchangeCode`)
+  and the `/oauth2/userinfo` subject (`OAuth2Service.getUserInfo`). JWKS is unaffected.
+  The internal dashboard access-token subject (the user principal/email) is **unchanged** —
+  Phase 4 only re-points the OIDC id_token/userinfo subject.
+- **Algorithm** (flag ON), implemented in `infrastructure.oauth2.PairwiseSubjectResolver`:
+  ```
+  sector       = OAuth2Client.sectorIdentifier()   # OIDC Core §8.1: host of the
+                                                    #   registered redirect_uri, else clientId
+  localAccount = user.identity_id                   # the PERSON (cross-tenant); falls back to
+                 (user.id pre-backfill if NULL)     #   user.id while V67 backfill is incomplete
+  salt         = app.identity.pairwise-salt         # per-env, stable + secret
+  sub          = base64url( SHA-256( sector + "|" + localAccount + "|" + salt ) )
+  ```
+  Properties: deterministic/stable per (identity, RP); unlinkable across RPs (distinct
+  sectors); opaque (one-way hash never exposes the raw `identity_id`); same person → same
+  `sub` for a given RP across all their tenant accounts (Model A goal).
+- **Default-OFF guarantee:** with the flag off the resolver returns exactly
+  `user.id.toString()` — byte-identical to the pre-Phase-4 path; the discovery doc keeps
+  `subject_types_supported: ["public"]`. With the flag on it advertises `["pairwise"]`.
+  Proven by `PairwiseSubjectResolverTest` (off==legacy; on==stable/per-RP/≠identity_id).
+- **Config:** `app.identity.oidc-subject-identity` (`APP_IDENTITY_OIDC_SUBJECT_IDENTITY`,
+  default false) + `app.identity.pairwise-salt` (`APP_IDENTITY_PAIRWISE_SALT`). Flipping the
+  flag (or rotating the salt) rotates every RP's view of `sub` — coordinate with RPs.
+- No Flyway migration (flag only). Reversible: flip the flag back to false.
 
 ## Cross-cutting rules
 - **Identities are NOT tenant-scoped** — no `@Filter(tenantFilter)` on `Identity`/

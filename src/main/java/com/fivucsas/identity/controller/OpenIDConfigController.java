@@ -30,6 +30,13 @@ public class OpenIDConfigController {
     @Value("${app.base-url:https://api.fivucsas.com}")
     private String baseUrl;
 
+    // Phase 4 (flag-gated, default OFF). When true the OIDC `sub` is a pairwise
+    // pseudonym per relying party, so the discovery doc advertises "pairwise"
+    // instead of "public". Mirrors app.identity.oidc-subject-identity consumed by
+    // PairwiseSubjectResolver — keep the two in lockstep.
+    @Value("${app.identity.oidc-subject-identity:false}")
+    private boolean pairwiseSubjectEnabled;
+
     private final RsaKeyProvider rsaKeyProvider;
 
     public OpenIDConfigController(RsaKeyProvider rsaKeyProvider) {
@@ -56,7 +63,11 @@ public class OpenIDConfigController {
         config.put("response_types_supported", List.of("code"));
         config.put("response_modes_supported", List.of("query"));
         config.put("grant_types_supported", List.of("authorization_code"));
-        config.put("subject_types_supported", List.of("public"));
+        // Phase 4: advertise the active subject type. Default OFF → "public"
+        // (sub = users.id, today's behaviour). Flag ON → "pairwise" (sub is an
+        // identity-derived per-RP pseudonym, OIDC Core §8).
+        config.put("subject_types_supported",
+                List.of(pairwiseSubjectEnabled ? "pairwise" : "public"));
         // BE-H1: dual-alg coexistence. HS512 (legacy symmetric) + RS256 (OIDC best practice).
         // The default signing algorithm is governed by fivucsas.jwt.default-algo.
         config.put("id_token_signing_alg_values_supported", List.of("RS256", "HS512"));

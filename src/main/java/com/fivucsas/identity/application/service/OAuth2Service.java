@@ -57,6 +57,10 @@ public class OAuth2Service {
     private final PasswordEncoder passwordEncoder;
     private final MfaSessionRepository mfaSessionRepository;
     private final com.fivucsas.identity.security.RateLimitService rateLimitService;
+    // Phase 4 (flag-gated, default OFF): resolves the OIDC `sub` for id_token +
+    // userinfo. With app.identity.oidc-subject-identity=false this returns the
+    // legacy user.id; with it on, a pairwise pseudonym per relying party.
+    private final com.fivucsas.identity.infrastructure.oauth2.PairwiseSubjectResolver pairwiseSubjectResolver;
 
     @Value("${app.base-url:https://api.fivucsas.com}")
     private String issuer;
@@ -368,6 +372,10 @@ public class OAuth2Service {
         claims.put("tenant_id", user.getTenant().getId().toString());
         claims.put("type", "oauth2");
         claims.put("scope", storedScope);
+        // Phase 4: stamp the relying party so /userinfo can reproduce the SAME
+        // pairwise `sub` as the id_token (the userinfo subject MUST equal the
+        // id_token subject — OIDC Core §5.3.2). Harmless when the flag is off.
+        claims.put("client_id", clientId);
 
         String accessToken = jwtService.generateToken(claims, userEmail);
         long expiresIn = jwtService.getExpirationMillis() / 1000;
@@ -375,7 +383,9 @@ public class OAuth2Service {
         // Generate ID token with required OIDC claims (OpenID Connect Core Section 2)
         Map<String, Object> idTokenClaims = new HashMap<>();
         idTokenClaims.put("iss", issuer);
-        idTokenClaims.put("sub", user.getId().toString());
+        // Phase 4: subject is identity-pairwise per RP when the flag is on; legacy
+        // user.id otherwise (default). The resolver owns the entity.User access.
+        idTokenClaims.put("sub", pairwiseSubjectResolver.resolveSubject(user, client));
         idTokenClaims.put("aud", clientId);
         idTokenClaims.put("iat", Instant.now().getEpochSecond());
         idTokenClaims.put("exp", Instant.now().plusMillis(jwtService.getExpirationMillis()).getEpochSecond());
@@ -491,8 +501,20 @@ public class OAuth2Service {
         String scope = scopeClaim != null ? scopeClaim : "";
 
         Map<String, Object> claims = new LinkedHashMap<>();
-        // Always include `sub` per OIDC Core §5.3
-        claims.put("sub", user.getId().toString());
+        // Always include `sub` per OIDC Core §5.3. Phase 4: the userinfo subject
+        // MUST equal the id_token subject (OIDC Core §5.3.2), so it is resolved
+        // through the same PairwiseSubjectResolver, keyed on the relying party
+        // stamped into the access token (`client_id`). With the flag off this is
+        // the legacy user.id. If the access token predates this claim (in-flight
+        // token minted before deploy) the client lookup is skipped and the
+        // resolver still yields the legacy user.id when the flag is off; when the
+        // flag is on a missing client falls back to the user id (stable, opaque).
+        String tokenClientId = tokenClaims.get("client_id", String.class);
+        OAuth2Client subjectClient = null;
+        if (tokenClientId != null && !tokenClientId.isBlank()) {
+            subjectClient = clientRepository.findByClientIdAndActiveTrue(tokenClientId).orElse(null);
+        }
+        claims.put("sub", pairwiseSubjectResolver.resolveSubject(user, subjectClient));
 
         if (scope.contains("email")) {
             claims.put("email", user.getEmail());
