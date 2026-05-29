@@ -29,6 +29,11 @@ public class GuestInvitationRepositoryAdapter implements GuestInvitationReposito
     }
 
     @Override
+    public Optional<GuestInvitation> findById(UUID id) {
+        return jpaRepository.findById(id);
+    }
+
+    @Override
     public Optional<GuestInvitation> findByInvitationToken(String token) {
         return jpaRepository.findByInvitationToken(token);
     }

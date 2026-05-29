@@ -22,6 +22,11 @@ spring:
 # than 30 days ago. DISABLED by default — operator must validate via
 # `DELETE /api/v1/admin/purge/dry-run` before flipping to true per environment.
 app:
+  # Public base URL of the web dashboard (React). Used to build user-facing
+  # links emailed to recipients — e.g. the guest accept-invitation link
+  # ({frontend-base-url}/accept-invite?token=...). Override per environment
+  # with APP_FRONTEND_BASE_URL.
+  frontend-base-url: ${APP_FRONTEND_BASE_URL:https://app.fivucsas.com}
   purge:
     softDelete:
       enabled: ${APP_PURGE_SOFT_DELETE_ENABLED:false}
