@@ -4,8 +4,10 @@ import com.fivucsas.identity.dto.EnrollmentDto;
 import com.fivucsas.identity.entity.UserEnrollment;
 import com.fivucsas.identity.exception.ResourceNotFoundException;
 import com.fivucsas.identity.application.port.output.UserEnrollmentRepositoryPort;
+import jakarta.persistence.EntityNotFoundException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.hibernate.Hibernate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -64,11 +66,31 @@ public class EnrollmentQueryService {
     }
 
     private EnrollmentDto mapEnrollmentToDto(UserEnrollment enrollment) {
+        // Resolve the associated user defensively. An enrollment can outlive its
+        // user row (orphaned FK from a hard-deleted/missing user — observed in
+        // prod 2026-05-29: EntityNotFoundException blew up the WHOLE list with a
+        // 500). Touching a lazy proxy that points at a missing row throws, so we
+        // catch it and render the row with null user fields instead of failing
+        // the entire enrollments page.
+        var resolved = enrollment.getUser();
+        if (resolved != null) {
+            try {
+                // Force proxy initialization so a missing row surfaces here,
+                // where we can swallow it, instead of during DTO field access.
+                Hibernate.initialize(resolved);
+                resolved.getEmail();
+            } catch (EntityNotFoundException ex) {
+                log.warn("Enrollment {} references a missing user row; rendering with null user fields",
+                        enrollment.getId());
+                resolved = null;
+            }
+        }
+        final var user = resolved;
         return EnrollmentDto.builder()
                 .id(enrollment.getId().toString())
-                .userId(enrollment.getUser() != null ? enrollment.getUser().getId().toString() : null)
-                .userName(enrollment.getUser() != null ? enrollment.getUser().getFullName() : null)
-                .userEmail(enrollment.getUser() != null ? enrollment.getUser().getEmail() : null)
+                .userId(user != null ? user.getId().toString() : null)
+                .userName(user != null ? user.getFullName() : null)
+                .userEmail(user != null ? user.getEmail() : null)
                 .tenantId(enrollment.getTenant() != null ? enrollment.getTenant().getId().toString() : null)
                 .authMethodType(enrollment.getAuthMethodType() != null ? enrollment.getAuthMethodType().name() : null)
                 .status(enrollment.getStatus().name())
