@@ -128,6 +128,25 @@ V68: Identity & Account-Linking Phase 3 (Model A) —
 
 ## Operator reality (2026-05-29 update)
 
+- **Identity/account-linking Phases 2/3/4 DEPLOYED (api #142/#143/#141, main `114b8eb`,
+  prod image `474c8d12`; web #128/#127 on Hostinger; parent #95).**
+  - **Phase 2 (account linking):** `POST /api/v1/identity/link/initiate` (OTP to target email
+    via Redis — no new table), `/link/confirm` (OTP + caller password step-up → re-points
+    `users.identity_id`), `/unlink` (fresh identity, reversible), `GET /identity/me` (person
+    view: emails + memberships across tenants). Guardrails: no same-tenant link, both ACTIVE,
+    audited `IDENTITY_LINKED`/`IDENTITY_UNLINKED`, rate-limited. web "Linked Accounts" Profile
+    section. NOTE: login is still PER-ACCOUNT (per email→membership); linking is additive.
+  - **Phase 3 (biometric + per-tenant consent, Model A):** `V68 identity_tenant_biometric_consent`
+    (cross-tenant, NO `@Filter`). Bio pgvector store NOT re-keyed — the api orchestrates: a
+    consented verify in tenant B routes to the person's CANONICAL (identity,method) enrollment;
+    **default-DENY** (no consent → behaves exactly like not-enrolled). `GET/POST
+    /api/v1/identity/biometric/consents` (membership-guarded, audited `BIOMETRIC_CONSENT_CHANGED`).
+    web per-tenant consent toggle. `IdentityBiometricConsentIT` (RUN_INTEGRATION). bio unchanged.
+  - **Phase 4 (OIDC `sub`):** `app.identity.oidc-subject-identity` flag **default OFF** (dormant —
+    `subject_types_supported=public`, sub unchanged). ON ⇒ pairwise `base64url(SHA-256(sector|
+    identityId|salt))` per RP. Dashboard access-token principal untouched. `PairwiseSubjectResolver`.
+  - Validated on staging before prod (link/unlink, consent grant/403-guard/revoke, OIDC discovery
+    public). Prod: V68 applied, consent table live, flag dormant.
 - **Identity/account-linking Phase 1 DEPLOYED (PR #139, prod via image after `e74cfac`).**
   Approved Model-A design in `docs/IDENTITY_ACCOUNT_LINKING_DESIGN.md` (#138). Phase 1 =
   person/identity layer, ZERO behavior change: `V65 identities`, `V66 identity_emails`
