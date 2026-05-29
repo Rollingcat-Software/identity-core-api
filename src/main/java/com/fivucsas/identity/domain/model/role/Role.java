@@ -34,7 +34,16 @@ public class Role {
                  boolean systemRole, boolean active, Set<Permission> permissions,
                  Instant createdAt, Instant updatedAt, Instant deletedAt) {
         this.id = id;
-        this.tenantId = Objects.requireNonNull(tenantId, "Tenant ID cannot be null");
+        // Global system roles (e.g. SUPER_ADMIN — the platform owner/developer
+        // role) legitimately have NO tenant: they span the whole platform, so
+        // tenant_id is NULL in the DB. Only tenant-scoped roles must carry one.
+        // Requiring it unconditionally NPE'd /auth/me for every SUPER_ADMIN
+        // (the real platform admin couldn't load the dashboard) — observed prod
+        // 2026-05-29 via the admin UI sweep.
+        if (!systemRole) {
+            Objects.requireNonNull(tenantId, "Tenant ID cannot be null for tenant-scoped roles");
+        }
+        this.tenantId = tenantId;
         this.name = Objects.requireNonNull(name, "Role name cannot be null");
         this.description = description;
         this.systemRole = systemRole;
