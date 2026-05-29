@@ -393,7 +393,7 @@ class RegisterUserServiceTest {
             // mapping, no legacy mapping → falls back to default slug, which
             // we now point at cappedTenant.
             ReflectionTestUtils.setField(registerUserService, "defaultTenantSlug", "capped-tenant");
-            when(tenantEmailDomainRepository.findByIdEmailDomainIgnoreCase("example.com"))
+            when(tenantEmailDomainRepository.findByIdEmailDomainIgnoreCaseAndVerifiedTrue("example.com"))
                 .thenReturn(Optional.empty());
             when(tenantRepository.findByLegacyDomainIgnoreCase("example.com"))
                 .thenReturn(Optional.empty());
@@ -438,7 +438,7 @@ class RegisterUserServiceTest {
             when(refreshTokenService.createRefreshToken(any(), any(), any())).thenReturn(refreshToken);
 
             ReflectionTestUtils.setField(registerUserService, "defaultTenantSlug", "near-cap-tenant");
-            when(tenantEmailDomainRepository.findByIdEmailDomainIgnoreCase("example.com"))
+            when(tenantEmailDomainRepository.findByIdEmailDomainIgnoreCaseAndVerifiedTrue("example.com"))
                 .thenReturn(Optional.empty());
             when(tenantRepository.findByLegacyDomainIgnoreCase("example.com"))
                 .thenReturn(Optional.empty());
@@ -523,7 +523,7 @@ class RegisterUserServiceTest {
             // Given — V44 backfill seeds (Marmara, marun.edu.tr, is_primary=false)
             String emailAddress = "ahmet@marun.edu.tr";
             TenantEmailDomain marunRow = TenantEmailDomain.create(MARMARA_TENANT_ID, "marun.edu.tr", false);
-            when(tenantEmailDomainRepository.findByIdEmailDomainIgnoreCase("marun.edu.tr"))
+            when(tenantEmailDomainRepository.findByIdEmailDomainIgnoreCaseAndVerifiedTrue("marun.edu.tr"))
                 .thenReturn(Optional.of(marunRow));
             when(tenantRepository.findById(MARMARA_TENANT_ID)).thenReturn(Optional.of(marmaraTenant));
             stubCommonRegistrationCollaborators(emailAddress);
@@ -548,7 +548,7 @@ class RegisterUserServiceTest {
             // Given — primary domain row backfilled by V44
             String emailAddress = "student@marmara.edu.tr";
             TenantEmailDomain primaryRow = TenantEmailDomain.create(MARMARA_TENANT_ID, "marmara.edu.tr", true);
-            when(tenantEmailDomainRepository.findByIdEmailDomainIgnoreCase("marmara.edu.tr"))
+            when(tenantEmailDomainRepository.findByIdEmailDomainIgnoreCaseAndVerifiedTrue("marmara.edu.tr"))
                 .thenReturn(Optional.of(primaryRow));
             when(tenantRepository.findById(MARMARA_TENANT_ID)).thenReturn(Optional.of(marmaraTenant));
             stubCommonRegistrationCollaborators(emailAddress);
@@ -596,7 +596,7 @@ class RegisterUserServiceTest {
                 Tenant marmara = enforcingMarmara();
                 TenantEmailDomain marunRow = TenantEmailDomain.create(MARMARA_TENANT_ID, "marun.edu.tr", false);
 
-                when(tenantEmailDomainRepository.findByIdEmailDomainIgnoreCase("marun.edu.tr"))
+                when(tenantEmailDomainRepository.findByIdEmailDomainIgnoreCaseAndVerifiedTrue("marun.edu.tr"))
                     .thenReturn(Optional.of(marunRow));
                 when(tenantRepository.findById(MARMARA_TENANT_ID)).thenReturn(Optional.of(marmara));
                 stubCommonRegistrationCollaborators(emailAddress);
@@ -620,7 +620,7 @@ class RegisterUserServiceTest {
                 try {
                     when(tenantRepository.findById(MARMARA_TENANT_ID)).thenReturn(Optional.of(marmara));
                     // gmail.com is not owned by any tenant.
-                    when(tenantEmailDomainRepository.findByIdEmailDomainIgnoreCase("gmail.com"))
+                    when(tenantEmailDomainRepository.findByIdEmailDomainIgnoreCaseAndVerifiedTrue("gmail.com"))
                         .thenReturn(Optional.empty());
                     when(userRepository.existsByEmail(emailAddress)).thenReturn(false);
 
@@ -651,7 +651,7 @@ class RegisterUserServiceTest {
                 com.fivucsas.identity.infrastructure.multitenancy.TenantContext.setCurrentTenant(MARMARA_TENANT_ID);
                 try {
                     when(tenantRepository.findById(MARMARA_TENANT_ID)).thenReturn(Optional.of(marmara));
-                    when(tenantEmailDomainRepository.findByIdEmailDomainIgnoreCase("othertenant.edu"))
+                    when(tenantEmailDomainRepository.findByIdEmailDomainIgnoreCaseAndVerifiedTrue("othertenant.edu"))
                         .thenReturn(Optional.of(otherRow));
                     when(userRepository.existsByEmail(emailAddress)).thenReturn(false);
 
@@ -670,7 +670,7 @@ class RegisterUserServiceTest {
         void unknownDomainFallsThroughToDefault() {
             // Given — neither path returns a tenant
             String emailAddress = "stranger@unknown.edu.tr";
-            when(tenantEmailDomainRepository.findByIdEmailDomainIgnoreCase("unknown.edu.tr"))
+            when(tenantEmailDomainRepository.findByIdEmailDomainIgnoreCaseAndVerifiedTrue("unknown.edu.tr"))
                 .thenReturn(Optional.empty());
             when(tenantRepository.findByLegacyDomainIgnoreCase("unknown.edu.tr"))
                 .thenReturn(Optional.empty());
@@ -681,7 +681,7 @@ class RegisterUserServiceTest {
             registerUserService.execute(registrationFor(emailAddress));
 
             // Then — legacy was consulted (verifying the fall-through chain)
-            verify(tenantEmailDomainRepository).findByIdEmailDomainIgnoreCase("unknown.edu.tr");
+            verify(tenantEmailDomainRepository).findByIdEmailDomainIgnoreCaseAndVerifiedTrue("unknown.edu.tr");
             verify(tenantRepository).findByLegacyDomainIgnoreCase("unknown.edu.tr");
             // And the user landed on the default tenant resolved via slug.
             ArgumentCaptor<User> userCaptor = ArgumentCaptor.forClass(User.class);

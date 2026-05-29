@@ -34,12 +34,21 @@ public class RateLimitFilter extends OncePerRequestFilter {
     private static final int MAX_REQUESTS = 100;
     private static final Duration WINDOW = Duration.ofMinutes(1);
 
+    // Public self-service tenant onboarding is abuse-prone (creates a tenant +
+    // admin + sends an email per call), so it gets a much tighter per-IP cap on
+    // top of the default. Each create attempt that passes is real work.
+    private static final String ONBOARDING_REGISTER_PATH = "/api/v1/onboarding/register";
+    private static final int ONBOARDING_MAX_REQUESTS = 5;
+    private static final Duration ONBOARDING_WINDOW = Duration.ofHours(1);
+
     // Sensitive endpoints that must fail-closed
     private static final java.util.Set<String> SENSITIVE_PATHS = java.util.Set.of(
             "/api/v1/auth/login",
             "/api/v1/auth/register",
             "/api/v1/auth/forgot-password",
-            "/api/v1/auth/reset-password"
+            "/api/v1/auth/reset-password",
+            "/api/v1/onboarding/register",
+            "/api/v1/onboarding/verify-email"
     );
 
     // In-memory fallback rate limiter (bounded)
@@ -64,6 +73,12 @@ public class RateLimitFilter extends OncePerRequestFilter {
         String clientId = getClientIdentifier(request);
         String key = "rate_limit:" + clientId + ":" + path;
 
+        // Per-path caps: onboarding/register is tightly throttled; everything
+        // else uses the default 100/min bucket.
+        boolean onboardingRegister = path.startsWith(ONBOARDING_REGISTER_PATH);
+        int maxRequests = onboardingRegister ? ONBOARDING_MAX_REQUESTS : MAX_REQUESTS;
+        Duration window = onboardingRegister ? ONBOARDING_WINDOW : WINDOW;
+
         try {
             Long requests = redisTemplate.opsForValue().increment(key);
 
@@ -73,15 +88,15 @@ public class RateLimitFilter extends OncePerRequestFilter {
 
             // Set expiry on first request
             if (requests == 1) {
-                redisTemplate.expire(key, WINDOW);
+                redisTemplate.expire(key, window);
             }
 
             // Add rate limit headers
-            response.setHeader("X-RateLimit-Limit", String.valueOf(MAX_REQUESTS));
-            response.setHeader("X-RateLimit-Remaining", String.valueOf(Math.max(0, MAX_REQUESTS - requests)));
+            response.setHeader("X-RateLimit-Limit", String.valueOf(maxRequests));
+            response.setHeader("X-RateLimit-Remaining", String.valueOf(Math.max(0, maxRequests - requests)));
 
-            if (requests > MAX_REQUESTS) {
-                long retryAfterSeconds = WINDOW.getSeconds();
+            if (requests > maxRequests) {
+                long retryAfterSeconds = window.getSeconds();
                 log.warn("Rate limit exceeded for client: {} on path: {}", clientId, path);
                 response.setStatus(HttpStatus.TOO_MANY_REQUESTS.value());
                 response.setHeader("Retry-After", String.valueOf(retryAfterSeconds));
@@ -129,8 +144,12 @@ public class RateLimitFilter extends OncePerRequestFilter {
             return true;
         }
 
+        boolean onboardingRegister = path.startsWith(ONBOARDING_REGISTER_PATH);
+        int maxRequests = onboardingRegister ? ONBOARDING_MAX_REQUESTS : MAX_REQUESTS;
+        long windowMs = (onboardingRegister ? ONBOARDING_WINDOW : WINDOW).toMillis();
+
         FallbackBucket bucket = fallbackBuckets.computeIfAbsent(key, k -> new FallbackBucket());
-        return bucket.incrementAndCheck(MAX_REQUESTS, WINDOW.toMillis());
+        return bucket.incrementAndCheck(maxRequests, windowMs);
     }
 
     private void cleanupFallbackIfNeeded() {

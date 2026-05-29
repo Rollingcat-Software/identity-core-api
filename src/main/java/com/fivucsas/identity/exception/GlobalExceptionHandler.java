@@ -263,6 +263,52 @@ public class GlobalExceptionHandler {
     }
 
     /**
+     * Self-service onboarding refused: the admin used a personal / free /
+     * disposable email provider instead of a corporate domain. HTTP 422
+     * Unprocessable Entity. The body carries {@code emailDomain} so the UI can
+     * surface a precise message.
+     */
+    @ExceptionHandler(PersonalEmailNotAllowedException.class)
+    public ResponseEntity<java.util.Map<String, Object>> handlePersonalEmailNotAllowed(
+            PersonalEmailNotAllowedException ex,
+            HttpServletRequest request) {
+        log.warn("Onboarding refused — personal/free email domain: {}, path={}",
+                ex.getEmailDomain(), request.getRequestURI());
+
+        java.util.Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("timestamp", java.time.Instant.now().toString());
+        body.put("status", HttpStatus.UNPROCESSABLE_ENTITY.value());
+        body.put("error", ex.getErrorCode());
+        body.put("errorCode", ex.getErrorCode());
+        body.put("message", ex.getMessage());
+        body.put("emailDomain", ex.getEmailDomain());
+        body.put("path", request.getRequestURI());
+
+        return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(body);
+    }
+
+    /**
+     * Onboarding semantic validation failure (bad slug, undeterminable domain,
+     * onboarding disabled). HTTP 400 Bad Request.
+     */
+    @ExceptionHandler(OnboardingValidationException.class)
+    public ResponseEntity<java.util.Map<String, Object>> handleOnboardingValidation(
+            OnboardingValidationException ex,
+            HttpServletRequest request) {
+        log.warn("Onboarding validation failed: {}, path={}", ex.getMessage(), request.getRequestURI());
+
+        java.util.Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("timestamp", java.time.Instant.now().toString());
+        body.put("status", HttpStatus.BAD_REQUEST.value());
+        body.put("error", ex.getErrorCode());
+        body.put("errorCode", ex.getErrorCode());
+        body.put("message", ex.getMessage());
+        body.put("path", request.getRequestURI());
+
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(body);
+    }
+
+    /**
      * V62: tenant email-domain registry conflict — either the domain is already
      * claimed by another tenant ({@code EMAIL_DOMAIN_ALREADY_CLAIMED}) or it is
      * the tenant's last domain while enforcement is on

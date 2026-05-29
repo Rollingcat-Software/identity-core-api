@@ -39,6 +39,19 @@ public interface TenantEmailDomainRepository
     Optional<TenantEmailDomain> findByIdEmailDomainIgnoreCase(String emailDomain);
 
     /**
+     * Look up a VERIFIED tenant-email-domain row for a given email domain
+     * (case-insensitive). Used on registration so that only domains whose
+     * ownership has been proven (DNS-TXT verification — Round 2 — or admin
+     * provisioning) auto-bind new registrants or satisfy
+     * {@code enforce_domain_matching}. A self-service-claimed but still
+     * unverified domain (V63) must NOT pull in other users.
+     *
+     * @param emailDomain the domain part of an email address
+     * @return the matching VERIFIED row, or {@link Optional#empty()}
+     */
+    Optional<TenantEmailDomain> findByIdEmailDomainIgnoreCaseAndVerifiedTrue(String emailDomain);
+
+    /**
      * List every email domain owned by a given tenant. Used by the tenant
      * admin UI to display and manage the list of claimed domains.
      *

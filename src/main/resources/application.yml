@@ -27,6 +27,25 @@ app:
   # ({frontend-base-url}/accept-invite?token=...). Override per environment
   # with APP_FRONTEND_BASE_URL.
   frontend-base-url: ${APP_FRONTEND_BASE_URL:https://app.fivucsas.com}
+  # Public self-service tenant onboarding (POST /api/v1/onboarding/register).
+  onboarding:
+    # Master switch for the public endpoint. When false the endpoint returns 400.
+    enabled: ${APP_ONBOARDING_ENABLED:true}
+    # When true, self-onboarded tenants stay PENDING for a SUPER_ADMIN to approve
+    # even AFTER the admin verifies their email. When false (default) email
+    # verification alone activates the (capped TRIAL) tenant.
+    require-admin-approval: ${APP_ONBOARDING_REQUIRE_ADMIN_APPROVAL:false}
+    # Seat cap applied to a freshly self-onboarded TRIAL tenant. The cap is lifted
+    # only after domain verification (Round-2 DNS-TXT) or SUPER_ADMIN promotion.
+    trial-max-users: ${APP_ONBOARDING_TRIAL_MAX_USERS:25}
+    # Personal / free / disposable email providers that may NOT onboard a tenant
+    # (a real org signs up with its own corporate domain → 422). Comma-separated;
+    # an entry ending in a dot (e.g. "gmx.") matches that label + any TLD.
+    # NOTE: deliberately NOT set here — the rich default lives on the @Value in
+    # RegisterTenantService so the list ships out of the box. Set the env var
+    # APP_ONBOARDING_BLOCKED_EMAIL_DOMAINS only to REPLACE it (a blank value
+    # here would override the code default with an empty list — same trap as
+    # APP_SECURITY_JWT_AUDIENCE).
   purge:
     softDelete:
       enabled: ${APP_PURGE_SOFT_DELETE_ENABLED:false}

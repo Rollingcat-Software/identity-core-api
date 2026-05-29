@@ -100,4 +100,38 @@ public class SmtpEmailService implements EmailService {
             log.error("Failed to send guest invitation email to: {}", to, e);
         }
     }
+
+    @Override
+    @Async
+    public void sendTenantOnboardingVerification(String to, String adminName, String orgName, String token) {
+        try {
+            String verifyLink = frontendBaseUrl + "/verify-email?token="
+                    + URLEncoder.encode(token, StandardCharsets.UTF_8);
+
+            StringBuilder body = new StringBuilder();
+            if (adminName != null && !adminName.isBlank()) {
+                body.append("Hello ").append(adminName).append(",\n\n");
+            } else {
+                body.append("Hello,\n\n");
+            }
+            body.append("Thanks for registering '").append(orgName)
+                    .append("' on FIVUCSAS.\n\n")
+                    .append("Verify your email to activate your organisation and finish setting up "
+                            + "your administrator account. Open the link below:\n\n")
+                    .append(verifyLink).append("\n\n")
+                    .append("This link expires in 24 hours. If you did not request this, you can ")
+                    .append("safely ignore this email.\n\n")
+                    .append("— FIVUCSAS");
+
+            SimpleMailMessage mail = new SimpleMailMessage();
+            mail.setFrom(fromAddress);
+            mail.setTo(to);
+            mail.setSubject("FIVUCSAS - Verify your email to activate " + orgName);
+            mail.setText(body.toString());
+            mailSender.send(mail);
+            log.info("Tenant onboarding verification email sent to: {}", to);
+        } catch (Exception e) {
+            log.error("Failed to send tenant onboarding verification email to: {}", to, e);
+        }
+    }
 }
