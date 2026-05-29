@@ -32,6 +32,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -108,8 +109,11 @@ class RegisterTenantServiceTest {
 
         verify(emailService).sendTenantOnboardingVerification(
                 eq("admin@acme.example"), eq("Ada"), eq("Acme Corp"), eq("verify-token-123"));
+        // userId is null for self-onboarding (pre-auth) — passing the tenant id
+        // into the audit_logs.user_id FK slot was the #124 bug. Tenant id now
+        // lives in the details string (last arg).
         verify(auditLogPort).logSecurityEvent(
-                eq(result.tenantId().toString()), eq("TENANT_SELF_ONBOARDED"), anyString(), anyString());
+                isNull(), eq("TENANT_SELF_ONBOARDED"), anyString(), anyString());
     }
 
     @Test
