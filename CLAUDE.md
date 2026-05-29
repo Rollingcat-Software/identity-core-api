@@ -94,8 +94,24 @@ V61: audit_logs.tenant_id SET NOT NULL (#99) — self-gating: pre-checks 0 NULLs
   `ahabgu@gmail.com` between 06:34–06:38 UTC on 2026-05-04 (Hibernate was
   treating manually-assigned UUIDs as merge candidates → silent NOOP on insert).
 
-## Operator reality (2026-05-28 update)
+## Operator reality (2026-05-29 update)
 
+- **Rebuilt 2026-05-29 12:25 UTC** (image `7109c30f`, healthy, boot 24s) — shipped
+  PR #115 (two admin 500 fixes) + the merged 2026-05-29 delta (#99 V61, #114 dead
+  card-detect proxy removal). **V61 applied** (audit_logs.tenant_id → NOT NULL;
+  precondition 0 NULLs verified before the rebuild). Flyway now at V61.
+- **PR #115 (two prod admin 500s)** — (1) Auth Flows "Make Default" star hit
+  `23505 uq_auth_flow_default`: the dethrone-then-claim in
+  `ManageAuthFlowService.updateFlow` now uses `saveAndFlush` so the partial unique
+  index slot is freed per-statement before the new default claims it. (2)
+  `/enrollments` list 500'd via `EntityNotFoundException` when an enrollment's
+  `User` proxy pointed at a soft-deleted/missing row (5 of 37 in prod) — the first
+  bad row aborted the whole list. `EnrollmentQueryService.mapEnrollmentToDto` now
+  force-inits the proxy in a try/catch and renders null user fields instead.
+- Note: the parent submodule pointer for identity-core-api had drifted STALE — it
+  read `606f1f4` while the deployed code was ~`5c50b68` (the 2026-05-28 security
+  bundle was deployed but the pointer was never bumped). Verify deployed state by
+  the running container / Flyway version, not the parent pointer, until bumped.
 - V60 (drop refresh_tokens.token plaintext) applied in prod. Prod has been rebuilt
   since the 2026-05-04 pending note — V56 through V60 all applied.
 - pg_partman (V57) is fail-soft. `ALTER DATABASE identity_core SET app.skip_partman_v57='on'`
