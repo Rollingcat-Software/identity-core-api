@@ -34,6 +34,7 @@ public class ManageTenantService implements ManageTenantUseCase {
 
     private final TenantRepository tenantRepository;
     private final com.fivucsas.identity.repository.UserRepository userRepository;
+    private final com.fivucsas.identity.repository.TenantEmailDomainRepository tenantEmailDomainRepository;
     private final AuditLogPort auditLogPort;
     private final TenantScopeResolver tenantScopeResolver;
 
@@ -117,7 +118,7 @@ public class ManageTenantService implements ManageTenantUseCase {
         log.info("Fetching all tenants");
 
         return tenantRepository.findAll().stream()
-            .map(this::mapToResponse)
+            .map(t -> mapToResponse(t, false))
             .collect(Collectors.toList());
     }
 
@@ -160,7 +161,8 @@ public class ManageTenantService implements ManageTenantUseCase {
             command.getBiometricEnabled() != null ? command.getBiometricEnabled() : tenant.isBiometricEnabled(),
             command.getSessionTimeoutMinutes() != null ? command.getSessionTimeoutMinutes() : tenant.getSessionTimeoutMinutes(),
             command.getRefreshTokenValidityDays() != null ? command.getRefreshTokenValidityDays() : tenant.getRefreshTokenValidityDays(),
-            command.getMfaRequired() != null ? command.getMfaRequired() : tenant.isMfaRequired()
+            command.getMfaRequired() != null ? command.getMfaRequired() : tenant.isMfaRequired(),
+            command.getEnforceDomainMatching() != null ? command.getEnforceDomainMatching() : tenant.isEnforceDomainMatching()
         );
         tenant.updateConfiguration(config);
 
@@ -275,7 +277,33 @@ public class ManageTenantService implements ManageTenantUseCase {
     }
 
     private TenantResponse mapToResponse(Tenant tenant) {
+        return mapToResponse(tenant, true);
+    }
+
+    /**
+     * Maps a domain tenant to its response DTO.
+     *
+     * @param includeEmailDomains when {@code true}, eagerly loads the tenant's
+     *        {@code tenant_email_domains} rows so the admin UI can render
+     *        current state. The list-all path passes {@code false} to avoid an
+     *        N+1 domain query per tenant; single-tenant reads pass {@code true}.
+     */
+    private TenantResponse mapToResponse(Tenant tenant, boolean includeEmailDomains) {
         long currentUsers = userRepository.countByTenantId(tenant.getId());
+        java.util.List<com.fivucsas.identity.application.dto.response.TenantEmailDomainResponse> domains = null;
+        if (includeEmailDomains) {
+            domains = tenantEmailDomainRepository.findByIdTenantId(tenant.getId()).stream()
+                .sorted(java.util.Comparator
+                    // primary first, then alphabetical for a stable display order
+                    .comparing((com.fivucsas.identity.entity.TenantEmailDomain d) -> !d.isPrimary())
+                    .thenComparing(com.fivucsas.identity.entity.TenantEmailDomain::getEmailDomain))
+                .map(d -> com.fivucsas.identity.application.dto.response.TenantEmailDomainResponse.builder()
+                    .domain(d.getEmailDomain())
+                    .isPrimary(d.isPrimary())
+                    .createdAt(d.getCreatedAt())
+                    .build())
+                .collect(Collectors.toList());
+        }
         return TenantResponse.builder()
             .id(tenant.getId().toString())
             .name(tenant.getName())
@@ -290,6 +318,8 @@ public class ManageTenantService implements ManageTenantUseCase {
             .sessionTimeoutMinutes(tenant.getSessionTimeoutMinutes())
             .refreshTokenValidityDays(tenant.getRefreshTokenValidityDays())
             .mfaRequired(tenant.isMfaRequired())
+            .enforceDomainMatching(tenant.isEnforceDomainMatching())
+            .emailDomains(domains)
             .createdAt(tenant.getCreatedAt())
             .updatedAt(tenant.getUpdatedAt())
             .build();

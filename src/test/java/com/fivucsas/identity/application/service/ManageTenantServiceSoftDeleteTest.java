@@ -51,6 +51,9 @@ class ManageTenantServiceSoftDeleteTest {
     private UserRepository userRepository;
 
     @Mock
+    private com.fivucsas.identity.repository.TenantEmailDomainRepository tenantEmailDomainRepository;
+
+    @Mock
     private com.fivucsas.identity.application.port.output.AuditLogPort auditLogPort;
 
     @InjectMocks

@@ -154,6 +154,7 @@ public class TenantController {
             .sessionTimeoutMinutes(request.getSessionTimeoutMinutes())
             .refreshTokenValidityDays(request.getRefreshTokenValidityDays())
             .mfaRequired(request.getMfaRequired())
+            .enforceDomainMatching(request.getEnforceDomainMatching())
             .build();
 
         TenantResponse response = manageTenantUseCase.updateTenant(command);
@@ -240,5 +241,11 @@ public class TenantController {
         private Integer refreshTokenValidityDays;
 
         private Boolean mfaRequired;
+
+        /**
+         * Opt-in email-domain enforcement (V62). When true, only registrants
+         * whose email domain is in this tenant's tenant_email_domains may join.
+         */
+        private Boolean enforceDomainMatching;
     }
 }

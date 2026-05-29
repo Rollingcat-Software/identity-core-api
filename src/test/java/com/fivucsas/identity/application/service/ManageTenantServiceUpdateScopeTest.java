@@ -53,6 +53,9 @@ class ManageTenantServiceUpdateScopeTest {
     private UserRepository userRepository;
 
     @Mock
+    private com.fivucsas.identity.repository.TenantEmailDomainRepository tenantEmailDomainRepository;
+
+    @Mock
     private com.fivucsas.identity.application.port.output.AuditLogPort auditLogPort;
 
     @Mock
