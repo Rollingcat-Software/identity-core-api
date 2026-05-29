@@ -85,6 +85,18 @@ V64: DNS-TXT domain verification + default-role-on-join.
      "fivucsas-domain-verification={token}") and POST .../{domain}/verify (DNS
      lookup → verified=true on match; 200/422/409). DNS via JNDI behind
      DnsTxtLookupPort (no new dep).
+V65-V67: Identity & Account-Linking Phase 1 (identities, identity_emails,
+     users.identity_id FK + backfill). Zero behavior change. See
+     docs/IDENTITY_ACCOUNT_LINKING_DESIGN.md.
+V68: Identity & Account-Linking Phase 3 (Model A) —
+     identity_tenant_biometric_consent(identity_id, tenant_id, method?, granted,
+     granted_at, revoked_at, UNIQUE(identity_id, tenant_id, method)). Cross-tenant
+     / platform-level table (deliberately NOT @Filter(tenantFilter), like
+     identities). Backs the per-tenant biometric-consent endpoints + the
+     consent-gated cross-tenant verify routing. Does NOT re-key the
+     biometric-processor pgvector store — "one template per person" is achieved at
+     the api orchestration layer (canonical-enrollment routing). Idempotent
+     (CREATE ... IF NOT EXISTS); applies cleanly from V67.
 
 **V34-V60 applied in prod. Last rebuild included V60 (drop refresh_tokens.token plaintext).**
 

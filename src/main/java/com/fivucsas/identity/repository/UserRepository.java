@@ -161,6 +161,70 @@ public interface UserRepository extends JpaRepository<User, UUID> {
     int hardDeleteById(@Param("id") UUID id);
 
     /**
+     * Resolves the CANONICAL biometric enrollment for a person (identity) for a
+     * given method, EXCLUDING the requesting tenant (Model A, Phase 3).
+     *
+     * <p>"Canonical" = the membership ({@code users} row) under the SAME identity,
+     * in a DIFFERENT tenant, that has an ENROLLED enrollment for {@code method}.
+     * The api routes a consented cross-tenant verify to this row's {@code user_id}
+     * (the bio face store is keyed by {@code user_id}). The oldest such enrollment
+     * wins (deterministic; the person's original enrollment), returned first.</p>
+     *
+     * <p><b>Native query</b> — deliberately bypasses the Hibernate
+     * {@code @Filter(tenantFilter)} on {@code User}/{@code UserEnrollment} and the
+     * {@code @SQLRestriction("deleted_at IS NULL")} is re-applied explicitly. This
+     * is a CONTROLLED cross-tenant read: it is reached ONLY after a consent grant
+     * has been verified by {@code BiometricConsentResolver}, never on the open
+     * read path. Returns {@code [user_id, tenant_id]} pairs; the caller takes the
+     * first (oldest) and forwards both to the existing bio verify so tenant-scoped
+     * voice/search predicates keep matching the canonical tenant.</p>
+     *
+     * @param identityId      the person whose canonical enrollment to find
+     * @param method          the {@code AuthMethodType} name (e.g. {@code FACE})
+     * @param excludeTenantId the requesting tenant — its own enrollments are
+     *                        excluded (same-tenant verify is handled by the
+     *                        unchanged existing path)
+     * @return rows of {@code (user_id, tenant_id)}, oldest enrollment first
+     */
+    @Query(value =
+            "SELECT u.id AS user_id, u.tenant_id AS tenant_id "
+            + "FROM users u "
+            + "JOIN user_enrollments e ON e.user_id = u.id "
+            + "WHERE u.identity_id = :identityId "
+            + "  AND u.deleted_at IS NULL "
+            + "  AND u.tenant_id <> :excludeTenantId "
+            + "  AND e.auth_method_type = :method "
+            + "  AND e.status = 'ENROLLED' "
+            + "ORDER BY e.enrolled_at ASC NULLS LAST, e.created_at ASC",
+            nativeQuery = true)
+    List<Object[]> findCanonicalEnrollment(@Param("identityId") UUID identityId,
+                                           @Param("method") String method,
+                                           @Param("excludeTenantId") UUID excludeTenantId);
+
+    /** Reads a user's identity_id without initializing the lazy identity proxy. */
+    @Query("SELECT u.identityId FROM User u WHERE u.id = :userId")
+    Optional<UUID> findIdentityIdById(@Param("userId") UUID userId);
+
+    /**
+     * Whether the given identity holds a (non-deleted) membership in the given
+     * tenant (Model A, Phase 3). Backs the consent-grant guard: a caller may only
+     * manage biometric consent for a tenant where they actually have a membership.
+     *
+     * <p>Native query so it does NOT get scoped by the Hibernate
+     * {@code tenantFilter} — the check is INTENTIONALLY cross-tenant (the caller's
+     * own identity spans tenants). Identity ownership is already proven by the
+     * controller (the {@code identityId} comes from the authenticated caller), so
+     * this is not a cross-tenant leak.</p>
+     */
+    @Query(value =
+            "SELECT EXISTS (SELECT 1 FROM users u "
+            + "WHERE u.identity_id = :identityId AND u.tenant_id = :tenantId "
+            + "AND u.deleted_at IS NULL)",
+            nativeQuery = true)
+    boolean identityHasMembershipInTenant(@Param("identityId") UUID identityId,
+                                          @Param("tenantId") UUID tenantId);
+
+    /**
      * Re-points a membership's {@code identity_id} FK (Phase-2 account linking).
      *
      * <p>Issued as a bulk native UPDATE so the link/unlink flow never has to load

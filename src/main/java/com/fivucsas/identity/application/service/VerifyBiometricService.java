@@ -7,6 +7,7 @@ import com.fivucsas.identity.application.port.output.BiometricServicePort;
 import com.fivucsas.identity.domain.exception.BiometricNotEnrolledException;
 import com.fivucsas.identity.domain.exception.BiometricVerificationException;
 import com.fivucsas.identity.domain.exception.UserNotFoundException;
+import com.fivucsas.identity.domain.model.auth.AuthMethodType;
 import com.fivucsas.identity.domain.repository.UserRepository;
 import com.fivucsas.identity.entity.User;
 import lombok.RequiredArgsConstructor;
@@ -30,6 +31,7 @@ public class VerifyBiometricService implements VerifyBiometricUseCase {
     private final UserRepository userRepository;
     private final BiometricServicePort biometricService;
     private final com.fivucsas.identity.application.port.output.EventPublisherPort eventPublisher;
+    private final com.fivucsas.identity.application.port.output.BiometricConsentResolver consentResolver;
 
     @Override
     @Transactional
@@ -40,17 +42,36 @@ public class VerifyBiometricService implements VerifyBiometricUseCase {
         User user = userRepository.findById(userId)
             .orElseThrow(() -> new UserNotFoundException(command.getUserId()));
 
+        // The bio face store is keyed by user_id. By default we verify against the
+        // requesting user's own embedding under their own tenant.
+        UUID targetUserId = userId;
+        String targetTenantId = command.getTenantId();
+
         if (!user.isBiometricEnrolled()) {
-            throw new BiometricNotEnrolledException(command.getUserId());
+            // Model A, Phase 3 — consent-gated cross-tenant verify. The requesting
+            // user has NO local FACE enrollment. If the SAME PERSON (identity) has
+            // a canonical FACE enrollment under another membership AND has granted
+            // this requesting tenant consent, route the verify to that canonical
+            // embedding. Otherwise behave EXACTLY as "not enrolled" — leaking no
+            // signal that a template exists elsewhere (default-DENY).
+            var canonical = consentResolver.resolveConsentedCanonicalTarget(
+                    userId, AuthMethodType.FACE.name());
+            if (canonical.isEmpty()) {
+                throw new BiometricNotEnrolledException(command.getUserId());
+            }
+            targetUserId = canonical.get().canonicalUserId();
+            // Forward the CANONICAL tenant so tenant-scoped bio predicates keep
+            // matching the embedding that actually lives there.
+            targetTenantId = canonical.get().canonicalTenantId().toString();
         }
 
         // Call external biometric service. Forward tenant_id +
         // client_embedding(s) for tenant-scoped pgvector matching and
         // D2 log-only client telemetry.
         Map<String, Object> response = biometricService.verifyFace(
-                userId,
+                targetUserId,
                 command.getFaceImage(),
-                command.getTenantId(),
+                targetTenantId,
                 command.getClientEmbedding(),
                 command.getClientEmbeddings());
 
