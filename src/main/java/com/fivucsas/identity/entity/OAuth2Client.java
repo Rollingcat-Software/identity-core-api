@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.Filter;
 import org.hibernate.annotations.UpdateTimestamp;
 
 import java.net.URI;
@@ -24,6 +25,8 @@ import java.util.UUID;
     @Index(name = "idx_oauth2_clients_client_id", columnList = "client_id", unique = true),
     @Index(name = "idx_oauth2_clients_tenant_id", columnList = "tenant_id")
 })
+// Defense-in-depth tenant isolation (P0-1). @FilterDef is global from User.java.
+@Filter(name = "tenantFilter", condition = "tenant_id = :tenantId")
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 @AllArgsConstructor(access = AccessLevel.PRIVATE)

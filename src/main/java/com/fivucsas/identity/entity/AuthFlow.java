@@ -5,6 +5,7 @@ import com.fivucsas.identity.domain.model.auth.OperationType;
 import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.Filter;
 import org.hibernate.annotations.UpdateTimestamp;
 
 import java.time.Instant;
@@ -14,6 +15,8 @@ import java.util.UUID;
 
 @Entity
 @Table(name = "auth_flows")
+// Defense-in-depth tenant isolation (P0-1). @FilterDef is global from User.java.
+@Filter(name = "tenantFilter", condition = "tenant_id = :tenantId")
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 @AllArgsConstructor(access = AccessLevel.PRIVATE)

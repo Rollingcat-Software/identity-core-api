@@ -6,6 +6,7 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.Filter;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
@@ -31,6 +32,8 @@ import java.util.UUID;
  */
 @Entity
 @Table(name = "audit_logs")
+// Defense-in-depth tenant isolation (P0-1). @FilterDef is global from User.java.
+@Filter(name = "tenantFilter", condition = "tenant_id = :tenantId")
 @Data
 @Builder
 @NoArgsConstructor
