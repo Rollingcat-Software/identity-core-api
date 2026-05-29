@@ -24,5 +24,14 @@ public interface AuthFlowRepositoryPort {
 
     AuthFlow save(AuthFlow flow);
 
+    /**
+     * Persists and immediately flushes to the database. Needed when a later write
+     * in the same transaction would otherwise collide with the partial unique
+     * index {@code uq_auth_flow_default(tenant_id, operation_type)}: the previous
+     * default must be cleared in the DB <em>before</em> a new flow claims it,
+     * because the index is checked per-statement (not deferred to commit).
+     */
+    AuthFlow saveAndFlush(AuthFlow flow);
+
     void delete(AuthFlow flow);
 }

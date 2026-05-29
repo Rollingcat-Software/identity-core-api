@@ -48,6 +48,11 @@ public class AuthFlowRepositoryAdapter implements AuthFlowRepositoryPort {
     }
 
     @Override
+    public AuthFlow saveAndFlush(AuthFlow flow) {
+        return jpaRepository.saveAndFlush(flow);
+    }
+
+    @Override
     public void delete(AuthFlow flow) {
         jpaRepository.delete(flow);
     }

@@ -129,13 +129,22 @@ public class ManageAuthFlowService implements ManageAuthFlowUseCase {
             // Without this, calling setAsDefault here would silently produce
             // two defaults — surprising for the runtime resolver and the
             // admin UI alike.
+            //
+            // saveAndFlush (not save): the partial unique index
+            // uq_auth_flow_default(tenant_id, operation_type) is checked
+            // per-statement, not deferred to commit. Hibernate does not
+            // guarantee the UPDATE that clears the old default runs before the
+            // UPDATE that sets the new one, so a plain save() lets the new
+            // default's INSERT/UPDATE hit the index while the old row is still
+            // is_default=true → 23505 duplicate-key violation (observed in prod
+            // 2026-05-29). Flushing the dethrone first frees the slot.
             authFlowRepository
                     .findAllByTenantIdAndOperationType(tenantId, flow.getOperationType())
                     .stream()
                     .filter(f -> f.isDefault() && !f.getId().equals(flow.getId()))
                     .forEach(f -> {
                         f.unsetDefault();
-                        authFlowRepository.save(f);
+                        authFlowRepository.saveAndFlush(f);
                     });
             flow.setAsDefault();
         }
