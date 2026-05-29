@@ -226,4 +226,17 @@ public class RbacAuthorizationService {
                 .map(User::getTenant)
                 .map(t -> t.getId());
     }
+
+    /**
+     * Returns the {@code id} of the currently authenticated principal, or
+     * {@link Optional#empty()} if unauthenticated.
+     *
+     * <p>Exposed (like {@link #getCurrentUserTenantId()}) so application /
+     * controller code can attribute audit rows to the acting user WITHOUT
+     * importing {@code entity.User} — keeping the JPA entity behind the
+     * {@code security..} boundary ratchet ({@code UserDomainBoundaryTest}).</p>
+     */
+    public Optional<UUID> getCurrentUserId() {
+        return getCurrentUser().map(User::getId);
+    }
 }

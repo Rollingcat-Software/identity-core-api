@@ -113,6 +113,15 @@ public class Tenant {
     @Builder.Default
     private boolean enforceDomainMatching = false;
 
+    /**
+     * Name ({@code roles.name}) of the per-tenant role auto-assigned to a user
+     * who joins this tenant by registering with a VERIFIED email domain (V64).
+     * NULL means fall back to the seeded baseline role ({@code "USER"}).
+     * Settable via {@code PUT /api/v1/tenants/{id}}.
+     */
+    @Column(name = "default_member_role", length = 100)
+    private String defaultMemberRole;
+
     @CreationTimestamp
     @Column(nullable = false, updatable = false)
     private Instant createdAt;
@@ -221,6 +230,17 @@ public class Tenant {
         this.refreshTokenValidityDays = configuration.getRefreshTokenValidityDays();
         this.mfaRequired = configuration.isMfaRequired();
         this.enforceDomainMatching = configuration.isEnforceDomainMatching();
+    }
+
+    /**
+     * Sets (or clears, when {@code null}/blank) the per-tenant default member
+     * role applied on verified-domain auto-join (V64). The name is normalised
+     * to a non-blank trimmed value or {@code null}.
+     */
+    public void setDefaultMemberRole(String roleName) {
+        this.defaultMemberRole = (roleName == null || roleName.isBlank())
+                ? null
+                : roleName.trim();
     }
 
     /**

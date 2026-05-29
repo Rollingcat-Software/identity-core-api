@@ -54,6 +54,7 @@ public class RegisterUserService implements RegisterUserUseCase {
     private final com.fivucsas.identity.application.port.output.EventPublisherPort eventPublisher;
     private final com.fivucsas.identity.infrastructure.otp.OtpService otpService;
     private final com.fivucsas.identity.infrastructure.email.EmailService emailService;
+    private final com.fivucsas.identity.application.port.output.MemberRoleAssignmentPort memberRoleAssignmentPort;
 
     @Value("${app.default-tenant-slug:default}")
     private String defaultTenantSlug;
@@ -80,13 +81,18 @@ public class RegisterUserService implements RegisterUserUseCase {
         //      V44 rollout so tenants whose admin has not yet migrated to
         //      tenant_email_domains continue to resolve correctly.
         //   4. Default tenant (configurable slug) — last-resort fall-back.
+        // Tracks whether the tenant was AUTO-BOUND from a VERIFIED email domain
+        // (V63/V64). Only that path triggers default-role-on-join — an explicit
+        // tenant context (invitation/header) or the default-tenant fallback do
+        // not auto-provision a member role.
+        boolean[] autoBoundViaVerifiedDomain = {false};
         Tenant defaultTenant;
         java.util.UUID contextTenantId = com.fivucsas.identity.infrastructure.multitenancy.TenantContext.getCurrentTenant();
         if (contextTenantId != null) {
             defaultTenant = tenantRepository.findById(contextTenantId)
                 .orElseThrow(() -> new com.fivucsas.identity.domain.exception.TenantNotFoundException(contextTenantId.toString()));
         } else {
-            defaultTenant = resolveTenantByEmailDomain(email.getDomain())
+            defaultTenant = resolveTenantByEmailDomain(email.getDomain(), autoBoundViaVerifiedDomain)
                 .orElseGet(() -> {
                     Tenant fallback = tenantRepository.findBySlug(defaultTenantSlug)
                         .orElseGet(() -> tenantRepository.findAll().stream().findFirst()
@@ -160,17 +166,34 @@ public class RegisterUserService implements RegisterUserUseCase {
 
         // Save user
         User savedUser = userRepository.save(user);
-        log.info("User registered successfully: {}", savedUser.getId());
-        auditLogPort.logUserRegistered(savedUser.getId().toString(), savedUser.getEmail(), command.getIpAddress());
-        eventPublisher.publishUserRegistered(savedUser.getId().toString(), savedUser.getEmail());
+        // Capture the id once (keeps entity.User method-call surface minimal).
+        java.util.UUID newUserId = savedUser.getId();
+        String newUserEmail = savedUser.getEmail();
+        log.info("User registered successfully: {}", newUserId);
+        auditLogPort.logUserRegistered(newUserId.toString(), newUserEmail, command.getIpAddress());
+        eventPublisher.publishUserRegistered(newUserId.toString(), newUserEmail);
+
+        // default-role-on-join (V64): a user who auto-joined a tenant via a
+        // VERIFIED email domain is provisioned with that tenant's default member
+        // role (falls back to the seeded baseline role). This is the in-platform
+        // "JIT" — NOT external-IdP federation. Best-effort: a failure here never
+        // rolls back the registration (the adapter swallows + logs).
+        if (autoBoundViaVerifiedDomain[0]) {
+            String assignedRole = memberRoleAssignmentPort.assignDefaultMemberRole(
+                    newUserId, defaultTenant.getId());
+            if (assignedRole != null) {
+                log.info("Assigned default member role '{}' to auto-joined user {} (tenant {})",
+                        assignedRole, newUserId, defaultTenant.getId());
+            }
+        }
 
         // Send email verification code
         try {
-            String verificationCode = otpService.generate("email-verify:" + savedUser.getId());
-            emailService.sendOtp(savedUser.getEmail(), verificationCode);
-            log.info("Email verification code sent to: {}", savedUser.getEmail());
+            String verificationCode = otpService.generate("email-verify:" + newUserId);
+            emailService.sendOtp(newUserEmail, verificationCode);
+            log.info("Email verification code sent to: {}", newUserEmail);
         } catch (Exception e) {
-            log.warn("Failed to send email verification code to: {}", savedUser.getEmail(), e);
+            log.warn("Failed to send email verification code to: {}", newUserEmail, e);
         }
 
         // Generate tokens
@@ -201,7 +224,8 @@ public class RegisterUserService implements RegisterUserUseCase {
      * @return the resolved tenant, or empty if no tenant claims the domain
      *         via either path
      */
-    private java.util.Optional<Tenant> resolveTenantByEmailDomain(String emailDomain) {
+    private java.util.Optional<Tenant> resolveTenantByEmailDomain(
+            String emailDomain, boolean[] autoBoundViaVerifiedDomain) {
         if (emailDomain == null || emailDomain.isBlank()) {
             return java.util.Optional.empty();
         }
@@ -213,7 +237,12 @@ public class RegisterUserService implements RegisterUserUseCase {
         if (mapped.isPresent()) {
             java.util.UUID tenantId = mapped.get().getTenantId();
             log.info("Resolved tenant {} for email domain '{}' via tenant_email_domains (verified)", tenantId, emailDomain);
-            return tenantRepository.findById(tenantId);
+            java.util.Optional<Tenant> resolved = tenantRepository.findById(tenantId);
+            // Mark as a verified-domain auto-bind so the caller applies the
+            // tenant's default member role on join (V64). The legacy
+            // tenants.domain fallback below does NOT set this flag.
+            resolved.ifPresent(t -> autoBoundViaVerifiedDomain[0] = true);
+            return resolved;
         }
         java.util.Optional<Tenant> legacy =
             tenantRepository.findByLegacyDomainIgnoreCase(emailDomain);

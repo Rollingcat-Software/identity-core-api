@@ -23,6 +23,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -37,6 +38,8 @@ class ManageTenantEmailDomainServiceTest {
     private JpaTenantRepository tenantRepository;
     @Mock
     private AuditLogPort auditLogPort;
+    @Mock
+    private com.fivucsas.identity.application.port.output.DnsTxtLookupPort dnsTxtLookupPort;
 
     @InjectMocks
     private ManageTenantEmailDomainService service;
@@ -145,5 +148,125 @@ class ManageTenantEmailDomainServiceTest {
         assertThat(oldPrimary.isPrimary()).isFalse(); // dethroned
         assertThat(target.isPrimary()).isTrue();
         verify(auditLogPort).logSecurityEvent(eq(TENANT_ID.toString()), eq("TENANT_EMAIL_DOMAIN_PRIMARY_SET"), any(), any());
+    }
+
+    // ==================== DNS-TXT verification (V64) ====================
+
+    @Test
+    @DisplayName("requestDomainVerification issues a token and returns the TXT record contract")
+    void requestVerificationIssuesToken() {
+        TenantEmailDomain row = TenantEmailDomain.create(TENANT_ID, "acme.com", true, false);
+        when(emailDomainRepository.findById(TenantEmailDomainId.of(TENANT_ID, "acme.com")))
+                .thenReturn(Optional.of(row));
+        when(emailDomainRepository.saveAndFlush(any(TenantEmailDomain.class)))
+                .thenAnswer(inv -> inv.getArgument(0));
+
+        var resp = service.requestDomainVerification(TENANT_ID, "acme.com");
+
+        assertThat(resp.getDomain()).isEqualTo("acme.com");
+        assertThat(resp.isVerified()).isFalse();
+        assertThat(resp.getRecordName()).isEqualTo("_fivucsas-verify.acme.com");
+        assertThat(resp.getRecordType()).isEqualTo("TXT");
+        assertThat(resp.getRecordValue()).startsWith("fivucsas-domain-verification=");
+        assertThat(row.getVerificationToken()).isNotBlank();
+    }
+
+    @Test
+    @DisplayName("requestDomainVerification is idempotent — reuses the existing token")
+    void requestVerificationIdempotent() {
+        TenantEmailDomain row = TenantEmailDomain.create(TENANT_ID, "acme.com", true, false);
+        row.issueVerificationToken("EXISTING-TOKEN");
+        when(emailDomainRepository.findById(TenantEmailDomainId.of(TENANT_ID, "acme.com")))
+                .thenReturn(Optional.of(row));
+
+        var resp = service.requestDomainVerification(TENANT_ID, "acme.com");
+
+        assertThat(resp.getRecordValue()).isEqualTo("fivucsas-domain-verification=EXISTING-TOKEN");
+        verify(emailDomainRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    @DisplayName("verifyDomain flips verified=true when the expected TXT record is present")
+    void verifyDomainSucceedsWhenRecordPresent() {
+        UUID admin = UUID.randomUUID();
+        TenantEmailDomain row = TenantEmailDomain.create(TENANT_ID, "acme.com", true, false);
+        row.issueVerificationToken("TOK123");
+        when(emailDomainRepository.findById(TenantEmailDomainId.of(TENANT_ID, "acme.com")))
+                .thenReturn(Optional.of(row));
+        when(dnsTxtLookupPort.lookupTxtRecords("_fivucsas-verify.acme.com"))
+                .thenReturn(List.of("some-other-record", "fivucsas-domain-verification=TOK123"));
+        when(emailDomainRepository.saveAndFlush(any(TenantEmailDomain.class)))
+                .thenAnswer(inv -> inv.getArgument(0));
+
+        var result = service.verifyDomain(TENANT_ID, "acme.com", admin);
+
+        assertThat(result.isVerified()).isTrue();
+        assertThat(row.isVerified()).isTrue();
+        assertThat(row.getVerificationToken()).isNull(); // spent token cleared
+        verify(auditLogPort).logSecurityEvent(eq(admin.toString()), eq("TENANT_EMAIL_DOMAIN_VERIFIED"), any(), any());
+    }
+
+    @Test
+    @DisplayName("verifyDomain returns RECORD_NOT_FOUND (not verified) when the TXT record is absent")
+    void verifyDomainFailsWhenRecordAbsent() {
+        TenantEmailDomain row = TenantEmailDomain.create(TENANT_ID, "acme.com", true, false);
+        row.issueVerificationToken("TOK123");
+        when(emailDomainRepository.findById(TenantEmailDomainId.of(TENANT_ID, "acme.com")))
+                .thenReturn(Optional.of(row));
+        when(dnsTxtLookupPort.lookupTxtRecords("_fivucsas-verify.acme.com"))
+                .thenReturn(List.of()); // nothing published
+
+        var result = service.verifyDomain(TENANT_ID, "acme.com", null);
+
+        assertThat(result.isVerified()).isFalse();
+        assertThat(result.getReason()).isEqualTo("RECORD_NOT_FOUND");
+        assertThat(row.isVerified()).isFalse();
+        verify(emailDomainRepository, never()).saveAndFlush(any());
+        verify(auditLogPort).logSecurityEvent(isNull(), eq("TENANT_EMAIL_DOMAIN_VERIFY_FAILED"), any(), any());
+    }
+
+    @Test
+    @DisplayName("verifyDomain returns RECORD_NOT_FOUND when a DIFFERENT token is published (mismatch)")
+    void verifyDomainFailsOnTokenMismatch() {
+        TenantEmailDomain row = TenantEmailDomain.create(TENANT_ID, "acme.com", true, false);
+        row.issueVerificationToken("EXPECTED");
+        when(emailDomainRepository.findById(TenantEmailDomainId.of(TENANT_ID, "acme.com")))
+                .thenReturn(Optional.of(row));
+        when(dnsTxtLookupPort.lookupTxtRecords("_fivucsas-verify.acme.com"))
+                .thenReturn(List.of("fivucsas-domain-verification=WRONG-VALUE"));
+
+        var result = service.verifyDomain(TENANT_ID, "acme.com", null);
+
+        assertThat(result.isVerified()).isFalse();
+        assertThat(result.getReason()).isEqualTo("RECORD_NOT_FOUND");
+        assertThat(row.isVerified()).isFalse();
+    }
+
+    @Test
+    @DisplayName("verifyDomain returns NO_CHALLENGE when no token was ever requested")
+    void verifyDomainFailsWithoutChallenge() {
+        TenantEmailDomain row = TenantEmailDomain.create(TENANT_ID, "acme.com", true, false); // no token
+        when(emailDomainRepository.findById(TenantEmailDomainId.of(TENANT_ID, "acme.com")))
+                .thenReturn(Optional.of(row));
+
+        var result = service.verifyDomain(TENANT_ID, "acme.com", null);
+
+        assertThat(result.isVerified()).isFalse();
+        assertThat(result.getReason()).isEqualTo("NO_CHALLENGE");
+        verifyNoInteractions(dnsTxtLookupPort);
+    }
+
+    @Test
+    @DisplayName("verifyDomain is idempotent — an already-verified domain returns verified=true")
+    void verifyDomainIdempotentWhenAlreadyVerified() {
+        TenantEmailDomain row = TenantEmailDomain.create(TENANT_ID, "acme.com", true, true);
+        when(emailDomainRepository.findById(TenantEmailDomainId.of(TENANT_ID, "acme.com")))
+                .thenReturn(Optional.of(row));
+
+        var result = service.verifyDomain(TENANT_ID, "acme.com", null);
+
+        assertThat(result.isVerified()).isTrue();
+        assertThat(result.getReason()).isEqualTo("ALREADY_VERIFIED");
+        verifyNoInteractions(dnsTxtLookupPort);
     }
 }

@@ -19,10 +19,16 @@ public final class TenantConfiguration {
     private final int refreshTokenValidityDays;
     private final boolean mfaRequired;
     private final boolean enforceDomainMatching;
+    /**
+     * Name of the per-tenant role auto-assigned to users who join via a verified
+     * email domain (V64). {@code null} = fall back to the seeded baseline role.
+     */
+    private final String defaultMemberRole;
 
     private TenantConfiguration(int maxUsers, boolean biometricEnabled,
                                 int sessionTimeoutMinutes, int refreshTokenValidityDays,
-                                boolean mfaRequired, boolean enforceDomainMatching) {
+                                boolean mfaRequired, boolean enforceDomainMatching,
+                                String defaultMemberRole) {
         if (maxUsers < 1) {
             throw new IllegalArgumentException("Max users must be at least 1");
         }
@@ -39,13 +45,15 @@ public final class TenantConfiguration {
         this.refreshTokenValidityDays = refreshTokenValidityDays;
         this.mfaRequired = mfaRequired;
         this.enforceDomainMatching = enforceDomainMatching;
+        this.defaultMemberRole = (defaultMemberRole == null || defaultMemberRole.isBlank())
+                ? null : defaultMemberRole.trim();
     }
 
     /**
      * Creates a default tenant configuration.
      */
     public static TenantConfiguration defaultConfiguration() {
-        return new TenantConfiguration(100, true, 30, 7, false, false);
+        return new TenantConfiguration(100, true, 30, 7, false, false, null);
     }
 
     /**
@@ -60,7 +68,7 @@ public final class TenantConfiguration {
                                          boolean mfaRequired) {
         return new TenantConfiguration(maxUsers, biometricEnabled,
                                        sessionTimeoutMinutes, refreshTokenValidityDays, mfaRequired,
-                                       false);
+                                       false, null);
     }
 
     /**
@@ -72,7 +80,20 @@ public final class TenantConfiguration {
                                          boolean mfaRequired, boolean enforceDomainMatching) {
         return new TenantConfiguration(maxUsers, biometricEnabled,
                                        sessionTimeoutMinutes, refreshTokenValidityDays, mfaRequired,
-                                       enforceDomainMatching);
+                                       enforceDomainMatching, null);
+    }
+
+    /**
+     * Creates a custom tenant configuration including the V64 per-tenant default
+     * member role.
+     */
+    public static TenantConfiguration of(int maxUsers, boolean biometricEnabled,
+                                         int sessionTimeoutMinutes, int refreshTokenValidityDays,
+                                         boolean mfaRequired, boolean enforceDomainMatching,
+                                         String defaultMemberRole) {
+        return new TenantConfiguration(maxUsers, biometricEnabled,
+                                       sessionTimeoutMinutes, refreshTokenValidityDays, mfaRequired,
+                                       enforceDomainMatching, defaultMemberRole);
     }
 
     /**
@@ -81,7 +102,7 @@ public final class TenantConfiguration {
     public TenantConfiguration withMaxUsers(int maxUsers) {
         return new TenantConfiguration(maxUsers, this.biometricEnabled,
                                        this.sessionTimeoutMinutes, this.refreshTokenValidityDays,
-                                       this.mfaRequired, this.enforceDomainMatching);
+                                       this.mfaRequired, this.enforceDomainMatching, this.defaultMemberRole);
     }
 
     /**
@@ -90,7 +111,7 @@ public final class TenantConfiguration {
     public TenantConfiguration withBiometricEnabled(boolean enabled) {
         return new TenantConfiguration(this.maxUsers, enabled,
                                        this.sessionTimeoutMinutes, this.refreshTokenValidityDays,
-                                       this.mfaRequired, this.enforceDomainMatching);
+                                       this.mfaRequired, this.enforceDomainMatching, this.defaultMemberRole);
     }
 
     /**
@@ -99,7 +120,7 @@ public final class TenantConfiguration {
     public TenantConfiguration withMfaRequired(boolean required) {
         return new TenantConfiguration(this.maxUsers, this.biometricEnabled,
                                        this.sessionTimeoutMinutes, this.refreshTokenValidityDays,
-                                       required, this.enforceDomainMatching);
+                                       required, this.enforceDomainMatching, this.defaultMemberRole);
     }
 
     /**
@@ -108,7 +129,16 @@ public final class TenantConfiguration {
     public TenantConfiguration withEnforceDomainMatching(boolean enforce) {
         return new TenantConfiguration(this.maxUsers, this.biometricEnabled,
                                        this.sessionTimeoutMinutes, this.refreshTokenValidityDays,
-                                       this.mfaRequired, enforce);
+                                       this.mfaRequired, enforce, this.defaultMemberRole);
+    }
+
+    /**
+     * Creates configuration with the V64 default member role changed.
+     */
+    public TenantConfiguration withDefaultMemberRole(String defaultMemberRole) {
+        return new TenantConfiguration(this.maxUsers, this.biometricEnabled,
+                                       this.sessionTimeoutMinutes, this.refreshTokenValidityDays,
+                                       this.mfaRequired, this.enforceDomainMatching, defaultMemberRole);
     }
 
     public int getMaxUsers() {
@@ -135,6 +165,11 @@ public final class TenantConfiguration {
         return enforceDomainMatching;
     }
 
+    /** Per-tenant default member role (V64); {@code null} = seeded baseline. */
+    public String getDefaultMemberRole() {
+        return defaultMemberRole;
+    }
+
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;
@@ -145,20 +180,24 @@ public final class TenantConfiguration {
                sessionTimeoutMinutes == that.sessionTimeoutMinutes &&
                refreshTokenValidityDays == that.refreshTokenValidityDays &&
                mfaRequired == that.mfaRequired &&
-               enforceDomainMatching == that.enforceDomainMatching;
+               enforceDomainMatching == that.enforceDomainMatching &&
+               Objects.equals(defaultMemberRole, that.defaultMemberRole);
     }
 
     @Override
     public int hashCode() {
         return Objects.hash(maxUsers, biometricEnabled, sessionTimeoutMinutes,
-                           refreshTokenValidityDays, mfaRequired, enforceDomainMatching);
+                           refreshTokenValidityDays, mfaRequired, enforceDomainMatching,
+                           defaultMemberRole);
     }
 
     @Override
     public String toString() {
         return String.format("TenantConfiguration{maxUsers=%d, biometric=%s, sessionTimeout=%d, " +
-                            "refreshValidity=%d, mfaRequired=%s, enforceDomainMatching=%s}",
+                            "refreshValidity=%d, mfaRequired=%s, enforceDomainMatching=%s, " +
+                            "defaultMemberRole=%s}",
                             maxUsers, biometricEnabled, sessionTimeoutMinutes,
-                            refreshTokenValidityDays, mfaRequired, enforceDomainMatching);
+                            refreshTokenValidityDays, mfaRequired, enforceDomainMatching,
+                            defaultMemberRole);
     }
 }

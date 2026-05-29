@@ -76,6 +76,15 @@ V63: tenant_email_domains.verified BOOLEAN NOT NULL DEFAULT false — domain-
      behaviour is unchanged; admin/ROOT CRUD adds are verified=true; only the
      PUBLIC self-service claim is verified=false (flipped later by Round-2 DNS-TXT
      verification or SUPER_ADMIN approval). Backs POST /api/v1/onboarding/register.
+V64: DNS-TXT domain verification + default-role-on-join.
+     tenant_email_domains.verification_token + verification_requested_at (the
+     DNS-TXT challenge state); tenants.default_member_role (role auto-assigned to
+     users who join via a verified domain, NULL = seeded USER). All nullable,
+     idempotent, no backfill. Backs POST .../email-domains/{domain}/verification
+     (returns the TXT record _fivucsas-verify.{domain} =
+     "fivucsas-domain-verification={token}") and POST .../{domain}/verify (DNS
+     lookup → verified=true on match; 200/422/409). DNS via JNDI behind
+     DnsTxtLookupPort (no new dep).
 
 **V34-V60 applied in prod. Last rebuild included V60 (drop refresh_tokens.token plaintext).**
 
