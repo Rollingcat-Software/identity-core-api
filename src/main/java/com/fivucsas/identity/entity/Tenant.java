@@ -103,6 +103,16 @@ public class Tenant {
     @Builder.Default
     private boolean mfaRequired = false;
 
+    /**
+     * Opt-in registration gate (V62). When true, only registrants whose email
+     * domain is present in {@code tenant_email_domains} may join this tenant;
+     * others are rejected. When false (default), registration is graceful
+     * (auto-bind on match, fall through to default tenant on miss).
+     */
+    @Column(name = "enforce_domain_matching", nullable = false)
+    @Builder.Default
+    private boolean enforceDomainMatching = false;
+
     @CreationTimestamp
     @Column(nullable = false, updatable = false)
     private Instant createdAt;
@@ -152,7 +162,8 @@ public class Tenant {
             biometricEnabled,
             sessionTimeoutMinutes,
             refreshTokenValidityDays,
-            mfaRequired
+            mfaRequired,
+            enforceDomainMatching
         );
     }
 
@@ -209,6 +220,7 @@ public class Tenant {
         this.sessionTimeoutMinutes = configuration.getSessionTimeoutMinutes();
         this.refreshTokenValidityDays = configuration.getRefreshTokenValidityDays();
         this.mfaRequired = configuration.isMfaRequired();
+        this.enforceDomainMatching = configuration.isEnforceDomainMatching();
     }
 
     /**

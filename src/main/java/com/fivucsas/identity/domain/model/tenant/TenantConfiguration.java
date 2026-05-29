@@ -18,10 +18,11 @@ public final class TenantConfiguration {
     private final int sessionTimeoutMinutes;
     private final int refreshTokenValidityDays;
     private final boolean mfaRequired;
+    private final boolean enforceDomainMatching;
 
     private TenantConfiguration(int maxUsers, boolean biometricEnabled,
                                 int sessionTimeoutMinutes, int refreshTokenValidityDays,
-                                boolean mfaRequired) {
+                                boolean mfaRequired, boolean enforceDomainMatching) {
         if (maxUsers < 1) {
             throw new IllegalArgumentException("Max users must be at least 1");
         }
@@ -37,23 +38,41 @@ public final class TenantConfiguration {
         this.sessionTimeoutMinutes = sessionTimeoutMinutes;
         this.refreshTokenValidityDays = refreshTokenValidityDays;
         this.mfaRequired = mfaRequired;
+        this.enforceDomainMatching = enforceDomainMatching;
     }
 
     /**
      * Creates a default tenant configuration.
      */
     public static TenantConfiguration defaultConfiguration() {
-        return new TenantConfiguration(100, true, 30, 7, false);
+        return new TenantConfiguration(100, true, 30, 7, false, false);
     }
 
     /**
      * Creates a custom tenant configuration.
+     *
+     * <p>Backwards-compatible overload that defaults
+     * {@code enforceDomainMatching} to {@code false} (the V62 default). Prefer
+     * the 6-arg overload when the flag is known.</p>
      */
     public static TenantConfiguration of(int maxUsers, boolean biometricEnabled,
                                          int sessionTimeoutMinutes, int refreshTokenValidityDays,
                                          boolean mfaRequired) {
         return new TenantConfiguration(maxUsers, biometricEnabled,
-                                       sessionTimeoutMinutes, refreshTokenValidityDays, mfaRequired);
+                                       sessionTimeoutMinutes, refreshTokenValidityDays, mfaRequired,
+                                       false);
+    }
+
+    /**
+     * Creates a custom tenant configuration including the V62 opt-in
+     * email-domain enforcement flag.
+     */
+    public static TenantConfiguration of(int maxUsers, boolean biometricEnabled,
+                                         int sessionTimeoutMinutes, int refreshTokenValidityDays,
+                                         boolean mfaRequired, boolean enforceDomainMatching) {
+        return new TenantConfiguration(maxUsers, biometricEnabled,
+                                       sessionTimeoutMinutes, refreshTokenValidityDays, mfaRequired,
+                                       enforceDomainMatching);
     }
 
     /**
@@ -62,7 +81,7 @@ public final class TenantConfiguration {
     public TenantConfiguration withMaxUsers(int maxUsers) {
         return new TenantConfiguration(maxUsers, this.biometricEnabled,
                                        this.sessionTimeoutMinutes, this.refreshTokenValidityDays,
-                                       this.mfaRequired);
+                                       this.mfaRequired, this.enforceDomainMatching);
     }
 
     /**
@@ -71,7 +90,7 @@ public final class TenantConfiguration {
     public TenantConfiguration withBiometricEnabled(boolean enabled) {
         return new TenantConfiguration(this.maxUsers, enabled,
                                        this.sessionTimeoutMinutes, this.refreshTokenValidityDays,
-                                       this.mfaRequired);
+                                       this.mfaRequired, this.enforceDomainMatching);
     }
 
     /**
@@ -80,7 +99,16 @@ public final class TenantConfiguration {
     public TenantConfiguration withMfaRequired(boolean required) {
         return new TenantConfiguration(this.maxUsers, this.biometricEnabled,
                                        this.sessionTimeoutMinutes, this.refreshTokenValidityDays,
-                                       required);
+                                       required, this.enforceDomainMatching);
+    }
+
+    /**
+     * Creates configuration with the email-domain enforcement flag changed.
+     */
+    public TenantConfiguration withEnforceDomainMatching(boolean enforce) {
+        return new TenantConfiguration(this.maxUsers, this.biometricEnabled,
+                                       this.sessionTimeoutMinutes, this.refreshTokenValidityDays,
+                                       this.mfaRequired, enforce);
     }
 
     public int getMaxUsers() {
@@ -103,6 +131,10 @@ public final class TenantConfiguration {
         return mfaRequired;
     }
 
+    public boolean isEnforceDomainMatching() {
+        return enforceDomainMatching;
+    }
+
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;
@@ -112,20 +144,21 @@ public final class TenantConfiguration {
                biometricEnabled == that.biometricEnabled &&
                sessionTimeoutMinutes == that.sessionTimeoutMinutes &&
                refreshTokenValidityDays == that.refreshTokenValidityDays &&
-               mfaRequired == that.mfaRequired;
+               mfaRequired == that.mfaRequired &&
+               enforceDomainMatching == that.enforceDomainMatching;
     }
 
     @Override
     public int hashCode() {
         return Objects.hash(maxUsers, biometricEnabled, sessionTimeoutMinutes,
-                           refreshTokenValidityDays, mfaRequired);
+                           refreshTokenValidityDays, mfaRequired, enforceDomainMatching);
     }
 
     @Override
     public String toString() {
         return String.format("TenantConfiguration{maxUsers=%d, biometric=%s, sessionTimeout=%d, " +
-                            "refreshValidity=%d, mfaRequired=%s}",
+                            "refreshValidity=%d, mfaRequired=%s, enforceDomainMatching=%s}",
                             maxUsers, biometricEnabled, sessionTimeoutMinutes,
-                            refreshTokenValidityDays, mfaRequired);
+                            refreshTokenValidityDays, mfaRequired, enforceDomainMatching);
     }
 }

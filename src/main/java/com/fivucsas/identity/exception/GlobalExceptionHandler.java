@@ -237,6 +237,55 @@ public class GlobalExceptionHandler {
     }
 
     /**
+     * V62: opt-in email-domain enforcement rejected this registration. Mapped to
+     * HTTP 422 Unprocessable Entity — the caller is permitted to hit the
+     * registration endpoint, but the submitted email-domain is semantically
+     * unacceptable for the target tenant (a request-content problem). The body
+     * carries {@code emailDomain} so the UI can surface a precise message.
+     */
+    @ExceptionHandler(EmailDomainNotAllowedException.class)
+    public ResponseEntity<java.util.Map<String, Object>> handleEmailDomainNotAllowed(
+            EmailDomainNotAllowedException ex,
+            HttpServletRequest request) {
+        log.warn("Registration refused — email domain not allowed: {}, path={}",
+                ex.getEmailDomain(), request.getRequestURI());
+
+        java.util.Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("timestamp", java.time.Instant.now().toString());
+        body.put("status", HttpStatus.UNPROCESSABLE_ENTITY.value());
+        body.put("error", ex.getErrorCode());
+        body.put("errorCode", ex.getErrorCode());
+        body.put("message", ex.getMessage());
+        body.put("emailDomain", ex.getEmailDomain());
+        body.put("path", request.getRequestURI());
+
+        return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(body);
+    }
+
+    /**
+     * V62: tenant email-domain registry conflict — either the domain is already
+     * claimed by another tenant ({@code EMAIL_DOMAIN_ALREADY_CLAIMED}) or it is
+     * the tenant's last domain while enforcement is on
+     * ({@code CANNOT_REMOVE_LAST_DOMAIN}). Mapped to HTTP 409 Conflict so the
+     * raw unique-index violation never surfaces as a 500.
+     */
+    @ExceptionHandler(TenantEmailDomainConflictException.class)
+    public ResponseEntity<ErrorResponse> handleTenantEmailDomainConflict(
+            TenantEmailDomainConflictException ex,
+            HttpServletRequest request) {
+        log.warn("Tenant email-domain conflict ({}): {}", ex.getErrorCode(), ex.getMessage());
+
+        ErrorResponse error = ErrorResponse.of(
+                HttpStatus.CONFLICT.value(),
+                ex.getErrorCode(),
+                ex.getMessage(),
+                request.getRequestURI()
+        );
+
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(error);
+    }
+
+    /**
      * P0-#8 (INVESTIGATION_MASTER_2026-05-07): tenant suspended / inactive /
      * pending. Mapped to HTTP 423 Locked — mirrors {@link AccountLockedException}
      * (the resource is intact but temporarily inaccessible). The body carries

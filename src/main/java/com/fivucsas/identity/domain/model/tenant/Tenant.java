@@ -200,6 +200,10 @@ public class Tenant {
         return configuration.isMfaRequired();
     }
 
+    public boolean isEnforceDomainMatching() {
+        return configuration.isEnforceDomainMatching();
+    }
+
     public Instant getCreatedAt() {
         return createdAt;
     }

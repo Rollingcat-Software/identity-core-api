@@ -20,4 +20,5 @@ public class UpdateTenantCommand {
     private final Integer sessionTimeoutMinutes;
     private final Integer refreshTokenValidityDays;
     private final Boolean mfaRequired;
+    private final Boolean enforceDomainMatching;
 }

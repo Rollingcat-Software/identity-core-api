@@ -4,6 +4,7 @@ import lombok.Builder;
 import lombok.Getter;
 
 import java.time.Instant;
+import java.util.List;
 
 /**
  * Response DTO for tenant information.
@@ -25,6 +26,13 @@ public class TenantResponse {
     private final int sessionTimeoutMinutes;
     private final int refreshTokenValidityDays;
     private final boolean mfaRequired;
+    private final boolean enforceDomainMatching;
+    /**
+     * The tenant's email-domain registry (V44). Populated so the admin UI can
+     * render current state without a second round-trip. May be {@code null}
+     * for list/summary responses that do not eagerly load domains.
+     */
+    private final List<TenantEmailDomainResponse> emailDomains;
     private final Instant createdAt;
     private final Instant updatedAt;
 }

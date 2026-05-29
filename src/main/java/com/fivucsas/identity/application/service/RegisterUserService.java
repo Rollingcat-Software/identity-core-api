@@ -97,6 +97,32 @@ public class RegisterUserService implements RegisterUserUseCase {
                 });
         }
 
+        // V62 — opt-in email-domain enforcement. When the resolved/targeted
+        // tenant has enforce_domain_matching=true, the registrant's email
+        // domain MUST be present in that tenant's tenant_email_domains registry
+        // (V44). On a miss we reject outright rather than silently letting the
+        // user through (when enforcement is OFF the resolution above already
+        // either auto-bound on a match or fell through to the default tenant —
+        // that graceful path is preserved). Checked BEFORE the bcrypt hash so a
+        // rejected registration doesn't pay for a hashing round.
+        //
+        // Note: a domain belongs to at most ONE tenant (ux_tenant_email_domains_domain),
+        // so we scope the membership check to the resolved tenant's id — a
+        // domain owned by a DIFFERENT tenant must not satisfy this tenant's gate.
+        if (defaultTenant.isEnforceDomainMatching()) {
+            String emailDomain = email.getDomain();
+            boolean domainAllowed = emailDomain != null
+                && tenantEmailDomainRepository.findByIdEmailDomainIgnoreCase(emailDomain)
+                    .map(TenantEmailDomain::getTenantId)
+                    .filter(ownerTenantId -> ownerTenantId.equals(defaultTenant.getId()))
+                    .isPresent();
+            if (!domainAllowed) {
+                log.warn("AUDIT: Registration refused — email domain '{}' not allowed for "
+                        + "tenant {} (enforce_domain_matching=true)", emailDomain, defaultTenant.getId());
+                throw new com.fivucsas.identity.domain.exception.EmailDomainNotAllowedException(emailDomain);
+            }
+        }
+
         // P0-#7 (INVESTIGATION_MASTER_2026-05-07): enforce tenant.max_users
         // BEFORE inserting (and before bcrypt-hashing the password — saves a
         // CPU-bound round on the rejected path). The field defaulted to 100

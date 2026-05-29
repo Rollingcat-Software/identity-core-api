@@ -28,7 +28,8 @@ public final class TenantMapper {
             jpa.isBiometricEnabled(),
             jpa.getSessionTimeoutMinutes(),
             jpa.getRefreshTokenValidityDays(),
-            jpa.isMfaRequired()
+            jpa.isMfaRequired(),
+            jpa.isEnforceDomainMatching()
         );
 
         return Tenant.reconstitute(
@@ -64,6 +65,7 @@ public final class TenantMapper {
             .sessionTimeoutMinutes(domain.getSessionTimeoutMinutes())
             .refreshTokenValidityDays(domain.getRefreshTokenValidityDays())
             .mfaRequired(domain.isMfaRequired())
+            .enforceDomainMatching(domain.isEnforceDomainMatching())
             .createdAt(domain.getCreatedAt())
             .updatedAt(domain.getUpdatedAt())
             .build();

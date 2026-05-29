@@ -65,6 +65,10 @@ V59: backfill audit_logs.tenant_id NULLs + introduce "system" sentinel tenant.
 V60: drop refresh_tokens.token plaintext column (hashed wire-format fully active since V55).
 V61: audit_logs.tenant_id SET NOT NULL (#99) — self-gating: pre-checks 0 NULLs and
      fails loud, no DEFAULT, metadata-only ALTER on PG12+. Applies on the next rebuild.
+V62: tenants.enforce_domain_matching BOOLEAN NOT NULL DEFAULT false — opt-in
+     email-domain registration gate. When true, only registrants whose email
+     domain is in tenant_email_domains (V44) may join; else graceful (today's
+     behaviour). Backs the admin email-domain CRUD + RegisterUserService gate.
 
 **V34-V60 applied in prod. Last rebuild included V60 (drop refresh_tokens.token plaintext).**
 

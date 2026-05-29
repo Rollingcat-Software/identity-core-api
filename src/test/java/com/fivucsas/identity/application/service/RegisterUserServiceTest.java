@@ -563,6 +563,108 @@ class RegisterUserServiceTest {
             assertThat(userCaptor.getValue().getTenant().getSlug()).isEqualTo("marmara");
         }
 
+        /**
+         * V62 — opt-in email-domain enforcement.
+         *
+         * <p>When the resolved tenant has {@code enforce_domain_matching=true},
+         * a registrant whose email domain is NOT in that tenant's
+         * tenant_email_domains is rejected with
+         * {@link com.fivucsas.identity.domain.exception.EmailDomainNotAllowedException};
+         * an allowed domain still registers normally. Mirrors the marun/marmara
+         * resolution tests above.</p>
+         */
+        @Nested
+        @DisplayName("Email-domain enforcement (V62)")
+        class EmailDomainEnforcement {
+
+            private Tenant enforcingMarmara() {
+                return Tenant.builder()
+                    .id(MARMARA_TENANT_ID)
+                    .name("Marmara University")
+                    .slug("marmara")
+                    .contactEmail("admin@marmara.edu.tr")
+                    .status(TenantStatus.ACTIVE)
+                    .maxUsers(100)
+                    .enforceDomainMatching(true)
+                    .build();
+            }
+
+            @Test
+            @DisplayName("marun.edu.tr is allowed when enforcement is on (domain in registry)")
+            void allowedDomainRegistersUnderEnforcement() {
+                String emailAddress = "ahmet@marun.edu.tr";
+                Tenant marmara = enforcingMarmara();
+                TenantEmailDomain marunRow = TenantEmailDomain.create(MARMARA_TENANT_ID, "marun.edu.tr", false);
+
+                when(tenantEmailDomainRepository.findByIdEmailDomainIgnoreCase("marun.edu.tr"))
+                    .thenReturn(Optional.of(marunRow));
+                when(tenantRepository.findById(MARMARA_TENANT_ID)).thenReturn(Optional.of(marmara));
+                stubCommonRegistrationCollaborators(emailAddress);
+
+                registerUserService.execute(registrationFor(emailAddress));
+
+                ArgumentCaptor<User> userCaptor = ArgumentCaptor.forClass(User.class);
+                verify(userRepository).save(userCaptor.capture());
+                assertThat(userCaptor.getValue().getTenant().getId()).isEqualTo(MARMARA_TENANT_ID);
+            }
+
+            @Test
+            @DisplayName("gmail.com is rejected when targeting an enforcing tenant via TenantContext")
+            void disallowedDomainRejectedUnderEnforcement() {
+                String emailAddress = "outsider@gmail.com";
+                Tenant marmara = enforcingMarmara();
+
+                // Target Marmara explicitly (invitation/multi-tenant header path)
+                // so resolution lands on the enforcing tenant regardless of domain.
+                com.fivucsas.identity.infrastructure.multitenancy.TenantContext.setCurrentTenant(MARMARA_TENANT_ID);
+                try {
+                    when(tenantRepository.findById(MARMARA_TENANT_ID)).thenReturn(Optional.of(marmara));
+                    // gmail.com is not owned by any tenant.
+                    when(tenantEmailDomainRepository.findByIdEmailDomainIgnoreCase("gmail.com"))
+                        .thenReturn(Optional.empty());
+                    when(userRepository.existsByEmail(emailAddress)).thenReturn(false);
+
+                    assertThatThrownBy(() -> registerUserService.execute(registrationFor(emailAddress)))
+                        .isInstanceOf(com.fivucsas.identity.domain.exception.EmailDomainNotAllowedException.class)
+                        .satisfies(ex -> assertThat(
+                            ((com.fivucsas.identity.domain.exception.EmailDomainNotAllowedException) ex)
+                                .getEmailDomain()).isEqualTo("gmail.com"));
+
+                    // Rejected before persistence / token issuance / bcrypt hash.
+                    verify(userRepository, never()).save(any(User.class));
+                    verify(tokenGenerator, never()).generateAccessToken(any());
+                    verify(passwordEncoder, never()).encode(any());
+                } finally {
+                    com.fivucsas.identity.infrastructure.multitenancy.TenantContext.clear();
+                }
+            }
+
+            @Test
+            @DisplayName("A domain owned by ANOTHER tenant does not satisfy this tenant's gate")
+            void domainOwnedByAnotherTenantRejected() {
+                String emailAddress = "outsider@othertenant.edu";
+                Tenant marmara = enforcingMarmara();
+                UUID otherTenantId = UUID.randomUUID();
+                // othertenant.edu is owned by a DIFFERENT tenant.
+                TenantEmailDomain otherRow = TenantEmailDomain.create(otherTenantId, "othertenant.edu", false);
+
+                com.fivucsas.identity.infrastructure.multitenancy.TenantContext.setCurrentTenant(MARMARA_TENANT_ID);
+                try {
+                    when(tenantRepository.findById(MARMARA_TENANT_ID)).thenReturn(Optional.of(marmara));
+                    when(tenantEmailDomainRepository.findByIdEmailDomainIgnoreCase("othertenant.edu"))
+                        .thenReturn(Optional.of(otherRow));
+                    when(userRepository.existsByEmail(emailAddress)).thenReturn(false);
+
+                    assertThatThrownBy(() -> registerUserService.execute(registrationFor(emailAddress)))
+                        .isInstanceOf(com.fivucsas.identity.domain.exception.EmailDomainNotAllowedException.class);
+
+                    verify(userRepository, never()).save(any(User.class));
+                } finally {
+                    com.fivucsas.identity.infrastructure.multitenancy.TenantContext.clear();
+                }
+            }
+        }
+
         @Test
         @DisplayName("Unknown domain falls through legacy lookup, then to default tenant")
         void unknownDomainFallsThroughToDefault() {
