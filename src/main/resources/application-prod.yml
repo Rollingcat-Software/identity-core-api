@@ -66,6 +66,14 @@ app:
   # accept-invitation link emailed to recipients. Override with
   # APP_FRONTEND_BASE_URL in .env.prod if the dashboard host changes.
   frontend-base-url: ${APP_FRONTEND_BASE_URL:https://app.fivucsas.com}
+  # Identity / account-linking (Model A). Phase 4 OIDC `sub` alignment ships
+  # DORMANT in prod: default OFF so `sub` stays = users.id (zero behaviour
+  # change). When true, `sub` is an identity-derived PAIRWISE pseudonym per RP
+  # (OIDC Core §8). Soak in staging before flipping; flipping rotates every RP's
+  # view of `sub`. Salt MUST be set (and kept stable) when enabling.
+  identity:
+    oidc-subject-identity: ${APP_IDENTITY_OIDC_SUBJECT_IDENTITY:false}
+    pairwise-salt: ${APP_IDENTITY_PAIRWISE_SALT:}
   # GDPR Art. 17 / KVKK right-to-erasure — daily hard-purge of users
   # soft-deleted more than 30 days ago. Default flipped to true in the prod
   # profile (T2-E, INVESTIGATION_MASTER_2026-05-07 P1): the controlling

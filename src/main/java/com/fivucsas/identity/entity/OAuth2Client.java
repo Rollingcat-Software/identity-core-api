@@ -207,6 +207,41 @@ public class OAuth2Client {
     }
 
     /**
+     * Derives the OIDC <em>sector identifier</em> for this relying party
+     * (OpenID Connect Core 1.0 §8.1, pairwise subject calculation).
+     *
+     * <p>This client does not register a {@code sector_identifier_uri}, so per
+     * §8.1 the sector identifier defaults to the host component of the
+     * registered {@code redirect_uri}. We take the host of the first registered
+     * redirect URI; if the column is empty or unparseable, we fall back to the
+     * stable {@code clientId} so the value is never null and never collides
+     * across distinct clients. The host is lower-cased so case variations of the
+     * same host map to the same sector.</p>
+     *
+     * <p>Used only when {@code app.identity.oidc-subject-identity=true} to make
+     * the OIDC {@code sub} a pairwise pseudonymous identifier per RP. With the
+     * flag off (default) this method is never invoked.</p>
+     *
+     * @return the sector identifier (redirect-uri host, lower-cased, or clientId)
+     */
+    public String sectorIdentifier() {
+        for (String uri : splitRegisteredRedirectUris()) {
+            if (uri == null || uri.isBlank()) {
+                continue;
+            }
+            try {
+                String host = java.net.URI.create(uri.trim()).getHost();
+                if (host != null && !host.isBlank()) {
+                    return host.toLowerCase(java.util.Locale.ROOT);
+                }
+            } catch (IllegalArgumentException ignored) {
+                // Malformed URI — skip and try the next, ultimately falling back to clientId.
+            }
+        }
+        return clientId;
+    }
+
+    /**
      * Checks if the given scope is allowed for this client.
      */
     public boolean isScopeAllowed(String scope) {

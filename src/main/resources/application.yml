@@ -27,6 +27,21 @@ app:
   # ({frontend-base-url}/accept-invite?token=...). Override per environment
   # with APP_FRONTEND_BASE_URL.
   frontend-base-url: ${APP_FRONTEND_BASE_URL:https://app.fivucsas.com}
+  # Identity / account-linking layer (Model A — docs/IDENTITY_ACCOUNT_LINKING_DESIGN.md).
+  identity:
+    # Phase 4 (LAST, widest blast radius — ships DORMANT). When false (default)
+    # the OIDC `sub` claim and the /oauth2/userinfo subject are EXACTLY as today
+    # (= users.id). When true, `sub` becomes an identity-derived PAIRWISE
+    # pseudonymous id per relying party (OIDC Core §8): the same person presents
+    # a stable `sub` to a given RP across all their tenant accounts, while
+    # different RPs get unlinkable subs. Does NOT touch the dashboard's own
+    # access-token subject (that stays the user principal). Flip to true ONLY
+    # after soaking in staging — changing it rotates every RP's view of `sub`.
+    oidc-subject-identity: ${APP_IDENTITY_OIDC_SUBJECT_IDENTITY:false}
+    # Per-environment salt mixed into the pairwise `sub` hash (one-way SHA-256 of
+    # sector + identity_id + salt). Keep stable + secret; rotating it rotates
+    # every pairwise `sub`. Only consulted when oidc-subject-identity=true.
+    pairwise-salt: ${APP_IDENTITY_PAIRWISE_SALT:}
   # Public self-service tenant onboarding (POST /api/v1/onboarding/register).
   onboarding:
     # Master switch for the public endpoint. When false the endpoint returns 400.

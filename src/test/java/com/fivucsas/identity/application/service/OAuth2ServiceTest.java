@@ -45,6 +45,14 @@ class OAuth2ServiceTest {
     @Mock private PasswordEncoder passwordEncoder;
     @Mock private MfaSessionRepository mfaSessionRepository;
 
+    // Phase 4: inject a REAL resolver with the pairwise flag OFF so these legacy
+    // tests keep asserting sub == user.id (the default, zero-behaviour-change
+    // path). @Spy lets @InjectMocks wire it like a mock. The dedicated
+    // PairwiseSubjectResolverTest covers the flag-ON pairwise behaviour.
+    @org.mockito.Spy
+    private com.fivucsas.identity.infrastructure.oauth2.PairwiseSubjectResolver pairwiseSubjectResolver =
+            new com.fivucsas.identity.infrastructure.oauth2.PairwiseSubjectResolver(false, "");
+
     @InjectMocks
     private OAuth2Service service;
 
