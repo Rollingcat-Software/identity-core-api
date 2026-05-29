@@ -33,8 +33,15 @@ public class TenantEmailDomain {
     @EmbeddedId
     private TenantEmailDomainId id;
 
+    // Read-only association for loading the owning tenant. The composite
+    // @EmbeddedId (tenant_id + email_domain) is the writable key — callers set
+    // it directly via TenantEmailDomain.create(tenantId, ...). @MapsId is NOT
+    // used: it would force the id's tenantId to be derived from this (often
+    // null on a fresh create) association, throwing "attempted to assign id
+    // from null one-to-one property" on insert (broke onboarding + admin
+    // add-domain, 2026-05-29). insertable/updatable=false keeps this purely a
+    // read view; the embedded id owns the tenant_id column on write.
     @ManyToOne(fetch = FetchType.LAZY)
-    @MapsId("tenantId")
     @JoinColumn(name = "tenant_id", insertable = false, updatable = false)
     private Tenant tenant;
 

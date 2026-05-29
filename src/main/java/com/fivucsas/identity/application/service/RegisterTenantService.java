@@ -162,13 +162,18 @@ public class RegisterTenantService implements RegisterTenantUseCase {
                         emailDomain,
                         initialStatus));
 
+        // userId=null: self-onboarding is pre-auth (no established user actor),
+        // and audit_logs.user_id is an FK to users — passing the new tenant id
+        // here violated audit_logs_user_id_fkey and rolled back the whole
+        // onboarding (this insert is in the same tx; the FK fails at commit).
+        // The tenant, slug, domain and admin are all captured in `details`.
         auditLogPort.logSecurityEvent(
-                result.tenantId().toString(),
+                null,
                 "TENANT_SELF_ONBOARDED",
                 command.getIpAddress(),
-                String.format("Self-service tenant '%s' (slug=%s, domain=%s) onboarded; "
+                String.format("Self-service tenant '%s' (slug=%s, domain=%s, id=%s) onboarded; "
                                 + "admin=%s, status=%s, awaiting email verification",
-                        orgName, slug, emailDomain, adminEmail.getValue(), initialStatus));
+                        orgName, slug, emailDomain, result.tenantId(), adminEmail.getValue(), initialStatus));
 
         // ---- Send the verification email (best-effort; never fails the tx) -
         try {
