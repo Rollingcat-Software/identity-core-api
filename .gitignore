@@ -139,3 +139,6 @@ package-lock.json
 # Production secrets
 .env.prod
 .env.gcp
+
+# Staging env (host-local; secrets — never commit)
+.env.staging
