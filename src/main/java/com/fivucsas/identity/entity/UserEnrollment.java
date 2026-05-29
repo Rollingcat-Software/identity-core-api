@@ -104,13 +104,22 @@ public class UserEnrollment {
     /**
      * Mark enrollment complete and capture quality + liveness scores from the
      * biometric-processor response. Either score may be {@code null} when the
-     * underlying method does not produce one (e.g. PASSWORD, EMAIL_OTP). The
-     * DB CHECK constraint enforces 0..1.
+     * underlying method does not produce one (e.g. PASSWORD, EMAIL_OTP) — in
+     * that case the corresponding previously-recorded score is PRESERVED, not
+     * cleared. This is intentional: the web FACE flow records scores during the
+     * /enroll step (which lands on a PENDING row) and only afterwards calls the
+     * 2-arg /complete (with null scores). Nulling here would wipe the scores
+     * recorded moments earlier — the P1-3 persistence bug. A non-null argument
+     * overrides the stored value. The DB CHECK constraint enforces 0..1.
      */
     public void completeEnrollment(String enrollmentData, BigDecimal qualityScore, BigDecimal livenessScore) {
         completeEnrollment(enrollmentData);
-        this.qualityScore = qualityScore;
-        this.livenessScore = livenessScore;
+        if (qualityScore != null) {
+            this.qualityScore = qualityScore;
+        }
+        if (livenessScore != null) {
+            this.livenessScore = livenessScore;
+        }
     }
 
     /**

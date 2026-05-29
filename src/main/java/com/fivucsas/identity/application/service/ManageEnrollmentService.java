@@ -10,6 +10,7 @@ import com.fivucsas.identity.entity.NfcCard;
 import com.fivucsas.identity.entity.Tenant;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.entity.UserEnrollment;
+import com.fivucsas.identity.infrastructure.multitenancy.TenantContext;
 import com.fivucsas.identity.repository.JpaTenantRepository;
 import com.fivucsas.identity.application.port.output.UserEnrollmentRepositoryPort;
 import com.fivucsas.identity.domain.repository.UserRepository;
@@ -157,12 +158,27 @@ public class ManageEnrollmentService implements ManageEnrollmentUseCase {
     }
 
     /**
-     * Best-effort score update: persists biometric quality + liveness scores on
-     * an existing enrollment row when one exists. Used by biometric enrollment
-     * endpoints (face/voice) to record scores even when the row was already
-     * marked ENROLLED via a separate /complete call. Silently no-ops when no
-     * enrollment exists yet, so the biometric upload itself never fails because
-     * of bookkeeping.
+     * Best-effort score UPSERT: persists biometric quality + liveness scores for
+     * a user's enrollment of the given method. Used by biometric enrollment
+     * endpoints (face/voice) to record the biometric-processor scores.
+     *
+     * <p>P1-3 fix: the web FACE flow records scores during the /enroll step
+     * BEFORE the user_enrollments row is created (createEnrollment runs after).
+     * Previously this method only updated an existing row and silently no-op'd
+     * when none existed yet — so every score was dropped on the floor and prod
+     * rows all had NULL quality_score / liveness_score. We now CREATE a PENDING
+     * row carrying the scores when none exists; the subsequent createEnrollment
+     * ({@link #startEnrollment}) leaves the scores intact (it only flips status
+     * for non-auto-complete types like FACE), and the final /complete preserves
+     * them too (see {@code UserEnrollment.completeEnrollment(String,BigDecimal,
+     * BigDecimal)} which no longer nulls existing scores).
+     *
+     * <p>Best-effort throughout: never throws so the biometric upload itself is
+     * not failed by admin bookkeeping. The created row's tenant == the owning
+     * user's tenant, which equals the active {@code TenantContext} for the
+     * enrolling user — so the Hibernate {@code tenantFilter} read + insert stay
+     * consistent (P0-1). The {@link DataIntegrityViolationException} catch
+     * mirrors {@link #startEnrollment}'s race handling.
      */
     @Override
     @Transactional
@@ -173,6 +189,33 @@ public class ManageEnrollmentService implements ManageEnrollmentUseCase {
         if (qualityScore == null && livenessScore == null) {
             return;
         }
+
+        if (userEnrollmentRepository.findByUserIdAndAuthMethodType(userId, methodType).isEmpty()) {
+            // Row not created yet — the web enrolls the biometric BEFORE creating
+            // the enrollment row (createEnrollment runs afterwards). Stage the row
+            // now so the scores have somewhere to live. We delegate to
+            // startEnrollment(), the existing sanctioned row-constructor (it owns
+            // user/tenant resolution + the unique-constraint race handling), using
+            // the active TenantContext tenant — which equals the enrolling user's
+            // tenant (set by TenantBindFromAuthFilter) and the row's tenant, so the
+            // Hibernate tenantFilter read + insert stay consistent (P0-1). For FACE/
+            // VOICE (not AUTO_COMPLETE_TYPES) startEnrollment lands a PENDING row
+            // without scores; we record them in the second step below.
+            UUID tenantId = TenantContext.getCurrentTenant();
+            if (tenantId == null) {
+                return; // best-effort: no active tenant to anchor the row to
+            }
+            try {
+                startEnrollment(userId, tenantId, methodType);
+            } catch (RuntimeException e) {
+                // User/tenant unresolved, or a concurrent writer won the race.
+                // Either way, fall through to the score write which no-ops if the
+                // row still isn't visible — never fail the biometric upload.
+                log.debug("recordBiometricScores could not pre-create row for user={} method={}: {}",
+                        userId, methodType, e.getMessage());
+            }
+        }
+
         userEnrollmentRepository.findByUserIdAndAuthMethodType(userId, methodType)
                 .ifPresent(enrollment -> {
                     enrollment.recordScores(qualityScore, livenessScore);

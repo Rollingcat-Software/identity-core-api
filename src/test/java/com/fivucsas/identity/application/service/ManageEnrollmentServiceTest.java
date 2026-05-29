@@ -11,6 +11,7 @@ import com.fivucsas.identity.domain.repository.UserRepository;
 import com.fivucsas.identity.entity.Tenant;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.entity.UserEnrollment;
+import com.fivucsas.identity.infrastructure.multitenancy.TenantContext;
 import com.fivucsas.identity.repository.JpaTenantRepository;
 import jakarta.persistence.EntityNotFoundException;
 import org.junit.jupiter.api.Test;
@@ -282,7 +283,49 @@ class ManageEnrollmentServiceTest {
     }
 
     @Test
-    void recordBiometricScores_WhenNoEnrollment_ShouldNoOp() {
+    void recordBiometricScores_WhenNoEnrollment_ShouldCreatePendingRowWithScores() {
+        // P1-3: the web FACE flow records scores during /enroll BEFORE the
+        // enrollment row exists (createEnrollment runs afterwards). The writer
+        // must now UPSERT — stage a PENDING row (delegating to startEnrollment,
+        // using the active TenantContext) and record the scores onto it, instead
+        // of silently dropping them.
+        TenantContext.setCurrentTenant(tenantId);
+        try {
+            User user = mock(User.class);
+            Tenant tenant = mock(Tenant.class);
+            when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+            when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+
+            // findBy: (1) initial upsert probe → empty; (2) startEnrollment probe →
+            // empty (builds new row); (3) post-create score write → the saved row.
+            UserEnrollment created = UserEnrollment.builder()
+                    .authMethodType(AuthMethodType.FACE)
+                    .status(EnrollmentStatus.PENDING)
+                    .build();
+            when(userEnrollmentRepository.findByUserIdAndAuthMethodType(userId, AuthMethodType.FACE))
+                    .thenReturn(Optional.empty())
+                    .thenReturn(Optional.empty())
+                    .thenReturn(Optional.of(created));
+            when(userEnrollmentRepository.save(any(UserEnrollment.class)))
+                    .thenAnswer(inv -> inv.getArgument(0));
+
+            service.recordBiometricScores(userId, AuthMethodType.FACE,
+                    new BigDecimal("0.5000"), new BigDecimal("0.5000"));
+
+            // the staged row carries PENDING status and the recorded scores
+            assertThat(created.getStatus()).isEqualTo(EnrollmentStatus.PENDING);
+            assertThat(created.getQualityScore()).isEqualByComparingTo(new BigDecimal("0.5000"));
+            assertThat(created.getLivenessScore()).isEqualByComparingTo(new BigDecimal("0.5000"));
+        } finally {
+            TenantContext.clear();
+        }
+    }
+
+    @Test
+    void recordBiometricScores_WhenNoEnrollmentAndNoTenantContext_ShouldNoOp() {
+        // Best-effort: with no row AND no active tenant to anchor the row to, the
+        // writer must not throw and must not persist anything.
+        TenantContext.clear();
         when(userEnrollmentRepository.findByUserIdAndAuthMethodType(userId, AuthMethodType.FACE))
                 .thenReturn(Optional.empty());
 
@@ -290,6 +333,44 @@ class ManageEnrollmentServiceTest {
                 new BigDecimal("0.5"), new BigDecimal("0.5"));
 
         verify(userEnrollmentRepository, never()).save(any());
+    }
+
+    @Test
+    void recordBiometricScores_WhenRowCreationRaces_ShouldStillRecordOntoWinner() {
+        // A concurrent enroll/startEnrollment inserts the row between our probe
+        // (empty) and startEnrollment's save. startEnrollment catches the
+        // unique-constraint violation internally; our follow-up findBy then sees
+        // the winner and records the scores onto it.
+        TenantContext.setCurrentTenant(tenantId);
+        try {
+            User user = mock(User.class);
+            Tenant tenant = mock(Tenant.class);
+            when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+            when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+
+            UserEnrollment winner = UserEnrollment.builder()
+                    .authMethodType(AuthMethodType.FACE)
+                    .status(EnrollmentStatus.PENDING)
+                    .build();
+            // probe → empty; startEnrollment initial → empty; startEnrollment
+            // race re-fetch → winner; our post-create write → winner.
+            when(userEnrollmentRepository.findByUserIdAndAuthMethodType(userId, AuthMethodType.FACE))
+                    .thenReturn(Optional.empty())
+                    .thenReturn(Optional.empty())
+                    .thenReturn(Optional.of(winner))
+                    .thenReturn(Optional.of(winner));
+            when(userEnrollmentRepository.save(any(UserEnrollment.class)))
+                    .thenThrow(new DataIntegrityViolationException("duplicate key"))
+                    .thenAnswer(inv -> inv.getArgument(0));
+
+            service.recordBiometricScores(userId, AuthMethodType.FACE,
+                    new BigDecimal("0.7700"), new BigDecimal("0.8800"));
+
+            assertThat(winner.getQualityScore()).isEqualByComparingTo(new BigDecimal("0.7700"));
+            assertThat(winner.getLivenessScore()).isEqualByComparingTo(new BigDecimal("0.8800"));
+        } finally {
+            TenantContext.clear();
+        }
     }
 
     @Test
