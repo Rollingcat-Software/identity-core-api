@@ -263,6 +263,28 @@ public class GlobalExceptionHandler {
     }
 
     /**
+     * Phase-2 account-link request rejected by a business rule (target inactive,
+     * same-tenant link, unlink target outside the caller's identity, etc.).
+     * HTTP 422 Unprocessable Entity — the request was well-formed but cannot be
+     * satisfied.
+     */
+    @ExceptionHandler(IdentityLinkException.class)
+    public ResponseEntity<ErrorResponse> handleIdentityLink(
+            IdentityLinkException ex,
+            HttpServletRequest request) {
+        log.warn("Account-link rejected: {}, path={}", ex.getMessage(), request.getRequestURI());
+
+        ErrorResponse error = ErrorResponse.of(
+                HttpStatus.UNPROCESSABLE_ENTITY.value(),
+                ex.getErrorCode(),
+                ex.getMessage(),
+                request.getRequestURI()
+        );
+
+        return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(error);
+    }
+
+    /**
      * Self-service onboarding refused: the admin used a personal / free /
      * disposable email provider instead of a corporate domain. HTTP 422
      * Unprocessable Entity. The body carries {@code emailDomain} so the UI can
