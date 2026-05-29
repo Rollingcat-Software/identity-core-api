@@ -128,6 +128,24 @@ V68: Identity & Account-Linking Phase 3 (Model A) —
 
 ## Operator reality (2026-05-29 update)
 
+- **Identity/account-linking Phase 5 (in-session membership switch) — PR OPEN, NOT
+  merged/deployed.** `POST /api/v1/auth/switch-membership {targetUserId}` (authenticated):
+  an authenticated person assumes another of THEIR OWN linked memberships without re-login
+  (token exchange / account switch, NOT a privilege grant). Same-identity HARD GATE → 403
+  (`MembershipSwitchForbiddenException`, the ONLY barrier between accounts); target must be
+  ACTIVE (not locked/suspended/soft-deleted) + tenant ACTIVE → else 409
+  (`MembershipNotSwitchableException`). Mints a NEW access+refresh pair AS the target via the
+  EXISTING post-login mint path (`JwtService` + `RefreshTokenService.createRefreshToken`,
+  bridged by `MembershipSwitchAdapter` — the only `entity.User` importer); carries the caller's
+  `amr` + `auth_time` and stamps `act={"sub":<caller>}` + `switched_from=<caller>`. Refresh
+  token is a normal target-membership token. Response = `/auth/login` `AuthResponse` shape.
+  Audited `MEMBERSHIP_SWITCHED` (`logTenantManagementEvent`: actor = caller, resource/tenant =
+  target tenant — never a tenant id in the user_id slot). Config flag
+  `app.identity.require-stepup-on-switch` (`APP_IDENTITY_REQUIRE_STEPUP_ON_SWITCH`, default
+  **false**) in application.yml + application-prod.yml — when true, requires a fresh caller
+  password in the body before minting. NO Flyway migration. Tests: `SwitchMembershipServiceTest`
+  + `MembershipSwitchControllerTest`; ArchUnit `UserDomainBoundaryTest` green (no new
+  `entity.User` imports in application/controller). web TopBar switcher still to wire.
 - **Identity/account-linking Phases 2/3/4 DEPLOYED (api #142/#143/#141, main `114b8eb`,
   prod image `474c8d12`; web #128/#127 on Hostinger; parent #95).**
   - **Phase 2 (account linking):** `POST /api/v1/identity/link/initiate` (OTP to target email

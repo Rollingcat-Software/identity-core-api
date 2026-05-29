@@ -285,6 +285,51 @@ public class GlobalExceptionHandler {
     }
 
     /**
+     * Phase-5 membership switch refused — the caller tried to assume a membership
+     * that does NOT belong to their own platform identity (the same-identity HARD
+     * GATE). HTTP 403 Forbidden: this is the ONLY barrier between accounts and is
+     * deliberately strict. The message is generic (no membership enumeration).
+     */
+    @ExceptionHandler(MembershipSwitchForbiddenException.class)
+    public ResponseEntity<ErrorResponse> handleMembershipSwitchForbidden(
+            MembershipSwitchForbiddenException ex,
+            HttpServletRequest request) {
+        log.warn("Membership-switch forbidden: {}, path={}", ex.getMessage(), request.getRequestURI());
+
+        ErrorResponse error = ErrorResponse.of(
+                HttpStatus.FORBIDDEN.value(),
+                ex.getErrorCode(),
+                ex.getMessage(),
+                request.getRequestURI()
+        );
+
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(error);
+    }
+
+    /**
+     * Phase-5 membership switch refused — the same-identity gate passed but the
+     * target membership cannot currently be assumed (locked / suspended /
+     * inactive / soft-deleted, or its tenant is not ACTIVE). HTTP 409 Conflict:
+     * the request was authorized for that account, but the target's current
+     * state forbids the switch.
+     */
+    @ExceptionHandler(MembershipNotSwitchableException.class)
+    public ResponseEntity<ErrorResponse> handleMembershipNotSwitchable(
+            MembershipNotSwitchableException ex,
+            HttpServletRequest request) {
+        log.warn("Membership-switch conflict: {}, path={}", ex.getMessage(), request.getRequestURI());
+
+        ErrorResponse error = ErrorResponse.of(
+                HttpStatus.CONFLICT.value(),
+                ex.getErrorCode(),
+                ex.getMessage(),
+                request.getRequestURI()
+        );
+
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(error);
+    }
+
+    /**
      * Self-service onboarding refused: the admin used a personal / free /
      * disposable email provider instead of a corporate domain. HTTP 422
      * Unprocessable Entity. The body carries {@code emailDomain} so the UI can

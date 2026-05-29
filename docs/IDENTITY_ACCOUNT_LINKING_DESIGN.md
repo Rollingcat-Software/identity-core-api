@@ -106,7 +106,26 @@ identity (the person)
   flag (or rotating the salt) rotates every RP's view of `sub` — coordinate with RPs.
 - No Flyway migration (flag only). Reversible: flip the flag back to false.
 
-### Phase 5 — Unified login + in-session membership switch  *(APPROVED 2026-05-29)*
+### Phase 5 — Unified login + in-session membership switch  *(IMPLEMENTED 2026-05-29)*
+
+> **Implementation note (2026-05-29).** `POST /api/v1/auth/switch-membership`
+> shipped. `MembershipSwitchController` (parses the caller's `amr`/`auth_time`
+> off the current bearer token) → `SwitchMembershipService` (same-identity HARD
+> GATE = 403 `MembershipSwitchForbiddenException`; switchability =
+> 409 `MembershipNotSwitchableException`; optional step-up) → `MembershipSwitchPort`
+> / `MembershipSwitchAdapter` (the ONLY `entity.User` bridge; REUSES `JwtService` +
+> `RefreshTokenService.createRefreshToken` — the exact post-login mint path). The
+> new access token carries the caller's `amr` + `auth_time` and stamps
+> `act={"sub":<caller>}` + `switched_from=<caller>`. The refresh token is a normal
+> refresh token for the TARGET membership. Response is the `/auth/login`
+> `AuthResponse` shape. Audited `MEMBERSHIP_SWITCHED` via `logTenantManagementEvent`
+> (actor = caller user id, resource/tenant = target tenant). Flag
+> `app.identity.require-stepup-on-switch` (default false) in application.yml +
+> application-prod.yml. No Flyway migration. Tests: `SwitchMembershipServiceTest`
+> (a–f incl. cross-identity 403 / null-identity 403 / inactive+suspended 409 /
+> step-up / audit-actor) + `MembershipSwitchControllerTest` (mapping + SecurityConfig
+> not-permitAll guard). web TopBar switcher still to wire.
+
 **Goal:** log in ONCE (any one of your linked emails + its credentials/MFA), then move
 between ALL your linked memberships in the same session without re-entering credentials —
 like a Google account switcher / Slack workspace switcher. The login *door* is unchanged;

@@ -74,6 +74,10 @@ app:
   identity:
     oidc-subject-identity: ${APP_IDENTITY_OIDC_SUBJECT_IDENTITY:false}
     pairwise-salt: ${APP_IDENTITY_PAIRWISE_SALT:}
+    # Phase 5 in-session membership switch. Default OFF (frictionless — ownership
+    # proven at link time). Flip to true to require a fresh caller password on
+    # every /auth/switch-membership before a token is minted.
+    require-stepup-on-switch: ${APP_IDENTITY_REQUIRE_STEPUP_ON_SWITCH:false}
   # GDPR Art. 17 / KVKK right-to-erasure — daily hard-purge of users
   # soft-deleted more than 30 days ago. Default flipped to true in the prod
   # profile (T2-E, INVESTIGATION_MASTER_2026-05-07 P1): the controlling
