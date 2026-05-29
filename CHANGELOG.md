@@ -2,6 +2,48 @@
 
 ## [Unreleased]
 
+### 2026-05-29 — Admin 500 fixes, guest-invite email, SUPER_ADMIN /auth/me, tenant email-domain management (5 PRs)
+
+Squash-merged to `main`:
+
+- **PR #115** `fix/admin-500s-2026-05-29` — two production admin 500s:
+  - Auth Flows "Make Default" hit `23505 uq_auth_flow_default` (the partial unique
+    index). `ManageAuthFlowService` now dethrones the current default via
+    `saveAndFlush` so the index slot is freed per-statement before the new default
+    claims it.
+  - `GET /enrollments` 500'd via `EntityNotFoundException` when an enrollment's
+    `User` proxy pointed at a soft-deleted/missing row — the first bad row aborted
+    the whole list. `EnrollmentQueryService` now force-inits the proxy in a
+    try/catch and renders null user fields instead.
+- **PR #117** `feat/enrollment-admin-gaps-2026-05-29` — admin visibility gaps:
+  - Enrollments list now surfaces the raw `user_id` for soft-deleted owners (name
+    and email stay null).
+  - NEW advisory endpoint `GET /api/v1/tenants/{tenantId}/auth-flows/{flowId}/default-impact`
+    — set-default lockout guardrail. Returns
+    `{activeUsers, usersAtRisk, methods[{method, choice, enrolledUsers, missingUsers}]}`,
+    derived by comparing each flow's required non-PASSWORD methods (CHOICE = any-one)
+    against per-user ENROLLED methods. Surfaced as a warning in the web-app
+    "Make Default" dialog.
+- **PR #119** `feat/guest-invite-email` — guest invitations now **send email**.
+  `EmailService.sendGuestInvitation` delivers the accept link (built from the new
+  `app.frontend-base-url` config); previously the accept endpoint and token existed
+  but the guest never received the link. NEW endpoint
+  `POST /api/v1/guests/{invitationId}/resend` re-sends a pending invitation.
+- **PR #120** `fix/super-admin-auth-me-500` — `GET /auth/me` no longer 500s for
+  `SUPER_ADMIN`. The domain `Role` model no longer requires a tenant for global
+  system roles, so `SUPER_ADMIN` (whose `tenant_id` is NULL) maps cleanly.
+- **PR #121** `feat/tenant-email-domain-management` — tenant email-domain
+  management:
+  - NEW endpoints `GET /api/v1/tenants/{tenantId}/email-domains`,
+    `POST /api/v1/tenants/{tenantId}/email-domains`,
+    `DELETE /api/v1/tenants/{tenantId}/email-domains/{domain}`, and
+    `PATCH /api/v1/tenants/{tenantId}/email-domains/{domain}/primary`.
+  - **V62** `V62__tenants_enforce_domain_matching.sql` — adds
+    `tenants.enforce_domain_matching BOOLEAN NOT NULL DEFAULT false` (opt-in).
+    When enabled, `RegisterUserService` rejects registrants whose email domain is
+    not in the tenant's allowed domains with HTTP 422; when disabled, registration
+    is unrestricted (today's behaviour).
+
 ### 2026-05-11 — Flyway V58–V60 (ops / DB hygiene)
 
 - **V58** `V58__oauth2_clients_secret_rotation.sql` — adds `previous_secret_hash`
