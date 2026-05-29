@@ -378,6 +378,7 @@ public class ManageTenantEmailDomainService implements ManageTenantEmailDomainUs
         return TenantEmailDomainResponse.builder()
                 .domain(d.getEmailDomain())
                 .isPrimary(d.isPrimary())
+                .verified(d.isVerified())
                 .createdAt(d.getCreatedAt())
                 .build();
     }
