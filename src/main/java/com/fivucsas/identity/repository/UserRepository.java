@@ -92,6 +92,15 @@ public interface UserRepository extends JpaRepository<User, UUID> {
     @Query("SELECT COUNT(u) FROM User u WHERE u.tenant.id = :tenantId")
     long countByTenantId(@Param("tenantId") UUID tenantId);
 
+    /**
+     * Ids of all non-deleted users in a tenant. The {@code @SQLRestriction} on
+     * {@link User} already filters soft-deleted rows. Returns ids only (no User
+     * graph) so callers in the application layer can aggregate per-user data
+     * without importing the entity.
+     */
+    @Query("SELECT u.id FROM User u WHERE u.tenant.id = :tenantId")
+    List<UUID> findIdsByTenantId(@Param("tenantId") UUID tenantId);
+
     @Query("SELECT u FROM User u WHERE u.passwordResetToken = :token AND u.deletedAt IS NULL")
     Optional<User> findByPasswordResetToken(@Param("token") String token);
 

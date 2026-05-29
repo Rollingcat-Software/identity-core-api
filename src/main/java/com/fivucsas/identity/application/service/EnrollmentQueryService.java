@@ -88,7 +88,10 @@ public class EnrollmentQueryService {
         final var user = resolved;
         return EnrollmentDto.builder()
                 .id(enrollment.getId().toString())
-                .userId(user != null ? user.getId().toString() : null)
+                // Raw FK so the id still shows even when the user row is
+                // soft-deleted (proxy unresolvable). Name/email come from the
+                // live user and are null for soft-deleted owners.
+                .userId(enrollment.getUserId() != null ? enrollment.getUserId().toString() : null)
                 .userName(user != null ? user.getFullName() : null)
                 .userEmail(user != null ? user.getEmail() : null)
                 .tenantId(enrollment.getTenant() != null ? enrollment.getTenant().getId().toString() : null)

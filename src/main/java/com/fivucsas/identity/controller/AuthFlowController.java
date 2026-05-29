@@ -3,6 +3,7 @@ package com.fivucsas.identity.controller;
 import com.fivucsas.identity.application.dto.command.CreateAuthFlowCommand;
 import com.fivucsas.identity.application.dto.command.UpdateAuthFlowCommand;
 import com.fivucsas.identity.application.dto.response.AuthFlowResponse;
+import com.fivucsas.identity.application.dto.response.AuthFlowDefaultImpactResponse;
 import com.fivucsas.identity.application.port.input.ManageAuthFlowUseCase;
 import com.fivucsas.identity.domain.model.auth.OperationType;
 import jakarta.validation.Valid;
@@ -36,6 +37,19 @@ public class AuthFlowController {
             @PathVariable UUID tenantId,
             @PathVariable UUID flowId) {
         return ResponseEntity.ok(manageAuthFlowUseCase.getFlow(tenantId, flowId));
+    }
+
+    /**
+     * Advisory lockout-impact analysis for "Make Default": how many tenant users
+     * could not complete this flow with their currently-enrolled methods. The UI
+     * surfaces this in the set-default confirmation before the admin proceeds.
+     */
+    @GetMapping("/{flowId}/default-impact")
+    @PreAuthorize("@rbac.isTenantAdmin() and @rbac.canAccessTenant(#tenantId)")
+    public ResponseEntity<AuthFlowDefaultImpactResponse> getDefaultImpact(
+            @PathVariable UUID tenantId,
+            @PathVariable UUID flowId) {
+        return ResponseEntity.ok(manageAuthFlowUseCase.computeDefaultImpact(tenantId, flowId));
     }
 
     @PostMapping
