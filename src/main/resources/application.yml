@@ -42,6 +42,14 @@ app:
     # sector + identity_id + salt). Keep stable + secret; rotating it rotates
     # every pairwise `sub`. Only consulted when oidc-subject-identity=true.
     pairwise-salt: ${APP_IDENTITY_PAIRWISE_SALT:}
+    # Phase 5 (in-session membership switch — POST /api/v1/auth/switch-membership).
+    # When false (default), an authenticated person may assume another of THEIR
+    # OWN linked memberships without re-entering credentials (ownership is already
+    # proven at link time). When true, the switch additionally requires a fresh
+    # password in the request body (verified against the CALLER) before a token is
+    # minted — limits blast radius if one session is stolen, since a switch can
+    # reach a higher-privileged linked membership. v1 ships default-false.
+    require-stepup-on-switch: ${APP_IDENTITY_REQUIRE_STEPUP_ON_SWITCH:false}
   # Public self-service tenant onboarding (POST /api/v1/onboarding/register).
   onboarding:
     # Master switch for the public endpoint. When false the endpoint returns 400.
