@@ -575,6 +575,9 @@ The following controllers exist but are not fully enumerated above. All paths ar
 | QrController           | `/api/v1/qr` + `/api/v1/auth/qr` | QR token generation; QR auth sessions       |
 | UserDataExportController | `/api/v1/users/{id}/export`  | GDPR Art. 20 portability export (GET)          |
 | PurgeAdminController   | `/api/v1/admin/purge`          | Super-admin dry-run soft-delete purge (DELETE) |
+| Guest invitations (UserController) | `/api/v1/guests`   | `POST /invite` (sends an email with the accept link via `app.frontend-base-url`), `POST /accept`, `POST /{invitationId}/resend`, `GET` (list), `GET /count` |
+| AuthFlowController     | `/api/v1/tenants/{tenantId}/auth-flows` | Tenant auth-flow CRUD + `GET /{flowId}/default-impact` (set-default lockout guardrail: `activeUsers`/`usersAtRisk`/per-method coverage) |
+| TenantEmailDomainController | `/api/v1/tenants/{tenantId}/email-domains` | List/add (`GET`/`POST`), `DELETE /{domain}`, `PATCH /{domain}/primary`. With `tenants.enforce_domain_matching` on (V62), registration is restricted to these domains (422 otherwise) |
 
 ## Database Schema
 
