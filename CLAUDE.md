@@ -108,10 +108,24 @@ V61: audit_logs.tenant_id SET NOT NULL (#99) — self-gating: pre-checks 0 NULLs
   `User` proxy pointed at a soft-deleted/missing row (5 of 37 in prod) — the first
   bad row aborted the whole list. `EnrollmentQueryService.mapEnrollmentToDto` now
   force-inits the proxy in a try/catch and renders null user fields instead.
-- Note: the parent submodule pointer for identity-core-api had drifted STALE — it
-  read `606f1f4` while the deployed code was ~`5c50b68` (the 2026-05-28 security
-  bundle was deployed but the pointer was never bumped). Verify deployed state by
-  the running container / Flyway version, not the parent pointer, until bumped.
+- **PR #117 (admin gaps, rebuilt 2026-05-29 12:47 UTC, image healthy)** — (1)
+  Enrollments list now surfaces the raw `user_id` for soft-deleted owners via a
+  read-only `@Column` on `UserEnrollment` (name/email stay null). (2) Set-default
+  lockout guardrail: new advisory `GET /tenants/{tid}/auth-flows/{fid}/default-impact`
+  → `{activeUsers, usersAtRisk, methods[{method, choice, enrolledUsers, missingUsers}]}`.
+  Derives required non-PASSWORD methods from the flow's steps (CHOICE = any-one),
+  compares to per-user ENROLLED methods. web-app #114 surfaces it as a warning in
+  the "Make Default" dialog. Paired web-app PRs: #114 (enrollment detail page +
+  `/enrollments/:id` route + N/A score columns + guardrail dialog) and #115
+  (removed the redundant sidebar "FIVUCSAS suite" bar — launcher FAB covers it).
+- **OPEN gap:** guest invitations send NO email (`GuestLifecycleService.createInvitation`
+  has no email call; `EmailService` only does `sendOtp`). Accept endpoint + token
+  exist but the guest can't receive the link → can't log in. Needs EmailService
+  wiring + a frontend accept-invite page. FACE/VOICE enrollment quality/liveness
+  scores are also never persisted to `user_enrollments`.
+- Note: the parent submodule pointer for identity-core-api drifts STALE in this
+  repo's workflow (read `606f1f4` while deployed was newer). Verify deployed state
+  by the running container / Flyway version, not the parent pointer.
 - V60 (drop refresh_tokens.token plaintext) applied in prod. Prod has been rebuilt
   since the 2026-05-04 pending note — V56 through V60 all applied.
 - pg_partman (V57) is fail-soft. `ALTER DATABASE identity_core SET app.skip_partman_v57='on'`
