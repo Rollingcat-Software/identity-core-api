@@ -239,9 +239,21 @@ class BiometricServiceAdapterTest {
                         .body("{\"detail\":\"bad sod\"}")
                         .contentType(MediaType.APPLICATION_JSON));
 
-        var result = adapter.verifyNfcChipAuthenticity("BADSOD", java.util.Map.of());
+        // Non-empty DG so the call actually reaches bio (empty DG short-circuits).
+        var result = adapter.verifyNfcChipAuthenticity("BADSOD", java.util.Map.of("dg1", "DG1"));
 
         assertThat(result).containsEntry("success", false);
         mockServer.verify();
+    }
+
+    @Test
+    @DisplayName("verifyNfcChipAuthenticity with NO data groups short-circuits fail-closed (MISSING_DG), no bio call")
+    void verifyNfcChipAuthenticity_noDataGroups_shortCircuits() {
+        // No mockServer.expect(...) — the adapter must NOT make an outbound call.
+        var result = adapter.verifyNfcChipAuthenticity("SODBYTES", java.util.Map.of());
+
+        assertThat(result).containsEntry("is_authentic", false);
+        assertThat(result).containsEntry("reason_code", "MISSING_DG");
+        mockServer.verify(); // verifies zero expected requests were made
     }
 }

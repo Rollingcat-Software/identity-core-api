@@ -333,6 +333,17 @@ public class BiometricServiceAdapter implements BiometricServicePort {
                 dataGroups.put(num, dg.getValue());
             }
         }
+        // Bio requires >= 1 DG (an empty data_groups is a hard 400 there, and a
+        // SOD with no DG to hash can't establish integrity anyway). Short-circuit
+        // to a clean fail-closed verdict instead of a doomed 400 round-trip; the
+        // verdict interpreter maps reason_code=MISSING_DG → not authentic.
+        if (dataGroups.isEmpty()) {
+            log.warn("NFC chip-authenticity called with no data groups — failing closed (MISSING_DG)");
+            return Map.of(
+                    "is_authentic", false,
+                    "reason", "At least one Data Group (e.g. DG1) is required for passive authentication",
+                    "reason_code", "MISSING_DG");
+        }
         body.put("data_groups", dataGroups);
         try {
             return postJsonObject("/api/v1/nfc/verify-authenticity", body);
