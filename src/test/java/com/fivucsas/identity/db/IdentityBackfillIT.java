@@ -73,6 +73,9 @@ class IdentityBackfillIT {
     @Autowired private IdentityEmailRepository identityEmailRepository;
     @Autowired private UserRepository userRepository;
 
+    @jakarta.persistence.PersistenceContext
+    private jakarta.persistence.EntityManager entityManager;
+
     @Test
     @DisplayName("V67 left zero users with NULL identity_id (raw, incl. soft-deleted)")
     void backfillLeavesNoNullIdentityId() {
@@ -153,6 +156,14 @@ class IdentityBackfillIT {
                         .verifiedAt(java.time.Instant.now())
                         .build());
         assertThat(saved.getId()).isNotNull();
+
+        // IdentityEmail.identityId is a read-only mirror (@Column insertable=false)
+        // of the FK owned by the `identity` association — it is only populated on
+        // a DB load, never on the freshly-built+flushed instance. Clear the
+        // persistence context so the find-back returns a re-read row (not the
+        // 1st-level-cached `saved` instance with a null raw identityId).
+        entityManager.flush();
+        entityManager.clear();
 
         Optional<IdentityEmail> byEmail = identityEmailRepository.findByEmailIgnoreCase(email.toUpperCase());
         assertThat(byEmail).isPresent();
