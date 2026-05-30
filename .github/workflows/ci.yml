@@ -52,18 +52,23 @@ jobs:
     needs: test
     runs-on: ubuntu-latest
     timeout-minutes: 35
-    # TEMPORARY (T3.1.b follow-up): the IT job now actually executes on
-    # ubuntu-latest (was 0/30 success on self-hosted because the runner
-    # never pulled jobs). Two pre-existing migration-data bugs exposed
-    # for the first time:
-    #   1) V29__add_email_otp_to_default_login_flow.sql FK-violates
-    #      auth_flow_steps_auth_flow_id_fkey on a clean DB;
-    #   2) the test images all hardcode `postgres:16-alpine` while
-    #      Flyway V0 needs pgvector — worked around by retagging in CI.
-    # Setting continue-on-error so this PR (which is only the runner
-    # switch) merges. Track follow-up under CICD_AUDIT_2026-05-04 P0-B
-    # tail.
-    continue-on-error: true
+    # P1-1 (2026-05-30): this job is now a BLOCKING / required check. It exists
+    # to keep the tenant-isolation security guarantees under test on EVERY PR —
+    # a security invariant that isn't tested every PR silently regresses.
+    #
+    # The `RUN_INTEGRATION=true` env below flips on the gated Testcontainers ITs
+    # (each is `@EnabledIfEnvironmentVariable(named="RUN_INTEGRATION", matches="true")`),
+    # and the `-Dtest=` filter in the run step now includes `*IT` so the
+    # tenant-isolation / backfill IT classes actually execute (previously the
+    # filter was `*IntegrationTest` only, which silently skipped every `*IT`).
+    #
+    # `continue-on-error` was REMOVED so a failing isolation IT fails the PR.
+    # Branch protection on `main` must list "Integration tests (Testcontainers)"
+    # as a required status check (operator GitHub-settings step — see PR body).
+    #
+    # The test sources hardcode `postgres:16-alpine` while Flyway V0 needs the
+    # pgvector extension (prod runs pgvector/pgvector:pg16) — handled by the
+    # retag step below.
     env:
       RUN_INTEGRATION: 'true'
 
@@ -91,10 +96,60 @@ jobs:
           docker tag pgvector/pgvector:pg16 postgres:16-alpine
 
       - name: Run integration tests
+        # `*IntegrationTest` = the existing Spring-context ITs (unchanged).
+        # `*IT`              = the RUN_INTEGRATION-gated Testcontainers security/
+        #                      backfill ITs that encode the tenant-isolation
+        #                      guarantees and previously never ran in CI:
+        #                      CrossTenantIsolationIT, TenantSwitcherIsolationIT,
+        #                      IdentityBiometricConsentIT, IdentityBackfillIT,
+        #                      RoleUnificationBackfillIT.
+        # Passing an explicit -Dtest overrides surefire's default include glob,
+        # so the `*IT` classes (which surefire would otherwise leave to failsafe)
+        # are executed in the `test` phase. -DfailIfNoTests guards against the
+        # filter silently matching nothing.
         env:
           MAVEN_OPTS: -Xmx2g
           TESTCONTAINERS_RYUK_DISABLED: 'true'
-        run: mvn -B -ntp -Dtest='*IntegrationTest' verify
+        # -Djacoco.skip=true: this job runs only a SUBSET of tests, so the
+        # jacoco `check` goal (bound to `verify`, baselined on the FULL unit run)
+        # would fail on coverage. The unit `test` job above enforces the coverage
+        # gate; here we only care that the isolation ITs pass.
+        run: mvn -B -ntp -Dtest='*IntegrationTest,*IT' -DfailIfNoTests=true -Djacoco.skip=true verify
+
+      - name: Assert tenant-isolation ITs actually executed (not skipped)
+        # Defense against a silent regression where the ITs compile but get
+        # skipped (e.g. RUN_INTEGRATION unset, or a rename drops them from the
+        # filter). Each named IT must have produced a surefire report with at
+        # least one run test and zero skips of the whole class.
+        run: |
+          set -euo pipefail
+          reports=target/surefire-reports
+          required=(
+            CrossTenantIsolationIT
+            TenantSwitcherIsolationIT
+            IdentityBiometricConsentIT
+            IdentityBackfillIT
+            RoleUnificationBackfillIT
+          )
+          fail=0
+          for it in "${required[@]}"; do
+            f="$reports/TEST-com.fivucsas.identity."*".$it.xml"
+            # shellcheck disable=SC2086
+            match=$(ls $f 2>/dev/null | head -1 || true)
+            if [ -z "$match" ]; then
+              echo "::error::$it produced no surefire report — it did NOT run (RUN_INTEGRATION gating or -Dtest filter broke)"
+              fail=1
+              continue
+            fi
+            tests=$(grep -oP 'testsuite[^>]*\btests="\K[0-9]+' "$match" | head -1 || echo 0)
+            if [ "${tests:-0}" -lt 1 ]; then
+              echo "::error::$it ran 0 tests (report: $match)"
+              fail=1
+            else
+              echo "OK: $it executed ($tests test(s))"
+            fi
+          done
+          exit $fail
 
       - name: Upload surefire reports on failure
         if: failure()
