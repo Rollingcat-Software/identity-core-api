@@ -113,16 +113,31 @@ public class RsaKeyProvider {
 
     private boolean isDevOrTestProfile() {
         for (String p : environment.getActiveProfiles()) {
-            if ("dev".equalsIgnoreCase(p) || "test".equalsIgnoreCase(p)) return true;
+            if (isEphemeralKeyProfile(p)) return true;
         }
         // No active profile in tests defaults to dev per application.yml
         if (environment.getActiveProfiles().length == 0) {
             for (String p : environment.getDefaultProfiles()) {
-                if ("dev".equalsIgnoreCase(p) || "test".equalsIgnoreCase(p)) return true;
+                if (isEphemeralKeyProfile(p)) return true;
             }
             return true; // Safe default: tests / no profile -> dev behavior
         }
         return false;
+    }
+
+    /**
+     * Profiles for which an ephemeral RSA key pair may be auto-generated instead
+     * of demanding {@code JWT_RSA_*} env vars. {@code integration} is included so
+     * the Testcontainers integration-test suite (the required tenant-isolation CI
+     * gate, P1-1) can boot the full Spring context without the CI job having to
+     * inject a real key pair — these keys never sign production tokens (prod runs
+     * under the {@code prod} profile, which is NOT in this list and still
+     * fail-fasts on missing keys).
+     */
+    private static boolean isEphemeralKeyProfile(String profile) {
+        return "dev".equalsIgnoreCase(profile)
+                || "test".equalsIgnoreCase(profile)
+                || "integration".equalsIgnoreCase(profile);
     }
 
     private static RSAPrivateKey parsePrivateKey(String pem) throws Exception {
