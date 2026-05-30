@@ -17,6 +17,13 @@ public interface WebAuthnCredentialRepositoryPort {
 
     List<WebAuthnCredential> findAllByUserId(UUID userId);
 
+    /**
+     * Finds every credential bound to the given WebAuthn user handle
+     * (base64url-encoded). Used by the usernameless/discoverable assertion path
+     * to resolve a user from the handle the authenticator returns.
+     */
+    List<WebAuthnCredential> findAllByUserHandle(String userHandle);
+
     boolean existsByCredentialId(String credentialId);
 
     void deleteByCredentialId(String credentialId);

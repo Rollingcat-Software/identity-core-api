@@ -9,8 +9,16 @@ import com.fivucsas.identity.application.port.output.WebAuthnCredentialRepositor
 import com.fivucsas.identity.domain.repository.UserRepository;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.entity.WebAuthnCredential;
+import com.fivucsas.identity.application.dto.response.AuthenticationResponse;
+import com.fivucsas.identity.application.dto.response.UserResponse;
+import com.fivucsas.identity.application.mapper.UserResponseMapper;
+import com.fivucsas.identity.application.port.output.TokenGenerationPort;
+import com.fivucsas.identity.entity.RefreshToken;
 import com.fivucsas.identity.infrastructure.webauthn.WebAuthnService;
+import com.fivucsas.identity.infrastructure.webauthn.WebAuthnUserHandle;
 import com.fivucsas.identity.security.TenantScopeResolver;
+import com.fivucsas.identity.service.RefreshTokenService;
+import jakarta.servlet.http.HttpServletRequest;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -45,6 +53,8 @@ public class DeviceController {
     private final WebAuthnCredentialService webAuthnCredentialService;
     private final UserRepository userRepository;
     private final TenantScopeResolver tenantScopeResolver;
+    private final TokenGenerationPort tokenGenerator;
+    private final RefreshTokenService refreshTokenService;
 
     // --- /api/v1/devices endpoints ---
 
@@ -249,19 +259,32 @@ public class DeviceController {
 
         String deviceName = body != null ? (String) body.get("deviceName") : null;
 
+        // Phase 1: derive the WebAuthn user handle from the user id so the
+        // browser sets PublicKeyCredentialUserEntity.id to it. On a later
+        // usernameless assertion the authenticator echoes this handle and we
+        // resolve the user from it without an up-front email.
+        String userHandle = WebAuthnUserHandle.encode(user.getId());
+
         Map<String, Object> options = new LinkedHashMap<>();
         options.put("sessionId", sessionId.toString());
         options.put("challenge", challenge);
         options.put("rpId", webAuthnService.getRpId());
         options.put("rpName", "Fivucsas Identity");
         options.put("userId", user.getId().toString());
+        // The base64url user handle the client MUST use as user.id so the
+        // resulting passkey is resolvable usernameless.
+        options.put("userHandle", userHandle);
         options.put("userName", user.getEmail());
         options.put("userDisplayName", user.getFirstName() + " " + user.getLastName());
         options.put("excludeCredentials", existingCredentialIds);
         options.put("attestation", "direct");
+        // Phase 1: residentKey="required" (requireResidentKey=true) +
+        // userVerification="required" make the platform create a DISCOVERABLE
+        // passkey that supports usernameless login.
         options.put("authenticatorSelection", Map.of(
-                "requireResidentKey", false,
-                "userVerification", "preferred"
+                "residentKey", "required",
+                "requireResidentKey", true,
+                "userVerification", "required"
         ));
         options.put("timeout", 60000);
         if (deviceName != null) {
@@ -312,6 +335,15 @@ public class DeviceController {
             ));
         }
 
+        // Phase 1: passkeys created via register-options are discoverable
+        // (residentKey="required"). Honour an explicit client-reported flag if
+        // present (e.g. a roaming key that declined resident storage), but
+        // default to true for this resident-key ceremony. The user handle is
+        // always derived from the authenticated user so usernameless assertion
+        // can resolve back to them.
+        boolean discoverable = !Boolean.FALSE.equals(request.get("discoverable"));
+        String userHandle = WebAuthnUserHandle.encode(user.getId());
+
         WebAuthnCredential credential = WebAuthnCredential.builder()
                 .user(user)
                 .credentialId(credentialId)
@@ -320,11 +352,14 @@ public class DeviceController {
                 .attestationFormat(attestationFormat)
                 .transports(transports)
                 .deviceName(deviceName)
+                .discoverable(discoverable)
+                .userHandle(userHandle)
                 .build();
 
         WebAuthnCredential saved = webAuthnCredentialService.saveCredential(credential);
 
-        log.info("WebAuthn credential registered for user: {}, credentialId: {}", user.getEmail(), credentialId);
+        log.info("WebAuthn credential registered for user: {}, credentialId: {}, discoverable: {}",
+                user.getEmail(), credentialId, discoverable);
         return ResponseEntity.status(HttpStatus.CREATED).body(Map.of(
                 "success", true,
                 "message", "Credential registered successfully",
@@ -461,5 +496,184 @@ public class DeviceController {
         result.put("credentialId", credentialId);
 
         return ResponseEntity.ok(result);
+    }
+
+    // --- Phase 1: usernameless / discoverable passkey login ---
+
+    /**
+     * Begin a usernameless WebAuthn assertion. No email is supplied: because
+     * the registered passkeys are discoverable (resident keys), we return an
+     * EMPTY {@code allowCredentials} so the platform offers every passkey the
+     * authenticator holds for this RP. The browser calls
+     * {@code navigator.credentials.get()} with these options, the user picks a
+     * passkey, and the authenticator returns the {@code userHandle} we resolve
+     * the account from in {@link #passkeyAuthenticate}.
+     */
+    @PostMapping("/api/v1/webauthn/passkey/authenticate-options")
+    @Operation(summary = "Begin usernameless (discoverable) passkey assertion — no email required")
+    public ResponseEntity<Map<String, Object>> passkeyAuthenticateOptions(
+            @RequestBody(required = false) Map<String, Object> request) {
+        UUID sessionId = UUID.randomUUID();
+        String challenge = webAuthnService.generateChallenge(sessionId);
+
+        Map<String, Object> options = new LinkedHashMap<>();
+        options.put("sessionId", sessionId.toString());
+        options.put("challenge", challenge);
+        options.put("rpId", webAuthnService.getRpId());
+        // Empty allowCredentials = discoverable: let the authenticator surface
+        // any resident passkey for this RP without an up-front credential hint.
+        options.put("allowCredentials", List.of());
+        options.put("userVerification", "required");
+        options.put("timeout", 60000);
+
+        log.info("WebAuthn passkey (usernameless) authenticate options generated, session={}", sessionId);
+        return ResponseEntity.ok(options);
+    }
+
+    /**
+     * Complete a usernameless WebAuthn assertion and mint a session.
+     *
+     * <p>The account is resolved from the {@code userHandle} the authenticator
+     * returned (NOT from an email). We then run the same cryptographic
+     * verification + sign-counter check as {@link #authenticate}, and on
+     * success mint an access token + refresh token exactly like a completed
+     * single-factor login (see {@code AuthenticateUserService}), returning the
+     * same {@link AuthenticationResponse} shape.</p>
+     */
+    @PostMapping("/api/v1/webauthn/passkey/authenticate")
+    @Operation(summary = "Complete usernameless passkey assertion and mint a login session")
+    public ResponseEntity<?> passkeyAuthenticate(@RequestBody Map<String, Object> request,
+                                                 HttpServletRequest httpRequest) {
+        String sessionIdStr = (String) request.get("sessionId");
+        String credentialId = (String) request.get("credentialId");
+        String authenticatorData = (String) request.get("authenticatorData");
+        String clientDataJson = (String) request.get("clientDataJSON");
+        String signature = (String) request.get("signature");
+        String userHandle = (String) request.get("userHandle");
+
+        if (sessionIdStr == null || credentialId == null || authenticatorData == null
+                || clientDataJson == null || signature == null || userHandle == null) {
+            return ResponseEntity.badRequest().body(Map.of(
+                    "success", false,
+                    "message", "sessionId, credentialId, authenticatorData, clientDataJSON, "
+                            + "signature, and userHandle are required"
+            ));
+        }
+
+        UUID sessionId;
+        try {
+            sessionId = UUID.fromString(sessionIdStr);
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of(
+                    "success", false,
+                    "message", "Invalid sessionId format"
+            ));
+        }
+
+        // Resolve the user from the user handle the authenticator returned.
+        // The handle is the base64url-encoded user-id bytes; decode it, then
+        // confirm the presented credential actually belongs to that user (so a
+        // forged handle paired with someone else's credentialId can't slip
+        // through before signature verification).
+        UUID resolvedUserId = WebAuthnUserHandle.decodeToUserId(userHandle);
+        if (resolvedUserId == null) {
+            log.warn("WebAuthn passkey authenticate: unresolvable userHandle");
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of(
+                    "success", false,
+                    "message", "Authentication failed"
+            ));
+        }
+
+        WebAuthnCredential credential = credentialRepository.findByCredentialId(credentialId).orElse(null);
+        if (credential == null || credential.getUser() == null
+                || !resolvedUserId.equals(credential.getUser().getId())) {
+            log.warn("WebAuthn passkey authenticate: credential/handle mismatch for credentialId={}", credentialId);
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of(
+                    "success", false,
+                    "message", "Authentication failed"
+            ));
+        }
+
+        // Same cryptographic verification + challenge consumption as the
+        // email-scoped path.
+        boolean valid = webAuthnService.verifyAssertion(
+                sessionId, credentialId, authenticatorData, clientDataJson,
+                signature, credential.getPublicKey());
+        if (!valid) {
+            log.warn("WebAuthn passkey authenticate: assertion verification failed for credentialId={}", credentialId);
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of(
+                    "success", false,
+                    "message", "Authentication failed"
+            ));
+        }
+
+        // WebAuthn §6.1 step 17 sign-counter check (clone detection).
+        long newSignCount = webAuthnService.extractSignCount(authenticatorData);
+        if (!webAuthnService.validateSignCount(newSignCount, credential.getSignCount())) {
+            log.warn("WebAuthn passkey authenticate: sign-counter regression for credentialId={} — possible clone",
+                    credentialId);
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of(
+                    "success", false,
+                    "message", "Authenticator counter regression — possible cloned credential"
+            ));
+        }
+        webAuthnCredentialService.updateSignCount(credential, newSignCount);
+
+        User user = credential.getUser();
+
+        // Mint a session the same way a completed single-factor login does:
+        // real access token (amr=webauthn) + persisted rotating refresh token.
+        String ip = clientIp(httpRequest);
+        String userAgent = httpRequest.getHeader("User-Agent");
+        String accessToken = tokenGenerator.generateAccessToken(user.getEmail(), List.of("webauthn"));
+        RefreshToken refreshToken = refreshTokenService.createRefreshToken(user, ip, userAgent);
+        UserResponse userResponse = UserResponseMapper.toResponse(user);
+
+        log.info("WebAuthn passkey (usernameless) login successful for user: {}, credential: {}",
+                user.getEmail(), credentialId);
+
+        return ResponseEntity.ok(AuthenticationResponse.of(
+                accessToken, refreshToken.getToken(), tokenGenerator.getExpirationMillis(), userResponse));
+    }
+
+    // --- Phase 2(d): push-token registration for approve-login ---
+
+    /**
+     * Stores/refreshes the push-notification token for one of the
+     * authenticated user's devices. Backs the approve-login push channel
+     * (Phase 3): the approver's device receives the number-matching prompt at
+     * this token. The route was previously unmounted even though
+     * {@code UserDevice.push_token} + {@code ManageDeviceService.updatePushToken}
+     * already existed.
+     */
+    @PostMapping("/api/v1/devices/push-token")
+    @Operation(summary = "Register/refresh a device push-notification token for the current user")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<DeviceResponse> updatePushToken(@RequestBody Map<String, Object> body) {
+        Object userIdRaw = body.get("userId");
+        String token = (String) body.get("token");
+        String platform = (String) body.get("platform");
+
+        if (userIdRaw == null || token == null || token.isBlank()) {
+            return ResponseEntity.badRequest().build();
+        }
+
+        UUID userId;
+        try {
+            userId = UUID.fromString(userIdRaw.toString());
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().build();
+        }
+
+        DeviceResponse updated = manageDeviceUseCase.updatePushToken(userId, token, platform);
+        return ResponseEntity.ok(updated);
+    }
+
+    private static String clientIp(HttpServletRequest request) {
+        String xff = request.getHeader("X-Forwarded-For");
+        if (xff != null && !xff.isBlank()) {
+            return xff.split(",")[0].trim();
+        }
+        return request.getRemoteAddr();
     }
 }
