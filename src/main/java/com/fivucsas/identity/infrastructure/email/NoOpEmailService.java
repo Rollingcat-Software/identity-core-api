@@ -18,9 +18,10 @@ public class NoOpEmailService implements EmailService {
 
     @Override
     public void sendGuestInvitation(String to, String token, Instant accessStart, Instant accessEnd,
-                                    String message, String inviterName) {
-        log.info("Mail disabled - guest invitation for {} (token={}, access {} -> {}, invitedBy={})",
-                to, token, accessStart, accessEnd, inviterName);
+                                    String message, String inviterName, String tenantName, String locale) {
+        log.info("Mail disabled - guest invitation for {} (token={}, access {} -> {}, invitedBy={}, "
+                        + "tenant='{}', locale={})",
+                to, token, accessStart, accessEnd, inviterName, tenantName, locale);
     }
 
     @Override

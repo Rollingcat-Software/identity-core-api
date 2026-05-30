@@ -27,4 +27,12 @@ public class InviteGuestRequest {
     private Integer accessDurationHours;
 
     private String message;
+
+    /**
+     * BCP-47 language tag for the invitation email ("tr" or "en"). Optional —
+     * the admin UI passes the recipient's preferred language (or its own active
+     * language) so the guest receives the email in their language. Null/blank or
+     * any unsupported value falls back to English.
+     */
+    private String locale;
 }

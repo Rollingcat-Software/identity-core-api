@@ -201,4 +201,47 @@ class BiometricServiceAdapterTest {
         adapter.enrollFace(USER_ID, imageFile, "   ", null, null);
         mockServer.verify();
     }
+
+    @Test
+    @DisplayName("verifyNfcChipAuthenticity posts the frozen contract: sod_b64 + numeric data_groups to /api/v1/nfc/verify-authenticity")
+    void verifyNfcChipAuthenticity_postsFrozenContract() {
+        mockServer.expect(requestTo(BIO_URL + "/api/v1/nfc/verify-authenticity"))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(req -> {
+                    String body = bodyAsString(req);
+                    // sod_b64 field present with the SOD value
+                    assertThat(body).contains("\"sod_b64\"").contains("SODBYTES");
+                    // data_groups object with bio-native numeric keys ("1","2"),
+                    // NOT the client's "dg1"/"dg2" form
+                    assertThat(body).contains("\"data_groups\"")
+                            .contains("\"1\"").contains("DG1BYTES")
+                            .contains("\"2\"").contains("DG2BYTES");
+                    assertThat(body).doesNotContain("\"dg1\"");
+                })
+                .andRespond(withSuccess(
+                        "{\"is_authentic\":true,\"reason_code\":\"OK\"}", MediaType.APPLICATION_JSON));
+
+        // Caller passes dg-prefixed keys; the adapter normalizes to numeric.
+        var result = adapter.verifyNfcChipAuthenticity("SODBYTES",
+                java.util.Map.of("dg1", "DG1BYTES", "dg2", "DG2BYTES"));
+
+        assertThat(result).containsEntry("is_authentic", true);
+        mockServer.verify();
+    }
+
+    @Test
+    @DisplayName("verifyNfcChipAuthenticity surfaces a 4xx from bio as a fail-closed error map")
+    void verifyNfcChipAuthenticity_4xx_failsClosed() {
+        mockServer.expect(requestTo(BIO_URL + "/api/v1/nfc/verify-authenticity"))
+                .andExpect(method(HttpMethod.POST))
+                .andRespond(org.springframework.test.web.client.response.MockRestResponseCreators
+                        .withStatus(org.springframework.http.HttpStatus.BAD_REQUEST)
+                        .body("{\"detail\":\"bad sod\"}")
+                        .contentType(MediaType.APPLICATION_JSON));
+
+        var result = adapter.verifyNfcChipAuthenticity("BADSOD", java.util.Map.of());
+
+        assertThat(result).containsEntry("success", false);
+        mockServer.verify();
+    }
 }

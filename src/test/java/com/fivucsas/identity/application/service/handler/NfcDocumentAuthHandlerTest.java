@@ -1,5 +1,6 @@
 package com.fivucsas.identity.application.service.handler;
 
+import com.fivucsas.identity.application.port.output.BiometricServicePort;
 import com.fivucsas.identity.application.port.output.NfcCardRepositoryPort;
 import com.fivucsas.identity.domain.model.auth.AuthMethodType;
 import com.fivucsas.identity.entity.AuthFlowStep;
@@ -25,6 +26,7 @@ class NfcDocumentAuthHandlerTest {
     @Mock private AuthSession session;
     @Mock private AuthFlowStep step;
     @Mock private NfcCardRepositoryPort nfcCardRepository;
+    @Mock private BiometricServicePort biometricServicePort;
 
     @InjectMocks
     private NfcDocumentAuthHandler handler;
@@ -42,7 +44,9 @@ class NfcDocumentAuthHandlerTest {
         when(session.getUser()).thenReturn(user);
         when(user.getId()).thenReturn(userId);
         when(session.getId()).thenReturn(UUID.randomUUID());
-        when(nfcCardRepository.findByCardSerialAndUserIdAndIsActiveTrue("someNfcPayload", userId))
+        // The handler canonicalizes the serial at ingest. "someNfcPayload" is
+        // non-hex → canonical form is its upper-case variant.
+        when(nfcCardRepository.findByCardSerialAndUserIdAndIsActiveTrue("SOMENFCPAYLOAD", userId))
                 .thenReturn(Optional.empty());
 
         // when
@@ -64,7 +68,8 @@ class NfcDocumentAuthHandlerTest {
 
         NfcCard card = mock(NfcCard.class);
         when(card.getCardType()).thenReturn("ID_CARD");
-        when(nfcCardRepository.findByCardSerialAndUserIdAndIsActiveTrue("validSerial", userId))
+        // "validSerial" is non-hex → canonical form is upper-cased.
+        when(nfcCardRepository.findByCardSerialAndUserIdAndIsActiveTrue("VALIDSERIAL", userId))
                 .thenReturn(Optional.of(card));
 
         // when
@@ -97,5 +102,72 @@ class NfcDocumentAuthHandlerTest {
     @Test
     void requiresEnrollment_ShouldReturnTrue() {
         assertThat(handler.requiresEnrollment()).isTrue();
+    }
+
+    @Test
+    void validate_WebColonSerial_LooksUpCanonicalUpperHex() {
+        // A card enrolled from mobile is stored as canonical UPPERHEX; the web
+        // client sends the same serial as lowercase:colons. The handler must
+        // canonicalize so the lookup hits.
+        User user = mock(User.class);
+        UUID userId = UUID.randomUUID();
+        when(session.getUser()).thenReturn(user);
+        when(user.getId()).thenReturn(userId);
+        when(session.getId()).thenReturn(UUID.randomUUID());
+
+        NfcCard card = mock(NfcCard.class);
+        when(card.getCardType()).thenReturn("ID_CARD");
+        when(nfcCardRepository.findByCardSerialAndUserIdAndIsActiveTrue("04A2245B6F7180", userId))
+                .thenReturn(Optional.of(card));
+
+        StepResult result = handler.validate(session, step,
+                Map.of("nfcData", "04:a2:24:5b:6f:71:80"));
+
+        assertThat(result.isSuccess()).isTrue();
+        verify(card).markUsed();
+    }
+
+    @Test
+    void validate_WhenSodPresentAndChipInauthentic_ShouldFailBeforeLookup() {
+        User user = mock(User.class);
+        UUID userId = UUID.randomUUID();
+        when(session.getUser()).thenReturn(user);
+        when(session.getId()).thenReturn(UUID.randomUUID());
+
+        when(biometricServicePort.verifyNfcChipAuthenticity(eq("SODB64"), anyMap()))
+                .thenReturn(Map.of("is_authentic", false, "reason", "DS untrusted",
+                        "reason_code", "DS_UNTRUSTED"));
+
+        StepResult result = handler.validate(session, step,
+                Map.of("nfcData", "04A2245B", "sod", "SODB64", "dg1", "DG1"));
+
+        assertThat(result.isSuccess()).isFalse();
+        assertThat(result.error()).contains("could not be authenticated");
+        // Fail-closed BEFORE the card lookup.
+        verify(nfcCardRepository, never())
+                .findByCardSerialAndUserIdAndIsActiveTrue(anyString(), any(UUID.class));
+    }
+
+    @Test
+    void validate_WhenSodPresentAndChipAuthentic_ShouldProceedToLookup() {
+        User user = mock(User.class);
+        UUID userId = UUID.randomUUID();
+        when(session.getUser()).thenReturn(user);
+        when(user.getId()).thenReturn(userId);
+        when(session.getId()).thenReturn(UUID.randomUUID());
+
+        when(biometricServicePort.verifyNfcChipAuthenticity(eq("SODB64"), anyMap()))
+                .thenReturn(Map.of("is_authentic", true));
+
+        NfcCard card = mock(NfcCard.class);
+        when(card.getCardType()).thenReturn("ID_CARD");
+        when(nfcCardRepository.findByCardSerialAndUserIdAndIsActiveTrue("04A2245B", userId))
+                .thenReturn(Optional.of(card));
+
+        StepResult result = handler.validate(session, step,
+                Map.of("nfcData", "04A2245B", "sod", "SODB64", "dg1", "DG1"));
+
+        assertThat(result.isSuccess()).isTrue();
+        verify(card).markUsed();
     }
 }
