@@ -8,6 +8,7 @@ import com.fivucsas.identity.domain.repository.UserRepository;
 import com.fivucsas.identity.entity.RefreshToken;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.domain.repository.RefreshTokenRepository;
+import com.fivucsas.identity.infrastructure.multitenancy.TenantFilterBypass;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -30,14 +31,20 @@ public class GetActiveSessionsService implements GetActiveSessionsUseCase {
 
     private final UserRepository userRepository;
     private final RefreshTokenRepository refreshTokenRepository;
+    private final TenantFilterBypass tenantFilterBypass;
 
     @Override
     @Transactional(readOnly = true)
     public List<SessionResponse> execute(GetActiveSessionsQuery query) {
         log.info("Get active sessions request for user: {}", query.getEmail());
 
-        User user = userRepository.findByEmail(query.getEmail())
-            .orElseThrow(() -> new UserNotFoundException("User not found with email: " + query.getEmail()));
+        // "My sessions" is user-centric — resolve the caller by their globally-unique
+        // email WITHOUT the active-tenant filter. Otherwise a ROOT viewing their own
+        // sessions while switched to another tenant (X-Tenant-ID) has their home-tenant
+        // user row filtered out by @Filter(tenantFilter) → UserNotFoundException → 404.
+        User user = tenantFilterBypass.runWithoutTenantFilter(() ->
+            userRepository.findByEmail(query.getEmail())
+                .orElseThrow(() -> new UserNotFoundException("User not found with email: " + query.getEmail())));
 
         List<RefreshToken> activeSessions = refreshTokenRepository.findActiveTokensByUser(user, Instant.now());
 
