@@ -11,6 +11,7 @@ import com.fivucsas.identity.entity.Tenant;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.entity.UserEnrollment;
 import com.fivucsas.identity.infrastructure.multitenancy.TenantContext;
+import com.fivucsas.identity.infrastructure.multitenancy.TenantFilterBypass;
 import com.fivucsas.identity.repository.JpaTenantRepository;
 import com.fivucsas.identity.application.port.output.UserEnrollmentRepositoryPort;
 import com.fivucsas.identity.domain.repository.UserRepository;
@@ -41,14 +42,28 @@ public class ManageEnrollmentService implements ManageEnrollmentUseCase {
     private final BiometricServicePort biometricServicePort;
     private final NfcCardRepositoryPort nfcCardRepository;
     private final WebAuthnCredentialRepositoryPort webAuthnCredentialRepository;
+    private final TenantFilterBypass tenantFilterBypass;
 
     @Override
     @Transactional
     public List<EnrollmentResponse> getUserEnrollments(UUID userId) {
-        ensureSessionBoundEnrollments(userId);
-        return userEnrollmentRepository.findAllByUserId(userId).stream()
-                .map(EnrollmentResponse::from)
-                .toList();
+        // A user's enrollments are USER-centric — they live in the user's own
+        // tenant, not whichever tenant a ROOT is currently browsing (X-Tenant-ID).
+        // Without this bypass, the @Filter(tenantFilter) on UserEnrollment/User
+        // scopes the reads to the ACTIVE tenant: when a ROOT views their own (or a
+        // foreign user's) auth methods while switched to another tenant, the real
+        // rows are filtered out, so (a) the list shows 0 methods and (b) the lazy
+        // EMAIL_OTP/QR_CODE provisioning thinks the rows are missing and re-inserts
+        // them → uq_user_enrollment violation at flush → 500. Resolving by user id
+        // is single-tenant by construction (a user belongs to one tenant), so the
+        // bypass is not a cross-tenant leak; authorization already happened at the
+        // controller @PreAuthorize before we get here.
+        return tenantFilterBypass.runWithoutTenantFilter(() -> {
+            ensureSessionBoundEnrollments(userId);
+            return userEnrollmentRepository.findAllByUserId(userId).stream()
+                    .map(EnrollmentResponse::from)
+                    .toList();
+        });
     }
 
     /**

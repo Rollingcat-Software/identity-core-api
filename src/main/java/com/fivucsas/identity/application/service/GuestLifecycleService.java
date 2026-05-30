@@ -188,6 +188,14 @@ public class GuestLifecycleService {
             throw new DomainStateConflictException("Invitation has expired");
         }
 
+        // An account with this email already exists — creating the guest user would
+        // hit the users.email unique constraint and surface as an opaque 500 ("An
+        // unexpected error occurred") on the accept-invite page. Fail gracefully.
+        if (userRepository.existsByEmail(invitation.getEmail())) {
+            throw new DomainStateConflictException(
+                    "An account with this email already exists. Please sign in instead.");
+        }
+
         // Create guest user
         User guestUser = User.builder()
                 .tenant(invitation.getTenant())
