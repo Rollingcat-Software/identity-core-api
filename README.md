@@ -472,16 +472,21 @@ http://localhost:8080/api/v1
 
 ### Tenant Management Endpoints
 
+> **Role naming (2026-05-30):** the platform-owner tier is now **`ROOT`** (formerly
+> `SUPER_ADMIN`). `user_type` is the sole authority for the platform tier
+> (`ROOT` › `TENANT_ADMIN` › `TENANT_MEMBER` › `GUEST`); the within-tenant `role`
+> is purely RBAC. See `docs/IDENTITY_ROLE_UNIFICATION.md`.
+
 | Method | Endpoint               | Description                 | Auth Required | Role         |
 |--------|------------------------|-----------------------------|---------------|--------------|
-| GET    | `/api/v1/tenants`                       | List all tenants              | Yes           | SUPER_ADMIN  |
+| GET    | `/api/v1/tenants`                       | List all tenants              | Yes           | ROOT         |
 | GET    | `/api/v1/tenants/{tenantId}`            | Get tenant by ID              | Yes           | TENANT_ADMIN |
 | GET    | `/api/v1/tenants/slug/{slug}`           | Get tenant by slug            | Yes           | TENANT_ADMIN |
-| POST   | `/api/v1/tenants`                       | Create new tenant             | Yes           | SUPER_ADMIN  |
+| POST   | `/api/v1/tenants`                       | Create new tenant             | Yes           | ROOT         |
 | PUT    | `/api/v1/tenants/{tenantId}`            | Update tenant (incl. config)  | Yes           | TENANT_ADMIN |
-| POST   | `/api/v1/tenants/{tenantId}/activate`   | Activate tenant               | Yes           | SUPER_ADMIN  |
-| POST   | `/api/v1/tenants/{tenantId}/suspend`    | Suspend tenant                | Yes           | SUPER_ADMIN  |
-| DELETE | `/api/v1/tenants/{tenantId}`            | Soft-delete tenant            | Yes           | SUPER_ADMIN  |
+| POST   | `/api/v1/tenants/{tenantId}/activate`   | Activate tenant               | Yes           | ROOT         |
+| POST   | `/api/v1/tenants/{tenantId}/suspend`    | Suspend tenant                | Yes           | ROOT         |
+| DELETE | `/api/v1/tenants/{tenantId}`            | Soft-delete tenant            | Yes           | ROOT         |
 
 ### Role & Permission Endpoints
 
