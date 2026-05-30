@@ -42,6 +42,7 @@ class ManageEnrollmentServiceTest {
     @Mock private BiometricServicePort biometricServicePort;
     @Mock private NfcCardRepositoryPort nfcCardRepository;
     @Mock private WebAuthnCredentialRepositoryPort webAuthnCredentialRepository;
+    @Mock private com.fivucsas.identity.infrastructure.multitenancy.TenantFilterBypass tenantFilterBypass;
 
     @InjectMocks
     private ManageEnrollmentService service;
@@ -59,6 +60,10 @@ class ManageEnrollmentServiceTest {
         when(enrollment.getUser()).thenReturn(null);
         when(enrollment.getTenant()).thenReturn(null);
         when(userEnrollmentRepository.findAllByUserId(userId)).thenReturn(List.of(enrollment));
+        // getUserEnrollments resolves the user-centric read with the tenant filter
+        // bypassed; the mock just executes the supplied work.
+        when(tenantFilterBypass.runWithoutTenantFilter(any()))
+                .thenAnswer(inv -> ((java.util.function.Supplier<?>) inv.getArgument(0)).get());
 
         // when
         List<EnrollmentResponse> result = service.getUserEnrollments(userId);

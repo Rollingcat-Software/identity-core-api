@@ -56,6 +56,9 @@ class ManageTenantServiceSoftDeleteTest {
     @Mock
     private com.fivucsas.identity.application.port.output.AuditLogPort auditLogPort;
 
+    @Mock
+    private com.fivucsas.identity.security.RbacAuthorizationService rbacService;
+
     @InjectMocks
     private ManageTenantService service;
 
@@ -64,6 +67,9 @@ class ManageTenantServiceSoftDeleteTest {
 
     @BeforeEach
     void setUp() {
+        // P1-4 added rbacService to ManageTenantService (audit actor via currentActorId()).
+        org.mockito.Mockito.lenient().when(rbacService.getCurrentUserId())
+                .thenReturn(java.util.Optional.empty());
         tenantId = UUID.randomUUID();
         Instant now = Instant.now();
         existingTenant = Tenant.reconstitute(
