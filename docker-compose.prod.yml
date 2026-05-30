@@ -57,6 +57,12 @@ services:
       # Daily cron at 03:30 server time. Operator must run dry-run first via
       # DELETE /api/v1/admin/purge/dry-run before flipping to true.
       APP_PURGE_SOFT_DELETE_ENABLED: ${APP_PURGE_SOFT_DELETE_ENABLED:-false}
+      # Config-driven login engine kill-switch (task #16, ships DARK 2026-05-30).
+      # Default OFF = byte-identical legacy password-first login. Reversible via
+      # .env.prod + `up -d` recreate (no image rebuild). Roll out dark → staging
+      # → canary one tenant (set _TENANTS to its UUID) → global (_LOGIN=true).
+      APP_AUTH_CONFIG_DRIVEN_LOGIN: ${APP_AUTH_CONFIG_DRIVEN_LOGIN:-false}
+      APP_AUTH_CONFIG_DRIVEN_LOGIN_TENANTS: ${APP_AUTH_CONFIG_DRIVEN_LOGIN_TENANTS:-}
       CORS_ALLOWED_ORIGINS: https://api.fivucsas.com,https://app.fivucsas.com,https://demo.fivucsas.com,https://verify.fivucsas.com
       CORS_ALLOWED_METHODS: GET,POST,PUT,DELETE,OPTIONS,PATCH
       CORS_ALLOWED_HEADERS: Authorization,Content-Type,X-Tenant-ID,X-Request-ID,Accept
