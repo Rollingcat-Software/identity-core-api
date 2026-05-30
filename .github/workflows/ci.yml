@@ -72,6 +72,23 @@ jobs:
     env:
       RUN_INTEGRATION: 'true'
 
+    # Redis service for the @SpringBootTest integration classes (TOTP used-code
+    # replay marker, rate-limit/cache). The `integration` profile points Redis at
+    # localhost:6379; without a real Redis the auth-flow ITs threw
+    # RedisConnectionException ("Unable to connect to localhost:6379"). Postgres
+    # is provided per-class via Testcontainers; Redis is simplest as a GH service
+    # (no extra Testcontainers dependency) and is prod-faithful (real Redis 7).
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
       - uses: actions/checkout@v4
 

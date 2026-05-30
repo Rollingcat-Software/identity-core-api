@@ -217,12 +217,15 @@ class TenantSwitcherIsolationIT {
 
     private UUID seedTenant(String slug) {
         UUID id = UUID.randomUUID();
+        // Unique name/slug per invocation — tearDown only soft-deletes (V53
+        // forbids hard-delete) so a fixed name/slug collides on the next @Test.
+        String unique = slug + "-" + id.toString().substring(0, 8);
         jdbc.update(
                 "INSERT INTO tenants (id, name, slug, contact_email, status, max_users, " +
                 "biometric_enabled, session_timeout_minutes, refresh_token_validity_days, " +
                 "is_active, created_at, updated_at) " +
                 "VALUES (?, ?, ?, ?, 'ACTIVE', 100, true, 30, 7, true, NOW(), NOW())",
-                id, "SW " + slug, slug, slug + "@example.com");
+                id, "SW " + unique, unique, unique + "@example.com");
         return id;
     }
 

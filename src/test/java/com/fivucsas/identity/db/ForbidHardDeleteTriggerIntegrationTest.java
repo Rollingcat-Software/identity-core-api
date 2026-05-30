@@ -136,10 +136,11 @@ class ForbidHardDeleteTriggerIntegrationTest {
 
     private UUID seedTenant() {
         UUID id = UUID.randomUUID();
+        // slug is NOT NULL since V20 — the fixture must supply it (unique per row).
         jdbc.update(
-                "INSERT INTO tenants (id, name, is_active, created_at, updated_at) " +
-                "VALUES (?, ?, true, NOW(), NOW())",
-                id, "v53-test-" + id);
+                "INSERT INTO tenants (id, name, slug, is_active, created_at, updated_at) " +
+                "VALUES (?, ?, ?, true, NOW(), NOW())",
+                id, "v53-test-" + id, "v53-test-" + id);
         return id;
     }
 

@@ -169,10 +169,11 @@ class IdentityBackfillIT {
 
     private UUID seedTenant(String name) {
         UUID id = UUID.randomUUID();
+        // slug is NOT NULL since V20 — the fixture must supply it (unique per row).
         jdbc.update(
-                "INSERT INTO tenants (id, name, domain, display_name, is_active, created_at, updated_at) " +
-                "VALUES (?, ?, ?, ?, true, NOW(), NOW())",
-                id, name + "-" + id, name + "-" + id + ".test", name);
+                "INSERT INTO tenants (id, name, slug, domain, display_name, is_active, created_at, updated_at) " +
+                "VALUES (?, ?, ?, ?, ?, true, NOW(), NOW())",
+                id, name + "-" + id, name + "-" + id, name + "-" + id + ".test", name);
         return id;
     }
 

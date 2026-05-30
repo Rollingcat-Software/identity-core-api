@@ -505,12 +505,17 @@ class CrossTenantIsolationIT {
 
     private UUID seedTenant(String slug) {
         UUID id = UUID.randomUUID();
+        // tenants.name + tenants.slug are UNIQUE, and tearDown only SOFT-deletes
+        // (the V53 trigger forbids hard-delete), so a fixed name/slug collides on
+        // the NEXT @Test's setUp. Suffix both with the row id to stay unique
+        // across methods while keeping the human-readable prefix.
+        String unique = slug + "-" + id.toString().substring(0, 8);
         jdbc.update(
                 "INSERT INTO tenants (id, name, slug, contact_email, status, max_users, " +
                 "biometric_enabled, session_timeout_minutes, refresh_token_validity_days, " +
                 "is_active, created_at, updated_at) " +
                 "VALUES (?, ?, ?, ?, 'ACTIVE', 100, true, 30, 7, true, NOW(), NOW())",
-                id, "ISO " + slug, slug, slug + "@example.com");
+                id, "ISO " + unique, unique, unique + "@example.com");
         return id;
     }
 
