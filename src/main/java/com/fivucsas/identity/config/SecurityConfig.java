@@ -107,6 +107,14 @@ public class SecurityConfig {
                                 "/api/v1/webauthn/authenticate"
                         ).permitAll()
 
+                        // Usernameless / discoverable passkey assertion (Phase 1).
+                        // Both run before a JWT exists: the account is resolved
+                        // from the authenticator's userHandle, not a bearer token.
+                        .requestMatchers(
+                                "/api/v1/webauthn/passkey/authenticate-options",
+                                "/api/v1/webauthn/passkey/authenticate"
+                        ).permitAll()
+
                         // User session management endpoints require authentication
                         .requestMatchers("/api/v1/auth/sessions/my/**").authenticated()
                         .requestMatchers("/api/v1/auth/sessions/my").authenticated()
@@ -126,6 +134,13 @@ public class SecurityConfig {
                         // QR session creation and polling must be public (unauthenticated clients)
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/qr/session").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/auth/qr/session/**").permitAll()
+
+                        // Approve-login (number-matching): the initiator side is
+                        // unauthenticated — create the session and poll for the
+                        // approver's decision. The pending-list + decide endpoints
+                        // fall through to authenticated() below.
+                        .requestMatchers(HttpMethod.POST, "/api/v1/auth/approve-login/session").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/v1/auth/approve-login/session/*").permitAll()
 
                         // Public auth method listing
                         .requestMatchers(HttpMethod.GET, "/api/v1/auth-methods", "/api/v1/auth-methods/**")

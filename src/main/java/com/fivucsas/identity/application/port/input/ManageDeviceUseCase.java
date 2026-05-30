@@ -16,5 +16,17 @@ public interface ManageDeviceUseCase {
      */
     List<DeviceResponse> listAllDevices();
     DeviceResponse updateDevice(UUID deviceId, String name, String pushToken);
+
+    /**
+     * Stores/refreshes the push-notification token for a user's device on the
+     * given platform (used by the number-matching approve-login push channel).
+     * Resolves the user's device for {@code platform}; when several exist the
+     * most-recently-used one is updated. Returns the updated device.
+     *
+     * @param platform optional platform hint (WEB/ANDROID/IOS/DESKTOP); when
+     *                 null the user's most-recently-used device is updated.
+     */
+    DeviceResponse updatePushToken(UUID userId, String token, String platform);
+
     void removeDevice(UUID deviceId);
 }

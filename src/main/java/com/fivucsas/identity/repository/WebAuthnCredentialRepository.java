@@ -15,6 +15,8 @@ public interface WebAuthnCredentialRepository extends JpaRepository<WebAuthnCred
 
     List<WebAuthnCredential> findAllByUserId(UUID userId);
 
+    List<WebAuthnCredential> findAllByUserHandle(String userHandle);
+
     void deleteByCredentialId(String credentialId);
 
     boolean existsByCredentialId(String credentialId);
