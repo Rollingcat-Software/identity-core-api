@@ -41,7 +41,7 @@ public class TenantOnboardingResponse {
 
     /**
      * True when {@code app.onboarding.require-admin-approval} is enabled — the
-     * tenant stays PENDING for a SUPER_ADMIN to approve even after the admin
+     * tenant stays PENDING for a ROOT to approve even after the admin
      * verifies their email. Lets the frontend tailor the messaging.
      */
     private final boolean requiresAdminApproval;

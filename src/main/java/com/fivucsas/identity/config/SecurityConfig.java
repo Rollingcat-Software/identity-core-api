@@ -212,7 +212,7 @@ public class SecurityConfig {
                 // JWT auth filter has populated SecurityContextHolder, rebind
                 // TenantContext to the JWT-derived tenantId so a forged header
                 // can no longer swap tenants for an authenticated user.
-                // SUPER_ADMIN keeps the legitimate cross-tenant override.
+                // ROOT keeps the legitimate cross-tenant override.
                 .addFilterAfter(tenantBindFromAuthFilter, JwtAuthenticationFilter.class);
 
         // Only disable frame options for H2 console in non-prod profiles

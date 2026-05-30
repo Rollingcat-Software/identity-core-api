@@ -43,7 +43,7 @@ import java.util.stream.Collectors;
  * admin must verify their email (which proves control of an address at the
  * claimed domain) before the tenant becomes {@code ACTIVE}. The starting state
  * is {@code TRIAL} by default; when {@code app.onboarding.require-admin-approval}
- * is {@code true} the tenant starts and STAYS {@code PENDING} until a SUPER_ADMIN
+ * is {@code true} the tenant starts and STAYS {@code PENDING} until a ROOT
  * approves it — verification alone is not enough. See
  * {@link com.fivucsas.identity.application.service.VerifyEmailService} for the
  * activation hook.</p>

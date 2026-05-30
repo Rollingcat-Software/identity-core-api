@@ -56,8 +56,8 @@ public class CustomUserDetailsService implements UserDetailsService {
         // disabled. Authentication and authority loading are keyed by the
         // caller's unique email and must reflect WHO the caller is — never the
         // tenant they are currently browsing. If the active X-Tenant-ID (e.g. a
-        // SUPER_ADMIN switching tenants) were allowed to scope this lookup, a
-        // ROOT user (whose row + global SUPER_ADMIN role live in the system
+        // ROOT switching tenants) were allowed to scope this lookup, a
+        // ROOT user (whose row + global ROOT role live in the system
         // tenant / tenant_id IS NULL) would be filtered out and load zero
         // authorities → spurious 403. See TenantFilterBypass.
         return tenantFilterBypass.runWithoutTenantFilter(() -> loadUserDetails(email));
@@ -112,7 +112,7 @@ public class CustomUserDetailsService implements UserDetailsService {
     /**
      * Loads all authorities for a user including:
      * - User type authority (USER_TYPE_ROOT, USER_TYPE_TENANT_ADMIN, etc.)
-     * - Role authorities (ROLE_SUPER_ADMIN, ROLE_USER, etc.)
+     * - Role authorities (ROLE_ROOT, ROLE_USER, etc.)
      * - Permission authorities (user:read, biometric:enroll, etc.)
      */
     private Set<GrantedAuthority> loadUserAuthorities(User user) {
@@ -121,10 +121,11 @@ public class CustomUserDetailsService implements UserDetailsService {
         // Add user type as authority for hierarchy-based checks
         authorities.add(new SimpleGrantedAuthority("USER_TYPE_" + user.getUserType().name()));
 
-        // ROOT gets special role authorities - permission bypass is handled at service level
+        // ROOT gets a special role authority - permission bypass is handled at service level.
+        // (The ROOT *role* — renamed from SUPER_ADMIN in V69 — also yields ROLE_ROOT below via
+        // its role name; this branch guarantees it even for a ROOT user_type without the role row.)
         if (user.getUserType() == UserType.ROOT) {
             authorities.add(new SimpleGrantedAuthority("ROLE_ROOT"));
-            authorities.add(new SimpleGrantedAuthority("ROLE_SUPER_ADMIN"));
         }
 
         // Load active user roles with permissions
@@ -135,7 +136,7 @@ public class CustomUserDetailsService implements UserDetailsService {
         for (UserRole userRole : userRoles) {
             Role role = userRole.getRole();
 
-            // Add role as authority (ROLE_SUPER_ADMIN, ROLE_USER, etc.)
+            // Add role as authority (ROLE_ROOT, ROLE_USER, etc.)
             String roleAuthority = "ROLE_" + role.getName();
             authorities.add(new SimpleGrantedAuthority(roleAuthority));
             log.trace("Added role authority: {}", roleAuthority);

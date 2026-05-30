@@ -23,11 +23,11 @@ INSERT INTO permissions (id, name, resource, action, description) VALUES
 
 -- Insert roles
 INSERT INTO roles (id, name, description, is_system_role, is_active, tenant_id, created_at, updated_at) VALUES
-    ('00000000-0000-0000-0002-000000000001', 'SUPER_ADMIN', 'Super administrator with all permissions', true, true, '00000000-0000-0000-0000-000000000001', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+    ('00000000-0000-0000-0002-000000000001', 'ROOT', 'Platform owner (root) with all permissions', true, true, '00000000-0000-0000-0000-000000000001', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
     ('00000000-0000-0000-0002-000000000002', 'ADMIN', 'Administrator with most permissions', true, true, '00000000-0000-0000-0000-000000000001', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
     ('00000000-0000-0000-0002-000000000003', 'USER', 'Regular user', true, true, '00000000-0000-0000-0000-000000000001', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
 
--- Assign all permissions to SUPER_ADMIN role
+-- Assign all permissions to ROOT role
 INSERT INTO role_permissions (role_id, permission_id) VALUES
     ('00000000-0000-0000-0002-000000000001', '00000000-0000-0000-0001-000000000001'),
     ('00000000-0000-0000-0002-000000000001', '00000000-0000-0000-0001-000000000002'),
@@ -57,7 +57,7 @@ INSERT INTO users (id, email, password_hash, first_name, last_name, status, tena
 INSERT INTO users (id, email, password_hash, first_name, last_name, status, tenant_id, is_biometric_enrolled, verification_count, created_at, updated_at) VALUES
     ('00000000-0000-0000-0003-000000000002', 'user@fivucsas.local', '$2a$10$mggLk8Vt0ldp5vFoLl1rGe6hqGsXFADiK2N7qvzihZ2lR1U3e2RWm', 'Test', 'User', 'ACTIVE', '00000000-0000-0000-0000-000000000001', false, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
 
--- Assign SUPER_ADMIN role to admin user
+-- Assign ROOT role to admin user
 INSERT INTO user_roles (user_id, role_id, assigned_at) VALUES
     ('00000000-0000-0000-0003-000000000001', '00000000-0000-0000-0002-000000000001', CURRENT_TIMESTAMP);
 

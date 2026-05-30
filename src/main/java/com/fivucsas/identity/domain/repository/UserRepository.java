@@ -108,7 +108,7 @@ public interface UserRepository {
     /**
      * Finds users in a given tenant with pagination.
      * Used by {@code ManageUserService.getAllUsers} when the caller is not
-     * SUPER_ADMIN — prevents cross-tenant user leakage.
+     * ROOT — prevents cross-tenant user leakage.
      */
     List<User> findAllByTenantId(UUID tenantId, int page, int size);
 
@@ -127,7 +127,7 @@ public interface UserRepository {
     /**
      * Searches users within a tenant by name, email, or id number.
      * Tenant-scoped variant of {@link #searchUsers(String)} — used when the
-     * caller is not SUPER_ADMIN.
+     * caller is not ROOT.
      */
     List<User> searchUsersByTenant(UUID tenantId, String query);
 

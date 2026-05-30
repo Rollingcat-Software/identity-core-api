@@ -5,6 +5,7 @@ import com.fivucsas.identity.application.dto.response.UserResponse;
 import com.fivucsas.identity.domain.exception.UserNotFoundException;
 import com.fivucsas.identity.domain.model.user.User;
 import com.fivucsas.identity.domain.model.user.UserStatus;
+import com.fivucsas.identity.domain.model.user.UserType;
 import com.fivucsas.identity.domain.repository.TenantRepository;
 import com.fivucsas.identity.domain.repository.UserDomainRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -57,6 +58,7 @@ class GetCurrentUserServiceTest {
             .address("123 Main St")
             .idNumber("12345678901")
             .status(UserStatus.ACTIVE)
+            .userType(UserType.ROOT)
             .isBiometricEnrolled(true)
             .verificationCount(5)
             .enrolledAt(Instant.now().minus(Duration.ofDays(10)))
@@ -96,6 +98,20 @@ class GetCurrentUserServiceTest {
             assertThat(response.getVerificationCount()).isEqualTo(5);
 
             verify(userRepository).findByEmail("test@example.com");
+        }
+
+        @Test
+        @DisplayName("Should expose userType (platform tier) on /auth/me — role/user_type unification")
+        void shouldExposeUserType() {
+            // Given
+            when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(existingUser));
+
+            // When
+            UserResponse response = getCurrentUserService.execute(validQuery);
+
+            // Then — the frontend trusts userType (the SOLE platform-tier authority)
+            // instead of inferring the tier from the role string.
+            assertThat(response.getUserType()).isEqualTo("ROOT");
         }
 
         @Test

@@ -114,7 +114,7 @@ class ManageVerificationServiceStatsTest {
     }
 
     @Test
-    @DisplayName("getVerificationStats with tenantId=null (SUPER_ADMIN) aggregates platform-wide")
+    @DisplayName("getVerificationStats with tenantId=null (ROOT) aggregates platform-wide")
     void statsPlatformWide() {
         when(sessionRepository.findAll()).thenReturn(List.of(
                 sessionWithStatus(VerificationSessionStatus.COMPLETED)));

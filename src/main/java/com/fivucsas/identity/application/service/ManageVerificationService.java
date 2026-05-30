@@ -88,7 +88,7 @@ public class ManageVerificationService {
         // @PreAuthorize('verification:create') only proves the caller is a
         // TENANT_ADMIN/ROOT *somewhere*; without this, a tenant-A admin could
         // mint a session for tenant B by passing B's id. canAccessTenant()
-        // returns true for ROOT/SUPER_ADMIN (null scope), so root keeps
+        // returns true for ROOT (null scope), so root keeps
         // cross-tenant access; everyone else is pinned to their own tenant.
         // Mirrors the S1 guard in ManageTenantService.updateTenant. Runs BEFORE
         // any load so nothing is persisted on a violation. → 403 via
@@ -100,7 +100,7 @@ public class ManageVerificationService {
 
         // Confirm the target user actually belongs to the requested tenant, so a
         // caller cannot pair their own tenant id with a foreign user. ROOT /
-        // SUPER_ADMIN (unrestricted) may cross-link. findTenantIdById is a JPQL
+        // ROOT (unrestricted) may cross-link. findTenantIdById is a JPQL
         // projection (no entity.User accessor) to keep the hexagonal boundary
         // ArchUnit rule green.
         if (!tenantScopeResolver.isUnrestricted()) {
@@ -213,7 +213,7 @@ public class ManageVerificationService {
         VerificationSession session = sessionRepository.findById(sessionId)
                 .orElseThrow(() -> new EntityNotFoundException("Verification session not found: " + sessionId));
         // S2 — object-level read guard. The session's tenant must be in the
-        // caller's scope (ROOT/SUPER_ADMIN unrestricted), else a caller could
+        // caller's scope (ROOT unrestricted), else a caller could
         // read any tenant's session by id. → 403 via GlobalExceptionHandler.
         assertCanAccessSessionTenant(session);
         return VerificationSessionResponse.from(session);
@@ -231,7 +231,7 @@ public class ManageVerificationService {
      * configured; never throws so the dashboard can render gracefully.</p>
      */
     public List<com.fivucsas.identity.application.dto.response.AuthFlowResponse> getVerificationFlows(UUID tenantId) {
-        // tenantId == null → SUPER_ADMIN platform-wide listing.
+        // tenantId == null → ROOT platform-wide listing.
         java.util.stream.Stream<AuthFlow> stream = tenantId == null
                 ? authFlowRepository.findAll().stream()
                 : authFlowRepository.findAllByTenantId(tenantId).stream();
@@ -379,7 +379,7 @@ public class ManageVerificationService {
     public VerificationStatusResponse getUserVerificationStatus(UUID userId) {
         // S2 — object-level read guard. Confirm the target user's tenant is in
         // the caller's scope before exposing their verification history
-        // (ROOT/SUPER_ADMIN unrestricted). findTenantIdById is a JPQL projection
+        // (ROOT unrestricted). findTenantIdById is a JPQL projection
         // (no entity.User accessor) to keep the hexagonal-boundary ArchUnit rule
         // green. → 403 via GlobalExceptionHandler.
         if (!tenantScopeResolver.isUnrestricted()) {
@@ -415,7 +415,7 @@ public class ManageVerificationService {
 
         // S2 — object-level write guard. Completing a session flips the user's
         // identityVerified flag, so a cross-tenant complete is a privilege
-        // escalation. Pin to the caller's tenant scope (ROOT/SUPER_ADMIN
+        // escalation. Pin to the caller's tenant scope (ROOT
         // unrestricted). → 403 via GlobalExceptionHandler.
         assertCanAccessSessionTenant(session);
 
@@ -549,7 +549,7 @@ public class ManageVerificationService {
     /**
      * S2 — object-level tenant-scope guard for a single session. Resolves the
      * session's owning tenant and confirms the current caller may access it
-     * (ROOT/SUPER_ADMIN are unrestricted via {@code canAccessTenant} returning
+     * (ROOT are unrestricted via {@code canAccessTenant} returning
      * true on null scope). Reads the tenant id off the session's
      * {@code entity.Tenant} (not {@code entity.User}) so the hexagonal-boundary
      * ArchUnit rule stays green. Throws {@link AccessDeniedException} (→ 403)

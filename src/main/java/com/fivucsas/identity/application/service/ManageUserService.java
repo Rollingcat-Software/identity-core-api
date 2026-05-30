@@ -81,7 +81,7 @@ public class ManageUserService implements ManageUserUseCase {
 
         // P0-#7 (INVESTIGATION_MASTER_2026-05-07): enforce tenant.max_users on
         // the admin-create path too. RegisterUserService gates the public
-        // self-service flow; this gates the SUPER_ADMIN/TENANT_ADMIN admin UI
+        // self-service flow; this gates the ROOT/TENANT_ADMIN admin UI
         // path. Tenant-less users (system-wide) are not capped here.
         if (tenant != null) {
             long currentUserCount = userRepository.countByTenantId(tenant.getId());
@@ -166,7 +166,7 @@ public class ManageUserService implements ManageUserUseCase {
         // Tenant-scope guard: list endpoints filter by resolveTenantScope(),
         // but the by-id endpoint relied on @PreAuthorize alone, letting a
         // TENANT_ADMIN of tenant A read users in tenant B by direct UUID.
-        // Closes audit-edge 2026-04-28 P0 #2. SUPER_ADMIN (null scope) and
+        // Closes audit-edge 2026-04-28 P0 #2. ROOT (null scope) and
         // self-reads (already permitted by @PreAuthorize) bypass.
         enforceTenantScope(user, query.getUserId());
 
@@ -176,7 +176,7 @@ public class ManageUserService implements ManageUserUseCase {
     private void enforceTenantScope(User user, String requestedId) {
         UUID scopeTenantId = resolveTenantScope();
         if (scopeTenantId == null) {
-            return; // SUPER_ADMIN — cross-tenant reads allowed by design
+            return; // ROOT — cross-tenant reads allowed by design
         }
         if (user.getTenant() == null) {
             log.warn("User {} has no tenant; rejecting cross-tenant access", requestedId);
@@ -194,7 +194,7 @@ public class ManageUserService implements ManageUserUseCase {
     @Transactional(readOnly = true)
     public List<UserResponse> getAllUsers(GetAllUsersQuery query) {
         // Tenant admins and below see only their own tenant's users.
-        // SUPER_ADMIN sees everything. Callers without a tenant (shouldn't happen
+        // ROOT sees everything. Callers without a tenant (shouldn't happen
         // for authenticated requests) get empty to fail closed.
         UUID scopeTenantId = resolveTenantScope();
         log.info("Fetching users (page={}, size={}, tenantScope={})",
@@ -239,7 +239,7 @@ public class ManageUserService implements ManageUserUseCase {
 
     /**
      * Returns the tenant the current caller is allowed to enumerate, or
-     * {@code null} if the caller is SUPER_ADMIN / ROOT (no scope restriction).
+     * {@code null} if the caller is ROOT (no scope restriction).
      *
      * <p>Prevents TENANT_ADMIN and below from listing users in other tenants
      * via {@code /api/v1/users}. The {@code @PreAuthorize("user:read")} check
@@ -264,13 +264,13 @@ public class ManageUserService implements ManageUserUseCase {
      * scopes on the SAME unified {@code X-Tenant-ID} switcher header as every
      * other admin list view. Semantics:
      * <ul>
-     *   <li>SUPER_ADMIN + {@code X-Tenant-ID=<t>} → {@code t} (selected tenant).</li>
-     *   <li>SUPER_ADMIN + no header → {@code null} (cross-tenant: see all).</li>
+     *   <li>ROOT + {@code X-Tenant-ID=<t>} → {@code t} (selected tenant).</li>
+     *   <li>ROOT + no header → {@code null} (cross-tenant: see all).</li>
      *   <li>TENANT_ADMIN / USER → their home tenant (header ignored).</li>
      *   <li>unresolvable caller → fail-closed sentinel (empty result).</li>
      * </ul>
      *
-     * <p>Previously this returned {@code null} for ANY SUPER_ADMIN and leaned on
+     * <p>Previously this returned {@code null} for ANY ROOT and leaned on
      * the implicit Hibernate {@code tenantFilter} to do the scoping — making the
      * result silently dependent on filter state and inconsistent with the other
      * controllers. Now the scope is explicit and uniform.</p>
@@ -350,7 +350,7 @@ public class ManageUserService implements ManageUserUseCase {
         // (RbacAuthorizationService.getCurrentUserTenantId,
         // resolveTenantScope) so the hexagonal-boundary ratchet
         // (UserDomainBoundaryTest) does not register new violations.
-        // resolveTenantScope() returns null for SUPER_ADMIN — keep that
+        // resolveTenantScope() returns null for ROOT — keep that
         // as "ROOT" for log readability.
         UUID scopeTenantId = resolveTenantScope();
         String actorTenantId = scopeTenantId == null

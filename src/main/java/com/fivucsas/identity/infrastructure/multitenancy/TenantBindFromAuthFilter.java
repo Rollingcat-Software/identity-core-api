@@ -42,12 +42,12 @@ import java.util.UUID;
  *       {@code TenantContextFilter} placed in {@link TenantContext}.
  *       <ul>
  *         <li>If they match, no change.</li>
- *         <li>If they differ AND the principal does not hold {@code SUPER_ADMIN},
+ *         <li>If they differ AND the principal does not hold {@code ROOT},
  *             overwrite the context with the JWT-derived tenantId and log
  *             the attempted swap (potential exploit signal).</li>
- *         <li>If they differ AND the principal IS {@code SUPER_ADMIN}, accept
- *             the asserted tenantId — SUPER_ADMIN is the legitimate
- *             cross-tenant administration role.</li>
+ *         <li>If they differ AND the principal IS {@code ROOT}, accept
+ *             the asserted tenantId — ROOT is the legitimate
+ *             cross-tenant administration tier.</li>
  *       </ul>
  *   </li>
  * </ul>
@@ -61,7 +61,7 @@ import java.util.UUID;
 @Slf4j
 public class TenantBindFromAuthFilter extends OncePerRequestFilter {
 
-    private static final String SUPER_ADMIN_ROLE = "ROLE_SUPER_ADMIN";
+    private static final String ROOT_ROLE = "ROLE_ROOT";
 
     @Override
     protected void doFilterInternal(HttpServletRequest request,
@@ -116,24 +116,24 @@ public class TenantBindFromAuthFilter extends OncePerRequestFilter {
             return;
         }
 
-        // Mismatch — only SUPER_ADMIN may assert a foreign tenantId.
-        if (isSuperAdmin(auth)) {
-            log.info("AUDIT: SUPER_ADMIN tenant override accepted — user={}, jwtTenant={}, assertedTenant={}",
+        // Mismatch — only ROOT may assert a foreign tenantId.
+        if (isRoot(auth)) {
+            log.info("AUDIT: ROOT tenant override accepted — user={}, jwtTenant={}, assertedTenant={}",
                     details.getEmail(), jwtTenantId, assertedTenantId);
             // Leave TenantContext as TenantContextFilter set it.
             return;
         }
 
-        // Non-SUPER_ADMIN attempting cross-tenant access — overwrite to the
+        // Non-ROOT attempting cross-tenant access — overwrite to the
         // JWT-derived tenantId and emit a warning for ops/security review.
         log.warn("AUDIT: tenant-rebind rejected cross-tenant assertion — user={}, jwtTenant={}, assertedTenant={}, role-set={}",
                 details.getEmail(), jwtTenantId, assertedTenantId, auth.getAuthorities());
         TenantContext.setCurrentTenant(jwtTenantId);
     }
 
-    private static boolean isSuperAdmin(Authentication auth) {
+    private static boolean isRoot(Authentication auth) {
         for (GrantedAuthority a : auth.getAuthorities()) {
-            if (SUPER_ADMIN_ROLE.equals(a.getAuthority())) {
+            if (ROOT_ROLE.equals(a.getAuthority())) {
                 return true;
             }
         }

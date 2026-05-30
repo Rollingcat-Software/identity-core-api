@@ -36,7 +36,7 @@ public interface GuestInvitationRepository extends JpaRepository<GuestInvitation
     List<GuestInvitation> findByTenantIdAndStatus(UUID tenantId, InvitationStatus status);
 
     /**
-     * Cross-tenant variants used by SUPER_ADMIN listing — bypasses tenant
+     * Cross-tenant variants used by ROOT listing — bypasses tenant
      * scoping so the platform owner can audit invitations across all tenants.
      */
     List<GuestInvitation> findAllByOrderByCreatedAtDesc();
@@ -44,7 +44,7 @@ public interface GuestInvitationRepository extends JpaRepository<GuestInvitation
     List<GuestInvitation> findAllByStatusOrderByCreatedAtDesc(InvitationStatus status);
 
     /**
-     * Count active guests platform-wide (SUPER_ADMIN dashboard).
+     * Count active guests platform-wide (ROOT dashboard).
      */
     @Query("SELECT COUNT(gi) FROM GuestInvitation gi " +
            "WHERE gi.status = 'ACCEPTED' " +

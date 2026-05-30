@@ -99,7 +99,7 @@ public class VerifyEmailService implements VerifyEmailUseCase {
         // (the first admin of a self-onboarded tenant), verification proves
         // control of an address at the claimed domain → activate the tenant out
         // of its PENDING/TRIAL state. When admin approval is required the tenant
-        // is left PENDING for a SUPER_ADMIN even after verification.
+        // is left PENDING for a ROOT even after verification.
         if (user.isTenantAdmin()) {
             boolean activated = tenantProvisioningPort
                     .activateTenantForVerifiedAdmin(user.getId(), requireAdminApproval);

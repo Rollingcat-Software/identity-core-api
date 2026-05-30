@@ -28,20 +28,20 @@ public interface GuestInvitationRepositoryPort {
     List<GuestInvitation> findByTenantIdAndStatus(UUID tenantId, InvitationStatus status);
 
     /**
-     * Cross-tenant listing for SUPER_ADMIN. Returns every invitation in the
+     * Cross-tenant listing for ROOT. Returns every invitation in the
      * platform, ordered most-recent first.
      */
     List<GuestInvitation> findAllOrderByCreatedAtDesc();
 
     /**
-     * Cross-tenant status filter for SUPER_ADMIN.
+     * Cross-tenant status filter for ROOT.
      */
     List<GuestInvitation> findAllByStatusOrderByCreatedAtDesc(InvitationStatus status);
 
     long countActiveGuestsInTenant(UUID tenantId, Instant now);
 
     /**
-     * Count of active guests across every tenant (SUPER_ADMIN dashboard).
+     * Count of active guests across every tenant (ROOT dashboard).
      */
     long countActiveGuestsPlatformWide(Instant now);
 

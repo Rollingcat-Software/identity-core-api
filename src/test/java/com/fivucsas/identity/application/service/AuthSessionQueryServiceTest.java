@@ -78,7 +78,7 @@ class AuthSessionQueryServiceTest {
     }
 
     @Test
-    @DisplayName("null tenantId → SUPER_ADMIN platform-wide listing (delegates to findAll)")
+    @DisplayName("null tenantId → ROOT platform-wide listing (delegates to findAll)")
     void nullTenantPlatformWide() {
         // Caller scope is verified at the controller; the service trusts a
         // null tenantId as a deliberate "list across all tenants" request.

@@ -34,7 +34,7 @@ public class PurgeAdminController {
     @Operation(summary = "Preview soft-delete purge candidates (no data modified)",
                description = "Returns the cutoff timestamp, count, and user IDs that WOULD be permanently "
                    + "purged under the 30-day retention window. Use this before enabling the scheduled job.")
-    @PreAuthorize("@rbac.isSuperAdmin()")
+    @PreAuthorize("@rbac.isRoot()")
     public ResponseEntity<Map<String, Object>> dryRun() {
         log.info("DELETE /api/v1/admin/purge/dry-run - super-admin previewing purge candidates");
         SoftDeletePurgeJob.DryRunResult result = softDeletePurgeJob.dryRun();

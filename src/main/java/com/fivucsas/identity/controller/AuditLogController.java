@@ -55,7 +55,7 @@ public class AuditLogController {
             @RequestParam(required = false) String action,
             @RequestParam(required = false) String userId) {
 
-        // TENANT_ADMIN sees only their tenant's audit logs; SUPER_ADMIN (null
+        // TENANT_ADMIN sees only their tenant's audit logs; ROOT (null
         // scope) sees everything; users without a resolvable tenant get empty
         // (zero-UUID sentinel matches no tenant).
         UUID scopeTenantId = tenantScopeResolver.currentScope();
@@ -66,7 +66,7 @@ public class AuditLogController {
         Page<AuditLog> auditLogs;
 
         if (scopeTenantId == null) {
-            // SUPER_ADMIN — no tenant restriction
+            // ROOT — no tenant restriction
             if (action != null && !action.isBlank()) {
                 auditLogs = auditLogRepository.findByActionOrderByCreatedAtDesc(action, pageRequest);
             } else if (userId != null && !userId.isBlank()) {
@@ -166,7 +166,7 @@ public class AuditLogController {
         AuditLog auditLog = auditLogRepository.findById(UUID.fromString(id))
                 .orElseThrow(() -> new com.fivucsas.identity.exception.ResourceNotFoundException("AuditLog not found: " + id));
 
-        // Tenant-scope check: non-SUPER_ADMIN may only view their own tenant's
+        // Tenant-scope check: non-ROOT may only view their own tenant's
         // entries. 404 rather than 403 to avoid leaking existence of log IDs.
         UUID scopeTenantId = tenantScopeResolver.currentScope();
         if (scopeTenantId != null && !scopeTenantId.equals(auditLog.getTenantId())) {

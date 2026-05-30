@@ -250,11 +250,11 @@ public class RoleController {
     @PreAuthorize("isAuthenticated()")
     public ResponseEntity<List<PermissionResponse>> getAllPermissions() {
         log.info("GET /api/v1/permissions - Get all permissions");
-        // Enumerating ALL system-wide permissions is a SUPER_ADMIN operation.
-        // For non-SUPER_ADMIN callers we return an empty list so the dashboard
+        // Enumerating ALL system-wide permissions is a ROOT operation.
+        // For non-ROOT callers we return an empty list so the dashboard
         // renders (rather than 403'ing and breaking the page). No data leak —
         // permission metadata is only visible to the platform owner.
-        if (!rbacService.isSuperAdmin()) {
+        if (!rbacService.isRoot()) {
             return ResponseEntity.ok(List.of());
         }
         return ResponseEntity.ok(managePermissionUseCase.getAllPermissions());

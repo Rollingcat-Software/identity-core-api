@@ -39,7 +39,7 @@ public class EnrollmentQueryService {
      * Returns all enrollments, optionally restricted to a tenant.
      *
      * @param tenantScopeId the tenant to scope by; {@code null} means
-     *                      "no scope restriction" (SUPER_ADMIN).
+     *                      "no scope restriction" (ROOT).
      */
     public List<EnrollmentDto> getAllEnrollments(UUID tenantScopeId) {
         return (tenantScopeId == null

@@ -57,14 +57,14 @@ public class AuthSessionController {
     /**
      * Admin list — paginated, tenant-scoped enumeration of auth sessions.
      *
-     * <p>TENANT_ADMIN sees only their own tenant's sessions; SUPER_ADMIN must
+     * <p>TENANT_ADMIN sees only their own tenant's sessions; ROOT must
      * pass {@code tenantId} explicitly (we do not dump every tenant's
      * sessions in one call). Callers without a resolvable tenant get an
      * empty page (fail-closed sentinel).</p>
      *
      * <p>Query params:
      * <ul>
-     *   <li>{@code tenantId} — required for SUPER_ADMIN; ignored (overridden
+     *   <li>{@code tenantId} — required for ROOT; ignored (overridden
      *       by caller scope) for tenant-scoped users.</li>
      *   <li>{@code status} — optional comma-separated list (e.g.
      *       {@code CREATED,IN_PROGRESS}).</li>
@@ -76,7 +76,7 @@ public class AuthSessionController {
     @Operation(
         summary = "List auth sessions (admin)",
         description = "Tenant-scoped paginated list of authentication sessions. " +
-                      "TENANT_ADMIN/audit:read; SUPER_ADMIN must pass tenantId."
+                      "TENANT_ADMIN/audit:read; ROOT must pass tenantId."
     )
     @PreAuthorize("@rbac.isTenantAdmin() or hasAuthority('audit:read')")
     public ResponseEntity<Map<String, Object>> listSessions(
@@ -90,7 +90,7 @@ public class AuthSessionController {
         UUID effectiveTenantId;
 
         if (callerScope == null) {
-            // SUPER_ADMIN — `tenantId` query param optional. When omitted,
+            // ROOT — `tenantId` query param optional. When omitted,
             // we list platform-wide (cross-tenant) so the dashboard renders
             // real activity instead of just the system tenant's empty list.
             effectiveTenantId = tenantId;

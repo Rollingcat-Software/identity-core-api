@@ -57,7 +57,7 @@ public class EnrollmentController {
     @Operation(summary = "Get all enrollments")
     @PreAuthorize("@rbac.isTenantAdmin() or hasAuthority('enrollment:read')")
     public ResponseEntity<List<EnrollmentDto>> getAllEnrollments() {
-        // TENANT_ADMIN sees only their tenant's enrollments; SUPER_ADMIN sees
+        // TENANT_ADMIN sees only their tenant's enrollments; ROOT sees
         // everything; users without a resolvable tenant get empty.
         UUID scopeTenantId = tenantScopeResolver.currentScope();
         log.info("GET /api/v1/enrollments - tenantScope={}",
@@ -77,7 +77,7 @@ public class EnrollmentController {
         UUID scopeTenantId = tenantScopeResolver.currentScope();
         if (scopeTenantId != null && dto.getTenantId() != null
                 && !scopeTenantId.toString().equals(dto.getTenantId())) {
-            // Non-SUPER_ADMIN may not peek at other tenants' enrollments.
+            // Non-ROOT may not peek at other tenants' enrollments.
             throw new ResourceNotFoundException("Enrollment not found: " + id);
         }
         return ResponseEntity.ok(dto);

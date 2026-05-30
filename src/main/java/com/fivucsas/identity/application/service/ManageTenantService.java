@@ -144,7 +144,7 @@ public class ManageTenantService implements ManageTenantUseCase {
         // @PreAuthorize only checks the 'tenant:configure' permission, which a
         // TENANT_ADMIN holds for their OWN tenant — without this check they
         // could overwrite any other tenant's config by passing its id.
-        // canAccessTenant() returns true for SUPER_ADMIN/ROOT (null scope), so
+        // canAccessTenant() returns true for ROOT (null scope), so
         // root retains cross-tenant access; everyone else is restricted to
         // their own tenant. Mirrors the read-path guard in TenantController and
         // the AccessDeniedException idiom in EnrollmentService (→ 403 via

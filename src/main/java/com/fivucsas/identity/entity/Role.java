@@ -22,9 +22,9 @@ import java.util.stream.Collectors;
 @Table(name = "roles", indexes = {
     @Index(name = "idx_roles_tenant_id", columnList = "tenant_id")
 })
-// Global/system roles (tenant_id IS NULL — e.g. SUPER_ADMIN, SYSTEM) are role
+// Global/system roles (tenant_id IS NULL — e.g. ROOT, SYSTEM) are role
 // DEFINITIONS, not grants, and must remain visible regardless of the active
-// tenant. Filtering them out broke SUPER_ADMIN authz under a switched tenant.
+// tenant. Filtering them out broke ROOT authz under a switched tenant.
 // A user only HOLDS a role via user_roles, so exposing global definitions is
 // not a cross-tenant data leak.
 @Filter(name = "tenantFilter", condition = "(tenant_id = :tenantId OR tenant_id IS NULL)")

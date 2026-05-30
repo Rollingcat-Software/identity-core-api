@@ -93,7 +93,7 @@ public class ManageDeviceService implements ManageDeviceUseCase {
 
     /**
      * Hard server-side cap on platform-wide device dumps. Copilot post-merge
-     * round 5 flagged the unbounded `findAll()`: above this limit the SUPER_ADMIN
+     * round 5 flagged the unbounded `findAll()`: above this limit the ROOT
      * UI MUST switch to a paged endpoint (planned follow-up — see
      * {@code listTenantDevices(tenantId)} for the existing tenant-scoped path).
      * The limit is intentionally generous so existing dashboards keep working

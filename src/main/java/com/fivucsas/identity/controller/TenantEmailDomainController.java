@@ -25,7 +25,7 @@ import java.util.UUID;
  * <p>Gating: {@code @rbac.isTenantAdmin() and @rbac.canAccessTenant(#tenantId)}.
  * {@code isTenantAdmin()} is {@code userType >= TENANT_ADMIN} (true for ROOT)
  * and {@code canAccessTenant()} returns true for ROOT and for a tenant-admin's
- * own tenant — so SUPER_ADMIN/ROOT retain cross-tenant access while a
+ * own tenant — so ROOT retain cross-tenant access while a
  * TENANT_ADMIN is confined to their own tenant. This mirrors how
  * {@code TenantController} gates its configure/update paths.</p>
  */

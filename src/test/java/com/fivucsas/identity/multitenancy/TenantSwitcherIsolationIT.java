@@ -35,7 +35,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Adversarial end-to-end isolation tests for the unified SUPER_ADMIN tenant
+ * Adversarial end-to-end isolation tests for the unified ROOT tenant
  * switcher (X-Tenant-ID). Exercises the REAL stack: Hibernate {@code tenantFilter},
  * {@code TenantHibernateAspect}, {@link TenantFilterBypass}, {@link RbacAuthorizationService},
  * and {@link TenantScopeResolver} against a Postgres container.
@@ -46,10 +46,10 @@ import static org.assertj.core.api.Assertions.assertThat;
  *       still resolves via {@code getCurrentUser()} (and thus passes
  *       {@code @PreAuthorize}) while the active tenant is a FOREIGN one — the
  *       tenant-filter no longer hides the caller from itself.</li>
- *   <li><b>SUPER_ADMIN switch.</b> With the foreign tenant active, the
+ *   <li><b>ROOT switch.</b> With the foreign tenant active, the
  *       Hibernate-filtered user listing returns the FOREIGN tenant's users, and
  *       {@code TenantScopeResolver.currentScope()} returns the selected tenant.</li>
- *   <li><b>SUPER_ADMIN default.</b> No header → home tenant data only.</li>
+ *   <li><b>ROOT default.</b> No header → home tenant data only.</li>
  *   <li><b>TENANT_ADMIN isolation.</b> Even with the foreign tenant pinned in
  *       {@code TenantContext}, a tenant-admin's filtered listing AND
  *       {@code currentScope()} stay on their OWN tenant — never the foreign one.</li>
@@ -117,23 +117,23 @@ class TenantSwitcherIsolationIT {
         jdbc.update("UPDATE tenants SET deleted_at = NOW() WHERE id IN (?, ?, ?)", systemTenant, tenantA, tenantB);
     }
 
-    // ── 1) The 403 fix + SUPER_ADMIN switch ────────────────────────────────
+    // ── 1) The 403 fix + ROOT switch ────────────────────────────────
 
     @Test
     @Transactional
-    @DisplayName("SUPER_ADMIN + foreign X-Tenant-ID → caller still resolves (no 403) AND sees the foreign tenant's users")
+    @DisplayName("ROOT + foreign X-Tenant-ID → caller still resolves (no 403) AND sees the foreign tenant's users")
     void superAdminSwitched_resolvesSelf_andSeesForeignData() {
-        authenticateAs(rootEmail, "ROLE_SUPER_ADMIN");
+        authenticateAs(rootEmail, "ROLE_ROOT");
         bindRequestWithTenantId(tenantB);
         // Emulate the post-rebind state: TenantContext pinned to the foreign tenant
-        // (TenantBindFromAuthFilter honours SUPER_ADMIN's asserted X-Tenant-ID).
+        // (TenantBindFromAuthFilter honours ROOT's asserted X-Tenant-ID).
         TenantContext.setCurrentTenant(tenantB);
 
         // (a) The 403 fix: caller self-resolution succeeds despite foreign filter.
         Optional<User> self = rbacService.getCurrentUser();
         assertThat(self).as("ROOT must resolve itself under a foreign active tenant").isPresent();
         assertThat(self.get().getId()).isEqualTo(rootId);
-        assertThat(rbacService.isSuperAdmin()).isTrue();
+        assertThat(rbacService.isRoot()).isTrue();
         assertThat(rbacService.hasPermission("user:read")).isTrue();
 
         // (b) currentScope reflects the selected tenant.
@@ -148,9 +148,9 @@ class TenantSwitcherIsolationIT {
 
     @Test
     @Transactional
-    @DisplayName("SUPER_ADMIN + no header → home (system) tenant only")
+    @DisplayName("ROOT + no header → home (system) tenant only")
     void superAdminNoHeader_homeTenantOnly() {
-        authenticateAs(rootEmail, "ROLE_SUPER_ADMIN");
+        authenticateAs(rootEmail, "ROLE_ROOT");
         bindRequestWithTenantId(null);
         TenantContext.setCurrentTenant(systemTenant); // rebind defaults to JWT home
 

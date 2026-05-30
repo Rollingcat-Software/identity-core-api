@@ -41,7 +41,7 @@ import static org.mockito.Mockito.mock;
  *
  * <p>Asserts: header asserts tenantB while JWT principal lives in tenantA →
  * filter overwrites context to tenantA, emits the AUDIT line, and a
- * tenant-scoped query returns only tenantA's row. SUPER_ADMIN may legitimately
+ * tenant-scoped query returns only tenantA's row. ROOT may legitimately
  * cross tenants. No header → bind to JWT tenant.</p>
  *
  * <p>NB: in production the JWT filter populates the principal with Spring's
@@ -109,7 +109,7 @@ class TenantRlsRegressionTest {
     }
 
     @Test
-    @DisplayName("non-SUPER_ADMIN: X-Tenant-ID=tenantB rebinds to JWT tenantA, audit logged")
+    @DisplayName("non-ROOT: X-Tenant-ID=tenantB rebinds to JWT tenantA, audit logged")
     void crossTenantHeader_nonSuperAdmin_isRebound() throws Exception {
         // Simulate the JWT filter having authenticated alice@tenantA.
         authenticateAs(aliceId, "alice@example.com", tenantA, "ROLE_USER");
@@ -134,9 +134,9 @@ class TenantRlsRegressionTest {
     }
 
     @Test
-    @DisplayName("SUPER_ADMIN: X-Tenant-ID=tenantB is honored, no rebind")
+    @DisplayName("ROOT: X-Tenant-ID=tenantB is honored, no rebind")
     void crossTenantHeader_superAdmin_isHonored() throws Exception {
-        authenticateAs(aliceId, "alice@example.com", tenantA, "ROLE_SUPER_ADMIN");
+        authenticateAs(aliceId, "alice@example.com", tenantA, "ROLE_ROOT");
         TenantContext.setCurrentTenant(tenantB);
 
         invokeFilter();
@@ -151,7 +151,7 @@ class TenantRlsRegressionTest {
 
         assertThat(logCapture.list)
                 .anyMatch(e -> e.getFormattedMessage()
-                        .contains("SUPER_ADMIN tenant override accepted"));
+                        .contains("ROOT tenant override accepted"));
     }
 
     @Test

@@ -131,7 +131,7 @@ public class ManageNfcCardService {
     public List<NfcCard> searchByCardSerial(String serial) {
         // Resolve the caller's tenant scope via the security layer rather than
         // entity.User, so this application service stays within the hexagonal
-        // boundary (UserDomainBoundaryTest). ROOT / SUPER_ADMIN has an
+        // boundary (UserDomainBoundaryTest). ROOT has an
         // unrestricted scope and keeps the unscoped global view used by
         // platform operators; everyone else is confined to their own tenant
         // (a non-super-admin with no resolvable tenant gets the fail-closed

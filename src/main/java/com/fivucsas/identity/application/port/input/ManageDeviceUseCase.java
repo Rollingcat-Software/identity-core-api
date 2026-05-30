@@ -11,7 +11,7 @@ public interface ManageDeviceUseCase {
     List<DeviceResponse> listUserDevices(UUID userId);
     List<DeviceResponse> listTenantDevices(UUID tenantId);
     /**
-     * Platform-wide device listing for SUPER_ADMIN. Returns every device
+     * Platform-wide device listing for ROOT. Returns every device
      * across every tenant — caller scope MUST already have been verified.
      */
     List<DeviceResponse> listAllDevices();
