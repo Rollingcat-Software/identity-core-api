@@ -1,0 +1,20 @@
+-- V74 — Correct the supports_usernameless flag for APPROVE_LOGIN.
+--
+-- V73 set supports_usernameless = TRUE for PASSKEY, APPROVE_LOGIN and QR_CODE.
+-- That is WRONG for APPROVE_LOGIN: "usernameless" means the factor itself
+-- identifies the user with NO identifier typed first (a discoverable passkey
+-- carries the user handle; a QR scan-to-approve is confirmed by an already-
+-- authenticated device). APPROVE_LOGIN (number-matching) is the opposite — the
+-- initiator MUST enter their email so the server knows whose device to push the
+-- number-match prompt to (POST /auth/approve-login/session {email}).
+--
+-- The mislabel made LoginConfigService compute identifierRequired=false when an
+-- all-usernameless Layer-1 included APPROVE_LOGIN, so the login UI hid the email
+-- field / framed the approve button as "no email needed" — and then the approve
+-- panel demanded an email. Operator-reported UX contradiction (2026-05-30).
+--
+-- APPROVE_LOGIN is correctly an IDENTIFIER-FIRST alternative to PASSWORD at
+-- Layer 1. PASSKEY and QR_CODE remain the true usernameless cross-device methods.
+--
+-- Additive/reversible data fix (no schema change). Idempotent.
+UPDATE auth_methods SET supports_usernameless = false WHERE type = 'APPROVE_LOGIN';
