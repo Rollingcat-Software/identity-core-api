@@ -142,3 +142,6 @@ package-lock.json
 
 # Staging env (host-local; secrets — never commit)
 .env.staging
+
+# Claude Code workspace (worktrees, local state) — never commit
+.claude/

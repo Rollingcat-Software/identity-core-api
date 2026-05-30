@@ -19,13 +19,20 @@ import java.util.List;
  * @param totalSteps the total number of steps in the default flow (>=1); 1 when
  *                   the tenant has no default flow (implicit single-step login)
  * @param laterSteps every step after Layer-1, ordered; empty for a 1-step flow
+ * @param engineActive true when the config-driven login engine is enabled for
+ *                   this tenant (global flag or per-tenant canary). The login UI
+ *                   uses this to switch on the identifier-first experience
+ *                   (collect identity on screen 1, authenticate after); when
+ *                   false it keeps the legacy single-screen email+password form,
+ *                   so the redesign reverts with the engine flag and no redeploy.
  */
 public record LoginConfigResponse(
         String tenantId,
         String tenantName,
         Layer1 layer1,
         int totalSteps,
-        List<LaterStep> laterSteps
+        List<LaterStep> laterSteps,
+        boolean engineActive
 ) {
     /**
      * @param methods          the methods offered at step 1 (one for SEQUENTIAL,

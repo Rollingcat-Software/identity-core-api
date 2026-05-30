@@ -67,7 +67,7 @@ public class LoginConfigService {
         // identifierRequired=true). The actual login path also stays legacy, so
         // the contract and the engine agree.
         if (!configDrivenLoginPolicy.isEnabledFor(tenantId)) {
-            return passwordFirstConfig(tenantId, tenantName);
+            return passwordFirstConfig(tenantId, tenantName, false);
         }
 
         Optional<AuthFlow> defaultLoginFlow = authFlowRepository
@@ -75,8 +75,9 @@ public class LoginConfigService {
                         tenantId, OperationType.APP_LOGIN);
 
         if (defaultLoginFlow.isEmpty()) {
-            // No configured flow → implicit single-step PASSWORD login.
-            return passwordFirstConfig(tenantId, tenantName);
+            // No configured flow → implicit single-step PASSWORD login. Engine is
+            // still ON for this tenant (we passed the gate above).
+            return passwordFirstConfig(tenantId, tenantName, true);
         }
 
         AuthFlow flow = defaultLoginFlow.get();
@@ -107,7 +108,8 @@ public class LoginConfigService {
                 tenantId.toString(), tenantName,
                 new LoginConfigResponse.Layer1(layer1Methods, identifierRequired),
                 flow.getStepCount(),
-                laterSteps);
+                laterSteps,
+                true);
     }
 
     /**
@@ -116,13 +118,13 @@ public class LoginConfigService {
      * cases the actual login path is the legacy password login, so the contract
      * matches the runtime behavior.
      */
-    private LoginConfigResponse passwordFirstConfig(UUID tenantId, String tenantName) {
+    private LoginConfigResponse passwordFirstConfig(UUID tenantId, String tenantName, boolean engineActive) {
         LoginConfigResponse.Method password =
                 new LoginConfigResponse.Method("PASSWORD", false, true);
         return new LoginConfigResponse(
                 tenantId.toString(), tenantName,
                 new LoginConfigResponse.Layer1(List.of(password), true),
-                1, List.of());
+                1, List.of(), engineActive);
     }
 
     private List<LoginConfigResponse.Method> toMethods(AuthFlowStep step) {
