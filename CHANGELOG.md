@@ -4,10 +4,24 @@
 
 ### 2026-05-30 — Config-driven login engine (task #16, A+B+C+F+G)
 
-Login is now fully driven by the tenant's default `APP_LOGIN` flow. The hard
-pre-flow password gate in `AuthenticateUserService` is gone: it runs the
-tenant's configured Layer-1 method (PASSWORD verified inline as step 1 when
-Layer-1 includes it — observable behavior UNCHANGED for PASSWORD-first tenants;
+**Ships DARK — feature-flagged, default OFF, instantly revertible without a
+redeploy.** `ConfigDrivenLoginPolicy` gates the entire behavior change:
+- `app.auth.config-driven-login` (env `APP_AUTH_CONFIG_DRIVEN_LOGIN`, default
+  **false**) — master switch. When OFF, login is **byte-identical to the legacy
+  password-first behavior**: the hard password gate stays, usernameless entry
+  points (passkey/QR) mint tokens directly, and `login-config` advertises the
+  single-step PASSWORD shape so the UI behaves exactly as today.
+- `app.auth.config-driven-login-tenants` (env
+  `APP_AUTH_CONFIG_DRIVEN_LOGIN_TENANTS`, CSV of tenant UUIDs) — per-tenant
+  **canary**: enable the new engine for one tenant in prod before the global
+  flip. Invalid UUIDs are skipped with a warn (never widens rollout / crashes).
+- Rollout: dark → staging soak → canary one tenant → global. Kill = unset the
+  flag (no rebuild/rollback).
+
+When ENABLED, login is driven by the tenant's default `APP_LOGIN` flow. The hard
+pre-flow password gate in `AuthenticateUserService` is replaced by the tenant's
+configured Layer-1 method (PASSWORD verified inline as step 1 when Layer-1
+includes it — observable behavior UNCHANGED for PASSWORD-first tenants;
 otherwise the `MfaSession` starts at step 1 with that identifier-first method
 and `VerifyMfaStepService` runs it). Backward-compatible: PASSWORD-first flows
 (e.g. Marmara) and the cross-tenant isolation ITs are unchanged/green.
@@ -26,7 +40,8 @@ and `VerifyMfaStepService` runs it). Backward-compatible: PASSWORD-first flows
   `MFA_PENDING`; mint only when the flow is 1-step/none. `amr` accumulates the
   Layer-1 method (PASSKEY→`hwk`, APPROVE_LOGIN/QR_CODE→`mca`) plus later steps.
   QR approve also now mints a REAL rotating refresh token (was a placeholder
-  UUID).
+  UUID). When the engine is OFF, QR/passkey/approve-login mint exactly as before
+  (QR keeps its legacy `JwtService` + placeholder-UUID path).
 - **C — `GET /api/v1/auth/login-config?tenantId=<uuid>`** (unauthenticated,
   permitAll). Returns the FROZEN public login contract — `{tenantId, tenantName,
   layer1:{methods:[{type,usernameless,requiresEnrollment}],identifierRequired},
@@ -35,7 +50,13 @@ and `VerifyMfaStepService` runs it). Backward-compatible: PASSWORD-first flows
 - **F — default-impact (`computeDefaultImpact`).** Usernameless Layer-1 factors
   no longer count as a lockout risk (the factor proves its own enrollment); new
   `noRecoveryWarning` field flags a flow with no PASSWORD step where every
-  required step is a single usernameless factor with no alternative.
+  required step is a single usernameless factor with no alternative. (Admin
+  advisory analysis — not gated by the login flag.)
+- **Reversibility.** Migration V73 is ADDITIVE only (new enum values + a
+  `supports_usernameless` column defaulting false + a widened CHECK); it
+  alters/drops no existing columns or rows, so a roll back to the prior image
+  keeps working. Combined with the default-OFF flag, the change ships with zero
+  runtime effect until an operator opts a tenant in.
 - ArchUnit `UserDomainBoundaryTest` baseline refrozen for the new
   `UsernamelessLoginFlowService` (entity-`User` use mirrors `AuthenticateUserService`).
 

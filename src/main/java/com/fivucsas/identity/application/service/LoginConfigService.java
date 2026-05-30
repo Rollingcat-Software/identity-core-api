@@ -36,6 +36,7 @@ public class LoginConfigService {
 
     private final AuthFlowRepositoryPort authFlowRepository;
     private final TenantRepository tenantRepository;
+    private final ConfigDrivenLoginPolicy configDrivenLoginPolicy;
 
     @Transactional(readOnly = true)
     public LoginConfigResponse getLoginConfig(UUID tenantId) {
@@ -43,18 +44,22 @@ public class LoginConfigService {
                 .map(Tenant::getName)
                 .orElse(null);
 
+        // REVERSIBILITY GATE (operator directive 2026-05-30): when the engine is
+        // OFF for this tenant, advertise the legacy password-first shape so the
+        // login UI behaves EXACTLY as today (single PASSWORD Layer-1,
+        // identifierRequired=true). The actual login path also stays legacy, so
+        // the contract and the engine agree.
+        if (!configDrivenLoginPolicy.isEnabledFor(tenantId)) {
+            return passwordFirstConfig(tenantId, tenantName);
+        }
+
         Optional<AuthFlow> defaultLoginFlow = authFlowRepository
                 .findByTenantIdAndIsDefaultTrueAndIsActiveTrueAndOperationType(
                         tenantId, OperationType.APP_LOGIN);
 
         if (defaultLoginFlow.isEmpty()) {
             // No configured flow → implicit single-step PASSWORD login.
-            LoginConfigResponse.Method password =
-                    new LoginConfigResponse.Method("PASSWORD", false, true);
-            return new LoginConfigResponse(
-                    tenantId.toString(), tenantName,
-                    new LoginConfigResponse.Layer1(List.of(password), true),
-                    1, List.of());
+            return passwordFirstConfig(tenantId, tenantName);
         }
 
         AuthFlow flow = defaultLoginFlow.get();
@@ -86,6 +91,21 @@ public class LoginConfigService {
                 new LoginConfigResponse.Layer1(layer1Methods, identifierRequired),
                 flow.getStepCount(),
                 laterSteps);
+    }
+
+    /**
+     * The legacy single-step PASSWORD-first config. Returned when the engine is
+     * OFF for the tenant OR the tenant has no default APP_LOGIN flow — in both
+     * cases the actual login path is the legacy password login, so the contract
+     * matches the runtime behavior.
+     */
+    private LoginConfigResponse passwordFirstConfig(UUID tenantId, String tenantName) {
+        LoginConfigResponse.Method password =
+                new LoginConfigResponse.Method("PASSWORD", false, true);
+        return new LoginConfigResponse(
+                tenantId.toString(), tenantName,
+                new LoginConfigResponse.Layer1(List.of(password), true),
+                1, List.of());
     }
 
     private List<LoginConfigResponse.Method> toMethods(AuthFlowStep step) {

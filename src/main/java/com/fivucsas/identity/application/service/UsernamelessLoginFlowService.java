@@ -51,6 +51,7 @@ public class UsernamelessLoginFlowService {
     private final MfaSessionRepository mfaSessionRepository;
     private final TokenGenerationPort tokenGenerator;
     private final RefreshTokenService refreshTokenService;
+    private final ConfigDrivenLoginPolicy configDrivenLoginPolicy;
 
     private static final Duration MFA_SESSION_TTL = Duration.ofMinutes(10);
 
@@ -95,10 +96,26 @@ public class UsernamelessLoginFlowService {
      * @param clientId  OAuth2 client_id that initiated the login (nullable);
      *                  bound to the MFA session for cross-client replay defense.
      */
+    /**
+     * Whether the config-driven flow handoff applies to {@code user}'s tenant.
+     * Call sites that have their OWN legacy minting path (QR / approve-login)
+     * check this FIRST and skip the bridge entirely when OFF, so their OFF-path
+     * token issuance stays byte-identical. Passkey has no separate legacy path,
+     * so it always calls {@link #continueAfterLayer1} which mints directly when
+     * the flow is 1-step / OFF.
+     */
+    public boolean isConfigDrivenFor(User user) {
+        return user.getTenant() != null
+                && configDrivenLoginPolicy.isEnabledFor(user.getTenant().getId());
+    }
+
     @Transactional
     public FlowOutcome continueAfterLayer1(User user, AuthMethodType layer1Method, String amr,
                                            String ip, String userAgent, String clientId) {
-        Optional<AuthFlow> defaultLoginFlow = user.getTenant() == null
+        // The flow handoff (MFA_PENDING) only applies when the engine is enabled
+        // (global flag or per-tenant canary). When OFF we mint directly — for
+        // passkey this matches its legacy single-factor behavior exactly.
+        Optional<AuthFlow> defaultLoginFlow = !isConfigDrivenFor(user)
                 ? Optional.empty()
                 : authFlowRepository.findByTenantIdAndIsDefaultTrueAndIsActiveTrueAndOperationType(
                         user.getTenant().getId(), OperationType.APP_LOGIN);

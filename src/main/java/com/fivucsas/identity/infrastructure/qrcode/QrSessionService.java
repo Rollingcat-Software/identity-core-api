@@ -155,42 +155,52 @@ public class QrSessionService {
                 .findFirst()
                 .orElseGet(() -> user.getUserType() != null ? user.getUserType().name() : "USER");
 
-        // Bridge the proven QR scan-to-approve (a usernameless Layer-1 factor)
-        // INTO the tenant's config-driven APP_LOGIN flow (task #16 B). When the
-        // tenant configured Layer-2+ steps we stash an mfaSessionToken (NOT
-        // tokens) and the polling client steps up via /api/v1/auth/mfa/step.
-        // Only a 1-step / no-flow tenant mints tokens here. This also replaces
-        // the old placeholder-UUID refresh token with a real persisted rotating
-        // token for the single-factor path.
-        UsernamelessLoginFlowService.FlowOutcome outcome =
-                usernamelessLoginFlowService.continueAfterLayer1(
-                        user, AuthMethodType.QR_CODE, "mca", null, null, null);
-
         Map<String, String> updates = new HashMap<>();
         updates.put("status", "APPROVED");
         updates.put("role", role);
-        if (outcome.mfaPending()) {
-            updates.put("mfaRequired", "true");
-            updates.put("mfaSessionToken", outcome.mfaSessionToken());
-            updates.put("currentStep", String.valueOf(outcome.currentStep()));
-            updates.put("totalSteps", String.valueOf(outcome.totalSteps()));
+
+        boolean mfaPending = false;
+        if (usernamelessLoginFlowService.isConfigDrivenFor(user)) {
+            // Config-driven engine ON for this tenant: bridge the proven QR
+            // scan-to-approve (a usernameless Layer-1 factor) INTO the tenant's
+            // APP_LOGIN flow (task #16 B). Layer-2+ steps → stash an
+            // mfaSessionToken (NOT tokens); the polling client steps up via
+            // /api/v1/auth/mfa/step. 1-step / no-flow → mint a real rotating
+            // refresh token (tokenGenerator + RefreshTokenService).
+            UsernamelessLoginFlowService.FlowOutcome outcome =
+                    usernamelessLoginFlowService.continueAfterLayer1(
+                            user, AuthMethodType.QR_CODE, "mca", null, null, null);
+            mfaPending = outcome.mfaPending();
+            if (outcome.mfaPending()) {
+                updates.put("mfaRequired", "true");
+                updates.put("mfaSessionToken", outcome.mfaSessionToken());
+                updates.put("currentStep", String.valueOf(outcome.currentStep()));
+                updates.put("totalSteps", String.valueOf(outcome.totalSteps()));
+            } else {
+                updates.put("accessToken", outcome.accessToken());
+                updates.put("refreshToken", outcome.refreshToken());
+                updates.put("expiresIn", String.valueOf(outcome.expiresIn() / 1000));
+            }
+            log.info("QR session approved (config-driven): {} by user: {} (mfaPending={})",
+                    sessionId, approverId, outcome.mfaPending());
         } else {
-            updates.put("accessToken", outcome.accessToken());
-            updates.put("refreshToken", outcome.refreshToken());
-            updates.put("expiresIn", String.valueOf(outcome.expiresIn() / 1000));
+            // Legacy path (engine OFF): mint directly, byte-identical to before.
+            String accessToken = jwtService.generateAccessToken(user.getEmail());
+            long expiresIn = jwtService.getExpirationMillis() / 1000;
+            updates.put("accessToken", accessToken);
+            updates.put("refreshToken", UUID.randomUUID().toString());
+            updates.put("expiresIn", String.valueOf(expiresIn));
+            log.info("QR session approved: {} by user: {}", sessionId, approverId);
         }
 
         redisTemplate.opsForHash().putAll(key, updates);
         redisTemplate.expire(key, Duration.ofMinutes(2));
 
-        log.info("QR session approved: {} by user: {} (mfaPending={})",
-                sessionId, approverId, outcome.mfaPending());
-
         return Map.of(
                 "sessionId", sessionId,
                 "qrContent", data.get("qrContent"),
                 "status", "APPROVED",
-                "message", outcome.mfaPending() ? "Login approved — additional verification required"
+                "message", mfaPending ? "Login approved — additional verification required"
                         : "Login approved"
         );
     }

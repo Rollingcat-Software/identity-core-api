@@ -69,6 +69,9 @@ class ConfigDrivenLoginIntegrationTest {
         registry.add("spring.datasource.username", postgres::getUsername);
         registry.add("spring.datasource.password", postgres::getPassword);
         registry.add("spring.datasource.driver-class-name", () -> "org.postgresql.Driver");
+        // Enable the config-driven engine globally for this IT (it ships OFF by
+        // default; the OFF/legacy path is covered by the unit tests).
+        registry.add("app.auth.config-driven-login", () -> "true");
     }
 
     @Autowired private AuthenticateUserService authenticateUserService;

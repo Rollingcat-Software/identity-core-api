@@ -84,6 +84,9 @@ class AuthenticateUserServiceTest {
     @Mock
     private EnrollmentHealthService enrollmentHealthService;
 
+    @Mock
+    private com.fivucsas.identity.application.service.ConfigDrivenLoginPolicy configDrivenLoginPolicy;
+
     @InjectMocks
     private AuthenticateUserService authenticateUserService;
 
@@ -793,6 +796,7 @@ class AuthenticateUserServiceTest {
             var emailOtp = method(com.fivucsas.identity.domain.model.auth.AuthMethodType.EMAIL_OTP, false);
             var loginFlow = flow(tenantId, step(1, emailOtp));
 
+            when(configDrivenLoginPolicy.isEnabledFor(tenantId)).thenReturn(true); // engine ON
             when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
             when(authFlowRepository.findByTenantIdAndIsDefaultTrueAndIsActiveTrueAndOperationType(
                     eq(tenantId), eq(com.fivucsas.identity.domain.model.auth.OperationType.APP_LOGIN)))
@@ -820,6 +824,7 @@ class AuthenticateUserServiceTest {
             var emailOtp = method(com.fivucsas.identity.domain.model.auth.AuthMethodType.EMAIL_OTP, false);
             var loginFlow = flow(tenantId, step(1, password), step(2, emailOtp));
 
+            when(configDrivenLoginPolicy.isEnabledFor(tenantId)).thenReturn(true); // engine ON
             when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
             when(passwordEncoder.matches("Password123!", VALID_BCRYPT_HASH)).thenReturn(true);
             when(authFlowRepository.findByTenantIdAndIsDefaultTrueAndIsActiveTrueAndOperationType(
@@ -845,6 +850,7 @@ class AuthenticateUserServiceTest {
             var password = method(com.fivucsas.identity.domain.model.auth.AuthMethodType.PASSWORD, true);
             var loginFlow = flow(tenantId, step(1, password));
 
+            when(configDrivenLoginPolicy.isEnabledFor(tenantId)).thenReturn(true); // engine ON
             when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
             when(passwordEncoder.matches("Password123!", VALID_BCRYPT_HASH)).thenReturn(true);
             when(authFlowRepository.findByTenantIdAndIsDefaultTrueAndIsActiveTrueAndOperationType(
@@ -861,6 +867,61 @@ class AuthenticateUserServiceTest {
             assertThat(response.isMfaRequired()).isFalse();
             assertThat(response.getAccessToken()).isEqualTo("access-token");
             verify(tokenGenerator).generateAccessToken("test@example.com", List.of("pwd"));
+        }
+
+        @Test
+        @DisplayName("REVERSIBILITY: flag OFF ⇒ even an EMAIL_OTP-Layer-1 flow runs the LEGACY hard password gate")
+        void flagOffForcesLegacyPasswordGate() {
+            UUID tenantId = UUID.randomUUID();
+            User user = tenantUser(tenantId);
+            // Tenant configured EMAIL_OTP as Layer-1, but the engine is OFF for it.
+            var emailOtp = method(com.fivucsas.identity.domain.model.auth.AuthMethodType.EMAIL_OTP, false);
+            var loginFlow = flow(tenantId, step(1, emailOtp));
+
+            when(configDrivenLoginPolicy.isEnabledFor(tenantId)).thenReturn(false); // engine OFF
+            when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
+            // Legacy path MUST verify the password (wrong password → InvalidCredentials,
+            // proving the hard gate still runs despite the EMAIL_OTP Layer-1 config).
+            when(passwordEncoder.matches("Password123!", VALID_BCRYPT_HASH)).thenReturn(false);
+
+            assertThatThrownBy(() -> authenticateUserService.execute(validCommand))
+                    .isInstanceOf(InvalidCredentialsException.class);
+
+            verify(passwordEncoder).matches("Password123!", VALID_BCRYPT_HASH);
+            // No MFA session opened — flag OFF never reaches the config-driven branch.
+            verify(mfaSessionRepository, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("REVERSIBILITY: flag OFF ⇒ correct password mints directly (amr=pwd), no flow lookup drives Layer-1")
+        void flagOffCorrectPasswordMintsLegacy() {
+            UUID tenantId = UUID.randomUUID();
+            User user = tenantUser(tenantId);
+            var emailOtp = method(com.fivucsas.identity.domain.model.auth.AuthMethodType.EMAIL_OTP, false);
+            // A default flow exists with a 2nd step, but flag OFF means the legacy
+            // path treats step 1 as PASSWORD and only looks for steps beyond step 1.
+            // Here the only step is EMAIL_OTP at order 1, so legacy sees NO remaining
+            // steps (order>1) → single-factor mint.
+            var loginFlow = flow(tenantId, step(1, emailOtp));
+
+            when(configDrivenLoginPolicy.isEnabledFor(tenantId)).thenReturn(false); // engine OFF
+            when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
+            when(passwordEncoder.matches("Password123!", VALID_BCRYPT_HASH)).thenReturn(true);
+            when(authFlowRepository.findByTenantIdAndIsDefaultTrueAndIsActiveTrueAndOperationType(
+                    eq(tenantId), eq(com.fivucsas.identity.domain.model.auth.OperationType.APP_LOGIN)))
+                    .thenReturn(Optional.of(loginFlow));
+            when(enrollmentHealthService.validateEnrollments(user.getId()))
+                    .thenReturn(java.util.Map.of());
+            when(tokenGenerator.generateAccessToken("test@example.com", List.of("pwd")))
+                    .thenReturn("access-token");
+            when(refreshTokenService.createRefreshToken(eq(user), any(), any())).thenReturn(refreshToken);
+
+            AuthenticationResponse response = authenticateUserService.execute(validCommand);
+
+            assertThat(response.isMfaRequired()).isFalse();
+            assertThat(response.getAccessToken()).isEqualTo("access-token");
+            verify(passwordEncoder).matches("Password123!", VALID_BCRYPT_HASH);
+            verify(mfaSessionRepository, never()).save(any());
         }
     }
 }

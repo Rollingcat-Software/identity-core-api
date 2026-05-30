@@ -56,6 +56,7 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
     private final UserEnrollmentRepository userEnrollmentRepository;
     private final MfaSessionRepository mfaSessionRepository;
     private final EnrollmentHealthService enrollmentHealthService;
+    private final ConfigDrivenLoginPolicy configDrivenLoginPolicy;
 
     private static final int MAX_FAILED_ATTEMPTS = 5;
     private static final Duration LOCKOUT_DURATION = Duration.ofMinutes(15);
@@ -186,7 +187,18 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
         //                           and VerifyMfaStepService runs it generically.
         // A null/empty flow (or a flow with no step 1) falls back to PASSWORD so
         // tenants without a configured flow keep the legacy password login.
-        Set<AuthMethodType> layer1Methods = resolveLayer1Methods(user);
+        //
+        // REVERSIBILITY GATE (operator directive 2026-05-30): the config-driven
+        // engine is OFF by default. When OFF for this tenant we resolve NO
+        // Layer-1 methods → layer1IsPassword=true → the hard password gate +
+        // legacy step-2/["PASSWORD"] flow below run EXACTLY as before. Flip
+        // app.auth.config-driven-login (or canary a tenant) to enable the new
+        // model with no redeploy.
+        boolean configDriven = user.getTenant() != null
+                && configDrivenLoginPolicy.isEnabledFor(user.getTenant().getId());
+        Set<AuthMethodType> layer1Methods = configDriven
+                ? resolveLayer1Methods(user)
+                : Set.of();
         boolean layer1IsPassword = layer1Methods.isEmpty()
                 || layer1Methods.contains(AuthMethodType.PASSWORD);
 

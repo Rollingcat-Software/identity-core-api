@@ -149,8 +149,22 @@ V73: config-driven login engine — adds AuthMethodType PASSKEY + APPROVE_LOGIN,
      (TRUE for PASSKEY/APPROVE_LOGIN/QR_CODE), and widens chk_auth_method_type
      (preserving the full V28 list). PASSKEY = discoverable mode of WebAuthn;
      APPROVE_LOGIN = number-matching mode of the QR cross-device method.
+     V73 is ADDITIVE/reversible — safe to leave applied if the image rolls back.
 
 **V34-V60 applied in prod. Last rebuild included V60 (drop refresh_tokens.token plaintext).**
+
+### Config-driven login engine — kill-switch (task #16, ships DARK 2026-05-30)
+
+The config-driven login engine (Layer-1-as-config + usernameless-into-flow) is
+gated by `ConfigDrivenLoginPolicy` and ships **OFF**. When OFF, login is
+byte-identical to the legacy password-first behavior. Flip WITHOUT a redeploy:
+- `APP_AUTH_CONFIG_DRIVEN_LOGIN=true` — enable for ALL tenants (master switch).
+- `APP_AUTH_CONFIG_DRIVEN_LOGIN_TENANTS=<uuid>,<uuid>` — canary specific tenants
+  while the master switch stays false.
+Roll out dark → staging soak → canary one tenant → global; **revert = unset the
+env var** (no rebuild). `/api/v1/auth/login-config` also returns the legacy
+password-first shape whenever the engine is OFF for the tenant, so the UI agrees
+with the runtime path.
 
 ### Operator reality — 2026-05-30 stabilize-&-harden backlog (P1-1 + P1-5, DEPLOYED)
 

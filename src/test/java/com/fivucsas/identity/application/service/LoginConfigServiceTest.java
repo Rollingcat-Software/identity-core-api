@@ -25,6 +25,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -33,6 +34,7 @@ class LoginConfigServiceTest {
 
     @Mock private AuthFlowRepositoryPort authFlowRepository;
     @Mock private TenantRepository tenantRepository;
+    @Mock private ConfigDrivenLoginPolicy configDrivenLoginPolicy;
 
     @InjectMocks private LoginConfigService service;
 
@@ -74,6 +76,7 @@ class LoginConfigServiceTest {
     @DisplayName("No default flow → implicit single-step PASSWORD, identifierRequired=true")
     void noFlowFallsBackToPassword() {
         UUID tenantId = UUID.randomUUID();
+        when(configDrivenLoginPolicy.isEnabledFor(tenantId)).thenReturn(true); // engine ON
         when(tenantRepository.findById(tenantId))
                 .thenReturn(Optional.of(Tenant.reconstitute(tenantId, "Acme", "acme", "desc",
                         "ops@acme.test", "+10000000000", null, null, null, null)));
@@ -100,6 +103,7 @@ class LoginConfigServiceTest {
         UUID tenantId = UUID.randomUUID();
         AuthMethod passkey = method(AuthMethodType.PASSKEY, true, true);
         AuthMethod emailOtp = method(AuthMethodType.EMAIL_OTP, false, false);
+        when(configDrivenLoginPolicy.isEnabledFor(tenantId)).thenReturn(true); // engine ON
         when(tenantRepository.findById(any())).thenReturn(Optional.empty());
         when(authFlowRepository.findByTenantIdAndIsDefaultTrueAndIsActiveTrueAndOperationType(
                 eq(tenantId), eq(OperationType.APP_LOGIN)))
@@ -126,6 +130,7 @@ class LoginConfigServiceTest {
     void passwordLayer1IsIdentifierRequired() {
         UUID tenantId = UUID.randomUUID();
         AuthMethod password = method(AuthMethodType.PASSWORD, true, false);
+        when(configDrivenLoginPolicy.isEnabledFor(tenantId)).thenReturn(true); // engine ON
         when(tenantRepository.findById(any())).thenReturn(Optional.empty());
         when(authFlowRepository.findByTenantIdAndIsDefaultTrueAndIsActiveTrueAndOperationType(
                 eq(tenantId), eq(OperationType.APP_LOGIN)))
@@ -136,5 +141,27 @@ class LoginConfigServiceTest {
         assertThat(cfg.layer1().identifierRequired()).isTrue();
         assertThat(cfg.totalSteps()).isEqualTo(1);
         assertThat(cfg.laterSteps()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("REVERSIBILITY: engine OFF ⇒ login-config returns legacy password-first shape, ignoring the configured PASSKEY flow")
+    void flagOffReturnsPasswordFirstShape() {
+        UUID tenantId = UUID.randomUUID();
+        // Engine OFF: must NOT consult the flow at all → advertise password-first
+        // so the UI behaves exactly as today.
+        when(configDrivenLoginPolicy.isEnabledFor(tenantId)).thenReturn(false);
+        when(tenantRepository.findById(tenantId))
+                .thenReturn(Optional.of(Tenant.reconstitute(tenantId, "Acme", "acme", "desc",
+                        "ops@acme.test", "+10000000000", null, null, null, null)));
+
+        LoginConfigResponse cfg = service.getLoginConfig(tenantId);
+
+        assertThat(cfg.totalSteps()).isEqualTo(1);
+        assertThat(cfg.layer1().identifierRequired()).isTrue();
+        assertThat(cfg.layer1().methods()).singleElement()
+                .satisfies(m -> assertThat(m.type()).isEqualTo("PASSWORD"));
+        assertThat(cfg.laterSteps()).isEmpty();
+        // The flow repository must never be hit when the engine is OFF.
+        verifyNoInteractions(authFlowRepository);
     }
 }
