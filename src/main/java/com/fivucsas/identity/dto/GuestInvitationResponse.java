@@ -39,12 +39,27 @@ public class GuestInvitationResponse {
     private String guestLastName;
 
     public static GuestInvitationResponse from(GuestInvitation invitation) {
+        // P1-4 lazy-proxy guard: the inviter / guest User can be soft-deleted
+        // (@SQLRestriction("deleted_at IS NULL") hides it), so initializing the proxy
+        // to read a name/email throws EntityNotFoundException and 500s the whole
+        // /guests list. .getId() is an FK read (no init); name/email init the proxy
+        // and are guarded here, falling back to null when the user row is gone.
+        String invitedByEmail = null;
+        try {
+            if (invitation.getInvitedBy() != null) {
+                org.hibernate.Hibernate.initialize(invitation.getInvitedBy());
+                invitedByEmail = invitation.getInvitedBy().getEmail();
+            }
+        } catch (jakarta.persistence.EntityNotFoundException ignored) {
+            // inviter soft-deleted — leave null
+        }
+
         GuestInvitationResponseBuilder builder = GuestInvitationResponse.builder()
                 .id(invitation.getId())
                 .tenantId(invitation.getTenant().getId())
                 .email(invitation.getEmail())
                 .status(invitation.getStatus().name())
-                .invitedByEmail(invitation.getInvitedBy().getEmail())
+                .invitedByEmail(invitedByEmail)
                 .message(invitation.getMessage())
                 .accessStartsAt(invitation.getAccessStartsAt())
                 .accessEndsAt(invitation.getAccessEndsAt())
@@ -56,9 +71,14 @@ public class GuestInvitationResponse {
                 .createdAt(invitation.getCreatedAt());
 
         if (invitation.getUser() != null) {
-            builder.guestUserId(invitation.getUser().getId())
-                   .guestFirstName(invitation.getUser().getFirstName())
-                   .guestLastName(invitation.getUser().getLastName());
+            builder.guestUserId(invitation.getUser().getId());
+            try {
+                org.hibernate.Hibernate.initialize(invitation.getUser());
+                builder.guestFirstName(invitation.getUser().getFirstName())
+                       .guestLastName(invitation.getUser().getLastName());
+            } catch (jakarta.persistence.EntityNotFoundException ignored) {
+                // guest user soft-deleted — leave name fields null
+            }
         }
 
         return builder.build();
