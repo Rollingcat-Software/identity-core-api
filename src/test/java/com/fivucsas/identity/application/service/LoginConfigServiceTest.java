@@ -96,6 +96,8 @@ class LoginConfigServiceTest {
                     assertThat(m.usernameless()).isFalse();
                 });
         assertThat(cfg.laterSteps()).isEmpty();
+        // Engine ON for this tenant (we passed the gate) → identifier-first UI.
+        assertThat(cfg.engineActive()).isTrue();
     }
 
     @Test
@@ -162,6 +164,8 @@ class LoginConfigServiceTest {
         assertThat(cfg.layer1().methods()).singleElement()
                 .satisfies(m -> assertThat(m.type()).isEqualTo("PASSWORD"));
         assertThat(cfg.laterSteps()).isEmpty();
+        // Engine OFF → the UI must keep the legacy single-screen email+password form.
+        assertThat(cfg.engineActive()).isFalse();
         // The flow repository must never be hit when the engine is OFF.
         verifyNoInteractions(authFlowRepository);
     }
