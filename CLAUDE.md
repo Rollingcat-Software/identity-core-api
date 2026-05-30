@@ -43,6 +43,38 @@ not a real biometric. The `AuthMethodType.FINGERPRINT` enum value is retained
 - **Session path handlers**: Accept BOTH old and new field names for backward compatibility (B1-B6).
 - **Entity state**: Professional pattern — NfcCard/OAuth2Client use `revokedAt` timestamps, User `isActive` synced from status enum via `@PrePersist/@PreUpdate`.
 - **NFC enrollment**: Auto-creates user_enrollments record. Reactivates existing inactive card on re-enrollment.
+- **NFC serial — CANONICAL FORMAT (WS2, 2026-05-30)**: web sends the serial as
+  lowercase-with-colons (`04:a2:24:5b:6f:71:80`), mobile sends UPPERHEX
+  (`04A2245B6F7180`). The API normalizes EVERY inbound serial at the ingest
+  boundary to **upper-case hex, NO separators** via `domain.model.NfcSerial.canonicalize`
+  (strip `: - . space`, upper-case, keep stripped value iff pure hex; non-hex/opaque
+  serials are upper-cased + trimmed only, separators preserved). Stored + looked-up
+  value is always canonical, so a mobile-enrolled card matches a web verify and
+  vice-versa. Applied in `ManageNfcCardService.{enrollCard,verifyCard,searchByCardSerial}`
+  and `NfcDocumentAuthHandler.validate`.
+- **NFC chip passive-authentication (WS2 trust gate, 2026-05-30)**: serial-only
+  proves "this serial is enrolled" but NOT that the physical chip is genuine. The
+  `biometric-processor` validates the eMRTD `EF.SOD → Document Signer → CSCA` chain
+  + DG-hash binding (CPU-only, X-API-Key). The api treats the verdict as
+  AUTHORITATIVE and is **FAIL-CLOSED** (error / `NO_TRUST_STORE` / non-authentic ⇒
+  reject). Wired via `BiometricServicePort.verifyNfcChipAuthenticity(sodB64, dataGroups)`
+  → `BiometricServiceAdapter` → bio `POST /api/v1/nfc/verify-authenticity`
+  (frozen contract, bio PR #131: request `{sod_b64, data_groups:{"1":..,"2":..}}`;
+  response `{is_authentic, reason, reason_code, ds_subject, ds_serial, csca_matched,
+  dg_hash_results, sod_hash_algorithm}`). Single verdict interpreter:
+  `application.service.nfc.NfcChipAuthenticityVerdict` (only place that reads
+  `is_authentic`). Endpoints/paths that gate on it:
+    - `POST /api/v1/nfc/verify-authenticity` — standalone trust check (200 authentic;
+      422 `NFC_PA_NOT_AUTHENTIC` fail-closed; 400 `NFC_PA_MISSING_SOD`).
+    - `POST /api/v1/nfc/enroll` — when the payload carries `sod`/`sod_b64`, enrollment
+      is gated (422 if inauthentic; serial-only enroll unchanged).
+    - `NfcDocumentAuthHandler` MFA step — when step data carries SOD/DGs, the step
+      fails closed if the chip isn't authentic before the serial lookup.
+  Accepts `sod` or `sod_b64`, and DG keys as `dg1..dgN` or bare `1..N`.
+  **Operator**: CSCA roots must be dropped into the bio container's
+  `NFC_CSCA_TRUST_DIR` (default `app/core/csca_trust_store/`) — until then every
+  verify returns `is_authentic=false, reason_code=NO_TRUST_STORE`, so any client
+  that SENDS a SOD will be rejected (serial-only flows are unaffected).
 - **CORS**: api.fivucsas.com, app.fivucsas.com, demo.fivucsas.com, verify.fivucsas.com
 
 ## Flyway Migrations (V1-V61)
@@ -360,11 +392,16 @@ V71: ROOT role granted all 48 permissions — backfills the full permission set 
     Audited as `GUEST_INVITATION_REVOKED` with userId = acting admin's user id (or null),
     NEVER the invitation/tenant id. The existing `POST /api/v1/guests/{guestUserId}/revoke`
     (ACCEPTED guests) is unchanged.
-- **OPEN gap:** guest invitations send NO email (`GuestLifecycleService.createInvitation`
-  has no email call; `EmailService` only does `sendOtp`). Accept endpoint + token
-  exist but the guest can't receive the link → can't log in. Needs EmailService
-  wiring + a frontend accept-invite page. FACE/VOICE enrollment quality/liveness
-  scores are also never persisted to `user_enrollments`.
+- **RESOLVED (WS5, 2026-05-30):** guest invitations now send an email. The accept-link
+  mail was wired in PR #119 (`EmailService.sendGuestInvitation` + `SmtpEmailService`
+  SMTP impl, called from `GuestLifecycleService.createInvitation`; resend endpoint
+  added). WS5 added **EN/TR i18n** + tenant name to the body: signature is now
+  `sendGuestInvitation(to, token, accessStart, accessEnd, message, inviterName,
+  tenantName, locale)`; `InviteGuestRequest` carries an optional `locale` ("tr"/"en",
+  EN fallback) the admin UI passes; the link is `{frontend}/accept-invite?token=…`.
+  (The web accept-invite page still needs to exist for the loop to fully close —
+  frontend WS item.) FACE/VOICE enrollment quality/liveness scores were also fixed
+  separately (P1-3, PR #137).
 - Note: the parent submodule pointer for identity-core-api drifts STALE in this
   repo's workflow (read `606f1f4` while deployed was newer). Verify deployed state
   by the running container / Flyway version, not the parent pointer.

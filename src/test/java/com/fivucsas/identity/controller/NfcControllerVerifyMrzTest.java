@@ -72,6 +72,7 @@ class NfcControllerVerifyMrzTest {
 
     @MockBean private ManageNfcCardService manageNfcCardService;
     @MockBean private BiometricProcessorClient biometricProcessorClient;
+    @MockBean private com.fivucsas.identity.application.port.output.BiometricServicePort biometricServicePort;
     @MockBean private AuditLogPort auditLogPort;
 
     // Spring-Security / infra beans the WebMvcTest slice still demands

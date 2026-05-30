@@ -312,6 +312,57 @@ public class BiometricServiceAdapter implements BiometricServicePort {
     }
 
     @Override
+    public Map<String, Object> verifyNfcChipAuthenticity(String sodBase64,
+                                                         Map<String, String> dataGroupsBase64) {
+        log.info("Calling biometric service /api/v1/nfc/verify-authenticity ({} data groups)",
+                dataGroupsBase64 != null ? dataGroupsBase64.size() : 0);
+        // Frozen contract (agent-bio PR #131):
+        //   { "sod_b64": "<b64 EF.SOD DER>",
+        //     "data_groups": { "1": "<b64>", "2": "<b64>", ... } }
+        // DG keys are the stringified DG NUMBER ("1".."16"). Callers may pass
+        // either "1" or "dg1" — both normalize to the bare number here.
+        java.util.Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("sod_b64", sodBase64);
+        java.util.Map<String, String> dataGroups = new java.util.LinkedHashMap<>();
+        if (dataGroupsBase64 != null) {
+            for (Map.Entry<String, String> dg : dataGroupsBase64.entrySet()) {
+                if (dg.getKey() == null || dg.getValue() == null || dg.getValue().isBlank()) {
+                    continue;
+                }
+                String num = dg.getKey().toLowerCase().replaceFirst("^dg", "").trim();
+                dataGroups.put(num, dg.getValue());
+            }
+        }
+        // Bio requires >= 1 DG (an empty data_groups is a hard 400 there, and a
+        // SOD with no DG to hash can't establish integrity anyway). Short-circuit
+        // to a clean fail-closed verdict instead of a doomed 400 round-trip; the
+        // verdict interpreter maps reason_code=MISSING_DG → not authentic.
+        if (dataGroups.isEmpty()) {
+            log.warn("NFC chip-authenticity called with no data groups — failing closed (MISSING_DG)");
+            return Map.of(
+                    "is_authentic", false,
+                    "reason", "At least one Data Group (e.g. DG1) is required for passive authentication",
+                    "reason_code", "MISSING_DG");
+        }
+        body.put("data_groups", dataGroups);
+        try {
+            return postJsonObject("/api/v1/nfc/verify-authenticity", body);
+        } catch (HttpClientErrorException e) {
+            // Bio rejected the input (malformed SOD/DG, 4xx). Fail-closed: this
+            // is an authenticity FAILURE, not an availability problem.
+            log.warn("NFC chip-authenticity rejected by biometric service: {} {}",
+                    e.getStatusCode(), e.getMessage());
+            return errorResponse("NFC chip authenticity check rejected: " + e.getResponseBodyAsString());
+        } catch (ResourceAccessException e) {
+            log.error("Biometric service unreachable for NFC chip-authenticity: {}", e.getMessage());
+            return errorResponse("NFC authenticity service unavailable");
+        } catch (RestClientException e) {
+            log.error("Biometric service error for NFC chip-authenticity: {}", e.getMessage());
+            return errorResponse("NFC authenticity service error");
+        }
+    }
+
+    @Override
     public Map<String, Object> generateLivenessPuzzle(String userId, String difficulty) {
         log.info("Calling biometric service to generate liveness puzzle for user: {}", userId);
         try {
@@ -388,6 +439,19 @@ public class BiometricServiceAdapter implements BiometricServicePort {
     }
 
     private Map<String, Object> postJson(String path, Map<String, String> body) {
+        return restClient.post()
+                .uri(path)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(body)
+                .retrieve()
+                .body(MAP_TYPE);
+    }
+
+    /**
+     * JSON POST accepting an arbitrary {@code Map<String, Object>} body (the
+     * NFC passive-auth request mixes the SOD with a variable set of DG fields).
+     */
+    private Map<String, Object> postJsonObject(String path, Map<String, Object> body) {
         return restClient.post()
                 .uri(path)
                 .contentType(MediaType.APPLICATION_JSON)

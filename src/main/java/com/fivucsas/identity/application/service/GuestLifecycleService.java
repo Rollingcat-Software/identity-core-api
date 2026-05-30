@@ -66,7 +66,7 @@ public class GuestLifecycleService {
     @Transactional
     public GuestInvitation createInvitation(Tenant tenant, String email, User invitedBy,
                                             int accessDurationHours, String message) {
-        return createInvitation(tenant, email, invitedBy, accessDurationHours, message, null);
+        return createInvitation(tenant, email, invitedBy, accessDurationHours, message, null, null);
     }
 
     /**
@@ -81,6 +81,20 @@ public class GuestLifecycleService {
     public GuestInvitation createInvitation(Tenant tenant, String email, User invitedBy,
                                             int accessDurationHours, String message,
                                             String inviterName) {
+        return createInvitation(tenant, email, invitedBy, accessDurationHours, message, inviterName, null);
+    }
+
+    /**
+     * Creates a guest invitation and emails the recipient an accept link in
+     * their {@code locale} (EN or TR).
+     *
+     * @param locale BCP-47 language tag of the recipient ("tr"/"en"); null/blank
+     *               or unsupported falls back to English.
+     */
+    @Transactional
+    public GuestInvitation createInvitation(Tenant tenant, String email, User invitedBy,
+                                            int accessDurationHours, String message,
+                                            String inviterName, String locale) {
         // Check for existing active invitation
         if (invitationRepository.existsActiveInvitation(tenant.getId(), email)) {
             throw new DomainStateConflictException("An active invitation already exists for " + email + " in this tenant");
@@ -109,10 +123,13 @@ public class GuestLifecycleService {
                 .build();
 
         GuestInvitation saved = invitationRepository.save(invitation);
+        // Inviter identity is logged via the resolved display name (a String the
+        // controller passes), not invitedBy.getEmail(), so this new overload
+        // adds no fresh entity.User method-call across the hexagonal boundary.
         log.info("Guest invitation created for {} in tenant {} by {}, access until {}",
-                email, tenant.getName(), invitedBy.getEmail(), accessEnds);
+                email, tenant.getName(), inviterName, accessEnds);
 
-        sendInvitationEmail(saved, inviterName);
+        sendInvitationEmail(saved, inviterName, tenant.getName(), locale);
         return saved;
     }
 
@@ -139,8 +156,9 @@ public class GuestLifecycleService {
 
         // Inviter name is omitted on resend to avoid new entity.User member
         // access in this service (hexagonal boundary); the email falls back to
-        // a generic "You have been invited" greeting.
-        sendInvitationEmail(invitation, null);
+        // a generic "You have been invited" greeting. Locale is not stored on
+        // the invitation, so resend falls back to English.
+        sendInvitationEmail(invitation, null, invitation.getTenant().getName(), null);
         log.info("Guest invitation resent for {} (id {})", invitation.getEmail(), invitation.getId());
     }
 
@@ -148,7 +166,8 @@ public class GuestLifecycleService {
      * Sends the invitation email. Failures are logged but never propagated:
      * invitation creation is authoritative and an admin can always resend.
      */
-    private void sendInvitationEmail(GuestInvitation invitation, String inviterName) {
+    private void sendInvitationEmail(GuestInvitation invitation, String inviterName,
+                                     String tenantName, String locale) {
         try {
             emailService.sendGuestInvitation(
                     invitation.getEmail(),
@@ -156,7 +175,9 @@ public class GuestLifecycleService {
                     invitation.getAccessStartsAt(),
                     invitation.getAccessEndsAt(),
                     invitation.getMessage(),
-                    inviterName);
+                    inviterName,
+                    tenantName,
+                    locale);
         } catch (Exception e) {
             log.error("Failed to dispatch guest invitation email to {} (id {}): {}",
                     invitation.getEmail(), invitation.getId(), e.getMessage(), e);

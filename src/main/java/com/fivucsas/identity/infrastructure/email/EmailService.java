@@ -8,15 +8,20 @@ public interface EmailService {
     /**
      * Sends a guest invitation email containing a prominent accept link.
      *
+     * <p>The body is rendered in the recipient's locale (EN or TR). Any
+     * unsupported/blank locale falls back to English.</p>
+     *
      * @param to          recipient email address
      * @param token       the invitation token (used to build the accept link)
      * @param accessStart start of the guest's access window
      * @param accessEnd   end of the guest's access window
      * @param message     optional custom message from the inviter (may be null/blank)
      * @param inviterName display name of the inviting admin (may be null/blank)
+     * @param tenantName  the inviting organisation's name (may be null/blank)
+     * @param locale      BCP-47 language tag of the recipient ("tr"/"en"; null/blank → EN)
      */
     void sendGuestInvitation(String to, String token, Instant accessStart, Instant accessEnd,
-                             String message, String inviterName);
+                             String message, String inviterName, String tenantName, String locale);
 
     /**
      * Sends the email-verification mail for a self-service tenant onboarding.

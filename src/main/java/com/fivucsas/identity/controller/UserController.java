@@ -344,7 +344,8 @@ public class UserController {
                 currentUser,
                 request.getAccessDurationHours(),
                 request.getMessage(),
-                inviterName
+                inviterName,
+                request.getLocale()
         );
 
         return ResponseEntity.status(HttpStatus.CREATED)

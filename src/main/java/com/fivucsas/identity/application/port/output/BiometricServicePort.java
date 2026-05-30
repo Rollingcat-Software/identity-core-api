@@ -154,6 +154,34 @@ public interface BiometricServicePort {
     Map<String, Object> searchVoice(String voiceData);
 
     /**
+     * Verifies the passive-authentication (chip-authenticity) of an eMRTD
+     * (electronic passport / TR e-ID) by validating the {@code EF.SOD} →
+     * Document Signer → CSCA certificate chain and that the supplied Data Group
+     * hashes match those signed in the SOD.
+     *
+     * <p>This is the authoritative, server-side passive-auth verdict that gates
+     * NFC enroll/verify (WS2). Clients may run an advisory client-side chain
+     * check, but the api trusts only this result and is <b>fail-closed</b>: any
+     * transport error, malformed response, or non-authentic verdict means the
+     * chip is treated as NOT authentic.</p>
+     *
+     * <p>Delegates to the biometric-processor's CPU-only passive-auth endpoint
+     * (X-API-Key authenticated). The request carries the base64-encoded SOD plus
+     * whichever Data Groups the caller read from the chip (at minimum DG1; DG2
+     * etc. are optional but strengthen the hash-binding check).</p>
+     *
+     * @param sodBase64 base64-encoded {@code EF.SOD} (required)
+     * @param dataGroupsBase64 map of DG name → base64 DG bytes
+     *                         (e.g. {@code {"dg1": "...", "dg2": "..."}}); may be
+     *                         empty but at least DG1 is recommended
+     * @return the raw verdict map from the biometric-processor; on transport
+     *         failure a {@code {success=false, ...}} error map (callers must
+     *         fail-closed)
+     */
+    Map<String, Object> verifyNfcChipAuthenticity(String sodBase64,
+                                                  Map<String, String> dataGroupsBase64);
+
+    /**
      * Generates a liveness puzzle challenge from the biometric processor.
      *
      * @param userId optional user identifier

@@ -3,6 +3,7 @@ package com.fivucsas.identity.application.service;
 import com.fivucsas.identity.application.port.input.ManageEnrollmentUseCase;
 import com.fivucsas.identity.application.port.output.NfcCardRepositoryPort;
 import com.fivucsas.identity.domain.exception.UnauthorizedException;
+import com.fivucsas.identity.domain.model.NfcSerial;
 import com.fivucsas.identity.domain.model.auth.AuthMethodType;
 import com.fivucsas.identity.domain.repository.UserRepository;
 import com.fivucsas.identity.entity.NfcCard;
@@ -55,11 +56,16 @@ public class ManageNfcCardService {
     }
 
     @Transactional
-    public EnrollResult enrollCard(UUID requestedUserId, String cardSerial,
+    public EnrollResult enrollCard(UUID requestedUserId, String rawCardSerial,
                                    String cardType, String label) {
         User currentUser = rbacService.getCurrentUser()
                 .orElseThrow(UnauthorizedException::new);
         Tenant tenant = currentUser.getTenant();
+
+        // Normalize the serial to the canonical UPPERHEX form at ingest so a
+        // card enrolled from mobile (UPPERHEX) matches one verified from web
+        // (lowercase:colons) and vice-versa. Stored value is always canonical.
+        String cardSerial = NfcSerial.canonicalize(rawCardSerial);
 
         UUID targetUserId = requestedUserId != null ? requestedUserId : currentUser.getId();
 
@@ -109,8 +115,10 @@ public class ManageNfcCardService {
     }
 
     @Transactional(readOnly = true)
-    public Optional<NfcCard> verifyCard(String cardSerial) {
-        return nfcCardRepository.findByCardSerialAndIsActiveTrue(cardSerial);
+    public Optional<NfcCard> verifyCard(String rawCardSerial) {
+        // Same canonicalization as enroll so cross-client (web ↔ mobile) serial
+        // shapes resolve to the same stored value.
+        return nfcCardRepository.findByCardSerialAndIsActiveTrue(NfcSerial.canonicalize(rawCardSerial));
     }
 
     /**
@@ -128,7 +136,9 @@ public class ManageNfcCardService {
      * tenant member cannot reach this lookup at all.</p>
      */
     @Transactional(readOnly = true)
-    public List<NfcCard> searchByCardSerial(String serial) {
+    public List<NfcCard> searchByCardSerial(String rawSerial) {
+        // Canonicalize so an admin can search with either client's serial shape.
+        String serial = NfcSerial.canonicalize(rawSerial);
         // Resolve the caller's tenant scope via the security layer rather than
         // entity.User, so this application service stays within the hexagonal
         // boundary (UserDomainBoundaryTest). ROOT has an

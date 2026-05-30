@@ -1,7 +1,9 @@
 package com.fivucsas.identity.controller;
 
 import com.fivucsas.identity.application.port.output.AuditLogPort;
+import com.fivucsas.identity.application.port.output.BiometricServicePort;
 import com.fivucsas.identity.application.service.ManageNfcCardService;
+import com.fivucsas.identity.application.service.nfc.NfcChipAuthenticityVerdict;
 import com.fivucsas.identity.application.service.ManageNfcCardService.DeactivateOutcome;
 import com.fivucsas.identity.application.service.ManageNfcCardService.EnrollResult;
 import com.fivucsas.identity.entity.NfcCard;
@@ -38,6 +40,7 @@ public class NfcController {
 
     private final ManageNfcCardService manageNfcCardService;
     private final BiometricProcessorClient biometricProcessorClient;
+    private final BiometricServicePort biometricServicePort;
     private final AuditLogPort auditLogPort;
 
     @PostMapping("/enroll")
@@ -54,6 +57,33 @@ public class NfcController {
                     "success", false,
                     "message", "cardSerial is required"
             ));
+        }
+
+        // WS2: if the client read the chip's EF.SOD, gate enrollment on the
+        // authoritative passive-auth (chip-authenticity) verdict — a cloned or
+        // emulated card must not be enrollable. Fail-closed. When no SOD is
+        // supplied (serial-only legacy/basic enroll), behaviour is unchanged.
+        String sod = trimToNull(request.get("sod"));
+        if (sod == null) {
+            sod = trimToNull(request.get("sod_b64"));
+        }
+        if (sod != null) {
+            NfcChipAuthenticityVerdict verdict = NfcChipAuthenticityVerdict.from(
+                    biometricServicePort.verifyNfcChipAuthenticity(sod, extractDataGroups(request)));
+            if (!verdict.isAuthentic()) {
+                log.warn("NFC enroll rejected — chip not authentic: code={} reason={}",
+                        verdict.reasonCode(), verdict.reason());
+                Map<String, Object> rejected = new LinkedHashMap<>();
+                rejected.put("success", false);
+                rejected.put("errorCode", "NFC_PA_NOT_AUTHENTIC");
+                if (verdict.reasonCode() != null) {
+                    rejected.put("reasonCode", verdict.reasonCode());
+                }
+                rejected.put("message", verdict.reason() != null
+                        ? verdict.reason()
+                        : "Chip passive authentication failed; card not enrolled.");
+                return ResponseEntity.unprocessableEntity().body(rejected);
+            }
         }
 
         UUID requestedUserId = (userIdStr != null && !userIdStr.isBlank())
@@ -351,6 +381,129 @@ public class NfcController {
         response.put("checksumValid", true);
 
         return ResponseEntity.ok(response);
+    }
+
+    // ------------------------------------------------------------------
+    // WS2: NFC chip passive-authentication (SOD → DS → CSCA) trust check
+    // ------------------------------------------------------------------
+    // The serial-only /verify path proves "this serial is enrolled" but NOT
+    // that the physical chip is genuine — a cloned/emulated card can present
+    // any serial. Passive Authentication validates the eMRTD EF.SOD signature
+    // chain (Document Signer → CSCA) and that the read Data Group hashes match
+    // those signed in the SOD. The biometric-processor performs the crypto
+    // (CPU-only, X-API-Key); the api treats the result as AUTHORITATIVE and is
+    // FAIL-CLOSED: any error or non-authentic verdict rejects the chip.
+    //
+    // Clients (web Web-NFC, mobile CoreNFC/Android) run an advisory local check
+    // but MUST send SOD + DGs here for the trusted verdict before relying on an
+    // NFC enroll/verify.
+
+    @PostMapping("/verify-authenticity")
+    @Operation(
+            summary = "Verify NFC chip authenticity (passive authentication)",
+            description = "Validates the eMRTD EF.SOD → Document Signer → CSCA "
+                    + "certificate chain and the DG-hash binding via the "
+                    + "biometric-processor. Fail-closed: a non-authentic verdict "
+                    + "or any service error rejects the chip. Send the base64 "
+                    + "EF.SOD as 'sod' (or 'sod_b64') and any read data groups as "
+                    + "dg1..dgN (or numeric keys 1..N)."
+    )
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<Map<String, Object>> verifyChipAuthenticity(
+            @RequestBody Map<String, String> request,
+            HttpServletRequest httpRequest) {
+
+        // Accept either 'sod' or the bio-native 'sod_b64' from clients.
+        String sod = trimToNull(request.get("sod"));
+        if (sod == null) {
+            sod = trimToNull(request.get("sod_b64"));
+        }
+        if (sod == null) {
+            return ResponseEntity.badRequest().body(Map.of(
+                    "success", false,
+                    "authentic", false,
+                    "errorCode", "NFC_PA_MISSING_SOD",
+                    "message", "The base64-encoded EF.SOD ('sod') is required."
+            ));
+        }
+
+        Map<String, String> dataGroups = extractDataGroups(request);
+
+        Map<String, Object> bioResponse =
+                biometricServicePort.verifyNfcChipAuthenticity(sod, dataGroups);
+        NfcChipAuthenticityVerdict verdict = NfcChipAuthenticityVerdict.from(bioResponse);
+
+        // Audit both authentic and rejected outcomes.
+        try {
+            String userId = currentUserId();
+            String ipAddress = clientIp(httpRequest);
+            String userAgent = httpRequest != null ? httpRequest.getHeader("User-Agent") : null;
+            auditLogPort.logSecurityEvent(
+                    userId,
+                    verdict.isAuthentic() ? "NFC_CHIP_AUTHENTIC" : "NFC_CHIP_NOT_AUTHENTIC",
+                    ipAddress,
+                    String.format("NFC passive-auth verdict=%s reason=%s ua=%s dgs=%d",
+                            verdict.isAuthentic(), verdict.reason(), userAgent, dataGroups.size())
+            );
+        } catch (Exception auditEx) {
+            log.error("Failed to write NFC chip-authenticity audit log: {}",
+                    auditEx.getMessage(), auditEx);
+        }
+
+        if (!verdict.isAuthentic()) {
+            // Fail-closed. 422 = reachable-but-rejected (chip not authentic),
+            // distinct from a transport problem which the verdict folds in too;
+            // we keep a single 422 so a cloned chip can't be told apart from a
+            // service blip by an attacker probing the endpoint.
+            log.warn("NFC chip rejected as not authentic: code={} reason={}",
+                    verdict.reasonCode(), verdict.reason());
+            Map<String, Object> rejected = new LinkedHashMap<>();
+            rejected.put("success", false);
+            rejected.put("authentic", false);
+            rejected.put("errorCode", "NFC_PA_NOT_AUTHENTIC");
+            if (verdict.reasonCode() != null) {
+                rejected.put("reasonCode", verdict.reasonCode());
+            }
+            rejected.put("message", verdict.reason() != null
+                    ? verdict.reason()
+                    : "Chip passive authentication failed.");
+            return ResponseEntity.unprocessableEntity().body(rejected);
+        }
+
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("success", true);
+        response.put("authentic", true);
+        if (verdict.reasonCode() != null) {
+            response.put("reasonCode", verdict.reasonCode());
+        }
+        if (verdict.reason() != null) {
+            response.put("detail", verdict.reason());
+        }
+        return ResponseEntity.ok(response);
+    }
+
+    /**
+     * Collects data-group base64 values from a request map. Accepts both the
+     * bio-native numeric keys ("1", "2", "14") and dg-prefixed keys ("dg1",
+     * "dg2"); the adapter normalizes to the numeric form. Non-DG keys (sod,
+     * sod_b64, cardSerial, etc.) are ignored.
+     */
+    private static Map<String, String> extractDataGroups(Map<String, String> request) {
+        Map<String, String> dataGroups = new LinkedHashMap<>();
+        for (Map.Entry<String, String> e : request.entrySet()) {
+            String key = e.getKey() == null ? "" : e.getKey().toLowerCase().trim();
+            if (e.getValue() == null || e.getValue().isBlank()) {
+                continue;
+            }
+            // dg1..dgN
+            if (key.matches("dg\\d{1,2}")) {
+                dataGroups.put(key, e.getValue().trim());
+            } else if (key.matches("\\d{1,2}")) {
+                // bare numeric DG key
+                dataGroups.put("dg" + key, e.getValue().trim());
+            }
+        }
+        return dataGroups;
     }
 
     // --- helpers -------------------------------------------------------
