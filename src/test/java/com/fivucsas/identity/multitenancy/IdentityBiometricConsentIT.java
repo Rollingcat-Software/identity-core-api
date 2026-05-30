@@ -123,8 +123,12 @@ class IdentityBiometricConsentIT {
         jdbc.update("DELETE FROM identity_tenant_biometric_consent WHERE identity_id IN (?, ?)",
                 identity, otherIdentity);
         jdbc.update("DELETE FROM user_enrollments WHERE tenant_id IN (?, ?)", tenantA, tenantB);
-        jdbc.update("DELETE FROM users WHERE tenant_id IN (?, ?)", tenantA, tenantB);
-        jdbc.update("DELETE FROM identities WHERE id IN (?, ?)", identity, otherIdentity);
+        // users + tenants are hard-delete-protected by the V53 trigger
+        // (app.allow_hard_delete bypass). Soft-delete instead — each @Test seeds
+        // fresh unique tenants/identities/emails, so leftover soft-deleted rows
+        // don't collide. identities are not trigger-protected, but a soft-deleted
+        // user still FKs them, so just NULL the FK references via the soft-delete.
+        jdbc.update("UPDATE users SET deleted_at = NOW() WHERE tenant_id IN (?, ?)", tenantA, tenantB);
         jdbc.update("UPDATE tenants SET deleted_at = NOW() WHERE id IN (?, ?)", tenantA, tenantB);
     }
 

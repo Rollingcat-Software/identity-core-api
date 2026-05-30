@@ -521,12 +521,23 @@ class CrossTenantIsolationIT {
 
     private UUID seedUser(UUID tenantId, String email, String userType) {
         UUID id = UUID.randomUUID();
+        // users.identity_id is NOT NULL since V70. Seed an identity explicitly
+        // (don't rely on the BEFORE-INSERT trigger) so a later Hibernate UPDATE
+        // of this row never trips the constraint.
+        UUID identityId = seedIdentity("ISO Test");
         jdbc.update(
-                "INSERT INTO users (id, tenant_id, email, password_hash, first_name, last_name, " +
+                "INSERT INTO users (id, tenant_id, identity_id, email, password_hash, first_name, last_name, " +
                 "user_type, status, is_active, created_at, updated_at) " +
-                "VALUES (?, ?, ?, '$2a$10$dummyhashfortesting.................................', " +
+                "VALUES (?, ?, ?, ?, '$2a$10$dummyhashfortesting.................................', " +
                 "'ISO', 'Test', ?, 'ACTIVE', true, NOW(), NOW())",
-                id, tenantId, email, userType);
+                id, tenantId, identityId, email, userType);
+        return id;
+    }
+
+    private UUID seedIdentity(String displayName) {
+        UUID id = UUID.randomUUID();
+        jdbc.update("INSERT INTO identities (id, display_name, status, created_at, updated_at) "
+                + "VALUES (?, ?, 'ACTIVE', NOW(), NOW())", id, displayName);
         return id;
     }
 
