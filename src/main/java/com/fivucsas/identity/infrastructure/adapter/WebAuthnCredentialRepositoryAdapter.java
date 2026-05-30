@@ -32,6 +32,11 @@ public class WebAuthnCredentialRepositoryAdapter implements WebAuthnCredentialRe
     }
 
     @Override
+    public List<WebAuthnCredential> findAllByUserHandle(String userHandle) {
+        return jpaRepository.findAllByUserHandle(userHandle);
+    }
+
+    @Override
     public boolean existsByCredentialId(String credentialId) {
         return jpaRepository.existsByCredentialId(credentialId);
     }

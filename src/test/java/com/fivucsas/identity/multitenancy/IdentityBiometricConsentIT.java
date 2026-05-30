@@ -123,8 +123,12 @@ class IdentityBiometricConsentIT {
         jdbc.update("DELETE FROM identity_tenant_biometric_consent WHERE identity_id IN (?, ?)",
                 identity, otherIdentity);
         jdbc.update("DELETE FROM user_enrollments WHERE tenant_id IN (?, ?)", tenantA, tenantB);
-        jdbc.update("DELETE FROM users WHERE tenant_id IN (?, ?)", tenantA, tenantB);
-        jdbc.update("DELETE FROM identities WHERE id IN (?, ?)", identity, otherIdentity);
+        // users + tenants are hard-delete-protected by the V53 trigger
+        // (app.allow_hard_delete bypass). Soft-delete instead — each @Test seeds
+        // fresh unique tenants/identities/emails, so leftover soft-deleted rows
+        // don't collide. identities are not trigger-protected, but a soft-deleted
+        // user still FKs them, so just NULL the FK references via the soft-delete.
+        jdbc.update("UPDATE users SET deleted_at = NOW() WHERE tenant_id IN (?, ?)", tenantA, tenantB);
         jdbc.update("UPDATE tenants SET deleted_at = NOW() WHERE id IN (?, ?)", tenantA, tenantB);
     }
 
@@ -205,12 +209,15 @@ class IdentityBiometricConsentIT {
 
     private UUID seedTenant(String slug) {
         UUID id = UUID.randomUUID();
+        // Unique name/slug per invocation — tearDown only soft-deletes (V53
+        // forbids hard-delete) so a fixed name/slug collides on the next @Test.
+        String unique = slug + "-" + id.toString().substring(0, 8);
         jdbc.update(
                 "INSERT INTO tenants (id, name, slug, contact_email, status, max_users, "
                 + "biometric_enabled, session_timeout_minutes, refresh_token_validity_days, "
                 + "is_active, created_at, updated_at) "
                 + "VALUES (?, ?, ?, ?, 'ACTIVE', 100, true, 30, 7, true, NOW(), NOW())",
-                id, "CONSENT " + slug, slug, slug + "@example.com");
+                id, "CONSENT " + unique, unique, unique + "@example.com");
         return id;
     }
 

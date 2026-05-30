@@ -38,6 +38,29 @@ public class WebAuthnCredential {
     @Builder.Default
     private long signCount = 0;
 
+    /**
+     * Whether this credential was created as a discoverable (resident-key)
+     * passkey. Discoverable passkeys can satisfy a usernameless assertion —
+     * the authenticator returns the {@link #userHandle} so the RP resolves the
+     * user without an up-front email. Non-discoverable credentials (the legacy
+     * default, requireResidentKey=false) can only be used in an
+     * {@code allowCredentials}-scoped assertion. Phase 1, V72.
+     */
+    @Column(name = "discoverable", nullable = false)
+    @Builder.Default
+    private boolean discoverable = false;
+
+    /**
+     * The WebAuthn user handle (PublicKeyCredentialUserEntity.id) bound to this
+     * credential at registration time, stored base64url-encoded. For a
+     * discoverable passkey the authenticator echoes this value on assertion;
+     * the RP resolves the owning user from it (no email needed). We encode the
+     * owning {@link User#getId()} UUID bytes — see {@code WebAuthnUserHandle}.
+     * Phase 1, V72.
+     */
+    @Column(name = "user_handle", length = 255)
+    private String userHandle;
+
     @Column(name = "device_name", length = 100)
     private String deviceName;
 

@@ -5,6 +5,7 @@ import com.fivucsas.identity.application.dto.response.DeviceResponse;
 import com.fivucsas.identity.application.port.input.ManageDeviceUseCase;
 import com.fivucsas.identity.application.port.output.UserDeviceRepositoryPort;
 import com.fivucsas.identity.domain.exception.DeviceLimitExceededException;
+import com.fivucsas.identity.domain.model.auth.DevicePlatform;
 import com.fivucsas.identity.domain.repository.UserRepository;
 import com.fivucsas.identity.entity.Tenant;
 import com.fivucsas.identity.entity.User;
@@ -16,6 +17,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
 
@@ -118,6 +120,46 @@ public class ManageDeviceService implements ManageDeviceUseCase {
         if (name != null) device.updateName(name);
         if (pushToken != null) device.updatePushToken(pushToken);
         return DeviceResponse.from(userDeviceRepository.save(device));
+    }
+
+    @Override
+    @Transactional
+    public DeviceResponse updatePushToken(UUID userId, String token, String platform) {
+        List<UserDevice> devices = userDeviceRepository.findAllByUserId(userId);
+        if (devices.isEmpty()) {
+            throw new EntityNotFoundException("No device registered for user: " + userId);
+        }
+
+        // Prefer a device matching the requested platform; otherwise fall back
+        // to any of the user's devices. Among candidates, pick the
+        // most-recently-used so the token lands on the device the user is
+        // actively driving the approve-login from.
+        DevicePlatform requested = parsePlatform(platform);
+        UserDevice target = devices.stream()
+                .filter(d -> requested == null || requested.equals(d.getPlatform()))
+                .max(Comparator.comparing(
+                        UserDevice::getLastUsedAt,
+                        Comparator.nullsFirst(Comparator.naturalOrder())))
+                .orElseGet(() -> devices.stream()
+                        .max(Comparator.comparing(
+                                UserDevice::getLastUsedAt,
+                                Comparator.nullsFirst(Comparator.naturalOrder())))
+                        .orElseThrow(() -> new EntityNotFoundException(
+                                "No device registered for user: " + userId)));
+
+        target.updatePushToken(token);
+        return DeviceResponse.from(userDeviceRepository.save(target));
+    }
+
+    private static DevicePlatform parsePlatform(String platform) {
+        if (platform == null || platform.isBlank()) {
+            return null;
+        }
+        try {
+            return DevicePlatform.valueOf(platform.trim().toUpperCase(java.util.Locale.ROOT));
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
     }
 
     @Override
