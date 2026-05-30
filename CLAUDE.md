@@ -107,6 +107,10 @@ V70: users.identity_id SET NOT NULL — preceded by a BEFORE-INSERT trigger
      create) on any user insert lacking one, so all creation paths + direct SQL +
      future callers stay covered (mirrors the V53 trigger pattern). Self-gating
      (RAISE EXCEPTION if any NULL remains before the ALTER).
+V71: ROOT role granted all 48 permissions — backfills the full permission set onto
+     the renamed ROOT role (post-V69) so the platform-owner tier holds every
+     permission grant. Idempotent (INSERT … ON CONFLICT DO NOTHING on
+     role_permissions). See docs/IDENTITY_ROLE_UNIFICATION.md.
 
 **V34-V60 applied in prod. Last rebuild included V60 (drop refresh_tokens.token plaintext).**
 
@@ -135,6 +139,40 @@ V70: users.identity_id SET NOT NULL — preceded by a BEFORE-INSERT trigger
   with explicit `isNew()` flag. Closes the 6 audit-log MFA_STEP_FAILED rows for
   `ahabgu@gmail.com` between 06:34–06:38 UTC on 2026-05-04 (Hibernate was
   treating manually-assigned UUIDs as merge candidates → silent NOOP on insert).
+
+## Operator reality (2026-05-30 update)
+
+- **Identity & account-linking Phases 1-5 ALL DEPLOYED + ROOT role/user_type
+  unification SHIPPED (2026-05-30).** The five-phase Model-A identity layer is now
+  fully live: Phase 1 person/identity layer (V65-V67), Phase 2 account linking
+  (`/identity/link/initiate|confirm`, `/unlink`, `/identity/me`), Phase 3 biometric +
+  per-tenant consent Model A (V68 `identity_tenant_biometric_consent`; the api
+  orchestrates the canonical (identity,method) enrollment, the bio store is NOT
+  re-keyed; default-DENY), Phase 4 OIDC pairwise `sub` (flag
+  `app.identity.oidc-subject-identity`, **default OFF / dormant**), Phase 5 unified
+  login + in-session membership switch (`POST /auth/switch-membership` token-exchange;
+  see the detailed Phase-5 block below — note it is no longer "PR OPEN", it shipped).
+  See `docs/IDENTITY_ACCOUNT_LINKING_DESIGN.md`.
+- **ROOT role/user_type unification (V69 + V71, `docs/IDENTITY_ROLE_UNIFICATION.md`).**
+  `user_type` is the SOLE platform-tier authority (`ROOT` › `TENANT_ADMIN` ›
+  `TENANT_MEMBER` › `GUEST`); `role` is purely within-tenant RBAC. The global
+  `SUPER_ADMIN` role was RENAMED to `ROOT` everywhere (DB/backend/frontend); V69
+  renames the role (UUID + grants unchanged) and elevate-only backfills `user_type`;
+  V71 grants the renamed ROOT role all 48 permissions. `/auth/me` (`UserResponse`)
+  now returns `userType` so the frontend trusts the real tier instead of inferring it
+  from a role string. UI label for the top tier = **"Root"**.
+- **Browser-sweep fixes (2026-05-30) — user-centric "/my" endpoints under a foreign
+  X-Tenant-ID scope.** Several self-service "my" reads 500/404'd when a ROOT caller had
+  a foreign tenant active, because the Hibernate `@Filter(tenantFilter)` scoped the
+  caller's OWN row/membership lookups to the foreign tenant. Fixed by routing the
+  self-resolution through `infrastructure.multitenancy.TenantFilterBypass` (clears
+  `TenantContext` + disables `tenantFilter` for the lookup, restores after — identity is
+  keyed by unique user, NOT a cross-tenant leak; the `@SQLRestriction` soft-delete guard
+  is untouched). This is the same pattern documented for the tenant-switcher 403 fix —
+  **apply `TenantFilterBypass` to any new user-centric `/my` read that must resolve the
+  CALLER regardless of active tenant.** Concretely: auth-methods enrollment 500 (#151),
+  `/auth/sessions/my` 404 (#153), `/guests` soft-deleted-proxy 500 (#152). Also:
+  accept-invite with an existing email now returns **409** (was 500).
 
 ## Operator reality (2026-05-29 update)
 
