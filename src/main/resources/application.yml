@@ -50,6 +50,22 @@ app:
     # minted — limits blast radius if one session is stolen, since a switch can
     # reach a higher-privileged linked membership. v1 ships default-false.
     require-stepup-on-switch: ${APP_IDENTITY_REQUIRE_STEPUP_ON_SWITCH:false}
+  # Config-driven login engine (task #16). Ships DARK — default FALSE so the
+  # entire login path is byte-identical to the legacy password-first behavior
+  # (hard password gate stays; usernameless entry points mint tokens directly).
+  # Operator kill-switch / canary, no redeploy needed to flip:
+  auth:
+    # Master switch. When true the tenant's default APP_LOGIN flow drives login:
+    # the hard password gate is replaced by the configured Layer-1 method, and
+    # passkey / approve-login / QR usernameless logins hand off into the flow
+    # (MFA_PENDING when Layer-2+ steps remain). Flip back to false to instantly
+    # restore legacy behavior.
+    config-driven-login: ${APP_AUTH_CONFIG_DRIVEN_LOGIN:false}
+    # Per-tenant CANARY: comma-separated tenant UUIDs that get the new engine
+    # even while the master switch is false. Lets one tenant be validated in
+    # production before the global flip. Invalid UUIDs are skipped with a warn
+    # (never widens the rollout / crashes startup).
+    config-driven-login-tenants: ${APP_AUTH_CONFIG_DRIVEN_LOGIN_TENANTS:}
   # Public self-service tenant onboarding (POST /api/v1/onboarding/register).
   onboarding:
     # Master switch for the public endpoint. When false the endpoint returns 400.

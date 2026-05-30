@@ -1,0 +1,56 @@
+package com.fivucsas.identity.application.dto.response;
+
+import java.util.List;
+
+/**
+ * Public, unauthenticated description of a tenant's default APP_LOGIN flow,
+ * served by {@code GET /api/v1/auth/login-config?tenantId=<uuid>} (task #16 C).
+ *
+ * <p>This is the FROZEN contract the login UI (agent-web3) renders against. It
+ * exposes ONLY what a login surface needs to decide which Layer-1 affordance to
+ * show (password field vs. "Sign in with a passkey" vs. "Approve on another
+ * device" vs. an OTP/biometric identifier-first step) and how many steps total
+ * to expect. It deliberately leaks NO internal IDs (auth_method / step / flow
+ * UUIDs), enrollment counts, or other tenant internals.
+ *
+ * @param tenantId   the tenant the config is for (echoed UUID string)
+ * @param tenantName the tenant display name (may be null for the system tenant)
+ * @param layer1     the first authentication layer (step-order 1)
+ * @param totalSteps the total number of steps in the default flow (>=1); 1 when
+ *                   the tenant has no default flow (implicit single-step login)
+ * @param laterSteps every step after Layer-1, ordered; empty for a 1-step flow
+ */
+public record LoginConfigResponse(
+        String tenantId,
+        String tenantName,
+        Layer1 layer1,
+        int totalSteps,
+        List<LaterStep> laterSteps
+) {
+    /**
+     * @param methods          the methods offered at step 1 (one for SEQUENTIAL,
+     *                         several for a CHOICE step)
+     * @param identifierRequired true when the surface must collect an identifier
+     *                         (email/username) up front — i.e. NOT every Layer-1
+     *                         method is usernameless. False only when EVERY
+     *                         Layer-1 method is usernameless (the user can be
+     *                         resolved from the factor alone).
+     */
+    public record Layer1(List<Method> methods, boolean identifierRequired) {}
+
+    /**
+     * @param order   the step order (>=2)
+     * @param methods the methods offered at that step
+     */
+    public record LaterStep(int order, List<Method> methods) {}
+
+    /**
+     * @param type               the {@code AuthMethodType} name (e.g. PASSWORD,
+     *                           EMAIL_OTP, PASSKEY, APPROVE_LOGIN)
+     * @param usernameless       true when this method can begin a login with no
+     *                           up-front identifier
+     * @param requiresEnrollment true when the user must have enrolled this method
+     *                           before it can be used
+     */
+    public record Method(String type, boolean usernameless, boolean requiresEnrollment) {}
+}

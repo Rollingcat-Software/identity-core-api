@@ -13,9 +13,18 @@ import java.util.List;
  * @param operationType  the operation it would become default for (e.g. APP_LOGIN)
  * @param activeUsers    number of (non-deleted) users in the tenant
  * @param usersAtRisk    how many of those users cannot complete this flow with
- *                       their currently-enrolled methods (would be locked out)
+ *                       their currently-enrolled methods (would be locked out).
+ *                       Usernameless Layer-1 methods (PASSKEY/APPROVE_LOGIN/
+ *                       QR_CODE) are NOT counted as a lockout risk — the factor
+ *                       proves its own enrollment, so requiring it as step 1
+ *                       cannot strand a user the way an un-enrolled OTP step can.
  * @param methods        per-method enrollment coverage for the flow's required
  *                       (non-PASSWORD) methods
+ * @param noRecoveryWarning true when the flow offers no usable recovery factor —
+ *                       i.e. it has NO PASSWORD step and EVERY required step is a
+ *                       single usernameless factor with no alternative. Losing
+ *                       the device then locks the user out with no fallback, so
+ *                       the admin should be warned before defaulting to it.
  */
 public record AuthFlowDefaultImpactResponse(
         String flowId,
@@ -23,7 +32,8 @@ public record AuthFlowDefaultImpactResponse(
         String operationType,
         long activeUsers,
         long usersAtRisk,
-        List<MethodCoverage> methods
+        List<MethodCoverage> methods,
+        boolean noRecoveryWarning
 ) {
     /**
      * @param method        the auth method type (e.g. SMS_OTP)

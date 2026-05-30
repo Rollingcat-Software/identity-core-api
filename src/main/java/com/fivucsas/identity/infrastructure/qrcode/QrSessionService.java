@@ -1,5 +1,7 @@
 package com.fivucsas.identity.infrastructure.qrcode;
 
+import com.fivucsas.identity.application.service.UsernamelessLoginFlowService;
+import com.fivucsas.identity.domain.model.auth.AuthMethodType;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.repository.UserRepository;
 import com.fivucsas.identity.security.JwtService;
@@ -30,6 +32,7 @@ public class QrSessionService {
     private final StringRedisTemplate redisTemplate;
     private final JwtService jwtService;
     private final UserRepository userRepository;
+    private final UsernamelessLoginFlowService usernamelessLoginFlowService;
 
     private static final Duration SESSION_TTL = Duration.ofMinutes(5);
     private static final SecureRandom RANDOM = new SecureRandom();
@@ -88,16 +91,27 @@ public class QrSessionService {
         response.put("expiresAtEpochSeconds", expiresAt);
 
         if ("APPROVED".equals(status)) {
-            String accessToken = (String) data.get("accessToken");
-            String refreshToken = (String) data.get("refreshToken");
             String role = (String) data.get("role");
-            String expiresIn = (String) data.get("expiresIn");
-
-            response.put("accessToken", accessToken);
-            response.put("refreshToken", refreshToken);
             response.put("role", role);
-            response.put("expiresIn", expiresIn != null ? Long.parseLong(expiresIn) : 0);
-            response.put("message", "Login approved");
+            // MFA-pending (tenant flow needs more steps): surface the session
+            // token instead of access/refresh tokens (task #16 B).
+            if ("true".equals(data.get("mfaRequired"))) {
+                response.put("mfaRequired", true);
+                response.put("mfaSessionToken", data.get("mfaSessionToken"));
+                String currentStep = (String) data.get("currentStep");
+                String totalSteps = (String) data.get("totalSteps");
+                response.put("currentStep", currentStep != null ? Integer.parseInt(currentStep) : 2);
+                response.put("totalSteps", totalSteps != null ? Integer.parseInt(totalSteps) : 0);
+                response.put("message", "Login approved — additional verification required");
+            } else {
+                String accessToken = (String) data.get("accessToken");
+                String refreshToken = (String) data.get("refreshToken");
+                String expiresIn = (String) data.get("expiresIn");
+                response.put("accessToken", accessToken);
+                response.put("refreshToken", refreshToken);
+                response.put("expiresIn", expiresIn != null ? Long.parseLong(expiresIn) : 0);
+                response.put("message", "Login approved");
+            }
         }
 
         return response;
@@ -137,29 +151,57 @@ public class QrSessionService {
         }
 
         User user = approver.get();
-        String accessToken = jwtService.generateAccessToken(user.getEmail());
-        long expiresIn = jwtService.getExpirationMillis() / 1000;
         String role = user.getRoleNames().stream()
                 .findFirst()
                 .orElseGet(() -> user.getUserType() != null ? user.getUserType().name() : "USER");
 
         Map<String, String> updates = new HashMap<>();
         updates.put("status", "APPROVED");
-        updates.put("accessToken", accessToken);
-        updates.put("refreshToken", UUID.randomUUID().toString());
         updates.put("role", role);
-        updates.put("expiresIn", String.valueOf(expiresIn));
+
+        boolean mfaPending = false;
+        if (usernamelessLoginFlowService.isConfigDrivenFor(user)) {
+            // Config-driven engine ON for this tenant: bridge the proven QR
+            // scan-to-approve (a usernameless Layer-1 factor) INTO the tenant's
+            // APP_LOGIN flow (task #16 B). Layer-2+ steps → stash an
+            // mfaSessionToken (NOT tokens); the polling client steps up via
+            // /api/v1/auth/mfa/step. 1-step / no-flow → mint a real rotating
+            // refresh token (tokenGenerator + RefreshTokenService).
+            UsernamelessLoginFlowService.FlowOutcome outcome =
+                    usernamelessLoginFlowService.continueAfterLayer1(
+                            user, AuthMethodType.QR_CODE, "mca", null, null, null);
+            mfaPending = outcome.mfaPending();
+            if (outcome.mfaPending()) {
+                updates.put("mfaRequired", "true");
+                updates.put("mfaSessionToken", outcome.mfaSessionToken());
+                updates.put("currentStep", String.valueOf(outcome.currentStep()));
+                updates.put("totalSteps", String.valueOf(outcome.totalSteps()));
+            } else {
+                updates.put("accessToken", outcome.accessToken());
+                updates.put("refreshToken", outcome.refreshToken());
+                updates.put("expiresIn", String.valueOf(outcome.expiresIn() / 1000));
+            }
+            log.info("QR session approved (config-driven): {} by user: {} (mfaPending={})",
+                    sessionId, approverId, outcome.mfaPending());
+        } else {
+            // Legacy path (engine OFF): mint directly, byte-identical to before.
+            String accessToken = jwtService.generateAccessToken(user.getEmail());
+            long expiresIn = jwtService.getExpirationMillis() / 1000;
+            updates.put("accessToken", accessToken);
+            updates.put("refreshToken", UUID.randomUUID().toString());
+            updates.put("expiresIn", String.valueOf(expiresIn));
+            log.info("QR session approved: {} by user: {}", sessionId, approverId);
+        }
 
         redisTemplate.opsForHash().putAll(key, updates);
         redisTemplate.expire(key, Duration.ofMinutes(2));
-
-        log.info("QR session approved: {} by user: {}", sessionId, approverId);
 
         return Map.of(
                 "sessionId", sessionId,
                 "qrContent", data.get("qrContent"),
                 "status", "APPROVED",
-                "message", "Login approved"
+                "message", mfaPending ? "Login approved — additional verification required"
+                        : "Login approved"
         );
     }
 }

@@ -6,6 +6,7 @@ import com.fivucsas.identity.application.dto.command.RefreshTokenCommand;
 import com.fivucsas.identity.application.dto.command.RegisterUserCommand;
 import com.fivucsas.identity.application.dto.query.GetUserByEmailQuery;
 import com.fivucsas.identity.application.dto.response.AuthenticationResponse;
+import com.fivucsas.identity.application.dto.response.LoginConfigResponse;
 import com.fivucsas.identity.application.dto.response.UserResponse;
 import com.fivucsas.identity.application.port.input.*;
 import com.fivucsas.identity.application.port.output.AuthFlowRepositoryPort;
@@ -39,6 +40,7 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
+import org.springframework.web.server.ResponseStatusException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -104,6 +106,7 @@ public class AuthController {
     private final com.fivucsas.identity.application.port.output.WebAuthnCredentialRepositoryPort webAuthnCredentialRepository;
     private final com.fivucsas.identity.application.port.output.AuditLogPort auditLogPort;
     private final com.fivucsas.identity.application.service.mfa.VerifyMfaStepService verifyMfaStepService;
+    private final com.fivucsas.identity.application.service.LoginConfigService loginConfigService;
 
     private static final String EMAIL_VERIFY_OTP_PREFIX = "email-verify:";
     private static final String PHONE_VERIFY_OTP_PREFIX = "phone-verify:";
@@ -149,6 +152,34 @@ public class AuthController {
         AuthenticationResponse response = authenticateUserUseCase.execute(command);
 
         return ResponseEntity.ok(mapToAuthResponse(response));
+    }
+
+    /**
+     * Public, unauthenticated description of a tenant's default APP_LOGIN flow
+     * (task #16 C). The login surface calls this BEFORE rendering to decide
+     * which Layer-1 affordance to show (password field vs. passkey vs. approve-
+     * on-another-device vs. an identifier-first OTP/biometric step) and how many
+     * steps to expect. Exposes no internal IDs — see {@link LoginConfigResponse}.
+     */
+    @GetMapping("/login-config")
+    @Operation(summary = "Public tenant login-flow config (Layer-1 methods + step count)")
+    public ResponseEntity<LoginConfigResponse> loginConfig(
+            @RequestParam(value = "tenantId", required = false) UUID tenantId,
+            @RequestParam(value = "clientId", required = false) String clientId) {
+        // The hosted login surface (verify.fivucsas.com) only carries the OIDC
+        // client_id, not the internal tenant id — resolve the tenant from
+        // oauth2_clients. The dashboard/widget pass tenantId directly.
+        if (clientId != null && !clientId.isBlank()) {
+            return loginConfigService.getLoginConfigByClientId(clientId)
+                    .map(ResponseEntity::ok)
+                    .orElseThrow(() -> new ResponseStatusException(
+                            HttpStatus.NOT_FOUND, "Unknown or tenant-less OAuth2 client"));
+        }
+        if (tenantId != null) {
+            return ResponseEntity.ok(loginConfigService.getLoginConfig(tenantId));
+        }
+        throw new ResponseStatusException(
+                HttpStatus.BAD_REQUEST, "Either tenantId or clientId is required");
     }
 
     @PostMapping("/refresh")

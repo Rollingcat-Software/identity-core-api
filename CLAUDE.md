@@ -148,8 +148,30 @@ V72: WebAuthn discoverable-passkey columns (2026-05-30, PR #161) —
      handle returned in a usernameless `navigator.credentials.get()`). Additive,
      nullable/defaulted. Backs the anonymous passkey login endpoints below.
      **V72 applied in prod (2026-05-30 rebuild).**
+V73: config-driven login engine — adds AuthMethodType PASSKEY + APPROVE_LOGIN,
+     seeds their auth_methods rows, adds auth_methods.supports_usernameless
+     (TRUE for PASSKEY/APPROVE_LOGIN/QR_CODE), and widens chk_auth_method_type
+     (preserving the full V28 list). PASSKEY = discoverable mode of WebAuthn;
+     APPROVE_LOGIN = number-matching mode of the QR cross-device method.
+     V73 is ADDITIVE/reversible — safe to leave applied if the image rolls back.
 
 **V34-V72 applied in prod. The 2026-05-30 rebuild added V72 (discoverable-passkey columns).**
+
+### Config-driven login engine — kill-switch (task #16, ships DARK 2026-05-30)
+
+The config-driven login engine (Layer-1-as-config + usernameless-into-flow) is
+gated by `ConfigDrivenLoginPolicy` and ships **OFF**. When OFF, login is
+byte-identical to the legacy password-first behavior. Flip WITHOUT a redeploy:
+- `APP_AUTH_CONFIG_DRIVEN_LOGIN=true` — enable for ALL tenants (master switch).
+- `APP_AUTH_CONFIG_DRIVEN_LOGIN_TENANTS=<uuid>,<uuid>` — canary specific tenants
+  while the master switch stays false.
+Roll out dark → staging soak → canary one tenant → global; **revert = unset the
+env var** (no rebuild). `/api/v1/auth/login-config` also returns the legacy
+password-first shape whenever the engine is OFF for the tenant, so the UI agrees
+with the runtime path. The endpoint accepts EITHER `?tenantId=<uuid>` (dashboard /
+widget) OR `?clientId=<oidc-client-id>` (the hosted verify.fivucsas.com surface,
+which only carries the OIDC client_id → tenant resolved via `oauth2_clients`);
+exactly one is required, and an unknown/tenant-less client_id returns 404.
 
 ### Operator reality — 2026-05-30 stabilize-&-harden backlog (P1-1 + P1-5, DEPLOYED)
 

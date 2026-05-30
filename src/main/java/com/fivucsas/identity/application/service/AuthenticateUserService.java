@@ -56,6 +56,7 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
     private final UserEnrollmentRepository userEnrollmentRepository;
     private final MfaSessionRepository mfaSessionRepository;
     private final EnrollmentHealthService enrollmentHealthService;
+    private final ConfigDrivenLoginPolicy configDrivenLoginPolicy;
 
     private static final int MAX_FAILED_ATTEMPTS = 5;
     private static final Duration LOCKOUT_DURATION = Duration.ofMinutes(15);
@@ -172,7 +173,36 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
             }
         }
 
-        if (!passwordEncoder.matches(command.getPassword(), user.getPasswordHash())) {
+        // Resolve the tenant's configured Layer-1 (step-order 1) method for the
+        // default APP_LOGIN flow. Task #16 B: login is now fully config-driven —
+        // we no longer hard-gate every login on a password check. Instead we run
+        // whatever the tenant configured as Layer-1:
+        //   * PASSWORD            → verify it here as step 1 (observable behavior
+        //                           is UNCHANGED for today's PASSWORD-first
+        //                           tenants — same lockout, audit, MFA-pending
+        //                           shape), then continue to the remaining steps.
+        //   * any other method    → an identifier-first factor (EMAIL_OTP / FACE /
+        //                           TOTP / …). We do NOT check the password; the
+        //                           MfaSession starts at step 1 with that method
+        //                           and VerifyMfaStepService runs it generically.
+        // A null/empty flow (or a flow with no step 1) falls back to PASSWORD so
+        // tenants without a configured flow keep the legacy password login.
+        //
+        // REVERSIBILITY GATE (operator directive 2026-05-30): the config-driven
+        // engine is OFF by default. When OFF for this tenant we resolve NO
+        // Layer-1 methods → layer1IsPassword=true → the hard password gate +
+        // legacy step-2/["PASSWORD"] flow below run EXACTLY as before. Flip
+        // app.auth.config-driven-login (or canary a tenant) to enable the new
+        // model with no redeploy.
+        boolean configDriven = user.getTenant() != null
+                && configDrivenLoginPolicy.isEnabledFor(user.getTenant().getId());
+        Set<AuthMethodType> layer1Methods = configDriven
+                ? resolveLayer1Methods(user)
+                : Set.of();
+        boolean layer1IsPassword = layer1Methods.isEmpty()
+                || layer1Methods.contains(AuthMethodType.PASSWORD);
+
+        if (layer1IsPassword && !passwordEncoder.matches(command.getPassword(), user.getPasswordHash())) {
             // Increment failed attempts and potentially lock account
             user.incrementFailedLoginAttempts();
             boolean justLocked = false;
@@ -210,7 +240,8 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
         }
         user.recordLogin(command.getIpAddress());
 
-        log.info("AUDIT: User authenticated — method: PASSWORD, userId={}, ip={}, userAgent={}",
+        log.info("AUDIT: User authenticated — layer1: {}, userId={}, ip={}, userAgent={}",
+                layer1IsPassword ? "PASSWORD" : layer1Methods,
                 user.getId(), command.getIpAddress(), command.getUserAgent());
 
         // Look up OAuth client name if login came from a widget/OAuth flow
@@ -236,7 +267,14 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
 
         UserResponse userResponse = com.fivucsas.identity.application.mapper.UserResponseMapper.toResponse(user);
 
-        // Check if tenant's default APP_LOGIN auth flow has additional steps beyond PASSWORD
+        // Drive the rest of login from the tenant's configured default APP_LOGIN
+        // flow. When Layer-1 is PASSWORD it was already verified above, so the
+        // "remaining" steps are step-order > 1 and the session starts at step 2
+        // with PASSWORD pre-credited (legacy behavior, byte-for-byte). When
+        // Layer-1 is an identifier-first method (EMAIL_OTP / FACE / TOTP / …) no
+        // password was checked: ALL steps remain, the session starts at step 1
+        // with no completed methods, and VerifyMfaStepService runs the Layer-1
+        // method as the first step.
         try {
             Optional<AuthFlow> defaultLoginFlow = authFlowRepository
                 .findByTenantIdAndIsDefaultTrueAndIsActiveTrueAndOperationType(
@@ -245,7 +283,11 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
             if (defaultLoginFlow.isPresent()) {
                 AuthFlow flow = defaultLoginFlow.get();
 
-                // Find steps beyond step 1 (password was already verified above).
+                // First flow step we still need to run. PASSWORD Layer-1 already
+                // satisfied step 1 ⇒ start from step 2; any other Layer-1 ⇒ start
+                // from step 1 (its own step).
+                int startStep = layer1IsPassword ? 2 : 1;
+
                 // Optional steps are skipped when the user has no enrollment in any
                 // enrollment-requiring method for that step — avoids forcing repeated
                 // EMAIL_OTP loops on users who haven't set up biometric MFA yet.
@@ -253,7 +295,7 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
                     enrollmentHealthService.validateEnrollments(user.getId());
 
                 List<AuthFlowStep> remainingSteps = flow.getSteps().stream()
-                    .filter(step -> step.getStepOrder() > 1)
+                    .filter(step -> step.getStepOrder() >= startStep)
                     .sorted(Comparator.comparingInt(AuthFlowStep::getStepOrder))
                     .filter(step -> step.isRequired() || stepHasBiometricEnrollment(step, healthStatus))
                     .toList();
@@ -262,8 +304,11 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
                     // Post-audit 2026-04-24 login edge case #5 — dead-end prevention.
                     // Before committing the user to a multi-step flow, verify every
                     // REQUIRED step has either a method the user is enrolled in or
-                    // a configured fallback. Otherwise we would authenticate PASSWORD
+                    // a configured fallback. Otherwise we would authenticate Layer-1
                     // and then strand them mid-flow with no way to proceed.
+                    // A usernameless Layer-1 step (PASSKEY/APPROVE_LOGIN/QR_CODE)
+                    // proves its own enrollment by being completed, so it is exempt
+                    // from the prior-enrollment requirement (task #16 F).
                     verifyUserCanCompleteFlow(user, remainingSteps);
 
                     // MFA required — DO NOT issue JWT yet. Only create MFA session.
@@ -271,15 +316,20 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
                     List<AvailableMfaMethod> availableMethods = buildAvailableMethods(nextStep, user);
                     String primaryMethod = pickPrimaryMethod(availableMethods, user.getPreferred2faMethod());
 
+                    // stepsData credits PASSWORD only when it was the verified
+                    // Layer-1 — an identifier-first Layer-1 has nothing completed
+                    // yet (its own step is the first one to run).
+                    String stepsData = layer1IsPassword ? "[\"PASSWORD\"]" : "[]";
+
                     String sessionToken = UUID.randomUUID().toString().replace("-", "");
                     MfaSession mfaSession = MfaSession.builder()
                         .sessionToken(sessionToken)
                         .userId(user.getId())
                         .tenantId(user.getTenant().getId())
                         .flowId(flow.getId())
-                        .currentStep(2)  // step 1 (PASSWORD) already done
+                        .currentStep(startStep)
                         .totalSteps(flow.getStepCount())
-                        .stepsData("[\"PASSWORD\"]")  // track by AuthMethodType for reuse check; AMR mapped at token issuance
+                        .stepsData(stepsData)  // track by AuthMethodType for reuse check; AMR mapped at token issuance
                         .ipAddress(command.getIpAddress())
                         .userAgent(command.getUserAgent())
                         // Bind this MFA session to the OAuth2 client_id when the hosted
@@ -290,15 +340,15 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
                         .build();
                     mfaSessionRepository.save(mfaSession);
 
-                    log.info("AUDIT: MFA required — userId={}, remainingSteps={}, nextStepType={}, availableMethods={}, ip={}",
-                        user.getId(), remainingSteps.size(), nextStep.getStepType(), availableMethods.size(), command.getIpAddress());
+                    log.info("AUDIT: MFA required — userId={}, startStep={}, remainingSteps={}, nextStepType={}, availableMethods={}, ip={}",
+                        user.getId(), startStep, remainingSteps.size(), nextStep.getStepType(), availableMethods.size(), command.getIpAddress());
 
                     // Return MFA pending response — NO accessToken, NO refreshToken.
                     // Echo completed methods sourced from the MfaSession so the response
                     // always reflects stored state (if the session ever records multiple
                     // methods at create-time in the future, the response stays in sync).
                     return AuthenticationResponse.ofMfaPending(
-                        sessionToken, flow.getStepCount(), 2, primaryMethod, availableMethods, userResponse,
+                        sessionToken, flow.getStepCount(), startStep, primaryMethod, availableMethods, userResponse,
                         mfaSession.getCompletedMethods()
                     );
                 }
@@ -318,8 +368,12 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
             log.warn("Failed to check tenant auth flow for user {}: {}", user.getId(), e.getMessage(), e);
         }
 
-        // No MFA required — single-factor login, issue JWT immediately
-        String accessToken = tokenGenerator.generateAccessToken(user.getEmail(), List.of("pwd"));
+        // No MFA required — single-factor login, issue JWT immediately. The amr
+        // reflects the verified Layer-1 factor: "pwd" for a PASSWORD Layer-1
+        // (the only single-step case in practice — an identifier-first Layer-1
+        // always contributes its own runnable step and goes through MFA-pending).
+        List<String> amr = layer1IsPassword ? List.of("pwd") : amrFor(layer1Methods);
+        String accessToken = tokenGenerator.generateAccessToken(user.getEmail(), amr);
         RefreshToken refreshToken = refreshTokenService.createRefreshToken(
             user, command.getIpAddress(), command.getUserAgent()
         );
@@ -423,17 +477,83 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
     }
 
     /**
-     * A method is usable if it either does not require enrollment, or the user
-     * is enrolled according to {@link EnrollmentHealthService}.
+     * A method is usable if it either does not require enrollment, is a
+     * usernameless factor (PASSKEY/APPROVE_LOGIN/QR_CODE — the factor proves its
+     * own enrollment by being completed, so no prior enrollment row is required
+     * to start the flow; task #16 F), or the user is enrolled according to
+     * {@link EnrollmentHealthService}.
      */
     private boolean isMethodUsable(AuthMethod method, Map<AuthMethodType, Boolean> healthStatus) {
         if (method == null || method.getType() == null) {
             return false;
         }
-        if (!method.isRequiresEnrollment()) {
+        if (!method.isRequiresEnrollment() || method.isSupportsUsernameless()) {
             return true;
         }
         return Boolean.TRUE.equals(healthStatus.get(method.getType()));
+    }
+
+    /**
+     * Resolves the set of {@link AuthMethodType}s configured for step-order 1
+     * (Layer-1) of the tenant's default APP_LOGIN flow. Returns an empty set
+     * when the tenant has no default flow / no step 1, in which case the caller
+     * falls back to the legacy PASSWORD login.
+     *
+     * <p>For a SEQUENTIAL step this is a single method; for a CHOICE step it is
+     * the set of alternatives. Layer-1 is treated as PASSWORD-first (the legacy
+     * path) whenever PASSWORD is one of those options — the user supplies the
+     * password they already typed, and any other option is offered as a later
+     * step or a CHOICE the MFA engine handles.
+     */
+    private Set<AuthMethodType> resolveLayer1Methods(User user) {
+        try {
+            if (user.getTenant() == null) {
+                return Set.of();
+            }
+            Optional<AuthFlow> defaultLoginFlow = authFlowRepository
+                .findByTenantIdAndIsDefaultTrueAndIsActiveTrueAndOperationType(
+                    user.getTenant().getId(), OperationType.APP_LOGIN);
+            if (defaultLoginFlow.isEmpty()) {
+                return Set.of();
+            }
+            return defaultLoginFlow.get().getSteps().stream()
+                .filter(s -> s.getStepOrder() == 1)
+                .findFirst()
+                .map(s -> s.getAvailableMethods().stream()
+                        .filter(Objects::nonNull)
+                        .map(AuthMethod::getType)
+                        .collect(Collectors.toCollection(java.util.LinkedHashSet::new)))
+                .map(set -> (Set<AuthMethodType>) set)
+                .orElseGet(Set::of);
+        } catch (Exception e) {
+            // Any lookup failure falls back to legacy PASSWORD login rather than
+            // locking everyone out of a misconfigured tenant.
+            log.warn("Failed to resolve Layer-1 methods for user {}: {} — defaulting to PASSWORD",
+                    user.getId(), e.getMessage());
+            return Set.of();
+        }
+    }
+
+    /** RFC 8176 amr values for a single-step identifier-first Layer-1 mint. */
+    private List<String> amrFor(Set<AuthMethodType> methods) {
+        return methods.stream()
+                .map(AuthenticateUserService::amrValue)
+                .distinct()
+                .toList();
+    }
+
+    private static String amrValue(AuthMethodType type) {
+        return switch (type) {
+            case PASSWORD -> "pwd";
+            case EMAIL_OTP, SMS_OTP, TOTP -> "otp";
+            case FACE -> "face";
+            case VOICE -> "voice";
+            case FINGERPRINT -> "fpt";
+            case HARDWARE_KEY, PASSKEY -> "hwk";
+            case QR_CODE, APPROVE_LOGIN -> "mca";
+            case NFC_DOCUMENT -> "swk";
+            default -> type.name().toLowerCase(java.util.Locale.ROOT);
+        };
     }
 
     /**

@@ -189,12 +189,17 @@ class AuthControllerTest {
     @MockBean
     private com.fivucsas.identity.application.service.mfa.VerifyMfaStepService verifyMfaStepService;
 
+    @MockBean
+    private com.fivucsas.identity.application.service.LoginConfigService loginConfigService;
+
     // Test Data
     private static final String TEST_EMAIL = "test@fivucsas.com";
     private static final String TEST_PASSWORD = "SecurePassword123!";
     private static final String TEST_FIRST_NAME = "Test";
     private static final String TEST_LAST_NAME = "User";
-    private static final String TEST_ACCESS_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...";
+    // Fake, truncated JWT header (base64 of {"alg":"HS256","typ":"JWT"} + "..."), not a real
+    // secret — silence the gitleaks generic-api-key heuristic on this test constant.
+    private static final String TEST_ACCESS_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."; // gitleaks:allow
     private static final String TEST_REFRESH_TOKEN = "550e8400-e29b-41d4-a716-446655440000";
 
     @BeforeEach

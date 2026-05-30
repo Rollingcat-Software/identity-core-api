@@ -60,6 +60,8 @@ class SecurityConfigPermitAllPinTest {
             "/api/v1/auth/health",
             "/api/v1/auth/forgot-password",
             "/api/v1/auth/reset-password",
+            // Public tenant login-flow config (task #16 C)
+            "/api/v1/auth/login-config",
             // N-step MFA
             "/api/v1/auth/mfa/step",
             "/api/v1/auth/mfa/send-otp",
