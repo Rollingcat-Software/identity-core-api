@@ -140,6 +140,10 @@ package-lock.json
 .env.prod
 .env.gcp
 
+# Dated .env.prod backups (host-local rotation/pre-purge snapshots; secrets) — never commit
+.env.prod.bak*
+.env.*.bak*
+
 # Staging env (host-local; secrets — never commit)
 .env.staging
 
