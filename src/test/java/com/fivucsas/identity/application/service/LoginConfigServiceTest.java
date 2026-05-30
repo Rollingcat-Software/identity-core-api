@@ -34,6 +34,7 @@ class LoginConfigServiceTest {
 
     @Mock private AuthFlowRepositoryPort authFlowRepository;
     @Mock private TenantRepository tenantRepository;
+    @Mock private com.fivucsas.identity.application.port.output.OAuth2ClientRepositoryPort oAuth2ClientRepository;
     @Mock private ConfigDrivenLoginPolicy configDrivenLoginPolicy;
 
     @InjectMocks private LoginConfigService service;
@@ -163,5 +164,38 @@ class LoginConfigServiceTest {
         assertThat(cfg.laterSteps()).isEmpty();
         // The flow repository must never be hit when the engine is OFF.
         verifyNoInteractions(authFlowRepository);
+    }
+
+    @Test
+    @DisplayName("clientId resolves the tenant via oauth2_clients → returns that tenant's config (hosted verify.fivucsas.com path)")
+    void clientIdResolvesTenant() {
+        UUID tenantId = UUID.randomUUID();
+        com.fivucsas.identity.entity.Tenant tenantEntity =
+                com.fivucsas.identity.entity.Tenant.builder().id(tenantId).name("Acme").build();
+        com.fivucsas.identity.entity.OAuth2Client client =
+                com.fivucsas.identity.entity.OAuth2Client.builder()
+                        .clientId("acme-hosted").tenant(tenantEntity).build();
+        when(oAuth2ClientRepository.findByClientId("acme-hosted")).thenReturn(Optional.of(client));
+        // Engine OFF for the tenant → legacy password-first, no flow lookup needed.
+        when(configDrivenLoginPolicy.isEnabledFor(tenantId)).thenReturn(false);
+        when(tenantRepository.findById(tenantId))
+                .thenReturn(Optional.of(Tenant.reconstitute(tenantId, "Acme", "acme", "desc",
+                        "ops@acme.test", "+10000000000", null, null, null, null)));
+
+        Optional<LoginConfigResponse> cfg = service.getLoginConfigByClientId("acme-hosted");
+
+        assertThat(cfg).isPresent();
+        assertThat(cfg.get().tenantId()).isEqualTo(tenantId.toString());
+        assertThat(cfg.get().layer1().methods()).singleElement()
+                .satisfies(m -> assertThat(m.type()).isEqualTo("PASSWORD"));
+    }
+
+    @Test
+    @DisplayName("Unknown clientId → empty (controller maps to 404)")
+    void unknownClientIdReturnsEmpty() {
+        when(oAuth2ClientRepository.findByClientId("nope")).thenReturn(Optional.empty());
+
+        assertThat(service.getLoginConfigByClientId("nope")).isEmpty();
+        verifyNoInteractions(authFlowRepository, tenantRepository, configDrivenLoginPolicy);
     }
 }

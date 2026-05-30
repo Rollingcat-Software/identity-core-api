@@ -2,6 +2,7 @@ package com.fivucsas.identity.application.service;
 
 import com.fivucsas.identity.application.dto.response.LoginConfigResponse;
 import com.fivucsas.identity.application.port.output.AuthFlowRepositoryPort;
+import com.fivucsas.identity.application.port.output.OAuth2ClientRepositoryPort;
 import com.fivucsas.identity.domain.model.auth.OperationType;
 import com.fivucsas.identity.domain.model.tenant.Tenant;
 import com.fivucsas.identity.domain.repository.TenantRepository;
@@ -36,7 +37,23 @@ public class LoginConfigService {
 
     private final AuthFlowRepositoryPort authFlowRepository;
     private final TenantRepository tenantRepository;
+    private final OAuth2ClientRepositoryPort oAuth2ClientRepository;
     private final ConfigDrivenLoginPolicy configDrivenLoginPolicy;
+
+    /**
+     * Resolve a tenant's login config from an OAuth2 {@code client_id} instead of
+     * a raw tenant UUID. The hosted login surface (verify.fivucsas.com) only
+     * carries the OIDC {@code client_id} in its {@code /authorize} request, never
+     * the internal tenant id, so it calls this variant. Returns empty when the
+     * client is unknown or not bound to a tenant (the controller maps that to 404).
+     */
+    @Transactional(readOnly = true)
+    public Optional<LoginConfigResponse> getLoginConfigByClientId(String clientId) {
+        return oAuth2ClientRepository.findByClientId(clientId)
+                .map(client -> client.getTenant())
+                .filter(Objects::nonNull)
+                .map(tenant -> getLoginConfig(tenant.getId()));
+    }
 
     @Transactional(readOnly = true)
     public LoginConfigResponse getLoginConfig(UUID tenantId) {

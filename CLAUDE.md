@@ -168,7 +168,10 @@ byte-identical to the legacy password-first behavior. Flip WITHOUT a redeploy:
 Roll out dark → staging soak → canary one tenant → global; **revert = unset the
 env var** (no rebuild). `/api/v1/auth/login-config` also returns the legacy
 password-first shape whenever the engine is OFF for the tenant, so the UI agrees
-with the runtime path.
+with the runtime path. The endpoint accepts EITHER `?tenantId=<uuid>` (dashboard /
+widget) OR `?clientId=<oidc-client-id>` (the hosted verify.fivucsas.com surface,
+which only carries the OIDC client_id → tenant resolved via `oauth2_clients`);
+exactly one is required, and an unknown/tenant-less client_id returns 404.
 
 ### Operator reality — 2026-05-30 stabilize-&-harden backlog (P1-1 + P1-5, DEPLOYED)
 
