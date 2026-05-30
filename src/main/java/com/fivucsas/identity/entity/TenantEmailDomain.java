@@ -51,7 +51,7 @@ public class TenantEmailDomain {
 
     /**
      * Domain-ownership gate (V63). FALSE until ownership is proven (DNS-TXT
-     * verification — Round 2 — or SUPER_ADMIN approval). Only verified domains
+     * verification — Round 2 — or ROOT approval). Only verified domains
      * auto-bind new registrants and satisfy {@code enforce_domain_matching}.
      * Self-service onboarding claims a domain as {@code verified=false}.
      */

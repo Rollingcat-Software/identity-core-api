@@ -65,10 +65,10 @@ import static org.assertj.core.api.Assertions.assertThat;
  *   <li>TENANT_ADMIN of A, no header → sees ONLY A's rows.</li>
  *   <li>TENANT_ADMIN of A + foreign {@code X-Tenant-ID: B} → STILL sees ONLY A's
  *       rows. <b>The critical isolation guarantee</b>: the header MUST be ignored
- *       for a non-SUPER_ADMIN. Assertions here are written to the SECURE
+ *       for a non-ROOT. Assertions here are written to the SECURE
  *       expectation; a failure is a genuine LEAK finding, not a test bug.</li>
- *   <li>SUPER_ADMIN + {@code X-Tenant-ID: B} → sees B's rows (switch works).</li>
- *   <li>SUPER_ADMIN + no header → cross-tenant / platform-wide per current code.</li>
+ *   <li>ROOT + {@code X-Tenant-ID: B} → sees B's rows (switch works).</li>
+ *   <li>ROOT + no header → cross-tenant / platform-wide per current code.</li>
  * </ol></p>
  *
  * <p>This drives the REAL controllers as Spring beans (so the same
@@ -201,14 +201,14 @@ class CrossTenantIsolationIT {
         }
 
         @Test @Transactional
-        @DisplayName("(3) SUPER_ADMIN + X-Tenant-ID:B → sees B's logs")
+        @DisplayName("(3) ROOT + X-Tenant-ID:B → sees B's logs")
         void superAdminForeignHeader_seesB() {
             asSuperAdmin(tenantB);
             assertThat(auditLogTenantIds()).containsOnly(tenantB.toString());
         }
 
         @Test @Transactional
-        @DisplayName("(4) SUPER_ADMIN + no header → cross-tenant (sees both A and B)")
+        @DisplayName("(4) ROOT + no header → cross-tenant (sees both A and B)")
         void superAdminNoHeader_crossTenant() {
             asSuperAdmin(null);
             assertThat(auditLogTenantIds())
@@ -250,14 +250,14 @@ class CrossTenantIsolationIT {
         }
 
         @Test @Transactional
-        @DisplayName("(3) SUPER_ADMIN + X-Tenant-ID:B → sees B's sessions")
+        @DisplayName("(3) ROOT + X-Tenant-ID:B → sees B's sessions")
         void superAdminForeignHeader_seesB() {
             asSuperAdmin(tenantB);
             assertThat(sessionTenantIds()).containsOnly(tenantB);
         }
 
         @Test @Transactional
-        @DisplayName("(4) SUPER_ADMIN + no header → platform-wide (sees both A and B)")
+        @DisplayName("(4) ROOT + no header → platform-wide (sees both A and B)")
         void superAdminNoHeader_crossTenant() {
             asSuperAdmin(null);
             assertThat(sessionTenantIds()).contains(tenantA, tenantB);
@@ -303,14 +303,14 @@ class CrossTenantIsolationIT {
         }
 
         @Test @Transactional
-        @DisplayName("(3) SUPER_ADMIN + X-Tenant-ID:B → sees B's devices")
+        @DisplayName("(3) ROOT + X-Tenant-ID:B → sees B's devices")
         void superAdminForeignHeader_seesB() {
             asSuperAdmin(tenantB);
             assertThat(deviceNames()).containsOnly("device-B");
         }
 
         @Test @Transactional
-        @DisplayName("(4) SUPER_ADMIN + no header → all devices (sees both A and B)")
+        @DisplayName("(4) ROOT + no header → all devices (sees both A and B)")
         void superAdminNoHeader_crossTenant() {
             asSuperAdmin(null);
             assertThat(deviceNames()).contains("device-A", "device-B");
@@ -348,14 +348,14 @@ class CrossTenantIsolationIT {
         }
 
         @Test @Transactional
-        @DisplayName("(3) SUPER_ADMIN + X-Tenant-ID:B → sees B's enrollments")
+        @DisplayName("(3) ROOT + X-Tenant-ID:B → sees B's enrollments")
         void superAdminForeignHeader_seesB() {
             asSuperAdmin(tenantB);
             assertThat(enrollmentTenantIds()).containsOnly(tenantB.toString());
         }
 
         @Test @Transactional
-        @DisplayName("(4) SUPER_ADMIN + no header → cross-tenant (sees both A and B)")
+        @DisplayName("(4) ROOT + no header → cross-tenant (sees both A and B)")
         void superAdminNoHeader_crossTenant() {
             asSuperAdmin(null);
             assertThat(enrollmentTenantIds()).contains(tenantA.toString(), tenantB.toString());
@@ -393,14 +393,14 @@ class CrossTenantIsolationIT {
         }
 
         @Test @Transactional
-        @DisplayName("(3) SUPER_ADMIN + X-Tenant-ID:B → sees B's verification sessions")
+        @DisplayName("(3) ROOT + X-Tenant-ID:B → sees B's verification sessions")
         void superAdminForeignHeader_seesB() {
             asSuperAdmin(tenantB);
             assertThat(verifSessionTenantIds()).containsOnly(tenantB);
         }
 
         @Test @Transactional
-        @DisplayName("(4) SUPER_ADMIN + no header → platform-wide (sees both A and B)")
+        @DisplayName("(4) ROOT + no header → platform-wide (sees both A and B)")
         void superAdminNoHeader_crossTenant() {
             asSuperAdmin(null);
             assertThat(verifSessionTenantIds()).contains(tenantA, tenantB);
@@ -439,14 +439,14 @@ class CrossTenantIsolationIT {
         }
 
         @Test @Transactional
-        @DisplayName("(3) SUPER_ADMIN + X-Tenant-ID:B → sees B's verification flows")
+        @DisplayName("(3) ROOT + X-Tenant-ID:B → sees B's verification flows")
         void superAdminForeignHeader_seesB() {
             asSuperAdmin(tenantB);
             assertThat(flowTenantIds()).containsOnly(tenantB);
         }
 
         @Test @Transactional
-        @DisplayName("(4) SUPER_ADMIN + no header → platform-wide (sees both A and B verification flows)")
+        @DisplayName("(4) ROOT + no header → platform-wide (sees both A and B verification flows)")
         void superAdminNoHeader_crossTenant() {
             asSuperAdmin(null);
             assertThat(flowTenantIds()).contains(tenantA, tenantB);
@@ -465,7 +465,7 @@ class CrossTenantIsolationIT {
     /**
      * Authenticate as the tenant-admin of A and (optionally) forge a foreign
      * X-Tenant-ID header. {@code currentScope()} must IGNORE the header for a
-     * non-SUPER_ADMIN, so we model the post-rebind invariant by pinning
+     * non-ROOT, so we model the post-rebind invariant by pinning
      * {@code TenantContext} to A (TenantBindFromAuthFilter would have done so).
      */
     private void asTenantAdminA(UUID foreignHeaderTenant) {
@@ -475,12 +475,12 @@ class CrossTenantIsolationIT {
     }
 
     /**
-     * Authenticate as the SUPER_ADMIN/ROOT. With a header present, the switcher
+     * Authenticate as the ROOT. With a header present, the switcher
      * pins {@code TenantContext} to that tenant; without one it defaults to the
      * system (home) tenant. {@code currentScope()} honours the header for ROOT.
      */
     private void asSuperAdmin(UUID activeTenant) {
-        authenticateAs(rootEmail, "ROLE_SUPER_ADMIN");
+        authenticateAs(rootEmail, "ROLE_ROOT");
         bindRequestWithTenantId(activeTenant);
         TenantContext.setCurrentTenant(activeTenant != null ? activeTenant : systemTenant);
     }

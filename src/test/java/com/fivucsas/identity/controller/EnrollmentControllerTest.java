@@ -87,7 +87,7 @@ class EnrollmentControllerTest {
                 .status("ENROLLED")
                 .build();
         // Controller now calls getAllEnrollments(tenantScopeId) with null when
-        // the caller is SUPER_ADMIN (resolver returns null). Match any UUID.
+        // the caller is ROOT (resolver returns null). Match any UUID.
         when(enrollmentQueryService.getAllEnrollments(org.mockito.ArgumentMatchers.<java.util.UUID>any()))
                 .thenReturn(List.of(dto));
 

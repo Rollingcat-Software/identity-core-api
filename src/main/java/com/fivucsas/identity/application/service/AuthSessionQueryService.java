@@ -25,10 +25,10 @@ import java.util.UUID;
  *   <li>Tenant-scoped callers MUST pass their own {@code tenantId}; the
  *       controller enforces this by deriving {@code tenantId} from the
  *       caller's RBAC scope.</li>
- *   <li>SUPER_ADMIN MAY pass {@code tenantId = null} to request a
+ *   <li>ROOT MAY pass {@code tenantId = null} to request a
  *       platform-wide cross-tenant listing. In that case this service runs
  *       non-tenant-scoped repository queries. Authorization (i.e. the
- *       caller is actually SUPER_ADMIN) MUST be enforced by the controller
+ *       caller is actually ROOT) MUST be enforced by the controller
  *       BEFORE invoking this service — this layer trusts that check.</li>
  * </ul>
  * Status and user filters are optional. Maps to the safe-fields DTO
@@ -49,8 +49,8 @@ public class AuthSessionQueryService {
      * Paginated list of auth sessions.
      *
      * @param tenantId      tenant whose sessions are returned. Pass
-     *                      {@code null} ONLY for SUPER_ADMIN platform-wide
-     *                      listings; the controller MUST verify SUPER_ADMIN
+     *                      {@code null} ONLY for ROOT platform-wide
+     *                      listings; the controller MUST verify ROOT
      *                      role before calling with {@code null}.
      * @param statusFilter  optional list of statuses to include (null/empty
      *                      means all statuses)
@@ -76,7 +76,7 @@ public class AuthSessionQueryService {
 
         Page<AuthSession> result;
         if (!hasTenantFilter) {
-            // SUPER_ADMIN platform-wide listing — caller scope already
+            // ROOT platform-wide listing — caller scope already
             // verified by the controller; tenant filter intentionally absent.
             if (hasUserFilter && hasStatusFilter) {
                 result = authSessionRepository.findAllByUserIdAndStatusIn(userId, statusFilter, pageable);

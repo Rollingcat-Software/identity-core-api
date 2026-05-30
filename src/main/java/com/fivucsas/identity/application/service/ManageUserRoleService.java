@@ -15,6 +15,7 @@ import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.entity.UserRole;
 import com.fivucsas.identity.application.port.output.RoleRepositoryPort;
 import com.fivucsas.identity.application.port.output.UserRoleRepositoryPort;
+import com.fivucsas.identity.application.port.output.UserTypeElevationPort;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -38,6 +39,7 @@ public class ManageUserRoleService implements ManageUserRoleUseCase {
     private final UserRepository userRepository;
     private final RoleRepositoryPort roleRepository;
     private final UserRoleRepositoryPort userRoleRepository;
+    private final UserTypeElevationPort userTypeElevationPort;
 
     @Override
     @Transactional
@@ -64,6 +66,14 @@ public class ManageUserRoleService implements ManageUserRoleUseCase {
         // Create the user-role assignment
         UserRole userRole = UserRole.create(user, role, assignedBy, command.getExpiresAt());
         userRoleRepository.save(userRole);
+
+        // Role / user_type unification — elevate-on-grant. Granting the ROOT or a
+        // TENANT_ADMIN role raises the user's platform tier (users.user_type) to
+        // match, so the role and the tier can never drift again. ELEVATE-ONLY:
+        // never lowers a higher existing tier, and revoke never auto-demotes.
+        // Routed through an output port so this service stays clear of entity.User
+        // (UserDomainBoundaryTest). See docs/IDENTITY_ROLE_UNIFICATION.md.
+        userTypeElevationPort.elevateForGrantedRole(userId, roleId, role.getName());
 
         log.info("Role {} assigned to user {} successfully", roleId, userId);
     }

@@ -38,7 +38,7 @@ import static org.mockito.Mockito.*;
  *
  * <p>The service now consults {@link TenantScopeResolver#canAccessTenant(UUID)}
  * (admin-on-behalf model). {@code canAccessTenant} returns {@code true} for
- * SUPER_ADMIN / ROOT (null scope ⇒ {@code isUnrestricted()} true), so ROOT keeps
+ * ROOT (null scope ⇒ {@code isUnrestricted()} true), so ROOT keeps
  * cross-tenant access while everyone else is confined to their own tenant. An
  * out-of-scope caller is rejected with {@link AccessDeniedException} (→ HTTP 403
  * via {@code GlobalExceptionHandler}) BEFORE anything is persisted. Mirrors

@@ -19,6 +19,7 @@ Method <com.fivucsas.identity.application.mapper.UserResponseMapper.toResponse(c
 Method <com.fivucsas.identity.application.mapper.UserResponseMapper.toResponse(com.fivucsas.identity.entity.User)> calls method <com.fivucsas.identity.entity.User.getStatus()> in (UserResponseMapper.java:36)
 Method <com.fivucsas.identity.application.mapper.UserResponseMapper.toResponse(com.fivucsas.identity.entity.User)> calls method <com.fivucsas.identity.entity.User.getTenant()> in (UserResponseMapper.java:41)
 Method <com.fivucsas.identity.application.mapper.UserResponseMapper.toResponse(com.fivucsas.identity.entity.User)> calls method <com.fivucsas.identity.entity.User.getUpdatedAt()> in (UserResponseMapper.java:50)
+Method <com.fivucsas.identity.application.mapper.UserResponseMapper.toResponse(com.fivucsas.identity.entity.User)> calls method <com.fivucsas.identity.entity.User.getUserType()> in (UserResponseMapper.java:61)
 Method <com.fivucsas.identity.application.mapper.UserResponseMapper.toResponse(com.fivucsas.identity.entity.User)> calls method <com.fivucsas.identity.entity.User.getVerificationCount()> in (UserResponseMapper.java:46)
 Method <com.fivucsas.identity.application.mapper.UserResponseMapper.toResponse(com.fivucsas.identity.entity.User)> calls method <com.fivucsas.identity.entity.User.isBiometricEnrolled()> in (UserResponseMapper.java:43)
 Method <com.fivucsas.identity.application.mapper.UserResponseMapper.toResponse(com.fivucsas.identity.entity.User)> calls method <com.fivucsas.identity.entity.User.isEmailVerified()> in (UserResponseMapper.java:37)

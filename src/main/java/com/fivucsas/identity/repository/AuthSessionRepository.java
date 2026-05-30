@@ -50,7 +50,7 @@ public interface AuthSessionRepository extends JpaRepository<AuthSession, UUID> 
 
     Page<AuthSession> findAllByTenantIdAndUserId(UUID tenantId, UUID userId, Pageable pageable);
 
-    // --- SUPER_ADMIN platform-wide variants (no tenant filter) ---
+    // --- ROOT platform-wide variants (no tenant filter) ---
     Page<AuthSession> findAllByStatusIn(List<AuthSessionStatus> statuses, Pageable pageable);
     Page<AuthSession> findAllByUserId(UUID userId, Pageable pageable);
     Page<AuthSession> findAllByUserIdAndStatusIn(

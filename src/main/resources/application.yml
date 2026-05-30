@@ -54,12 +54,12 @@ app:
   onboarding:
     # Master switch for the public endpoint. When false the endpoint returns 400.
     enabled: ${APP_ONBOARDING_ENABLED:true}
-    # When true, self-onboarded tenants stay PENDING for a SUPER_ADMIN to approve
+    # When true, self-onboarded tenants stay PENDING for a ROOT (platform owner) to approve
     # even AFTER the admin verifies their email. When false (default) email
     # verification alone activates the (capped TRIAL) tenant.
     require-admin-approval: ${APP_ONBOARDING_REQUIRE_ADMIN_APPROVAL:false}
     # Seat cap applied to a freshly self-onboarded TRIAL tenant. The cap is lifted
-    # only after domain verification (Round-2 DNS-TXT) or SUPER_ADMIN promotion.
+    # only after domain verification (Round-2 DNS-TXT) or ROOT promotion.
     trial-max-users: ${APP_ONBOARDING_TRIAL_MAX_USERS:25}
     # Personal / free / disposable email providers that may NOT onboard a tenant
     # (a real org signs up with its own corporate domain → 422). Comma-separated;

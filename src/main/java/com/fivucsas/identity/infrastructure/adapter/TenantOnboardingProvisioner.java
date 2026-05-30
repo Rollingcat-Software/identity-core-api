@@ -84,7 +84,7 @@ public class TenantOnboardingProvisioner implements TenantProvisioningPort {
     /**
      * Capped seat limit for a self-service TRIAL tenant. Trial tenants are NOT
      * full-production: the cap is lifted only after domain verification /
-     * SUPER_ADMIN approval. Configurable via {@code app.onboarding.trial-max-users}.
+     * ROOT approval. Configurable via {@code app.onboarding.trial-max-users}.
      */
     @Value("${app.onboarding.trial-max-users:25}")
     private int trialMaxUsers;
@@ -140,7 +140,7 @@ public class TenantOnboardingProvisioner implements TenantProvisioningPort {
         // verified=false (3-arg create default, V63): the claim reserves the
         // domain (unique index blocks another tenant taking it) but does NOT
         // auto-bind other registrants until ownership is proven via DNS-TXT
-        // (Round 2) or SUPER_ADMIN approval.
+        // (Round 2) or ROOT approval.
         TenantEmailDomain domain = TenantEmailDomain.create(tenant.getId(), params.emailDomain(), true);
         tenantEmailDomainRepository.save(domain);
         log.info("Onboarding: tenant {} claimed primary email domain '{}' (unverified)",
@@ -179,7 +179,7 @@ public class TenantOnboardingProvisioner implements TenantProvisioningPort {
             return true; // idempotent
         }
         if (requireAdminApproval) {
-            // Leave PENDING for a SUPER_ADMIN to approve; verification alone is
+            // Leave PENDING for a ROOT to approve; verification alone is
             // not sufficient under this policy.
             log.info("Onboarding: admin {} verified email but tenant {} stays PENDING "
                     + "(admin approval required)", adminUserId, managed.getId());

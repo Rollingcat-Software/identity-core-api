@@ -107,7 +107,7 @@ class AuthSessionControllerListTest {
     }
 
     @Test
-    @DisplayName("SUPER_ADMIN: caller-supplied tenantId honored when scope is null")
+    @DisplayName("ROOT: caller-supplied tenantId honored when scope is null")
     void superAdminUsesProvidedTenantId() throws Exception {
         UUID requested = UUID.randomUUID();
         when(tenantScopeResolver.currentScope()).thenReturn(null);
@@ -123,7 +123,7 @@ class AuthSessionControllerListTest {
     }
 
     @Test
-    @DisplayName("SUPER_ADMIN without tenantId param → platform-wide listing (null tenantId passed through)")
+    @DisplayName("ROOT without tenantId param → platform-wide listing (null tenantId passed through)")
     void superAdminWithoutTenantIdIsPlatformWide() throws Exception {
         when(tenantScopeResolver.currentScope()).thenReturn(null);
         when(authSessionQueryService.listForTenant(eq((UUID) null), any(), any(), eq(0), eq(20)))

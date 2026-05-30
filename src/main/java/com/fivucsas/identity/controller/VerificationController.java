@@ -60,7 +60,7 @@ public class VerificationController {
     /**
      * Reads a single verification session. S2 fix — object-level authz lives in
      * {@link ManageVerificationService#getSession}: the resolved session's tenant
-     * must satisfy {@code tenantScopeResolver.canAccessTenant(...)} (ROOT/SUPER_ADMIN
+     * must satisfy {@code tenantScopeResolver.canAccessTenant(...)} (ROOT
      * unrestricted), else 403. Without it any authenticated caller could read any
      * other tenant's session by guessing the id (read-side IDOR).
      */
@@ -89,7 +89,7 @@ public class VerificationController {
 
     /**
      * Lists VERIFICATION-type auth flows for a tenant. Tenant-scoped: a
-     * TENANT_ADMIN may only query their own tenant; SUPER_ADMIN may query any.
+     * TENANT_ADMIN may only query their own tenant; ROOT may query any.
      * Unknown/unauthorized tenantId → empty list (dashboard-friendly) rather
      * than 403 so the page renders.
      */
@@ -100,7 +100,7 @@ public class VerificationController {
         UUID callerScope = tenantScopeResolver.currentScope();
         UUID effectiveTenantId;
         if (callerScope == null) {
-            // SUPER_ADMIN — honor query param. When omitted, the service
+            // ROOT — honor query param. When omitted, the service
             // returns every VERIFICATION flow on the platform so the
             // dashboard renders real data instead of a fake empty state.
             effectiveTenantId = tenantId;
@@ -123,7 +123,7 @@ public class VerificationController {
         UUID callerScope = tenantScopeResolver.currentScope();
         UUID effectiveTenantId;
         if (callerScope == null) {
-            // SUPER_ADMIN — if no tenantId param, aggregate platform-wide.
+            // ROOT — if no tenantId param, aggregate platform-wide.
             effectiveTenantId = tenantId;
         } else if (TenantScopeResolver.FAIL_CLOSED_EMPTY_SCOPE.equals(callerScope)) {
             // Fail-closed: empty stats
@@ -158,7 +158,7 @@ public class VerificationController {
      * Returns a user's verification status + session history. S2 fix —
      * object-level authz inside {@link ManageVerificationService#getUserVerificationStatus}
      * confirms the target user's tenant is in the caller's scope
-     * ({@code tenantScopeResolver.canAccessTenant(...)}; ROOT/SUPER_ADMIN
+     * ({@code tenantScopeResolver.canAccessTenant(...)}; ROOT
      * unrestricted), else 403. Without it any authenticated caller could read
      * any user's verification history by guessing their id (read-side IDOR).
      */
@@ -169,7 +169,7 @@ public class VerificationController {
     }
 
     @PostMapping("/sessions/{id}/steps/{stepNumber}/review")
-    @PreAuthorize("hasAnyAuthority('ROLE_SUPER_ADMIN', 'ROLE_ADMIN', 'ROLE_TENANT_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ROOT', 'ROLE_ADMIN', 'ROLE_TENANT_ADMIN')")
     public ResponseEntity<VerificationStepResultResponse> reviewStep(
             @PathVariable UUID id,
             @PathVariable int stepNumber,

@@ -29,7 +29,7 @@ import static org.mockito.Mockito.when;
  * Unit tests for {@link RbacAuthorizationService} focused on the tenant-switcher
  * 403 fix: the caller's own identity/authorities are resolved through
  * {@link TenantFilterBypass} (tenant filter suppressed), so a switched
- * SUPER_ADMIN keeps their authorities and {@code @PreAuthorize} passes.
+ * ROOT keeps their authorities and {@code @PreAuthorize} passes.
  */
 @ExtendWith(MockitoExtension.class)
 @DisplayName("RbacAuthorizationService — caller self-resolution bypasses tenant filter")
@@ -86,7 +86,7 @@ class RbacAuthorizationServiceTest {
 
         // ROOT short-circuits to true regardless of role rows.
         assertThat(rbac.hasPermission("user:read")).isTrue();
-        assertThat(rbac.isSuperAdmin()).isTrue();
+        assertThat(rbac.isRoot()).isTrue();
     }
 
     @Test

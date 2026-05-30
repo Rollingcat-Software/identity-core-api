@@ -125,23 +125,17 @@ public class RbacAuthorizationService {
     }
 
     /**
-     * Checks if the current user is ROOT.
+     * Checks if the current user is ROOT — the single platform-owner tier.
+     *
+     * <p>This is the one method for the top platform tier (the former
+     * {@code isSuperAdmin()} alias was collapsed into it during the role/user_type
+     * unification — see {@code docs/IDENTITY_ROLE_UNIFICATION.md}). It keys off
+     * {@code user_type == ROOT}, the SOLE authority for the platform tier.</p>
      */
     public boolean isRoot() {
         return getCurrentUser()
                 .map(u -> u.getUserType() == UserType.ROOT)
                 .orElse(false);
-    }
-
-    /**
-     * Checks if the current user is the platform super-admin (ROOT).
-     *
-     * <p>Alias for {@link #isRoot()} exposed under the name used in GDPR-purge
-     * {@code @PreAuthorize} expressions — keeps {@code @rbac.isSuperAdmin()} readable
-     * at the call-site without conflating "tenant admin" with "platform owner".</p>
-     */
-    public boolean isSuperAdmin() {
-        return isRoot();
     }
 
     /**
@@ -204,7 +198,7 @@ public class RbacAuthorizationService {
      *
      * <p><b>Tenant-switcher correctness.</b> The lookup runs with the Hibernate
      * {@code tenantFilter} disabled (see {@link TenantFilterBypass}). Otherwise,
-     * when a SUPER_ADMIN is browsing a foreign tenant (active {@code X-Tenant-ID}),
+     * when a ROOT is browsing a foreign tenant (active {@code X-Tenant-ID}),
      * the active-tenant filter would scope this self-lookup to the foreign tenant
      * and filter out the caller's OWN row (a ROOT user lives in the system
      * tenant) — collapsing their authorities and yielding a spurious 403 on the
@@ -226,7 +220,7 @@ public class RbacAuthorizationService {
     /**
      * Returns the {@code tenant_id} of the currently authenticated principal, or
      * {@link Optional#empty()} if there is no authenticated user (or the user has
-     * no tenant attached, e.g. ROOT/SUPER_ADMIN).
+     * no tenant attached, e.g. ROOT).
      *
      * <p>This helper exists so application/controller code can derive the caller's
      * tenant scope WITHOUT importing {@code entity.User} — the JPA entity is kept

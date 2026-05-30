@@ -54,7 +54,7 @@ public class DeviceController {
             @RequestParam(required = false) UUID userId,
             @RequestParam(required = false) UUID tenantId) {
         // Determine the scope to enforce:
-        //   - SUPER_ADMIN → callerScope=null → no restriction.
+        //   - ROOT → callerScope=null → no restriction.
         //   - TENANT_ADMIN / below → callerScope=caller's tenant id.
         // If the caller asks for a tenantId different from their own scope we
         // coerce to the caller's scope (fail-closed), so the dashboard can
@@ -67,7 +67,7 @@ public class DeviceController {
         }
         UUID effectiveTenantId;
         if (callerScope == null) {
-            // SUPER_ADMIN: tenantId optional. When omitted we list every
+            // ROOT: tenantId optional. When omitted we list every
             // device on the platform — without this, the admin dashboard
             // can never observe activity from non-system tenants.
             effectiveTenantId = tenantId;

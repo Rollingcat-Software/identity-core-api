@@ -704,12 +704,12 @@ public class User {
     /**
      * Checks if user is an administrator.
      * ROOT and TENANT_ADMIN user types are always admins.
-     * Also checks for SUPER_ADMIN or TENANT_ADMIN roles for backwards compatibility.
+     * Also checks for ROOT or TENANT_ADMIN roles for backwards compatibility.
      */
     public boolean isAdmin() {
         return this.userType == UserType.ROOT
             || this.userType == UserType.TENANT_ADMIN
-            || hasAnyRole("SUPER_ADMIN", "TENANT_ADMIN");
+            || hasAnyRole("ROOT", "TENANT_ADMIN");
     }
 
     /**

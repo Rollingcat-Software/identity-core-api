@@ -394,7 +394,7 @@ public class User {
     public boolean isAdmin() {
         return this.userType == UserType.ROOT
             || this.userType == UserType.TENANT_ADMIN
-            || hasAnyRole("SUPER_ADMIN", "TENANT_ADMIN");
+            || hasAnyRole("ROOT", "TENANT_ADMIN");
     }
 
     public Set<String> getAllPermissions() {

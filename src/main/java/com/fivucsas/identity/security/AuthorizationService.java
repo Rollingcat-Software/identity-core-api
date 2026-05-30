@@ -52,7 +52,7 @@ public class AuthorizationService {
     /**
      * Checks if the current user can manage the specified user.
      * Rules:
-     * - SUPER_ADMIN can manage anyone
+     * - ROOT can manage anyone
      * - TENANT_ADMIN can manage users in their tenant
      * - Regular users can only manage themselves
      *
@@ -65,8 +65,8 @@ public class AuthorizationService {
             return false;
         }
 
-        // Super admin can manage anyone
-        if (hasRole("SUPER_ADMIN")) {
+        // Root (platform owner) can manage anyone
+        if (hasRole("ROOT")) {
             return true;
         }
 

@@ -88,9 +88,9 @@ class TenantScopeResolverTest {
     }
 
     @Test
-    @DisplayName("SUPER_ADMIN → null scope (unrestricted)")
+    @DisplayName("ROOT → null scope (unrestricted)")
     void superAdminGetsNullScope() {
-        when(rbacService.isSuperAdmin()).thenReturn(true);
+        when(rbacService.isRoot()).thenReturn(true);
 
         assertThat(resolver.currentScope()).isNull();
         assertThat(resolver.isUnrestricted()).isTrue();
@@ -100,7 +100,7 @@ class TenantScopeResolverTest {
     @Test
     @DisplayName("TENANT_ADMIN with a tenant → their own tenant UUID")
     void tenantAdminGetsOwnTenantScope() {
-        when(rbacService.isSuperAdmin()).thenReturn(false);
+        when(rbacService.isRoot()).thenReturn(false);
         when(rbacService.getCurrentUser()).thenReturn(Optional.of(tenantUser));
 
         assertThat(resolver.currentScope()).isEqualTo(tenantId);
@@ -112,7 +112,7 @@ class TenantScopeResolverTest {
     @Test
     @DisplayName("Caller resolves but has no tenant → fail-closed sentinel")
     void userWithoutTenantGetsFailClosed() {
-        when(rbacService.isSuperAdmin()).thenReturn(false);
+        when(rbacService.isRoot()).thenReturn(false);
         User tenantless = User.builder().id(UUID.randomUUID()).tenant(null).build();
         when(rbacService.getCurrentUser()).thenReturn(Optional.of(tenantless));
 
@@ -123,7 +123,7 @@ class TenantScopeResolverTest {
     @Test
     @DisplayName("Unresolvable caller → fail-closed sentinel")
     void unresolvedCallerGetsFailClosed() {
-        when(rbacService.isSuperAdmin()).thenReturn(false);
+        when(rbacService.isRoot()).thenReturn(false);
         when(rbacService.getCurrentUser()).thenReturn(Optional.empty());
 
         assertThat(resolver.currentScope()).isEqualTo(TenantScopeResolver.FAIL_CLOSED_EMPTY_SCOPE);
@@ -151,7 +151,7 @@ class TenantScopeResolverTest {
     @DisplayName("ROOT + valid X-Active-Tenant → scope narrows to the selected tenant")
     void rootWithHeaderScopesToSelectedTenant() {
         UUID selected = UUID.randomUUID();
-        when(rbacService.isSuperAdmin()).thenReturn(true);
+        when(rbacService.isRoot()).thenReturn(true);
         when(tenantRepository.existsById(selected)).thenReturn(true);
         bindRequestWithActiveTenant(selected.toString());
 
@@ -163,7 +163,7 @@ class TenantScopeResolverTest {
     @Test
     @DisplayName("ROOT + no X-Active-Tenant header → unrestricted (cross-tenant)")
     void rootWithoutHeaderStaysUnrestricted() {
-        when(rbacService.isSuperAdmin()).thenReturn(true);
+        when(rbacService.isRoot()).thenReturn(true);
         bindRequestWithActiveTenant(null);
 
         assertThat(resolver.currentScope()).isNull();
@@ -174,7 +174,7 @@ class TenantScopeResolverTest {
     @DisplayName("ROOT + X-Active-Tenant for an unknown tenant → ignored, stays cross-tenant")
     void rootWithUnknownTenantHeaderIgnored() {
         UUID unknown = UUID.randomUUID();
-        when(rbacService.isSuperAdmin()).thenReturn(true);
+        when(rbacService.isRoot()).thenReturn(true);
         when(tenantRepository.existsById(unknown)).thenReturn(false);
         bindRequestWithActiveTenant(unknown.toString());
 
@@ -184,7 +184,7 @@ class TenantScopeResolverTest {
     @Test
     @DisplayName("ROOT + malformed X-Active-Tenant value → ignored, stays cross-tenant")
     void rootWithMalformedHeaderIgnored() {
-        when(rbacService.isSuperAdmin()).thenReturn(true);
+        when(rbacService.isRoot()).thenReturn(true);
         bindRequestWithActiveTenant("not-a-uuid");
 
         assertThat(resolver.currentScope()).isNull();
@@ -194,7 +194,7 @@ class TenantScopeResolverTest {
     @DisplayName("SECURITY: TENANT_ADMIN + X-Active-Tenant for a foreign tenant → header IGNORED, home tenant returned")
     void tenantAdminCannotEscalateViaHeader() {
         UUID foreignTenant = UUID.randomUUID();
-        when(rbacService.isSuperAdmin()).thenReturn(false);
+        when(rbacService.isRoot()).thenReturn(false);
         when(rbacService.getCurrentUser()).thenReturn(Optional.of(tenantUser));
         // Even a perfectly valid, existing foreign tenant id must not be honoured.
         lenient().when(tenantRepository.existsById(foreignTenant)).thenReturn(true);
@@ -209,7 +209,7 @@ class TenantScopeResolverTest {
     @DisplayName("SECURITY: tenantless USER + X-Active-Tenant header → still fail-closed, never the foreign tenant")
     void tenantlessUserCannotEscalateViaHeader() {
         UUID foreignTenant = UUID.randomUUID();
-        when(rbacService.isSuperAdmin()).thenReturn(false);
+        when(rbacService.isRoot()).thenReturn(false);
         User tenantless = User.builder().id(UUID.randomUUID()).tenant(null).build();
         when(rbacService.getCurrentUser()).thenReturn(Optional.of(tenantless));
         bindRequestWithActiveTenant(foreignTenant.toString());
@@ -223,7 +223,7 @@ class TenantScopeResolverTest {
     @DisplayName("ROOT + valid X-Tenant-ID → scope narrows to the selected tenant")
     void rootWithCanonicalHeaderScopesToSelectedTenant() {
         UUID selected = UUID.randomUUID();
-        when(rbacService.isSuperAdmin()).thenReturn(true);
+        when(rbacService.isRoot()).thenReturn(true);
         when(tenantRepository.existsById(selected)).thenReturn(true);
         bindRequestWithTenantId(selected.toString());
 
@@ -237,7 +237,7 @@ class TenantScopeResolverTest {
     void canonicalHeaderTakesPrecedenceOverAlias() {
         UUID canonical = UUID.randomUUID();
         UUID alias = UUID.randomUUID();
-        when(rbacService.isSuperAdmin()).thenReturn(true);
+        when(rbacService.isRoot()).thenReturn(true);
         when(tenantRepository.existsById(canonical)).thenReturn(true);
         bindRequestWithBothHeaders(canonical.toString(), alias.toString());
 
@@ -249,7 +249,7 @@ class TenantScopeResolverTest {
     @DisplayName("ROOT + blank X-Tenant-ID but valid X-Active-Tenant → alias fallback honoured")
     void aliasHonouredWhenCanonicalBlank() {
         UUID alias = UUID.randomUUID();
-        when(rbacService.isSuperAdmin()).thenReturn(true);
+        when(rbacService.isRoot()).thenReturn(true);
         when(tenantRepository.existsById(alias)).thenReturn(true);
         bindRequestWithBothHeaders("", alias.toString());
 
@@ -260,7 +260,7 @@ class TenantScopeResolverTest {
     @DisplayName("SECURITY: TENANT_ADMIN + canonical X-Tenant-ID for a foreign tenant → IGNORED, home tenant returned")
     void tenantAdminCannotEscalateViaCanonicalHeader() {
         UUID foreignTenant = UUID.randomUUID();
-        when(rbacService.isSuperAdmin()).thenReturn(false);
+        when(rbacService.isRoot()).thenReturn(false);
         when(rbacService.getCurrentUser()).thenReturn(Optional.of(tenantUser));
         lenient().when(tenantRepository.existsById(foreignTenant)).thenReturn(true);
         bindRequestWithTenantId(foreignTenant.toString());
@@ -273,7 +273,7 @@ class TenantScopeResolverTest {
     @Test
     @DisplayName("ROOT + no header → cross-tenant (null) default preserved")
     void rootNoHeaderStaysCrossTenant() {
-        when(rbacService.isSuperAdmin()).thenReturn(true);
+        when(rbacService.isRoot()).thenReturn(true);
         bindRequestWithTenantId(null);
 
         assertThat(resolver.currentScope()).isNull();
@@ -283,10 +283,10 @@ class TenantScopeResolverTest {
     // ===== isCrossTenantAdmin (capability, independent of active selection) =====
 
     @Test
-    @DisplayName("isCrossTenantAdmin → true for SUPER_ADMIN even AFTER selecting a tenant")
+    @DisplayName("isCrossTenantAdmin → true for ROOT even AFTER selecting a tenant")
     void crossTenantAdminCapabilitySurvivesSelection() {
         UUID selected = UUID.randomUUID();
-        when(rbacService.isSuperAdmin()).thenReturn(true);
+        when(rbacService.isRoot()).thenReturn(true);
         lenient().when(tenantRepository.existsById(selected)).thenReturn(true);
         bindRequestWithTenantId(selected.toString());
 
@@ -300,7 +300,7 @@ class TenantScopeResolverTest {
     @Test
     @DisplayName("isCrossTenantAdmin → false for a TENANT_ADMIN")
     void tenantAdminIsNotCrossTenantAdmin() {
-        when(rbacService.isSuperAdmin()).thenReturn(false);
+        when(rbacService.isRoot()).thenReturn(false);
 
         assertThat(resolver.isCrossTenantAdmin()).isFalse();
     }

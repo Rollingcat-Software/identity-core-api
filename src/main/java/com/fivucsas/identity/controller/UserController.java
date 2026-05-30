@@ -305,21 +305,21 @@ public class UserController {
         User currentUser = rbacService.getCurrentUser()
                 .orElseThrow(() -> new UnauthorizedException());
 
-        // Resolve target tenant: SUPER_ADMIN MUST pin to a tenant via the
+        // Resolve target tenant: ROOT MUST pin to a tenant via the
         // `tenantId` query param (no silent fallback to currentUser.tenant /
         // system tenant); tenant-scoped callers always invite into their own
         // tenant. Caller without a resolvable tenant rejects with 400 rather
         // than defaulting into an unintended tenant.
         // Copilot post-merge round 5: previous fallback would silently invite
-        // guests into the SUPER_ADMIN's home (often `system`) tenant when the
+        // guests into the ROOT's home (often `system`) tenant when the
         // caller forgot `?tenantId=`. Now the request fails fast with 400.
         UUID callerScope = tenantScopeResolver.currentScope();
         Tenant targetTenant;
         if (callerScope == null) {
-            // SUPER_ADMIN — must pick a tenant to invite into explicitly
+            // ROOT — must pick a tenant to invite into explicitly
             if (tenantId == null) {
                 throw new IllegalArgumentException(
-                        "'tenantId' query parameter is required when SUPER_ADMIN invites a guest.");
+                        "'tenantId' query parameter is required when ROOT invites a guest.");
             }
             targetTenant = tenantRepository.findById(tenantId)
                     .orElseThrow(() -> new IllegalArgumentException(
@@ -378,7 +378,7 @@ public class UserController {
     }
 
     @GetMapping("/api/v1/guests")
-    @Operation(summary = "List guest invitations for current tenant (or platform-wide for SUPER_ADMIN)")
+    @Operation(summary = "List guest invitations for current tenant (or platform-wide for ROOT)")
     @PreAuthorize("@rbac.isTenantAdmin() or @rbac.hasPermission('guest:read')")
     public ResponseEntity<List<GuestInvitationResponse>> listInvitations(
             @RequestParam(required = false) String status,
@@ -391,7 +391,7 @@ public class UserController {
         UUID callerScope = tenantScopeResolver.currentScope();
         UUID effectiveTenantId;
         if (callerScope == null) {
-            // SUPER_ADMIN — `tenantId` query param is optional; null means
+            // ROOT — `tenantId` query param is optional; null means
             // platform-wide (cross-tenant) listing.
             effectiveTenantId = tenantId;
         } else if (TenantScopeResolver.FAIL_CLOSED_EMPTY_SCOPE.equals(callerScope)) {
@@ -403,7 +403,7 @@ public class UserController {
 
         List<GuestInvitation> invitations;
         if (effectiveTenantId == null) {
-            // SUPER_ADMIN, no tenant pinned → cross-tenant listing.
+            // ROOT, no tenant pinned → cross-tenant listing.
             // Copilot post-merge round 5: cross-tenant dumps are bounded by a
             // hard cap (MAX_PLATFORM_WIDE_GUESTS) to prevent runaway memory/
             // latency. Operators who need more should pass a `status` filter
@@ -427,7 +427,7 @@ public class UserController {
     private static final int MAX_PLATFORM_WIDE_GUESTS = 1000;
 
     @GetMapping("/api/v1/guests/count")
-    @Operation(summary = "Count active guests in tenant (or platform-wide for SUPER_ADMIN)")
+    @Operation(summary = "Count active guests in tenant (or platform-wide for ROOT)")
     @PreAuthorize("@rbac.isTenantAdmin() or @rbac.hasPermission('guest:read')")
     public ResponseEntity<Long> countActiveGuests(
             @RequestParam(required = false) UUID tenantId) {
@@ -473,7 +473,7 @@ public class UserController {
                 .orElseThrow(() -> new UnauthorizedException());
 
         // Tenant-scope guard: a scoped caller (TENANT_ADMIN) may only revoke
-        // invitations belonging to a tenant they can access. SUPER_ADMIN with
+        // invitations belonging to a tenant they can access. ROOT with
         // no active scope passes for any tenant; with X-Active-Tenant set, the
         // invitation must belong to the selected tenant. 404 (not 403) when the
         // invitation isn't visible to the caller — don't leak existence across

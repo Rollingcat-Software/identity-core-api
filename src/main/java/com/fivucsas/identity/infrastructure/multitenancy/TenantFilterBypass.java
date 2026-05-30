@@ -13,8 +13,8 @@ import java.util.function.Supplier;
  * Runs a unit of repository work with the Hibernate {@code tenantFilter}
  * temporarily disabled, restoring it afterwards.
  *
- * <p><b>Why this exists — the SUPER_ADMIN tenant-switcher 403.</b> When a
- * SUPER_ADMIN selects a foreign tenant (via {@code X-Tenant-ID}),
+ * <p><b>Why this exists — the ROOT tenant-switcher 403.</b> When a
+ * ROOT selects a foreign tenant (via {@code X-Tenant-ID}),
  * {@link TenantContext} carries that foreign tenant for the whole request, and
  * {@link TenantHibernateAspect} enables {@code tenantFilter = <foreign>} on
  * every {@code repository..} call. That correctly scopes the DATA the admin is

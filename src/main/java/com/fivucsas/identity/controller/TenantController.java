@@ -64,7 +64,7 @@ public class TenantController {
     @GetMapping("/{tenantId}")
     @PreAuthorize("isAuthenticated()")
     public ResponseEntity<TenantResponse> getTenantById(@PathVariable String tenantId) {
-        // Non-SUPER_ADMIN callers may only fetch their own tenant. 404 rather
+        // Non-ROOT callers may only fetch their own tenant. 404 rather
         // than 403 to avoid leaking which tenant IDs exist.
         UUID target;
         try {
@@ -83,7 +83,7 @@ public class TenantController {
     @PreAuthorize("isAuthenticated()")
     public ResponseEntity<TenantResponse> getTenantBySlug(@PathVariable String slug) {
         TenantResponse response = manageTenantUseCase.getTenantBySlug(slug);
-        // Tenant-scope check — non-SUPER_ADMIN may only resolve their own.
+        // Tenant-scope check — non-ROOT may only resolve their own.
         try {
             UUID target = UUID.fromString(response.getId());
             if (!tenantScopeResolver.canAccessTenant(target)) {
@@ -100,8 +100,8 @@ public class TenantController {
     public ResponseEntity<Map<String, Object>> getAllTenants(
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
-        // Listing ALL tenants system-wide is a SUPER_ADMIN operation. For
-        // non-SUPER_ADMIN callers we return only the caller's own tenant so
+        // Listing ALL tenants system-wide is a ROOT operation. For
+        // non-ROOT callers we return only the caller's own tenant so
         // the dashboard renders a usable list (rather than 403'ing and
         // breaking the page). This never leaks other tenants' data.
         //

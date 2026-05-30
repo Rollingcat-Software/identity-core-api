@@ -34,7 +34,7 @@ public class AdminOverviewController {
 
     @GetMapping("/auth-flows")
     @Operation(summary = "List all auth flows across all tenants (admin)")
-    @PreAuthorize("hasAuthority('ROLE_SUPER_ADMIN')")
+    @PreAuthorize("hasAuthority('ROLE_ROOT')")
     public ResponseEntity<List<AuthFlowResponse>> getAllAuthFlows(
             @RequestParam(required = false) OperationType operationType) {
         log.info("GET /api/v1/auth-flows - List all auth flows");
@@ -43,7 +43,7 @@ public class AdminOverviewController {
 
     @GetMapping("/auth-sessions")
     @Operation(summary = "List all auth sessions across all tenants (admin)")
-    @PreAuthorize("hasAuthority('ROLE_SUPER_ADMIN')")
+    @PreAuthorize("hasAuthority('ROLE_ROOT')")
     public ResponseEntity<List<AuthSessionResponse>> getAllAuthSessions() {
         log.info("GET /api/v1/auth-sessions - List all auth sessions");
         return ResponseEntity.ok(adminOverviewService.listAllAuthSessions());

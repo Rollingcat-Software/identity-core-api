@@ -34,7 +34,7 @@ import java.util.stream.Collectors;
  * {@code @rbac.isTenantAdmin()} on every endpoint. Previously any
  * TENANT_MEMBER could mint OAuth2 client credentials for the tenant —
  * effectively a privilege-escalation primitive. {@code isTenantAdmin()} returns
- * true for TENANT_ADMIN, ROOT, and SUPER_ADMIN via {@code UserType.isAtLeast}.
+ * true for TENANT_ADMIN, ROOT, and ROOT via {@code UserType.isAtLeast}.
  */
 @RestController
 @RequestMapping("/api/v1/oauth2/clients")

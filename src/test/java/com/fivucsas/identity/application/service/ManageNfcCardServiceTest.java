@@ -184,7 +184,7 @@ class ManageNfcCardServiceTest {
     @Test
     @DisplayName("searchByCardSerial → unscoped global lookup for ROOT (no tenant attached)")
     void searchByCardSerial_WhenCallerHasNoTenant_ShouldQueryGlobally() {
-        // ROOT / SUPER_ADMIN: unrestricted scope → unscoped global lookup.
+        // ROOT: unrestricted scope → unscoped global lookup.
         when(tenantScopeResolver.isUnrestricted()).thenReturn(true);
         NfcCard anyCard = mock(NfcCard.class);
         when(nfcCardRepository.findByCardSerial("SERIAL-2")).thenReturn(List.of(anyCard));

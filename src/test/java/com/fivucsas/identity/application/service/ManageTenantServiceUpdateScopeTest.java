@@ -37,7 +37,7 @@ import static org.mockito.Mockito.when;
  * therefore overwrite tenant B's configuration by passing B's id. The service
  * now consults {@link TenantScopeResolver#canAccessTenant(UUID)} before
  * applying any change. {@code canAccessTenant} returns {@code true} for
- * SUPER_ADMIN / ROOT (null scope), so root keeps cross-tenant access while
+ * ROOT (null scope), so root keeps cross-tenant access while
  * everyone else is confined to their own tenant. An out-of-scope caller is
  * rejected with {@link AccessDeniedException} (→ HTTP 403 via
  * {@code GlobalExceptionHandler}).</p>
@@ -126,7 +126,7 @@ class ManageTenantServiceUpdateScopeTest {
     }
 
     @Test
-    @DisplayName("Root/SUPER_ADMIN (null scope ⇒ canAccessTenant true) retains cross-tenant update")
+    @DisplayName("Root/ROOT (null scope ⇒ canAccessTenant true) retains cross-tenant update")
     void updateTenant_rootCrossTenant_appliesUpdate() {
         // Root has no scope restriction, so canAccessTenant() returns true even
         // for a tenant the caller is not a member of.

@@ -30,7 +30,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * suite.
  *
  * <p>{@code @rbac.isTenantAdmin()} resolves to true for {@code TENANT_ADMIN},
- * {@code ROOT}, and {@code SUPER_ADMIN} via {@code UserType.isAtLeast}
+ * {@code ROOT} (formerly ROOT) via {@code UserType.isAtLeast}
  * (see {@link com.fivucsas.identity.security.RbacAuthorizationService}); a
  * {@code TENANT_MEMBER} principal therefore receives {@code 403 Forbidden}
  * from Spring Security's {@code AccessDeniedException} handler.

@@ -45,7 +45,7 @@ public interface TenantProvisioningPort {
      *
      * @param adminUserId the user whose email was just verified
      * @param requireAdminApproval when true the tenant is left PENDING for a
-     *                             SUPER_ADMIN to approve, even after verification
+     *                             ROOT to approve, even after verification
      * @return true if the tenant was activated, false if it was left pending
      */
     boolean activateTenantForVerifiedAdmin(UUID adminUserId, boolean requireAdminApproval);

@@ -24,8 +24,8 @@ import static org.mockito.Mockito.when;
 
 /**
  * Verifies {@link EnrollmentQueryService#getAllEnrollments(UUID)} routes
- * through the tenant-scoped repository path for non-SUPER_ADMIN callers
- * (scope arg != null) and falls through to {@code findAll()} for SUPER_ADMIN.
+ * through the tenant-scoped repository path for non-ROOT callers
+ * (scope arg != null) and falls through to {@code findAll()} for ROOT.
  */
 @ExtendWith(MockitoExtension.class)
 @DisplayName("EnrollmentQueryService — tenant-scoped listing")
@@ -60,7 +60,7 @@ class EnrollmentQueryServiceTenantScopeTest {
     }
 
     @Test
-    @DisplayName("null scope (SUPER_ADMIN) → findAll()")
+    @DisplayName("null scope (ROOT) → findAll()")
     void superAdminHitsFindAll() {
         when(userEnrollmentRepository.findAll()).thenReturn(List.of(enrollment));
 
