@@ -61,6 +61,9 @@ class ManageTenantServiceUpdateScopeTest {
     @Mock
     private TenantScopeResolver tenantScopeResolver;
 
+    @Mock
+    private com.fivucsas.identity.security.RbacAuthorizationService rbacService;
+
     @InjectMocks
     private ManageTenantService service;
 
@@ -69,6 +72,11 @@ class ManageTenantServiceUpdateScopeTest {
 
     @BeforeEach
     void setUp() {
+        // P1-4 added rbacService to ManageTenantService (audit actor resolution via
+        // currentActorId()). Stub it leniently — the out-of-scope test throws before
+        // the audit path, so not every test reaches this call.
+        org.mockito.Mockito.lenient().when(rbacService.getCurrentUserId())
+                .thenReturn(java.util.Optional.empty());
         tenantId = UUID.randomUUID();
         Instant now = Instant.now();
         existingTenant = Tenant.reconstitute(
