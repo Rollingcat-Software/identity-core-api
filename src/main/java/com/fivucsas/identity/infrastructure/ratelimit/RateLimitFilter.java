@@ -48,7 +48,11 @@ public class RateLimitFilter extends OncePerRequestFilter {
             "/api/v1/auth/forgot-password",
             "/api/v1/auth/reset-password",
             "/api/v1/onboarding/register",
-            "/api/v1/onboarding/verify-email"
+            "/api/v1/onboarding/verify-email",
+            // Anonymous approve-login session creation mints a cross-device
+            // login challenge per call, so it fails closed (in-memory fallback)
+            // when Redis is down rather than allowing unbounded prompts.
+            "/api/v1/auth/approve-login/session"
     );
 
     // In-memory fallback rate limiter (bounded)

@@ -76,6 +76,9 @@ class SecurityConfigPermitAllPinTest {
             // WebAuthn pre-login
             "/api/v1/webauthn/authenticate-options",
             "/api/v1/webauthn/authenticate",
+            // Usernameless / discoverable passkey pre-login (Phase 1)
+            "/api/v1/webauthn/passkey/authenticate-options",
+            "/api/v1/webauthn/passkey/authenticate",
             // Auth-session (multi-step pre-JWT)
             "/api/v1/auth/sessions",
             "/api/v1/auth/sessions/*",
@@ -83,6 +86,9 @@ class SecurityConfigPermitAllPinTest {
             // QR session
             "/api/v1/auth/qr/session",
             "/api/v1/auth/qr/session/**",
+            // Approve-login (number-matching) initiator side
+            "/api/v1/auth/approve-login/session",
+            "/api/v1/auth/approve-login/session/*",
             // Public auth method listing
             "/api/v1/auth-methods",
             // Guest invitations

@@ -153,6 +153,62 @@ class AnonymousEndpointsSecurityIntegrationTest {
                 .andExpect(status().is(not(equalTo(401))));
     }
 
+    // ── Approve-login (number-matching) permitAll initiator side ─────────
+
+    @Test
+    @DisplayName("POST /auth/approve-login/session — anonymous request is NOT 401")
+    void approveLoginCreate_Anonymous_ShouldNotBe401() throws Exception {
+        mockMvc.perform(post("/api/v1/auth/approve-login/session")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"nobody@example.com\"}"))
+                .andExpect(status().is(not(equalTo(401))));
+    }
+
+    @Test
+    @DisplayName("GET /auth/approve-login/session/{id} — anonymous poll is NOT 401")
+    void approveLoginPoll_Anonymous_ShouldNotBe401() throws Exception {
+        mockMvc.perform(get("/api/v1/auth/approve-login/session/00000000-0000-0000-0000-000000000000"))
+                .andExpect(status().is(not(equalTo(401))));
+    }
+
+    // ── Approve-login approver side — MUST be 401 anonymous ──────────────
+
+    @Test
+    @DisplayName("GET /auth/approve-login/pending — anonymous request IS 401 (approver-only)")
+    void approveLoginPending_Anonymous_ShouldBe401() throws Exception {
+        mockMvc.perform(get("/api/v1/auth/approve-login/pending"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @DisplayName("POST /auth/approve-login/session/{id}/decide — anonymous request IS 401 (approver-only)")
+    void approveLoginDecide_Anonymous_ShouldBe401() throws Exception {
+        mockMvc.perform(post("/api/v1/auth/approve-login/session/00000000-0000-0000-0000-000000000000/decide")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"decision\":\"deny\"}"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    // ── Usernameless / discoverable passkey pre-login permitAll (Phase 1) ─
+
+    @Test
+    @DisplayName("POST /webauthn/passkey/authenticate-options — anonymous request is NOT 401")
+    void passkeyAuthenticateOptions_Anonymous_ShouldNotBe401() throws Exception {
+        mockMvc.perform(post("/api/v1/webauthn/passkey/authenticate-options")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().is(not(equalTo(401))));
+    }
+
+    @Test
+    @DisplayName("POST /webauthn/passkey/authenticate — anonymous request is NOT 401")
+    void passkeyAuthenticate_Anonymous_ShouldNotBe401() throws Exception {
+        mockMvc.perform(post("/api/v1/webauthn/passkey/authenticate")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().is(not(equalTo(401))));
+    }
+
     // ── WebAuthn pre-login permitAll ─────────────────────────────────────
 
     @Test
