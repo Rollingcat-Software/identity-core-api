@@ -54,6 +54,12 @@ services:
       # Fresh staging DB → full V0..V64 chain applies cleanly; keep validation on.
       SPRING_FLYWAY_VALIDATE_ON_MIGRATE: "true"
       APP_PURGE_SOFT_DELETE_ENABLED: "false"
+      # Config-driven login engine kill-switch (default OFF = byte-identical legacy).
+      # Lets staging exercise the flag-ON path before a prod canary, e.g.:
+      #   APP_AUTH_CONFIG_DRIVEN_LOGIN=true docker compose -f docker-compose.staging.yml \
+      #     --env-file .env.staging up -d --force-recreate identity-core-api-staging
+      APP_AUTH_CONFIG_DRIVEN_LOGIN: ${APP_AUTH_CONFIG_DRIVEN_LOGIN:-false}
+      APP_AUTH_CONFIG_DRIVEN_LOGIN_TENANTS: ${APP_AUTH_CONFIG_DRIVEN_LOGIN_TENANTS:-}
       CORS_ALLOWED_ORIGINS: http://localhost:18080,http://localhost:5173,http://localhost:3000
       CORS_ALLOWED_METHODS: GET,POST,PUT,DELETE,OPTIONS,PATCH
       CORS_ALLOWED_HEADERS: Authorization,Content-Type,X-Tenant-ID,X-Active-Tenant,X-Request-ID,Accept
