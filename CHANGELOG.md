@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+### 2026-05-30 — Stabilize-&-harden backlog (P1-1 + P1-5, DEPLOYED)
+
+- **P1-1 (PR #155/#156)** — cross-tenant isolation ITs promoted to a REQUIRED CI
+  gate: the `integration-tests` job runs `-Dtest='*IntegrationTest,*IT'`, blocks
+  (no `continue-on-error`), and asserts they executed. 3 unit tests fixed to
+  unblock `needs: test`. Operator must add the `Integration tests (Testcontainers)`
+  required status check in branch protection.
+- **P1-5 (PR #157, DEPLOYED)** — Flyway chain made DR-safe from a fresh database:
+  V29 rewritten to resolve Default-Login flow + EMAIL_OTP by natural keys (was
+  prod-only hardcoded UUIDs); fixed V40 pkey collision + V40/V41
+  `COMMENT 'a'||'b'` syntax. Chain now applies 71/71 from an empty DB. Shipped via
+  a one-time `flyway repair` (validate-on-migrate=true). See
+  `docs/RUNBOOK_FLYWAY_V29_REPAIR.md`.
+
 ### 2026-05-29 — DNS-TXT email-domain verification + default-role-on-join (V64)
 
 Backend only (frontend DNS-verify UI ships separately).

@@ -114,6 +114,22 @@ V71: ROOT role granted all 48 permissions — backfills the full permission set 
 
 **V34-V60 applied in prod. Last rebuild included V60 (drop refresh_tokens.token plaintext).**
 
+### Operator reality — 2026-05-30 stabilize-&-harden backlog (P1-1 + P1-5, DEPLOYED)
+
+- **P1-1 — cross-tenant isolation ITs are now a CI gate (PR #155/#156).** The
+  `integration-tests` job actually RUNS the isolation ITs
+  (`-Dtest='*IntegrationTest,*IT'`), BLOCKS the pipeline (no `continue-on-error`),
+  and asserts they executed. Three unit tests (TenantFilterBypass + rbacService
+  mocks) were fixed to unblock `needs: test`. **Operator follow-up:** add
+  `Integration tests (Testcontainers)` as a REQUIRED status check in
+  `main`-branch protection so a red gate can't be merged around.
+- **P1-5 — Flyway chain is DR-safe from a fresh DB (PR #157, DEPLOYED).** V29 was
+  rewritten to resolve the Default-Login flow + EMAIL_OTP by NATURAL keys (it used
+  prod-only hardcoded UUIDs, so a fresh DB diverged); the V40 pkey collision and the
+  invalid `COMMENT 'a'||'b'` syntax in V40/V41 were fixed. The chain now applies
+  **71/71 from an empty database**. Shipped to prod via a one-time `flyway repair`
+  with `validate-on-migrate=true`. Runbook: `docs/RUNBOOK_FLYWAY_V29_REPAIR.md`.
+
 ## 2026-05-04 highlights
 
 - **PR #63** — ArchUnit `UserDomainImportBoundaryTest` freezes direct `entity.User`
