@@ -97,6 +97,16 @@ V68: Identity & Account-Linking Phase 3 (Model A) —
      biometric-processor pgvector store — "one template per person" is achieved at
      the api orchestration layer (canonical-enrollment routing). Idempotent
      (CREATE ... IF NOT EXISTS); applies cleanly from V67.
+V69: Role/user_type unification — rename the global SUPER_ADMIN role → ROOT
+     (UUID + grants unchanged) + elevate-only user_type tier backfill (ROOT-role
+     holders → user_type ROOT; TENANT_ADMIN-role holders → ≥TENANT_ADMIN; never
+     demotes). user_type is the SOLE platform-tier authority; role = within-tenant
+     RBAC. See docs/IDENTITY_ROLE_UNIFICATION.md.
+V70: users.identity_id SET NOT NULL — preceded by a BEFORE-INSERT trigger
+     `ensure_user_identity` that auto-assigns an identity (reuse-by-email or
+     create) on any user insert lacking one, so all creation paths + direct SQL +
+     future callers stay covered (mirrors the V53 trigger pattern). Self-gating
+     (RAISE EXCEPTION if any NULL remains before the ALTER).
 
 **V34-V60 applied in prod. Last rebuild included V60 (drop refresh_tokens.token plaintext).**
 
