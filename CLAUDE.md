@@ -143,7 +143,11 @@ V71: ROOT role granted all 48 permissions — backfills the full permission set 
      the renamed ROOT role (post-V69) so the platform-owner tier holds every
      permission grant. Idempotent (INSERT … ON CONFLICT DO NOTHING on
      role_permissions). See docs/IDENTITY_ROLE_UNIFICATION.md.
-V72: webauthn_credentials discoverable + user_handle columns (usernameless passkey).
+V72: WebAuthn discoverable-passkey columns (2026-05-30, PR #161) —
+     webauthn_credentials.discoverable BOOLEAN + user_handle (the stable per-user
+     handle returned in a usernameless `navigator.credentials.get()`). Additive,
+     nullable/defaulted. Backs the anonymous passkey login endpoints below.
+     **V72 applied in prod (2026-05-30 rebuild).**
 V73: config-driven login engine — adds AuthMethodType PASSKEY + APPROVE_LOGIN,
      seeds their auth_methods rows, adds auth_methods.supports_usernameless
      (TRUE for PASSKEY/APPROVE_LOGIN/QR_CODE), and widens chk_auth_method_type
@@ -151,7 +155,7 @@ V73: config-driven login engine — adds AuthMethodType PASSKEY + APPROVE_LOGIN,
      APPROVE_LOGIN = number-matching mode of the QR cross-device method.
      V73 is ADDITIVE/reversible — safe to leave applied if the image rolls back.
 
-**V34-V60 applied in prod. Last rebuild included V60 (drop refresh_tokens.token plaintext).**
+**V34-V72 applied in prod. The 2026-05-30 rebuild added V72 (discoverable-passkey columns).**
 
 ### Config-driven login engine — kill-switch (task #16, ships DARK 2026-05-30)
 
@@ -210,6 +214,42 @@ with the runtime path.
 
 ## Operator reality (2026-05-30 update)
 
+- **Cross-device / authenticator login SHIPPED + DEPLOYED (PR #161, V72; CI gate fixes #160).**
+  - **Passkey hybrid login (discoverable + usernameless).** `register-options` now sets
+    `residentKey=required` + `UV=required`. NEW **anonymous** endpoints (both `permitAll` in
+    SecurityConfig): `POST /api/v1/webauthn/passkey/authenticate-options` (returns an assertion
+    challenge with an EMPTY `allowCredentials`) and `POST /api/v1/webauthn/passkey/authenticate`
+    (resolves the user by the asserted `userHandle`, then mints a session). Backed by V72
+    (`webauthn_credentials.discoverable` + `user_handle`). This is the browser-native
+    cross-device ("use your phone") path — no companion app required.
+  - **No-Firebase, number-matching approve-login.** Redis-backed, modeled on `QrSessionService`:
+    `POST /api/v1/auth/approve-login/session {email}` → `{sessionId, matchNumber, …}` (permitAll),
+    GET poll, `GET /api/v1/auth/approve-login/pending` (authenticated approver lists pending
+    requests), `POST /api/v1/auth/approve-login/{id}/decide {decision, matchNumber}` (mints tokens
+    like the QR approve path). **`matchNumber` is a zero-padded STRING (e.g. "07")** — never type
+    it as a number on a client (leading zeros drop). An unknown-email request returns a decoy
+    session (no account-existence oracle). client-apps #53 is the shared approver KMP stack.
+  - Prod: api rebuilt, V72 applied, `/webauthn/passkey/authenticate-options` +
+    `/auth/approve-login/session` return 200; rollback tag
+    `identity-core-api-identity-core-api:rollback-pre-passkeys-20260530`.
+- **`User.identity` association → `insertable=false, updatable=false` (PR #160).** PROD-SAFE
+  fix: `identity_id` is owned by the V70 BEFORE-INSERT trigger + the native `repointIdentity`
+  UPDATE, so a routine entity UPDATE (e.g. `lastLoginAt`) whose in-memory `identity` is null
+  right after a trigger-populated insert no longer flushes `identity_id=NULL` (V70 is NOT NULL).
+  Nothing persists the association (account-linking = native query; seeds = raw JDBC), so it is
+  safe. Pattern: never let a JPA association OWN a column a DB trigger/native query owns.
+- **Integration-test gate — one-time exception + being genuinely greened.** The
+  `Integration tests (Testcontainers)` gate is REQUIRED (P1-1, #155) but was NEVER green
+  (deep pre-existing test-infra rot). The operator authorized a **ONE-TIME admin-merge
+  exception** for the four orthogonal auth PRs (#159/#160/#161 + web #137), with manual
+  cross-tenant staging smoke; the gate stays REQUIRED for everyone else. PR #160 began
+  genuinely greening it (RSA ephemeral in the integration profile, IT NOT-NULL slug, dup
+  tenant slug, JWT secret length, Redis service, `identity_id` seeding, `User.identity`
+  entity fix + teardown soft-deletes). Remaining causes tracked: `java.time.Instant` JDBC
+  bind in seeds, `unique_tenant_email` seed collisions, CI not running bio `:8001` / Redis
+  `:6379`. **Do NOT treat the gate as trustworthy until that task closes.** This Hetzner box
+  cannot run Testcontainers ITs (no Docker socket for TC in the sandboxed shell) — verify
+  ITs via CI.
 - **Identity & account-linking Phases 1-5 ALL DEPLOYED + ROOT role/user_type
   unification SHIPPED (2026-05-30).** The five-phase Model-A identity layer is now
   fully live: Phase 1 person/identity layer (V65-V67), Phase 2 account linking
