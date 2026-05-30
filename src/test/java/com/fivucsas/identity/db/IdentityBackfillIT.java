@@ -73,6 +73,9 @@ class IdentityBackfillIT {
     @Autowired private IdentityEmailRepository identityEmailRepository;
     @Autowired private UserRepository userRepository;
 
+    @jakarta.persistence.PersistenceContext
+    private jakarta.persistence.EntityManager entityManager;
+
     @Test
     @DisplayName("V67 left zero users with NULL identity_id (raw, incl. soft-deleted)")
     void backfillLeavesNoNullIdentityId() {
@@ -105,12 +108,18 @@ class IdentityBackfillIT {
     void sameEmailAcrossTenantsLinksToSameIdentity() {
         // Seed two tenants + two users with the SAME email, then run the V67
         // backfill SQL again (idempotent) so the new rows are linked.
+        // The global idx_users_email_unique is PARTIAL (WHERE deleted_at IS NULL,
+        // V7), so two ACTIVE rows can't share an email — userB is the
+        // historical/soft-deleted duplicate (the exact prod shape V67 backfills:
+        // one live + one soft-deleted same-email row across tenants). The
+        // backfill groups by lower(email) regardless of deleted_at, so both link
+        // to ONE identity.
         UUID tenantA = seedTenant("backfill-tenant-a");
         UUID tenantB = seedTenant("backfill-tenant-b");
         String sharedEmail = "shared-" + UUID.randomUUID() + "@example.com";
 
         UUID userA = seedUser(tenantA, sharedEmail, "Shared", "PersonA");
-        UUID userB = seedUser(tenantB, sharedEmail, "Shared", "PersonB");
+        UUID userB = seedUser(tenantB, sharedEmail, "Shared", "PersonB", true);
 
         runBackfill();
 
@@ -148,6 +157,14 @@ class IdentityBackfillIT {
                         .build());
         assertThat(saved.getId()).isNotNull();
 
+        // IdentityEmail.identityId is a read-only mirror (@Column insertable=false)
+        // of the FK owned by the `identity` association — it is only populated on
+        // a DB load, never on the freshly-built+flushed instance. Clear the
+        // persistence context so the find-back returns a re-read row (not the
+        // 1st-level-cached `saved` instance with a null raw identityId).
+        entityManager.flush();
+        entityManager.clear();
+
         Optional<IdentityEmail> byEmail = identityEmailRepository.findByEmailIgnoreCase(email.toUpperCase());
         assertThat(byEmail).isPresent();
         assertThat(byEmail.get().getIdentityId()).isEqualTo(identity.getId());
@@ -169,20 +186,36 @@ class IdentityBackfillIT {
 
     private UUID seedTenant(String name) {
         UUID id = UUID.randomUUID();
+        // slug is NOT NULL since V20 — the fixture must supply it (unique per row).
         jdbc.update(
-                "INSERT INTO tenants (id, name, domain, display_name, is_active, created_at, updated_at) " +
-                "VALUES (?, ?, ?, ?, true, NOW(), NOW())",
-                id, name + "-" + id, name + "-" + id + ".test", name);
+                "INSERT INTO tenants (id, name, slug, domain, display_name, is_active, created_at, updated_at) " +
+                "VALUES (?, ?, ?, ?, ?, true, NOW(), NOW())",
+                id, name + "-" + id, name + "-" + id, name + "-" + id + ".test", name);
         return id;
     }
 
     private UUID seedUser(UUID tenantId, String email, String first, String last) {
+        return seedUser(tenantId, email, first, last, false);
+    }
+
+    /**
+     * @param softDeleted when true the row is inserted with {@code deleted_at} set.
+     *        The global {@code idx_users_email_unique} is PARTIAL
+     *        ({@code WHERE deleted_at IS NULL}, V7), so two rows can only share an
+     *        email if at most one is active — which is exactly the prod situation
+     *        the V67 backfill was written for (one live + one historical/soft-
+     *        deleted row of the same person across tenants). The backfill groups
+     *        by {@code lower(email)} irrespective of {@code deleted_at}, so the
+     *        soft-deleted row is still linked to the shared identity.
+     */
+    private UUID seedUser(UUID tenantId, String email, String first, String last, boolean softDeleted) {
         UUID id = UUID.randomUUID();
         jdbc.update(
                 "INSERT INTO users (id, tenant_id, email, password_hash, first_name, last_name, " +
-                "user_type, status, is_active, created_at, updated_at) " +
+                "user_type, status, is_active, created_at, updated_at, deleted_at) " +
                 "VALUES (?, ?, ?, '$2a$10$dummyhashfortesting.................................', " +
-                "?, ?, 'TENANT_MEMBER', 'ACTIVE', true, NOW(), NOW())",
+                "?, ?, 'TENANT_MEMBER', 'ACTIVE', true, NOW(), NOW(), " +
+                (softDeleted ? "NOW()" : "NULL") + ")",
                 id, tenantId, email, first, last);
         return id;
     }

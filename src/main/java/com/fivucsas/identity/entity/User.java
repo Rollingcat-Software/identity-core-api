@@ -98,8 +98,15 @@ public class User {
      * once the prod backfill (V67) is confirmed 100% populated. Auth is unchanged
      * through Phase 1–2 — this association is additive and read-mostly.
      */
+    // identity_id is owned by the DB: the V70 BEFORE-INSERT trigger
+    // (ensure_user_identity) assigns it on insert, and account-linking re-points
+    // it via UserRepository.repointIdentity (native @Modifying UPDATE). This
+    // association is read-mostly, so it is NON-writable — otherwise a routine
+    // entity UPDATE (e.g. lastLoginAt) whose in-memory `identity` is still null
+    // (right after a trigger-populated insert, same persistence context) would
+    // flush identity_id=NULL and trip the V70 NOT-NULL constraint.
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "identity_id")
+    @JoinColumn(name = "identity_id", insertable = false, updatable = false)
     private Identity identity;
 
     /**

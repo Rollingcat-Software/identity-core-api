@@ -67,8 +67,17 @@ fivucsas:
   totp:
     enc-key: AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=
     migrate-on-boot: false
+  jwt:
+    # Mint RS256 (prod default since 2026-04-20) in the integration suite. The
+    # `integration` profile auto-generates an ephemeral RSA pair (RsaKeyProvider),
+    # so token minting in @SpringBootTest paths uses the same asymmetric path as
+    # prod. The legacy `jwt.secret` above is only 368 bits — far too short for
+    # HS512 minting (RFC 7518 requires >= 512) — so the previous HS512 default
+    # threw SignatureException at every token mint. allow-hs512 stays true below
+    # so any legacy HS512 fixture token still VERIFIES.
+    default-algo: RS256
 
-# Integration profile: HS512 stays on so legacy fixture tokens still
+# Integration profile: HS512 verification stays on so legacy fixture tokens still
 # round-trip in @SpringBootTest paths; prod-mode is asserted by unit tests.
 app:
   security:

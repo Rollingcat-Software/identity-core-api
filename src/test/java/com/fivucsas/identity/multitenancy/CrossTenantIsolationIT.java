@@ -169,7 +169,9 @@ class CrossTenantIsolationIT {
         jdbc.update("DELETE FROM auth_sessions WHERE tenant_id IN (?, ?, ?)", systemTenant, tenantA, tenantB);
         jdbc.update("DELETE FROM auth_flows WHERE tenant_id IN (?, ?, ?)", systemTenant, tenantA, tenantB);
         jdbc.update("DELETE FROM audit_logs WHERE tenant_id IN (?, ?, ?)", systemTenant, tenantA, tenantB);
-        jdbc.update("DELETE FROM users WHERE tenant_id IN (?, ?, ?)", systemTenant, tenantA, tenantB);
+        // Soft-delete users: the V53 trigger forbids hard DELETE. Seeds use unique
+        // per-run emails/tenants, so leftover soft-deleted rows never collide.
+        jdbc.update("UPDATE users SET deleted_at = NOW() WHERE tenant_id IN (?, ?, ?) AND deleted_at IS NULL", systemTenant, tenantA, tenantB);
         jdbc.update("UPDATE tenants SET deleted_at = NOW() WHERE id IN (?, ?, ?)", systemTenant, tenantA, tenantB);
     }
 
@@ -505,23 +507,39 @@ class CrossTenantIsolationIT {
 
     private UUID seedTenant(String slug) {
         UUID id = UUID.randomUUID();
+        // tenants.name + tenants.slug are UNIQUE, and tearDown only SOFT-deletes
+        // (the V53 trigger forbids hard-delete), so a fixed name/slug collides on
+        // the NEXT @Test's setUp. Suffix both with the row id to stay unique
+        // across methods while keeping the human-readable prefix.
+        String unique = slug + "-" + id.toString().substring(0, 8);
         jdbc.update(
                 "INSERT INTO tenants (id, name, slug, contact_email, status, max_users, " +
                 "biometric_enabled, session_timeout_minutes, refresh_token_validity_days, " +
                 "is_active, created_at, updated_at) " +
                 "VALUES (?, ?, ?, ?, 'ACTIVE', 100, true, 30, 7, true, NOW(), NOW())",
-                id, "ISO " + slug, slug, slug + "@example.com");
+                id, "ISO " + unique, unique, unique + "@example.com");
         return id;
     }
 
     private UUID seedUser(UUID tenantId, String email, String userType) {
         UUID id = UUID.randomUUID();
+        // users.identity_id is NOT NULL since V70. Seed an identity explicitly
+        // (don't rely on the BEFORE-INSERT trigger) so a later Hibernate UPDATE
+        // of this row never trips the constraint.
+        UUID identityId = seedIdentity("ISO Test");
         jdbc.update(
-                "INSERT INTO users (id, tenant_id, email, password_hash, first_name, last_name, " +
+                "INSERT INTO users (id, tenant_id, identity_id, email, password_hash, first_name, last_name, " +
                 "user_type, status, is_active, created_at, updated_at) " +
-                "VALUES (?, ?, ?, '$2a$10$dummyhashfortesting.................................', " +
+                "VALUES (?, ?, ?, ?, '$2a$10$dummyhashfortesting.................................', " +
                 "'ISO', 'Test', ?, 'ACTIVE', true, NOW(), NOW())",
-                id, tenantId, email, userType);
+                id, tenantId, identityId, email, userType);
+        return id;
+    }
+
+    private UUID seedIdentity(String displayName) {
+        UUID id = UUID.randomUUID();
+        jdbc.update("INSERT INTO identities (id, display_name, status, created_at, updated_at) "
+                + "VALUES (?, ?, 'ACTIVE', NOW(), NOW())", id, displayName);
         return id;
     }
 
