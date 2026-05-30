@@ -172,6 +172,12 @@ with the runtime path. The endpoint accepts EITHER `?tenantId=<uuid>` (dashboard
 widget) OR `?clientId=<oidc-client-id>` (the hosted verify.fivucsas.com surface,
 which only carries the OIDC client_id → tenant resolved via `oauth2_clients`);
 exactly one is required, and an unknown/tenant-less client_id returns 404.
+The response also carries **`engineActive`** (PR #168) — `true` when the engine
+is ON for the tenant (master switch or per-tenant canary). It is the single
+signal the web login UI reads to switch on the **identifier-first** experience
+(collect identity on screen 1, present password + every factor afterward);
+`engineActive=false` keeps the legacy single-screen email+password form, so the
+UI redesign reverts with the env flag and no web redeploy.
 
 ### Operator reality — 2026-05-30 stabilize-&-harden backlog (P1-1 + P1-5, DEPLOYED)
 
