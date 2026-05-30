@@ -825,7 +825,22 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ErrorResponse> handleHttpMessageNotReadable(
             HttpMessageNotReadableException ex,
             HttpServletRequest request) {
-        log.warn("Malformed request body: {}", ex.getMessage());
+        // Diagnostic (2026-05-30): distinguish a TRUNCATED body (client aborted the
+        // request mid-send — the cause chain contains an IOException like
+        // "I/O error while reading input message") from a genuine JSON parse error.
+        // Logs the declared Content-Length and HTTP protocol so we can tell whether
+        // a client (e.g. mobile OkHttp/HTTP-2 stale-connection) sent fewer bytes than
+        // it promised vs. sent malformed JSON. No body is read/consumed here.
+        boolean truncated = false;
+        for (Throwable t = ex; t != null; t = t.getCause()) {
+            if (t instanceof java.io.IOException) { truncated = true; break; }
+        }
+        log.warn("Malformed request body: kind={}, method={}, path={}, protocol={}, "
+                        + "contentLength={}, contentType={}, remote={}, msg={}",
+                truncated ? "TRUNCATED_OR_IO" : "PARSE_ERROR",
+                request.getMethod(), request.getRequestURI(), request.getProtocol(),
+                request.getHeader("Content-Length"), request.getContentType(),
+                request.getRemoteAddr(), ex.getMessage());
 
         ErrorResponse error = ErrorResponse.of(
                 HttpStatus.BAD_REQUEST.value(),
