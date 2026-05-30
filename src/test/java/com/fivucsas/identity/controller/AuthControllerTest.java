@@ -59,6 +59,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultHandlers.print;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
@@ -911,5 +912,24 @@ class AuthControllerTest {
 
         verify(auditLogPort, times(1)).logTwoFactorFailed(
                 eq(userId.toString()), eq("FINGERPRINT"), anyString(), anyString(), anyString());
+    }
+
+    // --- login-config contract (task #16 B/C) ---
+
+    @Test
+    @DisplayName("GET /auth/login-config with neither tenantId nor clientId → 400 (not 500)")
+    void loginConfigRequiresAnIdentifier() throws Exception {
+        mockMvc.perform(get("/api/v1/auth/login-config"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @DisplayName("GET /auth/login-config?clientId=unknown → 404 (not 500)")
+    void loginConfigUnknownClientIs404() throws Exception {
+        when(loginConfigService.getLoginConfigByClientId("does-not-exist"))
+                .thenReturn(java.util.Optional.empty());
+
+        mockMvc.perform(get("/api/v1/auth/login-config").param("clientId", "does-not-exist"))
+                .andExpect(status().isNotFound());
     }
 }
