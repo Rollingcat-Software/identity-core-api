@@ -47,6 +47,19 @@ public class AuthMethod {
     @Builder.Default
     private boolean requiresEnrollment = false;
 
+    /**
+     * True when this method can start a login without an up-front identifier
+     * (email/username) — the user is resolved <em>from</em> the factor itself.
+     * Set for PASSKEY (discoverable WebAuthn), APPROVE_LOGIN / QR_CODE
+     * (cross-device approval), and HARDWARE_KEY only when it is a discoverable
+     * resident key. Drives the {@code usernameless} flag in {@code login-config}
+     * and lets the engine skip the prior-enrollment dead-end check for a
+     * usernameless Layer-1 step (task #16 A/F).
+     */
+    @Column(name = "supports_usernameless", nullable = false)
+    @Builder.Default
+    private boolean supportsUsernameless = false;
+
     @Column(name = "is_active", nullable = false)
     @Builder.Default
     private boolean isActive = true;

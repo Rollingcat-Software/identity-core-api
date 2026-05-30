@@ -1,6 +1,8 @@
 package com.fivucsas.identity.infrastructure.approvelogin;
 
 import com.fivucsas.identity.application.port.output.TokenGenerationPort;
+import com.fivucsas.identity.application.service.UsernamelessLoginFlowService;
+import com.fivucsas.identity.domain.model.auth.AuthMethodType;
 import com.fivucsas.identity.entity.RefreshToken;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.repository.UserRepository;
@@ -58,6 +60,7 @@ public class ApproveLoginService {
     private final TokenGenerationPort tokenGenerator;
     private final RefreshTokenService refreshTokenService;
     private final UserRepository userRepository;
+    private final UsernamelessLoginFlowService usernamelessLoginFlowService;
 
     static final Duration SESSION_TTL = Duration.ofMinutes(2);
     private static final Duration APPROVED_TTL = Duration.ofMinutes(2);
@@ -139,11 +142,24 @@ public class ApproveLoginService {
         response.put("status", status);
 
         if (STATUS_APPROVED.equals(status)) {
-            response.put("accessToken", data.get("accessToken"));
-            response.put("refreshToken", data.get("refreshToken"));
-            String expiresIn = (String) data.get("expiresIn");
-            response.put("expiresIn", expiresIn != null ? Long.parseLong(expiresIn) : 0L);
-            response.put("role", data.get("role"));
+            // When the tenant flow needs more steps the approver stashed an
+            // mfaSessionToken instead of tokens — surface MFA_PENDING so the
+            // polling client steps up via /api/v1/auth/mfa/step (task #16 B).
+            if ("true".equals(data.get("mfaRequired"))) {
+                response.put("mfaRequired", true);
+                response.put("mfaSessionToken", data.get("mfaSessionToken"));
+                String currentStep = (String) data.get("currentStep");
+                String totalSteps = (String) data.get("totalSteps");
+                response.put("currentStep", currentStep != null ? Integer.parseInt(currentStep) : 2);
+                response.put("totalSteps", totalSteps != null ? Integer.parseInt(totalSteps) : 0);
+                response.put("role", data.get("role"));
+            } else {
+                response.put("accessToken", data.get("accessToken"));
+                response.put("refreshToken", data.get("refreshToken"));
+                String expiresIn = (String) data.get("expiresIn");
+                response.put("expiresIn", expiresIn != null ? Long.parseLong(expiresIn) : 0L);
+                response.put("role", data.get("role"));
+            }
         }
 
         return response;
@@ -254,24 +270,42 @@ public class ApproveLoginService {
         String role = user.getRoleNames().stream()
                 .findFirst()
                 .orElseGet(() -> user.getUserType() != null ? user.getUserType().name() : "USER");
-        String accessToken = tokenGenerator.generateAccessToken(user.getEmail(), List.of("approve_login"));
-        RefreshToken refreshToken = refreshTokenService.createRefreshToken(user, ip, userAgent);
-        long expiresIn = tokenGenerator.getExpirationMillis() / 1000;
+
+        // Bridge the proven approve-login factor (a usernameless Layer-1) INTO
+        // the tenant's config-driven APP_LOGIN flow (task #16 B). If the tenant
+        // configured Layer-2+ steps we stash an mfaSessionToken on the session
+        // (NOT tokens); the initiator polls, sees MFA_PENDING, and completes the
+        // remaining steps via /api/v1/auth/mfa/step. Only a 1-step / no-flow
+        // tenant mints tokens here.
+        UsernamelessLoginFlowService.FlowOutcome outcome =
+                usernamelessLoginFlowService.continueAfterLayer1(
+                        user, AuthMethodType.APPROVE_LOGIN, "approve_login", ip, userAgent, null);
 
         Map<String, String> updates = new HashMap<>();
-        updates.put("status", STATUS_APPROVED);
-        updates.put("accessToken", accessToken);
-        updates.put("refreshToken", refreshToken.getToken());
-        updates.put("role", role);
-        updates.put("expiresIn", String.valueOf(expiresIn));
+        if (outcome.mfaPending()) {
+            updates.put("status", STATUS_APPROVED);
+            updates.put("mfaRequired", "true");
+            updates.put("mfaSessionToken", outcome.mfaSessionToken());
+            updates.put("currentStep", String.valueOf(outcome.currentStep()));
+            updates.put("totalSteps", String.valueOf(outcome.totalSteps()));
+            updates.put("role", role);
+        } else {
+            updates.put("status", STATUS_APPROVED);
+            updates.put("accessToken", outcome.accessToken());
+            updates.put("refreshToken", outcome.refreshToken());
+            updates.put("role", role);
+            updates.put("expiresIn", String.valueOf(outcome.expiresIn() / 1000));
+        }
         redisTemplate.opsForHash().putAll(key, updates);
         redisTemplate.expire(key, APPROVED_TTL);
         redisTemplate.opsForSet().remove(USER_INDEX_PREFIX + approverId, sessionId);
 
-        log.info("Approve-login session approved: {} by {}", sessionId, approverId);
+        log.info("Approve-login session approved: {} by {} (mfaPending={})",
+                sessionId, approverId, outcome.mfaPending());
 
         response.put("status", STATUS_APPROVED);
-        response.put("message", "Login approved");
+        response.put("message", outcome.mfaPending() ? "Login approved — additional verification required"
+                : "Login approved");
         return response;
     }
 }

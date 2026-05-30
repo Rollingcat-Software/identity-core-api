@@ -58,18 +58,26 @@ import java.util.Set;
 public class VerifyMfaStepService {
 
     /** RFC 8176 Authentication Methods References mapping. */
-    private static final Map<AuthMethodType, String> AMR_VALUES = Map.of(
-            AuthMethodType.PASSWORD, "pwd",
-            AuthMethodType.EMAIL_OTP, "otp",
-            AuthMethodType.SMS_OTP, "sms",
-            AuthMethodType.TOTP, "otp",
-            AuthMethodType.FACE, "face",
-            AuthMethodType.VOICE, "voice",
-            AuthMethodType.FINGERPRINT, "fpt",
-            AuthMethodType.HARDWARE_KEY, "hwk",
-            AuthMethodType.QR_CODE, "mca",
-            AuthMethodType.NFC_DOCUMENT, "swk"
-    );
+    private static final Map<AuthMethodType, String> AMR_VALUES;
+    static {
+        Map<AuthMethodType, String> m = new EnumMap<>(AuthMethodType.class);
+        m.put(AuthMethodType.PASSWORD, "pwd");
+        m.put(AuthMethodType.EMAIL_OTP, "otp");
+        m.put(AuthMethodType.SMS_OTP, "sms");
+        m.put(AuthMethodType.TOTP, "otp");
+        m.put(AuthMethodType.FACE, "face");
+        m.put(AuthMethodType.VOICE, "voice");
+        m.put(AuthMethodType.FINGERPRINT, "fpt");
+        m.put(AuthMethodType.HARDWARE_KEY, "hwk");
+        // PASSKEY is the discoverable mode of WebAuthn → same "hwk" amr (task #16 G).
+        m.put(AuthMethodType.PASSKEY, "hwk");
+        m.put(AuthMethodType.QR_CODE, "mca");
+        // APPROVE_LOGIN is the number-matching mode of the QR cross-device
+        // approval method → same "mca" multi-channel-authentication amr.
+        m.put(AuthMethodType.APPROVE_LOGIN, "mca");
+        m.put(AuthMethodType.NFC_DOCUMENT, "swk");
+        AMR_VALUES = Collections.unmodifiableMap(m);
+    }
 
     private final Map<AuthMethodType, VerifyMfaStepHandler> handlers;
     private final MfaSessionRepository mfaSessionRepository;

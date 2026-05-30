@@ -81,6 +81,11 @@ public class SecurityConfig {
                                 "/api/v1/auth/reset-password"
                         ).permitAll()
 
+                        // Public tenant login-flow config (task #16 C). The login
+                        // surface fetches Layer-1 methods + step count BEFORE login;
+                        // exposes no internal IDs. GET only.
+                        .requestMatchers(HttpMethod.GET, "/api/v1/auth/login-config").permitAll()
+
                         // N-step MFA flow (public — uses session token, not JWT)
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/mfa/step").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/mfa/send-otp").permitAll()

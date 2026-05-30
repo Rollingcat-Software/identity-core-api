@@ -3,8 +3,10 @@ package com.fivucsas.identity.controller;
 import com.fivucsas.identity.application.dto.command.RegisterDeviceCommand;
 import com.fivucsas.identity.application.dto.response.DeviceResponse;
 import com.fivucsas.identity.application.port.input.ManageDeviceUseCase;
+import com.fivucsas.identity.application.service.UsernamelessLoginFlowService;
 import com.fivucsas.identity.application.service.WebAuthnCredentialService;
 import com.fivucsas.identity.domain.exception.UserNotFoundException;
+import com.fivucsas.identity.domain.model.auth.AuthMethodType;
 import com.fivucsas.identity.application.port.output.WebAuthnCredentialRepositoryPort;
 import com.fivucsas.identity.domain.repository.UserRepository;
 import com.fivucsas.identity.entity.User;
@@ -55,6 +57,7 @@ public class DeviceController {
     private final TenantScopeResolver tenantScopeResolver;
     private final TokenGenerationPort tokenGenerator;
     private final RefreshTokenService refreshTokenService;
+    private final UsernamelessLoginFlowService usernamelessLoginFlowService;
 
     // --- /api/v1/devices endpoints ---
 
@@ -621,19 +624,32 @@ public class DeviceController {
 
         User user = credential.getUser();
 
-        // Mint a session the same way a completed single-factor login does:
-        // real access token (amr=webauthn) + persisted rotating refresh token.
         String ip = clientIp(httpRequest);
         String userAgent = httpRequest.getHeader("User-Agent");
-        String accessToken = tokenGenerator.generateAccessToken(user.getEmail(), List.of("webauthn"));
-        RefreshToken refreshToken = refreshTokenService.createRefreshToken(user, ip, userAgent);
         UserResponse userResponse = UserResponseMapper.toResponse(user);
+
+        // Bridge the proven passkey (a usernameless Layer-1 factor) INTO the
+        // tenant's config-driven APP_LOGIN flow (task #16 B). If the tenant
+        // configured Layer-2+ steps we do NOT mint tokens here — we open an
+        // MfaSession (currentStep=2, completedMethods=[PASSKEY]) and return
+        // MFA_PENDING so the client must complete the remaining steps via
+        // /api/v1/auth/mfa/step. Only a 1-step (or no-flow) tenant mints now.
+        UsernamelessLoginFlowService.FlowOutcome outcome =
+                usernamelessLoginFlowService.continueAfterLayer1(
+                        user, AuthMethodType.PASSKEY, "webauthn", ip, userAgent, null);
+
+        if (outcome.mfaPending()) {
+            log.info("WebAuthn passkey (usernameless) Layer-1 verified, MFA pending for user: {}, credential: {}",
+                    user.getEmail(), credentialId);
+            return ResponseEntity.ok(AuthenticationResponse.ofMfaPending(
+                    outcome.mfaSessionToken(), outcome.totalSteps(), outcome.currentStep(),
+                    null, List.of(), userResponse, List.of(AuthMethodType.PASSKEY.name())));
+        }
 
         log.info("WebAuthn passkey (usernameless) login successful for user: {}, credential: {}",
                 user.getEmail(), credentialId);
-
         return ResponseEntity.ok(AuthenticationResponse.of(
-                accessToken, refreshToken.getToken(), tokenGenerator.getExpirationMillis(), userResponse));
+                outcome.accessToken(), outcome.refreshToken(), outcome.expiresIn(), userResponse));
     }
 
     // --- Phase 2(d): push-token registration for approve-login ---

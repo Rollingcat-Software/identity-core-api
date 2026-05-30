@@ -1,6 +1,8 @@
 package com.fivucsas.identity.infrastructure.approvelogin;
 
 import com.fivucsas.identity.application.port.output.TokenGenerationPort;
+import com.fivucsas.identity.application.service.UsernamelessLoginFlowService;
+import com.fivucsas.identity.domain.model.auth.AuthMethodType;
 import com.fivucsas.identity.entity.RefreshToken;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.entity.UserStatus;
@@ -47,6 +49,7 @@ class ApproveLoginServiceTest {
     @Mock private TokenGenerationPort tokenGenerator;
     @Mock private RefreshTokenService refreshTokenService;
     @Mock private UserRepository userRepository;
+    @Mock private UsernamelessLoginFlowService usernamelessLoginFlowService;
 
     private ApproveLoginService service;
 
@@ -60,7 +63,8 @@ class ApproveLoginServiceTest {
     @BeforeEach
     @SuppressWarnings("unchecked")
     void setUp() {
-        service = new ApproveLoginService(redisTemplate, tokenGenerator, refreshTokenService, userRepository);
+        service = new ApproveLoginService(redisTemplate, tokenGenerator, refreshTokenService,
+                userRepository, usernamelessLoginFlowService);
 
         lenient().when(redisTemplate.opsForHash()).thenReturn((HashOperations) hashOps);
         lenient().when(redisTemplate.opsForSet()).thenReturn(setOps);
@@ -161,10 +165,13 @@ class ApproveLoginServiceTest {
             String sessionId = startSession();
             String number = matchNumberFor(sessionId);
 
-            when(tokenGenerator.generateAccessToken(eq("user@example.com"), any())).thenReturn("access-tok");
-            when(tokenGenerator.getExpirationMillis()).thenReturn(900_000L);
-            RefreshToken rt = RefreshToken.builder().token("refresh-tok").build();
-            when(refreshTokenService.createRefreshToken(any(), anyString(), any())).thenReturn(rt);
+            // No Layer-2+ flow → the bridge mints tokens directly (expiresIn is
+            // in millis; getSession divides by 1000 → 900L).
+            when(usernamelessLoginFlowService.continueAfterLayer1(
+                    eq(user), eq(AuthMethodType.APPROVE_LOGIN), eq("approve_login"),
+                    eq("5.6.7.8"), eq("ua"), eq(null)))
+                    .thenReturn(UsernamelessLoginFlowService.FlowOutcome
+                            .minted("access-tok", "refresh-tok", 900_000L));
 
             Map<String, Object> decision = service.decide(sessionId, userId, "allow", number, "5.6.7.8", "ua");
             assertThat(decision).containsEntry("status", "APPROVED");
@@ -174,6 +181,30 @@ class ApproveLoginServiceTest {
             assertThat(poll).containsEntry("accessToken", "access-tok");
             assertThat(poll).containsEntry("refreshToken", "refresh-tok");
             assertThat(poll).containsEntry("expiresIn", 900L);
+        }
+
+        @Test
+        @DisplayName("allow + Layer-2 flow returns MFA_PENDING instead of tokens")
+        void allowWithFlowReturnsMfaPending() {
+            String sessionId = startSession();
+            String number = matchNumberFor(sessionId);
+
+            when(usernamelessLoginFlowService.continueAfterLayer1(
+                    eq(user), eq(AuthMethodType.APPROVE_LOGIN), eq("approve_login"),
+                    eq("5.6.7.8"), eq("ua"), eq(null)))
+                    .thenReturn(UsernamelessLoginFlowService.FlowOutcome
+                            .pending("mfa-session-tok", 2, 2));
+
+            Map<String, Object> decision = service.decide(sessionId, userId, "allow", number, "5.6.7.8", "ua");
+            assertThat(decision).containsEntry("status", "APPROVED");
+
+            Map<String, Object> poll = service.getSession(sessionId);
+            assertThat(poll).containsEntry("status", "APPROVED");
+            assertThat(poll).containsEntry("mfaRequired", true);
+            assertThat(poll).containsEntry("mfaSessionToken", "mfa-session-tok");
+            assertThat(poll).containsEntry("currentStep", 2);
+            assertThat(poll).containsEntry("totalSteps", 2);
+            assertThat(poll).doesNotContainKey("accessToken");
         }
 
         @Test

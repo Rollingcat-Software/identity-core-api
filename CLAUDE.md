@@ -143,6 +143,12 @@ V71: ROOT role granted all 48 permissions — backfills the full permission set 
      the renamed ROOT role (post-V69) so the platform-owner tier holds every
      permission grant. Idempotent (INSERT … ON CONFLICT DO NOTHING on
      role_permissions). See docs/IDENTITY_ROLE_UNIFICATION.md.
+V72: webauthn_credentials discoverable + user_handle columns (usernameless passkey).
+V73: config-driven login engine — adds AuthMethodType PASSKEY + APPROVE_LOGIN,
+     seeds their auth_methods rows, adds auth_methods.supports_usernameless
+     (TRUE for PASSKEY/APPROVE_LOGIN/QR_CODE), and widens chk_auth_method_type
+     (preserving the full V28 list). PASSKEY = discoverable mode of WebAuthn;
+     APPROVE_LOGIN = number-matching mode of the QR cross-device method.
 
 **V34-V60 applied in prod. Last rebuild included V60 (drop refresh_tokens.token plaintext).**
 

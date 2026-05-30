@@ -6,6 +6,7 @@ import com.fivucsas.identity.application.dto.command.RefreshTokenCommand;
 import com.fivucsas.identity.application.dto.command.RegisterUserCommand;
 import com.fivucsas.identity.application.dto.query.GetUserByEmailQuery;
 import com.fivucsas.identity.application.dto.response.AuthenticationResponse;
+import com.fivucsas.identity.application.dto.response.LoginConfigResponse;
 import com.fivucsas.identity.application.dto.response.UserResponse;
 import com.fivucsas.identity.application.port.input.*;
 import com.fivucsas.identity.application.port.output.AuthFlowRepositoryPort;
@@ -104,6 +105,7 @@ public class AuthController {
     private final com.fivucsas.identity.application.port.output.WebAuthnCredentialRepositoryPort webAuthnCredentialRepository;
     private final com.fivucsas.identity.application.port.output.AuditLogPort auditLogPort;
     private final com.fivucsas.identity.application.service.mfa.VerifyMfaStepService verifyMfaStepService;
+    private final com.fivucsas.identity.application.service.LoginConfigService loginConfigService;
 
     private static final String EMAIL_VERIFY_OTP_PREFIX = "email-verify:";
     private static final String PHONE_VERIFY_OTP_PREFIX = "phone-verify:";
@@ -149,6 +151,19 @@ public class AuthController {
         AuthenticationResponse response = authenticateUserUseCase.execute(command);
 
         return ResponseEntity.ok(mapToAuthResponse(response));
+    }
+
+    /**
+     * Public, unauthenticated description of a tenant's default APP_LOGIN flow
+     * (task #16 C). The login surface calls this BEFORE rendering to decide
+     * which Layer-1 affordance to show (password field vs. passkey vs. approve-
+     * on-another-device vs. an identifier-first OTP/biometric step) and how many
+     * steps to expect. Exposes no internal IDs — see {@link LoginConfigResponse}.
+     */
+    @GetMapping("/login-config")
+    @Operation(summary = "Public tenant login-flow config (Layer-1 methods + step count)")
+    public ResponseEntity<LoginConfigResponse> loginConfig(@RequestParam("tenantId") UUID tenantId) {
+        return ResponseEntity.ok(loginConfigService.getLoginConfig(tenantId));
     }
 
     @PostMapping("/refresh")

@@ -178,15 +178,40 @@ public class ManageAuthFlowService implements ManageAuthFlowUseCase {
         // Each requirement = the set of methods that satisfy one required step.
         // SEQUENTIAL → size 1; CHOICE → the alternatives (user needs >=1).
         // PASSWORD is always available so it never constitutes a lockout risk.
+        // Usernameless factors (PASSKEY/APPROVE_LOGIN/QR_CODE) likewise never
+        // count as a lockout risk (task #16 F): the factor proves its own
+        // enrollment, so requiring it cannot strand a user the way an
+        // un-enrolled OTP/biometric step can — they're excluded from the
+        // requirement set exactly like PASSWORD.
+        Set<AuthMethodType> usernamelessTypes = usernamelessMethodTypes();
         List<Set<AuthMethodType>> requirements = new java.util.ArrayList<>();
+        boolean hasPasswordStep = false;
+        boolean everyRequiredStepIsSoleUsernameless = true;
+        boolean hasRequiredStep = false;
         for (AuthFlowStep step : flow.getSteps()) {
             if (!step.isRequired()) continue;
-            Set<AuthMethodType> opts = step.getAvailableMethods().stream()
-                    .map(AuthMethod::getType)
+            hasRequiredStep = true;
+            List<AuthMethodType> stepTypes = step.getAvailableMethods().stream()
+                    .map(AuthMethod::getType).toList();
+            if (stepTypes.contains(AuthMethodType.PASSWORD)) hasPasswordStep = true;
+            // A step provides recovery breadth unless it is a SINGLE usernameless
+            // factor with no alternative.
+            boolean soleUsernameless = stepTypes.size() == 1
+                    && usernamelessTypes.contains(stepTypes.get(0));
+            if (!soleUsernameless) everyRequiredStepIsSoleUsernameless = false;
+
+            Set<AuthMethodType> opts = stepTypes.stream()
                     .filter(m -> m != AuthMethodType.PASSWORD)
+                    .filter(m -> !usernamelessTypes.contains(m))
                     .collect(java.util.stream.Collectors.toCollection(java.util.LinkedHashSet::new));
             if (!opts.isEmpty()) requirements.add(opts);
         }
+
+        // No usable recovery: the flow has no PASSWORD step and every required
+        // step is a single usernameless factor with no alternative — losing the
+        // device locks the user out with no fallback (task #16 F).
+        boolean noRecoveryWarning =
+                hasRequiredStep && !hasPasswordStep && everyRequiredStepIsSoleUsernameless;
 
         List<UUID> activeUserIds = userRepository.findIdsByTenantId(tenantId);
         long activeUsers = activeUserIds.size();
@@ -224,7 +249,22 @@ public class ManageAuthFlowService implements ManageAuthFlowUseCase {
 
         return new AuthFlowDefaultImpactResponse(
                 flow.getId().toString(), flow.getName(), flow.getOperationType().name(),
-                activeUsers, usersAtRisk, coverage);
+                activeUsers, usersAtRisk, coverage, noRecoveryWarning);
+    }
+
+    /**
+     * The set of {@link AuthMethodType}s flagged supports_usernameless in
+     * auth_methods. Used by {@link #computeDefaultImpact} to exclude
+     * usernameless factors from lockout-risk accounting (task #16 F). Resolved
+     * from the DB so it stays in sync with the V73 seed rather than hardcoding
+     * the list in two places.
+     */
+    private Set<AuthMethodType> usernamelessMethodTypes() {
+        return authMethodRepository.findAllByIsActiveTrue().stream()
+                .filter(AuthMethod::isSupportsUsernameless)
+                .map(AuthMethod::getType)
+                .collect(java.util.stream.Collectors.toCollection(
+                        () -> java.util.EnumSet.noneOf(AuthMethodType.class)));
     }
 
     /**
