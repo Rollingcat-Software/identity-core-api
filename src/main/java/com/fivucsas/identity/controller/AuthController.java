@@ -40,7 +40,6 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
-import org.springframework.web.server.ResponseStatusException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -172,14 +171,13 @@ public class AuthController {
         if (clientId != null && !clientId.isBlank()) {
             return loginConfigService.getLoginConfigByClientId(clientId)
                     .map(ResponseEntity::ok)
-                    .orElseThrow(() -> new ResponseStatusException(
-                            HttpStatus.NOT_FOUND, "Unknown or tenant-less OAuth2 client"));
+                    .orElseThrow(() -> new com.fivucsas.identity.exception.ResourceNotFoundException(
+                            "Unknown or tenant-less OAuth2 client"));
         }
         if (tenantId != null) {
             return ResponseEntity.ok(loginConfigService.getLoginConfig(tenantId));
         }
-        throw new ResponseStatusException(
-                HttpStatus.BAD_REQUEST, "Either tenantId or clientId is required");
+        throw new IllegalArgumentException("Either tenantId or clientId is required");
     }
 
     @PostMapping("/refresh")
