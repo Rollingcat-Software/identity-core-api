@@ -50,8 +50,7 @@ BEGIN
 END;
 $$;
 
+-- Single string literal — `'a' || 'b'` is a syntax error in a COMMENT IS clause
+-- (would fail a from-zero run; the previous `||` form had never executed).
 COMMENT ON FUNCTION ensure_audit_logs_partition(date) IS
-    'Creates the monthly audit_logs partition for the given target_month if missing. '
-    || 'Schedule monthly via cron (user action): '
-    || 'SELECT ensure_audit_logs_partition(date_trunc(''month'', now() + interval ''2 months'')::date); '
-    || 'Companion to V40 (IN-H5).';
+    'Creates the monthly audit_logs partition for the given target_month if missing. Schedule monthly via cron (user action): SELECT ensure_audit_logs_partition(date_trunc(''month'', now() + interval ''2 months'')::date); Companion to V40 (IN-H5).';

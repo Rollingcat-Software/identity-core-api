@@ -14,11 +14,19 @@ Stood up 2026-05-29 (roadmap P1-2) to run E2E / adversarial tenant-isolation /
   + `.env.staging` (gitignored — secrets).
 
 ## Why the DB is CLONED, not migrated from scratch
-A from-zero Flyway run **fails**: `V29__add_email_otp_to_default_login_flow.sql`
-inserts an `auth_flow_steps` row referencing a default-login-flow that doesn't
+> **DR fix landed 2026-05-30 (P1-5):** the from-zero failure described below is
+> now resolved — `V29` resolves the flow/method by natural key, and `V40`/`V41`
+> no longer carry a from-scratch PK-collision / invalid-COMMENT bug. A from-zero
+> `flyway migrate` now reaches V71 cleanly (verified on a throwaway DB). Existing
+> DBs (incl. this staging clone) need a one-time `flyway repair` for the three
+> re-checksummed migrations — see `RUNBOOK_FLYWAY_V29_REPAIR.md`. Cloning is no
+> longer strictly required for staging, but is still fine.
+
+Historically, a from-zero Flyway run **failed**:
+`V29__add_email_otp_to_default_login_flow.sql`
+inserted an `auth_flow_steps` row referencing a default-login-flow that doesn't
 exist in a from-scratch chain → `auth_flow_steps_auth_flow_id_fkey` violation
-(it assumes a flow created out-of-band on prod). This is a real DR risk tracked
-separately. So staging is seeded by cloning prod's **schema + config/seed**
+(it assumed a flow created out-of-band on prod). So staging is seeded by cloning prod's **schema + config/seed**
 (PII-free): all DDL, `flyway_schema_history` (so Flyway sees V64, no re-migrate),
 and the config tables (roles, permissions, auth_methods, tenants, auth_flows,
 auth_flow_steps, tenant_email_domains, …) — but **no users/enrollments/audit**.
@@ -59,4 +67,6 @@ and only deploy to prod once staging is green. Tear down: `docker compose
 - Staging WEB build (`VITE_API_BASE_URL=http://localhost:18080/api/v1`) + wire
   Playwright E2E (web-app/e2e) to run against staging on PRs (the CI E2E gate the
   roadmap's P1-1 needs).
-- Fix the V29 from-scratch failure so the chain is DR-safe.
+- ~~Fix the V29 from-scratch failure so the chain is DR-safe.~~ **DONE 2026-05-30
+  (P1-5)** — V29 (+ V40/V41 latent from-scratch bugs) fixed; chain reaches V71 from
+  zero. See `RUNBOOK_FLYWAY_V29_REPAIR.md` (existing DBs need one `flyway repair`).

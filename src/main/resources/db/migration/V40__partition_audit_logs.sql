@@ -58,6 +58,16 @@ ALTER TABLE audit_logs RENAME TO audit_logs_legacy;
 
 -- Rename old indexes so they don't clash with the clones we're about to make.
 -- (INCLUDING ALL below would try to create indexes with identical names.)
+-- DR/fresh-DB safety (added 2026-05-30): the legacy table's PRIMARY KEY index is
+-- auto-named `audit_logs_pkey` by V5's inline `id ... PRIMARY KEY`. Index/constraint
+-- backing-index names share the table namespace, so the `ADD CONSTRAINT
+-- audit_logs_pkey` below collides with it on a from-zero chain (`relation
+-- "audit_logs_pkey" already exists`). Rename the legacy PK index out of the way
+-- first. NO-OP on prod: prod's legacy table has no `audit_logs_pkey` index
+-- (its PK predates this exact V5 text / was created out-of-band), so
+-- `IF EXISTS` skips it. Requires the same one-time `flyway repair` as V29 —
+-- see docs/RUNBOOK_FLYWAY_V29_REPAIR.md.
+ALTER INDEX IF EXISTS audit_logs_pkey RENAME TO audit_logs_legacy_pkey;
 ALTER INDEX IF EXISTS idx_audit_tenant RENAME TO idx_audit_legacy_tenant;
 ALTER INDEX IF EXISTS idx_audit_user RENAME TO idx_audit_legacy_user;
 ALTER INDEX IF EXISTS idx_audit_action RENAME TO idx_audit_legacy_action;
@@ -267,9 +277,10 @@ CREATE INDEX IF NOT EXISTS idx_mv_audit_stats_date
 COMMENT ON MATERIALIZED VIEW mv_audit_statistics IS
     'Pre-aggregated audit statistics for analytics dashboards (refresh daily)';
 
+-- NOTE: a COMMENT's IS clause takes a SINGLE string literal — `'a' || 'b'`
+-- concatenation is a syntax error in PostgreSQL (it would fail a from-zero run;
+-- the previously committed `||` form had never actually executed). Single literal:
 COMMENT ON TABLE audit_logs IS
-    'Range-partitioned by created_at (monthly). Pre-created partitions: 2026-01..2026-06 plus audit_logs_legacy covering pre-2026-01. '
-    || 'Schedule ensure_audit_logs_partition() monthly (see V41) to create the next month partition at least 2 months ahead. '
-    || 'PK is (id, created_at) — semantic change from V5 where PK was (id) alone. IN-H5 (AUDIT_2026-04-19).';
+    'Range-partitioned by created_at (monthly). Pre-created partitions: 2026-01..2026-06 plus audit_logs_legacy covering pre-2026-01. Schedule ensure_audit_logs_partition() monthly (see V41) to create the next month partition at least 2 months ahead. PK is (id, created_at) — semantic change from V5 where PK was (id) alone. IN-H5 (AUDIT_2026-04-19).';
 
 COMMIT;
