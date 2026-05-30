@@ -169,7 +169,9 @@ class CrossTenantIsolationIT {
         jdbc.update("DELETE FROM auth_sessions WHERE tenant_id IN (?, ?, ?)", systemTenant, tenantA, tenantB);
         jdbc.update("DELETE FROM auth_flows WHERE tenant_id IN (?, ?, ?)", systemTenant, tenantA, tenantB);
         jdbc.update("DELETE FROM audit_logs WHERE tenant_id IN (?, ?, ?)", systemTenant, tenantA, tenantB);
-        jdbc.update("DELETE FROM users WHERE tenant_id IN (?, ?, ?)", systemTenant, tenantA, tenantB);
+        // Soft-delete users: the V53 trigger forbids hard DELETE. Seeds use unique
+        // per-run emails/tenants, so leftover soft-deleted rows never collide.
+        jdbc.update("UPDATE users SET deleted_at = NOW() WHERE tenant_id IN (?, ?, ?) AND deleted_at IS NULL", systemTenant, tenantA, tenantB);
         jdbc.update("UPDATE tenants SET deleted_at = NOW() WHERE id IN (?, ?, ?)", systemTenant, tenantA, tenantB);
     }
 
