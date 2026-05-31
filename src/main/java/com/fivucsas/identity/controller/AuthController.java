@@ -186,6 +186,30 @@ public class AuthController {
     }
 
     /**
+     * Identifier-first login WITHOUT a password — opens an MFA session at step 1
+     * so the user can satisfy a CHOICE Layer-1 with ANY configured method
+     * (Face / TOTP / Email-OTP / … or password via its step handler), not only
+     * password. Returns an MFA-pending {@link AuthResponse} with the Layer-1
+     * {@code availableMethods} + {@code mfaSessionToken}; the chosen method is
+     * then completed via {@code POST /auth/mfa/step}. Enumeration-safe (decoy on
+     * unknown/ineligible email); gated by the config-driven engine.
+     */
+    @PostMapping("/login/begin")
+    @Operation(summary = "Identifier-first login: open a step-1 MFA session for any configured Layer-1 method (no password up front)")
+    public ResponseEntity<AuthResponse> loginBegin(
+            @Valid @RequestBody LoginPreflightRequest request,
+            HttpServletRequest httpRequest) {
+        log.info("AUDIT: Login begin (identifier-first) — email={}, clientId={}, ip={}",
+                request.getEmail(), request.getClientId(), getClientIP(httpRequest));
+
+        AuthenticationResponse response = authenticateUserUseCase.beginIdentifierLogin(
+                request.getEmail(), request.getClientId(),
+                getClientIP(httpRequest), getUserAgent(httpRequest));
+
+        return ResponseEntity.ok(mapToAuthResponse(response));
+    }
+
+    /**
      * Public, unauthenticated description of a tenant's default APP_LOGIN flow
      * (task #16 C). The login surface calls this BEFORE rendering to decide
      * which Layer-1 affordance to show (password field vs. passkey vs. approve-

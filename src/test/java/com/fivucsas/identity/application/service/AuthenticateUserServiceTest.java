@@ -901,6 +901,53 @@ class AuthenticateUserServiceTest {
         }
 
         @Test
+        @DisplayName("beginIdentifierLogin: opens a step-1 session for the configured Layer-1, no password checked")
+        void beginIdentifierLogin_opensStepOneSession() {
+            UUID tenantId = UUID.randomUUID();
+            User user = tenantUser(tenantId);
+            var emailOtp = method(com.fivucsas.identity.domain.model.auth.AuthMethodType.EMAIL_OTP, false);
+            var loginFlow = flow(tenantId, step(1, emailOtp));
+
+            when(configDrivenLoginPolicy.isEnabledFor(tenantId)).thenReturn(true);
+            when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
+            when(authFlowRepository.findByTenantIdAndIsDefaultTrueAndIsActiveTrueAndOperationType(
+                    eq(tenantId), eq(com.fivucsas.identity.domain.model.auth.OperationType.APP_LOGIN)))
+                    .thenReturn(Optional.of(loginFlow));
+            when(enrollmentHealthService.validateEnrollments(user.getId()))
+                    .thenReturn(java.util.Map.of());
+
+            AuthenticationResponse response = authenticateUserService.beginIdentifierLogin(
+                    "test@example.com", null, "1.1.1.1", "ua");
+
+            assertThat(response.isMfaRequired()).isTrue();
+            assertThat(response.getAccessToken()).isNull();
+            assertThat(response.getCurrentStep()).isEqualTo(1);
+            assertThat(response.getCompletedMethods()).isEmpty();
+            assertThat(response.getMfaSessionToken()).isNotBlank();
+            assertThat(response.getAvailableMethods())
+                    .extracting(com.fivucsas.identity.dto.AvailableMfaMethod::getMethodType)
+                    .contains("EMAIL_OTP");
+            verify(passwordEncoder, never()).matches(any(), any());
+            verify(mfaSessionRepository).save(any());
+        }
+
+        @Test
+        @DisplayName("beginIdentifierLogin: unknown email → decoy (PASSWORD-only, no session persisted)")
+        void beginIdentifierLogin_unknownEmail_returnsDecoy() {
+            when(userRepository.findByEmail("ghost@example.com")).thenReturn(Optional.empty());
+
+            AuthenticationResponse response = authenticateUserService.beginIdentifierLogin(
+                    "ghost@example.com", null, "1.1.1.1", "ua");
+
+            assertThat(response.isMfaRequired()).isTrue();
+            assertThat(response.getAvailableMethods())
+                    .extracting(com.fivucsas.identity.dto.AvailableMfaMethod::getMethodType)
+                    .containsExactly("PASSWORD");
+            verify(mfaSessionRepository, never()).save(any());
+            verify(passwordEncoder, never()).matches(any(), any());
+        }
+
+        @Test
         @DisplayName("Layer-1=PASSWORD with a 2nd step: legacy behavior — password verified, MFA pending at step 2 with PASSWORD completed")
         void passwordLayer1IsUnchanged() {
             UUID tenantId = UUID.randomUUID();

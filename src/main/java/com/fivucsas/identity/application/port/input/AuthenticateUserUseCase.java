@@ -51,4 +51,20 @@ public interface AuthenticateUserUseCase {
      * @return the user's tenant id, or {@code null} if no such user
      */
     java.util.UUID resolveHomeTenantId(String email);
+
+    /**
+     * Begin an identifier-first login WITHOUT a password — opens an MFA session
+     * at step 1 so the user can satisfy a CHOICE Layer-1 with ANY configured
+     * method (Face / TOTP / Email-OTP / … or password via the step handler),
+     * not only password. Returns an MFA-pending {@link AuthenticationResponse}
+     * carrying the Layer-1 {@code availableMethods} (enrollment-filtered) +
+     * {@code mfaSessionToken}; the caller then completes step 1 via
+     * {@code POST /auth/mfa/step}. Gated by the config-driven engine.
+     *
+     * <p>Enumeration-safe: an unknown / ineligible / no-flow identifier yields a
+     * DECOY response (no persisted session — {@code /mfa/step} returns
+     * "invalid session"); no user profile is exposed before a factor is proven.
+     * Tenant-lock mismatch still throws 403.
+     */
+    AuthenticationResponse beginIdentifierLogin(String email, String clientId, String ipAddress, String userAgent);
 }
