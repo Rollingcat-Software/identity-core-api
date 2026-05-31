@@ -87,6 +87,7 @@ public class VerifyMfaStepService {
     private final TokenGenerationPort tokenGenerator;
     private final RefreshTokenService refreshTokenService;
     private final AuditLogPort auditLogPort;
+    private final AvailableMethodsResolver availableMethodsResolver;
 
     public VerifyMfaStepService(
             List<VerifyMfaStepHandler> handlerBeans,
@@ -96,7 +97,8 @@ public class VerifyMfaStepService {
             EnrollmentHealthService enrollmentHealthService,
             TokenGenerationPort tokenGenerator,
             RefreshTokenService refreshTokenService,
-            AuditLogPort auditLogPort) {
+            AuditLogPort auditLogPort,
+            AvailableMethodsResolver availableMethodsResolver) {
         Map<AuthMethodType, VerifyMfaStepHandler> map = new EnumMap<>(AuthMethodType.class);
         for (VerifyMfaStepHandler h : handlerBeans) {
             VerifyMfaStepHandler prior = map.put(h.supports(), h);
@@ -114,6 +116,7 @@ public class VerifyMfaStepService {
         this.tokenGenerator = tokenGenerator;
         this.refreshTokenService = refreshTokenService;
         this.auditLogPort = auditLogPort;
+        this.availableMethodsResolver = availableMethodsResolver;
     }
 
     /**
@@ -384,8 +387,21 @@ public class VerifyMfaStepService {
         // next step never re-offers a just-completed method (e.g. FINGERPRINT
         // appearing in both step-2 and step-3 CHOICE lists).
         Set<String> completedSoFar = new HashSet<>(session.getCompletedMethods());
-        List<AvailableMfaMethod> availableMethods =
-                buildMfaAvailableMethods(nextStep, user, completedSoFar);
+        // DISPLAY list: the FULL step set (shared resolver — correct PASSWORD rule).
+        // Completed methods are NOT filtered out; the client marks them "already used"
+        // from `completedMethods` below. The METHOD_ALREADY_USED guard above is the
+        // actual enforcement, so showing a used method (disabled) leaks nothing.
+        Map<AuthMethodType, Boolean> healthStatus = enrollmentHealthService.validateEnrollments(user.getId());
+        List<AvailableMfaMethod> availableMethods = availableMethodsResolver.build(
+                nextStep,
+                AvailableMethodsResolver.hasPassword(user.getPasswordHash()),
+                healthStatus,
+                user.getPreferred2faMethod());
+        // Internal auto-routing (single-option auto-advance + alternatives) must still
+        // ignore already-completed methods so the flow never re-offers a used factor.
+        List<AvailableMfaMethod> selectable = availableMethods.stream()
+                .filter(m -> !completedSoFar.contains(m.getMethodType()))
+                .collect(java.util.stream.Collectors.toList());
         AuthMethodType nextPrimary = nextStep.getAvailableMethods().stream()
                 .filter(Objects::nonNull)
                 .map(AuthMethod::getType)
@@ -394,7 +410,7 @@ public class VerifyMfaStepService {
                 .orElse(null);
         List<AvailableMfaMethod> alternativeMethods = nextPrimary == null
                 ? List.of()
-                : computeAlternativeMethods(availableMethods, nextPrimary);
+                : computeAlternativeMethods(selectable, nextPrimary);
 
         log.info("AUDIT: MFA step completed — method: {}, step: {}/{}, userId={}, ip={}, userAgent={}",
                 req.method(), nextStepOrder - 1, session.getTotalSteps(), user.getId(),
@@ -434,26 +450,6 @@ public class VerifyMfaStepService {
         }
     }
 
-    private List<AvailableMfaMethod> buildMfaAvailableMethods(
-            AuthFlowStep step, User user, Set<String> alreadyCompleted) {
-        List<AuthMethod> methods = step.getAvailableMethods();
-        Map<AuthMethodType, Boolean> healthStatus =
-                enrollmentHealthService.validateEnrollments(user.getId());
-        String preferred = user.getPreferred2faMethod();
-        return methods.stream()
-                .filter(Objects::nonNull)
-                .filter(m -> !alreadyCompleted.contains(m.getType().name()))
-                .map(m -> AvailableMfaMethod.builder()
-                        .methodType(m.getType().name())
-                        .name(m.getName())
-                        .category(m.getCategory().name())
-                        .enrolled(Boolean.TRUE.equals(healthStatus.get(m.getType()))
-                                || !m.isRequiresEnrollment())
-                        .preferred(m.getType().name().equals(preferred))
-                        .requiresEnrollment(m.isRequiresEnrollment())
-                        .build())
-                .collect(java.util.stream.Collectors.toList());
-    }
 
     private List<AvailableMfaMethod> computeAlternativeMethods(
             List<AvailableMfaMethod> available, AuthMethodType primary) {

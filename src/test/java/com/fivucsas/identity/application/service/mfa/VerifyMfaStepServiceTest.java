@@ -111,7 +111,8 @@ class VerifyMfaStepServiceTest {
         service = new VerifyMfaStepService(
                 List.of(passwordHandler, totpHandler, faceHandler, hardwareKeyHandler, emailOtpHandler),
                 mfaSessionRepository, userRepository, authFlowRepository,
-                enrollmentHealthService, tokenGenerator, refreshTokenService, auditLogPort);
+                enrollmentHealthService, tokenGenerator, refreshTokenService, auditLogPort,
+                new AvailableMethodsResolver());
     }
 
     // ============== Handler dispatch — 4 representative methods ==============

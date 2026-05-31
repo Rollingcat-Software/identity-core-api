@@ -106,6 +106,9 @@ class AuthControllerTest {
     @MockBean
     private GetCurrentUserUseCase getCurrentUserUseCase;
 
+    @MockBean
+    private com.fivucsas.identity.application.service.mfa.AvailableMethodsResolver availableMethodsResolver;
+
     // Security beans needed for context loading
     @MockBean
     private JwtAuthenticationFilter jwtAuthenticationFilter;
