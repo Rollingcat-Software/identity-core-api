@@ -40,7 +40,8 @@ public class VerifyEmailService implements VerifyEmailUseCase {
     @Override
     @Transactional
     public void execute(VerifyEmailCommand command) {
-        log.info("Email verification attempt with token: {}", command.getToken());
+        // Do NOT log the token — it is a bearer credential (would leak into Loki).
+        log.info("Email verification attempt");
 
         // Find user by verification token
         User user = userRepository.findByEmailVerificationToken(command.getToken())
