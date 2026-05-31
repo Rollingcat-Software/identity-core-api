@@ -361,8 +361,14 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
             .map(m -> AvailableMfaMethod.builder()
                 .methodType(m.getType().name())
                 .name(m.getName())
-                .category(m.getCategory().name())
-                .enrolled(Boolean.TRUE.equals(healthStatus.get(m.getType())) || !m.isRequiresEnrollment())
+                // PASSWORD is "enrolled" iff the user has a password hash — it is set
+                // at user creation, not via the biometric enrollment flow, so
+                // EnrollmentHealthService doesn't track it (it returned false →
+                // the Layer-1 picker showed "Not enrolled" for password). Every
+                // other method uses its enrollment health (or needs none).
+                .enrolled(m.getType() == AuthMethodType.PASSWORD
+                        ? user.getPasswordHash() != null && !user.getPasswordHash().isBlank()
+                        : Boolean.TRUE.equals(healthStatus.get(m.getType())) || !m.isRequiresEnrollment())
                 .preferred(m.getType().name().equals(preferred))
                 .requiresEnrollment(m.isRequiresEnrollment())
                 .build())
