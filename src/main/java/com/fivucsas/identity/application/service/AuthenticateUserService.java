@@ -134,44 +134,7 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
         // "This account is not a {{tenant}} member." inline. The tenant
         // identity is already known to the user (they're on the tenant's own
         // hosted login surface) so there is no enumeration leak.
-        if (command.getClientId() != null && !command.getClientId().isBlank()) {
-            try {
-                Optional<OAuth2Client> tenantBoundClient =
-                        oAuth2ClientRepository.findByClientId(command.getClientId());
-                if (tenantBoundClient.isPresent() && tenantBoundClient.get().getTenant() != null) {
-                    UUID clientTenantId = tenantBoundClient.get().getTenant().getId();
-                    UUID systemTenantId = UUID.fromString("00000000-0000-0000-0000-000000000000");
-                    // Only enforce on tenant-scoped clients (system-tenant clients are
-                    // intentionally cross-tenant — e.g. fivucsas-web-dashboard).
-                    if (clientTenantId != null
-                            && !clientTenantId.equals(systemTenantId)
-                            && user.getTenant() != null
-                            && !clientTenantId.equals(user.getTenant().getId())) {
-                        String requiredTenantName = tenantBoundClient.get().getTenant().getName();
-                        if (requiredTenantName == null || requiredTenantName.isBlank()) {
-                            // Fall back to the client's display name, then to client_id.
-                            requiredTenantName = tenantBoundClient.get().getClientName();
-                        }
-                        if (requiredTenantName == null || requiredTenantName.isBlank()) {
-                            requiredTenantName = command.getClientId();
-                        }
-                        log.warn("AUDIT: Login refused — tenant mismatch, email={}, " +
-                                        "userTenant={}, clientTenant={}, clientId={}, ip={}",
-                                command.getEmail(), user.getTenant().getId(), clientTenantId,
-                                command.getClientId(), command.getIpAddress());
-                        auditLogPort.logAuthenticationFailed(command.getEmail(),
-                                command.getIpAddress(),
-                                "Tenant mismatch for OAuth client " + command.getClientId());
-                        throw new TenantMismatchException(requiredTenantName);
-                    }
-                }
-            } catch (TenantMismatchException e) {
-                throw e;
-            } catch (Exception e) {
-                log.warn("Tenant-lock check failed for client '{}': {}",
-                        command.getClientId(), e.getMessage());
-            }
-        }
+        enforceTenantLock(user, command.getClientId(), command.getEmail(), command.getIpAddress());
 
         // Resolve the tenant's configured Layer-1 (step-order 1) method for the
         // default APP_LOGIN flow. Task #16 B: login is now fully config-driven —
@@ -573,5 +536,74 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
             .map(AvailableMfaMethod::getMethodType)
             .findFirst()
             .orElse("EMAIL_OTP");
+    }
+
+    /**
+     * Tenant lock — when the login originates from an OAuth client bound to a
+     * specific tenant (e.g. demo.fivucsas.com → marmara-bys-demo → Marmara), refuse
+     * the login if the user belongs to a DIFFERENT tenant. Throws
+     * {@link TenantMismatchException} (→ HTTP 403 + errorCode TENANT_MISMATCH +
+     * required-tenant display name). System-tenant clients are intentionally
+     * cross-tenant (e.g. the dashboard) and are NOT gated. Extracted so the
+     * password login path AND the identifier-first pre-flight share one
+     * implementation. Non-mismatch failures are swallowed (fail-open to the
+     * regular login path), exactly as the inline gate behaved before extraction.
+     */
+    private void enforceTenantLock(User user, String clientId, String email, String ipAddress) {
+        if (clientId == null || clientId.isBlank()) {
+            return;
+        }
+        try {
+            Optional<OAuth2Client> tenantBoundClient = oAuth2ClientRepository.findByClientId(clientId);
+            if (tenantBoundClient.isPresent() && tenantBoundClient.get().getTenant() != null) {
+                UUID clientTenantId = tenantBoundClient.get().getTenant().getId();
+                UUID systemTenantId = UUID.fromString("00000000-0000-0000-0000-000000000000");
+                // Only enforce on tenant-scoped clients (system-tenant clients are
+                // intentionally cross-tenant — e.g. fivucsas-web-dashboard).
+                if (clientTenantId != null
+                        && !clientTenantId.equals(systemTenantId)
+                        && user.getTenant() != null
+                        && !clientTenantId.equals(user.getTenant().getId())) {
+                    String requiredTenantName = tenantBoundClient.get().getTenant().getName();
+                    if (requiredTenantName == null || requiredTenantName.isBlank()) {
+                        // Fall back to the client's display name, then to client_id.
+                        requiredTenantName = tenantBoundClient.get().getClientName();
+                    }
+                    if (requiredTenantName == null || requiredTenantName.isBlank()) {
+                        requiredTenantName = clientId;
+                    }
+                    log.warn("AUDIT: Login refused — tenant mismatch, email={}, " +
+                                    "userTenant={}, clientTenant={}, clientId={}, ip={}",
+                            email, user.getTenant().getId(), clientTenantId, clientId, ipAddress);
+                    auditLogPort.logAuthenticationFailed(email, ipAddress,
+                            "Tenant mismatch for OAuth client " + clientId);
+                    throw new TenantMismatchException(requiredTenantName);
+                }
+            }
+        } catch (TenantMismatchException e) {
+            throw e;
+        } catch (Exception e) {
+            log.warn("Tenant-lock check failed for client '{}': {}", clientId, e.getMessage());
+        }
+    }
+
+    /**
+     * Identifier-first pre-flight: given an email + tenant-bound clientId, throw
+     * {@link TenantMismatchException} if that email belongs to a DIFFERENT tenant —
+     * WITHOUT verifying any password. Lets the hosted login surface the
+     * "not a {tenant} member" error on the identity (email) step instead of one
+     * step later at the password step. No password is checked and no lockout
+     * counter is touched. An unknown email is a silent no-op (the password step
+     * then returns the normal invalid-credentials response), so this is no more of
+     * an enumeration oracle than the existing password-step gate.
+     */
+    @Override
+    @Transactional(readOnly = true)
+    public void checkTenantEligibility(String email, String clientId) {
+        if (email == null || email.isBlank()) {
+            return;
+        }
+        userRepository.findByEmail(email)
+                .ifPresent(user -> enforceTenantLock(user, clientId, email, null));
     }
 }

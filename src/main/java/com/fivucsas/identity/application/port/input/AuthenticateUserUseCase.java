@@ -24,4 +24,18 @@ public interface AuthenticateUserUseCase {
      * @throws com.fivucsas.identity.domain.exception.UserNotFoundException if user doesn't exist
      */
     AuthenticationResponse execute(AuthenticateUserCommand command);
+
+    /**
+     * Identifier-first pre-flight tenant check. Given an email and a tenant-bound
+     * OAuth clientId, throws {@link com.fivucsas.identity.domain.exception.TenantMismatchException}
+     * (→ HTTP 403 TENANT_MISMATCH) if the email belongs to a DIFFERENT tenant than
+     * the client — WITHOUT verifying any password or touching the lockout counter.
+     * Lets the hosted login surface the "not a {tenant} member" error on the email
+     * step instead of the later password step. Unknown email / non-tenant-bound
+     * client / system-tenant client ⇒ silent no-op.
+     *
+     * @param email    the typed identifier
+     * @param clientId the OAuth client_id of the hosted login surface (may be null)
+     */
+    void checkTenantEligibility(String email, String clientId);
 }

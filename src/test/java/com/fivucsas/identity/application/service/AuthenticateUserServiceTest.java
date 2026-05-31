@@ -556,6 +556,91 @@ class AuthenticateUserServiceTest {
     }
 
     /**
+     * Identifier-first pre-flight ({@code checkTenantEligibility}): surfaces the
+     * tenant-mismatch on the EMAIL step (no password verified, no lockout touched).
+     * Shares {@code enforceTenantLock} with the password path, so behavior matches
+     * the gate above.
+     */
+    @Nested
+    @DisplayName("Pre-flight tenant eligibility (identifier-first)")
+    class PreflightTenantEligibility {
+
+        @Test
+        @DisplayName("Throws TenantMismatchException when email belongs to a different tenant — no password checked")
+        void throwsOnMismatch() {
+            Tenant userTenant = Tenant.builder()
+                    .id(UUID.randomUUID()).name("Fivucsas").status(TenantStatus.ACTIVE).build();
+            Tenant marmaraTenant = Tenant.builder()
+                    .id(UUID.randomUUID()).name("Marmara University").status(TenantStatus.ACTIVE).build();
+            User gmailUser = User.builder()
+                    .id(UUID.randomUUID()).email("alice@gmail.com").passwordHash(VALID_BCRYPT_HASH)
+                    .firstName("Alice").lastName("Doe").status(UserStatus.ACTIVE).tenant(userTenant)
+                    .createdAt(Instant.now()).updatedAt(Instant.now()).build();
+            OAuth2Client marmaraClient = OAuth2Client.builder()
+                    .clientId("marmara-bys-demo").clientName("Marmara BYS").tenant(marmaraTenant).build();
+
+            when(userRepository.findByEmail("alice@gmail.com")).thenReturn(Optional.of(gmailUser));
+            when(oAuth2ClientRepository.findByClientId("marmara-bys-demo"))
+                    .thenReturn(Optional.of(marmaraClient));
+
+            assertThatThrownBy(() ->
+                    authenticateUserService.checkTenantEligibility("alice@gmail.com", "marmara-bys-demo"))
+                    .isInstanceOf(TenantMismatchException.class)
+                    .satisfies(ex -> assertThat(((TenantMismatchException) ex).getRequiredTenant())
+                            .isEqualTo("Marmara University"));
+
+            // No password is ever checked on the pre-flight.
+            verify(passwordEncoder, never()).matches(any(), any());
+        }
+
+        @Test
+        @DisplayName("No throw when the email belongs to the client's tenant")
+        void allowsSameTenant() {
+            Tenant marmaraTenant = Tenant.builder()
+                    .id(UUID.randomUUID()).name("Marmara University").status(TenantStatus.ACTIVE).build();
+            User marmaraUser = User.builder()
+                    .id(UUID.randomUUID()).email("staff@marmara.edu.tr").passwordHash(VALID_BCRYPT_HASH)
+                    .firstName("Staff").lastName("Member").status(UserStatus.ACTIVE).tenant(marmaraTenant)
+                    .createdAt(Instant.now()).updatedAt(Instant.now()).build();
+            OAuth2Client marmaraClient = OAuth2Client.builder()
+                    .clientId("marmara-bys-demo").clientName("Marmara BYS").tenant(marmaraTenant).build();
+
+            when(userRepository.findByEmail("staff@marmara.edu.tr")).thenReturn(Optional.of(marmaraUser));
+            when(oAuth2ClientRepository.findByClientId("marmara-bys-demo"))
+                    .thenReturn(Optional.of(marmaraClient));
+
+            authenticateUserService.checkTenantEligibility("staff@marmara.edu.tr", "marmara-bys-demo");
+            // no exception
+        }
+
+        @Test
+        @DisplayName("Unknown email is a silent no-op (no enumeration beyond the password-step gate)")
+        void unknownEmailNoOp() {
+            when(userRepository.findByEmail("ghost@nowhere.test")).thenReturn(Optional.empty());
+
+            authenticateUserService.checkTenantEligibility("ghost@nowhere.test", "marmara-bys-demo");
+
+            verify(oAuth2ClientRepository, never()).findByClientId(any());
+        }
+
+        @Test
+        @DisplayName("Blank clientId skips the tenant lookup entirely")
+        void blankClientIdNoLookup() {
+            User marmaraUser = User.builder()
+                    .id(UUID.randomUUID()).email("staff@marmara.edu.tr").passwordHash(VALID_BCRYPT_HASH)
+                    .firstName("Staff").lastName("Member").status(UserStatus.ACTIVE)
+                    .tenant(Tenant.builder().id(UUID.randomUUID()).name("Marmara University")
+                            .status(TenantStatus.ACTIVE).build())
+                    .createdAt(Instant.now()).updatedAt(Instant.now()).build();
+            when(userRepository.findByEmail("staff@marmara.edu.tr")).thenReturn(Optional.of(marmaraUser));
+
+            authenticateUserService.checkTenantEligibility("staff@marmara.edu.tr", "");
+
+            verify(oAuth2ClientRepository, never()).findByClientId(any());
+        }
+    }
+
+    /**
      * P0-#8 (INVESTIGATION_MASTER_2026-05-07): tenant suspension gate.
      *
      * <p>Asserts that authentication fails with HTTP 423
