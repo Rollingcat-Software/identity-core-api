@@ -22,10 +22,16 @@ public record AuthFlowStepResponse(
     List<String> alternativeMethodTypes
 ) {
     public static AuthFlowStepResponse from(AuthFlowStep entity) {
+        String primaryType = entity.getAuthMethod() != null && entity.getAuthMethod().getType() != null
+            ? entity.getAuthMethod().getType().name()
+            : null;
         List<String> alternatives = entity.getStepType() == StepType.CHOICE && entity.getAlternativeMethods() != null
             ? entity.getAlternativeMethods().stream()
+                // null-guard: an orphaned/unresolved join row leaves a null method —
+                // skip it rather than NPE the whole auth-flows list (regression fix).
+                .filter(m -> m != null && m.getType() != null)
                 .map(m -> m.getType().name())
-                .filter(t -> entity.getAuthMethod() == null || !t.equals(entity.getAuthMethod().getType().name()))
+                .filter(t -> primaryType == null || !t.equals(primaryType))
                 .toList()
             : List.of();
         return new AuthFlowStepResponse(
