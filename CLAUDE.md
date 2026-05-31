@@ -154,6 +154,15 @@ V73: config-driven login engine — adds AuthMethodType PASSKEY + APPROVE_LOGIN,
      (preserving the full V28 list). PASSKEY = discoverable mode of WebAuthn;
      APPROVE_LOGIN = number-matching mode of the QR cross-device method.
      V73 is ADDITIVE/reversible — safe to leave applied if the image rolls back.
+V74: APPROVE_LOGIN supports_usernameless → false (identifier-first correction).
+V75: make VOICE + GESTURE_LIVENESS active LOGIN auth methods — activates the
+     V16-seeded VOICE row (was is_active=false, so it never showed in
+     GET /api/v1/auth-methods) and seeds GESTURE_LIVENESS, widening
+     chk_auth_method_type to admit GESTURE_LIVENESS (VOICE was already in it).
+     Both supports_usernameless=false (neither can resolve the user from the
+     factor alone). Additive/idempotent/reversible. **Applies on the next api
+     rebuild — operator must rebuild the api container for the dashboard
+     auth-flow builder to see VOICE + GESTURE_LIVENESS.**
 
 **V34-V72 applied in prod. The 2026-05-30 rebuild added V72 (discoverable-passkey columns).**
 

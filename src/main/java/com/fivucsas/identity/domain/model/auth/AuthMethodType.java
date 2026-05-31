@@ -16,6 +16,12 @@ public enum AuthMethodType {
     // number-matching mode of the QR cross-device-approval method (task #16 G).
     PASSKEY,
     APPROVE_LOGIN,
+    // Active liveness challenge (blink / smile / head turn). Seeded as an active
+    // auth_methods row by V75 so the dashboard auth-flow builder can offer it
+    // alongside VOICE; not usernameless (cannot resolve the user from the factor
+    // alone). The @Enumerated(EnumType.STRING) AuthMethod.type mapping REQUIRES
+    // this constant to exist or loading the V75-seeded row would throw.
+    GESTURE_LIVENESS,
     // Verification pipeline step types
     DOCUMENT_SCAN,
     NFC_CHIP_READ,
