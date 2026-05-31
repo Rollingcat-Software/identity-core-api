@@ -67,6 +67,16 @@ public class ConfigDrivenLoginPolicy {
         return tenantId != null && canaryTenantIds.contains(tenantId);
     }
 
+    /**
+     * The GLOBAL master switch state, independent of any tenant. Used by the
+     * platform (no-tenant) login surface — the dashboard's own cross-tenant login
+     * — which has no single tenant to consult, so it follows the global flag only
+     * (per-tenant canary is irrelevant to it).
+     */
+    public boolean isGloballyEnabled() {
+        return globallyEnabled;
+    }
+
     private static Set<UUID> parseTenantIds(String csv) {
         Set<UUID> ids = new LinkedHashSet<>();
         if (csv == null || csv.isBlank()) {

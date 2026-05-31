@@ -201,7 +201,11 @@ public class AuthController {
         if (tenantId != null) {
             return ResponseEntity.ok(loginConfigService.getLoginConfig(tenantId));
         }
-        throw new IllegalArgumentException("Either tenantId or clientId is required");
+        // No tenantId/clientId = the PLATFORM login surface (app.fivucsas dashboard,
+        // which is cross-tenant). Return a platform PASSWORD-first config whose
+        // engineActive follows the global master switch, so the dashboard opens
+        // identifier-first iff the engine is globally enabled.
+        return ResponseEntity.ok(loginConfigService.getPlatformLoginConfig());
     }
 
     @PostMapping("/refresh")

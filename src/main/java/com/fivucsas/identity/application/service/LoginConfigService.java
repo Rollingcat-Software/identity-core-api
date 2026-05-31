@@ -118,6 +118,20 @@ public class LoginConfigService {
      * cases the actual login path is the legacy password login, so the contract
      * matches the runtime behavior.
      */
+    /**
+     * Platform (no-tenant) login config for the dashboard's OWN login surface,
+     * which is cross-tenant (any tenant's user signs in there) and therefore has
+     * no single tenant to consult. PASSWORD-first Layer-1; {@code engineActive}
+     * follows the GLOBAL master switch only, so app.fivucsas opens identifier-first
+     * exactly when the engine is globally enabled and reverts with the flag.
+     */
+    public LoginConfigResponse getPlatformLoginConfig() {
+        return passwordFirstConfig(
+                UUID.fromString("00000000-0000-0000-0000-000000000000"),
+                "platform",
+                configDrivenLoginPolicy.isGloballyEnabled());
+    }
+
     private LoginConfigResponse passwordFirstConfig(UUID tenantId, String tenantName, boolean engineActive) {
         LoginConfigResponse.Method password =
                 new LoginConfigResponse.Method("PASSWORD", false, true);
