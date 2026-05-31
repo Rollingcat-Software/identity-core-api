@@ -124,6 +124,51 @@ class ManageAuthFlowServiceTest {
     }
 
     @Test
+    void createFlow_RequiredChoiceWithSupportedAlternative_ShouldSucceed() {
+        // A required layer offering {VOICE, EMAIL_OTP} is fine — VOICE can't stand
+        // alone as required, but EMAIL_OTP gives the user a supported way to satisfy
+        // the layer, so the choice must be allowed (regression: it used to 400 on
+        // the VOICE primary).
+        UUID tenantId = UUID.randomUUID();
+        UUID flowId = UUID.randomUUID();
+        Tenant tenant = mock(Tenant.class);
+        when(tenant.getId()).thenReturn(tenantId);
+        AuthFlow flow = mock(AuthFlow.class);
+        when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+        when(flow.getId()).thenReturn(flowId);
+        when(flow.getTenant()).thenReturn(tenant);
+        when(flow.getSteps()).thenReturn(new ArrayList<>());
+        when(flow.getCreatedAt()).thenReturn(Instant.now());
+        when(flow.getUpdatedAt()).thenReturn(Instant.now());
+        when(authFlowRepository.save(any())).thenReturn(flow);
+        when(authFlowRepository.findById(flowId)).thenReturn(Optional.of(flow));
+        when(authMethodRepository.findByType(AuthMethodType.VOICE)).thenReturn(Optional.of(mock(AuthMethod.class)));
+        when(authMethodRepository.findByType(AuthMethodType.EMAIL_OTP)).thenReturn(Optional.of(mock(AuthMethod.class)));
+
+        var steps = List.of(new CreateAuthFlowCommand.FlowStepSpec(
+                "VOICE", 1, true, 120, 3, null, false, null, List.of("EMAIL_OTP")));
+        service.createFlow(tenantId,
+                new CreateAuthFlowCommand("Voice-or-Email", "", OperationType.APP_LOGIN, false, steps));
+
+        verify(authFlowStepRepository).save(any());
+    }
+
+    @Test
+    void createFlow_RequiredLayerOnlyUnsupportedMethods_ShouldReject() {
+        // A required layer whose ONLY method is VOICE has no supported way to be
+        // completed → still rejected (400).
+        UUID tenantId = UUID.randomUUID();
+        Tenant tenant = mock(Tenant.class);
+        when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+
+        var steps = List.of(new CreateAuthFlowCommand.FlowStepSpec(
+                "VOICE", 1, true, 120, 3, null, false, null, null));
+        assertThatThrownBy(() -> service.createFlow(tenantId,
+                new CreateAuthFlowCommand("Voice-only", "", OperationType.APP_LOGIN, false, steps)))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
     void createFlow_WhenNoPasswordAnywhere_ShouldSucceed() {
         // Two-step FACE -> TOTP flow, no PASSWORD anywhere — explicitly
         // supported by the new customizable-auth-flow model.

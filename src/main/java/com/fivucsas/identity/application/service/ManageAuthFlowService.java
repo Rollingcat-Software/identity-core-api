@@ -348,19 +348,31 @@ public class ManageAuthFlowService implements ManageAuthFlowUseCase {
     }
 
     private void validateNoRequiredUnsupportedMethods(List<CreateAuthFlowCommand.FlowStepSpec> steps) {
-        List<String> requiredUnsupportedMethods = steps.stream()
+        // Method-set model: a layer is satisfied by ANY ONE of its methods (primary
+        // ∪ alternatives). Only reject a REQUIRED layer when EVERY method in it is
+        // unsupported-as-required — i.e. the user has no supported way to complete
+        // it. A choice that includes at least one supported method is fine even if
+        // it also offers VOICE/FINGERPRINT/NFC (the user can pick the supported one).
+        List<String> blockedLayers = steps.stream()
                 .filter(CreateAuthFlowCommand.FlowStepSpec::isRequired)
-                .map(CreateAuthFlowCommand.FlowStepSpec::authMethodType)
-                .filter(REQUIRED_UNSUPPORTED_METHODS::contains)
+                .filter(s -> {
+                    java.util.List<String> layerMethods = new java.util.ArrayList<>();
+                    if (s.authMethodType() != null) layerMethods.add(s.authMethodType());
+                    if (s.alternativeMethodTypes() != null) layerMethods.addAll(s.alternativeMethodTypes());
+                    // blocked iff non-empty AND no method is supported-as-required
+                    return !layerMethods.isEmpty()
+                            && layerMethods.stream().allMatch(REQUIRED_UNSUPPORTED_METHODS::contains);
+                })
+                .map(s -> "Layer " + s.stepOrder())
                 .distinct()
                 .toList();
 
-        if (!requiredUnsupportedMethods.isEmpty()) {
+        if (!blockedLayers.isEmpty()) {
             throw new IllegalArgumentException(
-                    "The following methods cannot be configured as required auth steps yet: " +
-                    requiredUnsupportedMethods +
-                    ". These flows rely on hardware/biometric integrations that are not fully available. " +
-                    "Configure them as optional steps or choose a different method.");
+                    "These required layers offer ONLY methods that cannot yet stand alone as a "
+                    + "mandatory factor (" + REQUIRED_UNSUPPORTED_METHODS + "): " + blockedLayers
+                    + ". Add a supported method to the layer (so the user has a way to complete it), "
+                    + "or make the layer optional.");
         }
     }
 }
