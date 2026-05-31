@@ -917,10 +917,23 @@ class AuthControllerTest {
     // --- login-config contract (task #16 B/C) ---
 
     @Test
-    @DisplayName("GET /auth/login-config with neither tenantId nor clientId → 400 (not 500)")
-    void loginConfigRequiresAnIdentifier() throws Exception {
+    @DisplayName("GET /auth/login-config with neither tenantId nor clientId → 200 platform config (dashboard's own login)")
+    void loginConfigNoParamsReturnsPlatformConfig() throws Exception {
+        // No tenant/client = the platform (dashboard) login surface; engineActive
+        // follows the global master switch.
+        when(loginConfigService.getPlatformLoginConfig()).thenReturn(
+                new com.fivucsas.identity.application.dto.response.LoginConfigResponse(
+                        "00000000-0000-0000-0000-000000000000", "platform",
+                        new com.fivucsas.identity.application.dto.response.LoginConfigResponse.Layer1(
+                                java.util.List.of(new com.fivucsas.identity.application.dto.response.LoginConfigResponse.Method(
+                                        "PASSWORD", false, true)),
+                                true),
+                        1, java.util.List.of(), true));
+
         mockMvc.perform(get("/api/v1/auth/login-config"))
-                .andExpect(status().isBadRequest());
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.engineActive").value(true))
+                .andExpect(jsonPath("$.layer1.methods[0].type").value("PASSWORD"));
     }
 
     @Test
