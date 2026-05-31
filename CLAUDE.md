@@ -162,8 +162,34 @@ V75: activate the VOICE login auth method — V16 seeded the VOICE row with
      auth method** — it is an active-liveness anti-spoofing sub-component of FACE
      (no auth handler), so it must NOT be seeded as a selectable auth_methods row.
      Applies on the next api rebuild.
+V76: scope tenant-scoped TENANT_ADMIN roles to TENANT-level permissions only —
+     strip the 7 PLATFORM grants (tenant.create/delete, system.audit/configure,
+     permission.create/update/delete) from every `TENANT_ADMIN` role with a
+     non-NULL tenant_id. The fivucsas TENANT_ADMIN held all 48 (identical to
+     ROOT) — over-privileged + misleading in the Roles UI. ROOT (tenant_id NULL)
+     keeps all 48 (its real power is user_type=ROOT, which bypasses perm checks).
+     Idempotent DELETE; no runtime re-seed (DataInitializer doesn't touch
+     role_permissions). Applies on the next api rebuild.
 
-**V34-V72 applied in prod. The 2026-05-30 rebuild added V72 (discoverable-passkey columns).**
+**V34-V72 applied in prod. The 2026-05-30 rebuild added V72 (discoverable-passkey columns). 2026-05-31 rebuild adds V73-V76.**
+
+### Identifier-first preflight now returns the resolved login-config (2026-05-31)
+
+`POST /auth/login/preflight` previously returned `{eligible:true}`; it now returns
+`LoginPreflightResponse {eligible, loginConfig}` where `loginConfig` is the caller's
+RESOLVED tenant login-config (`AuthenticateUserUseCase.resolveHomeTenantId(email)` →
+`LoginConfigService.getLoginConfigForTenantOrPlatform(tenantId)`). This lets the
+cross-tenant **dashboard** (app.fivucsas.com — no tenantId/clientId of its own) show
+the caller's REAL flow (Layer-1 methods + step count → "1/3") at the email step
+instead of the hardcoded platform PASSWORD-first/totalSteps=1. Enumeration-safe:
+unknown email → null tenant → platform default (indistinguishable from a single-step
+password tenant). Backward compatible (the old `eligible` field is unchanged).
+NOTE: the frontend `beginIdentifierLogin()` → `POST /auth/login/begin` is DEAD (no
+such endpoint; 401) and only reachable on a no-PASSWORD-Layer-1 surface — the dashboard
+stays password-first, which is correct for the fivucsas flow ("Password + any 2FA +
+any 3FA"). True arbitrary-first-factor (e.g. start with FACE when password is a Layer-1
+CHOICE) is NOT implemented on either surface — verify.fivucsas also falls back to
+password — and remains a future feature.
 
 ### Config-driven login engine — kill-switch (task #16, ships DARK 2026-05-30)
 
