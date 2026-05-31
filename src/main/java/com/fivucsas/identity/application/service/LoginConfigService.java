@@ -41,6 +41,30 @@ public class LoginConfigService {
     private final ConfigDrivenLoginPolicy configDrivenLoginPolicy;
 
     /**
+     * Resolve the login config for the tenant that OWNS a given identifier, for
+     * the cross-tenant dashboard's identifier-first step. The dashboard
+     * (app.fivucsas.com) carries no tenantId/clientId, so until the user types
+     * their email it can only show the platform default — this lets the email
+     * step resolve the caller's ACTUAL tenant flow (Layer-1 methods + step
+     * count) so the password screen shows "1/3" and the flexible flow the
+     * tenant configured, instead of the hardcoded platform PASSWORD-first
+     * totalSteps=1.
+     *
+     * <p>The email→tenant resolution happens upstream (in
+     * {@code AuthenticateUserService}, which legitimately works with the user
+     * entity); a {@code null} tenantId (unknown email) yields the platform
+     * config so a non-existent email is indistinguishable from a single-step
+     * password tenant. A real email reveals only the tenant's PUBLIC
+     * login-config (already exposed by {@code GET /login-config?tenantId}); the
+     * step count is surfaced one screen earlier than the password-step gate
+     * already does.
+     */
+    @Transactional(readOnly = true)
+    public LoginConfigResponse getLoginConfigForTenantOrPlatform(UUID tenantId) {
+        return tenantId != null ? getLoginConfig(tenantId) : getPlatformLoginConfig();
+    }
+
+    /**
      * Resolve a tenant's login config from an OAuth2 {@code client_id} instead of
      * a raw tenant UUID. The hosted login surface (verify.fivucsas.com) only
      * carries the OIDC {@code client_id} in its {@code /authorize} request, never

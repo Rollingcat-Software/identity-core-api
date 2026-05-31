@@ -82,6 +82,17 @@ public class ManageAuthFlowService implements ManageAuthFlowUseCase {
                     "Auth flow must declare at least one step (stepOrder=1 required)");
         }
 
+        // Dethrone the existing default BEFORE inserting a new default flow.
+        // updateFlow() already does this (PR #115), but createFlow() did not, so
+        // creating a new flow with isDefault=true while another default existed
+        // hit the partial unique index uq_auth_flow_default(tenant_id,
+        // operation_type) → 23505 duplicate-key → opaque 500 on the Auth Flows
+        // page ("An unexpected error occurred"). Observed in prod 2026-05-31 for
+        // the fivucsas tenant (a "Default 3-Step Flow" already held the slot).
+        if (Boolean.TRUE.equals(command.isDefault())) {
+            dethroneExistingDefault(tenantId, command.operationType(), null);
+        }
+
         AuthFlow savedFlow = authFlowRepository.save(flow);
 
         {
@@ -154,28 +165,7 @@ public class ManageAuthFlowService implements ManageAuthFlowUseCase {
             );
         }
         if (command.isDefault() != null && command.isDefault()) {
-            // Dethrone the existing default for this (tenant, operationType)
-            // pair so the "Default" column always identifies a single flow.
-            // Without this, calling setAsDefault here would silently produce
-            // two defaults — surprising for the runtime resolver and the
-            // admin UI alike.
-            //
-            // saveAndFlush (not save): the partial unique index
-            // uq_auth_flow_default(tenant_id, operation_type) is checked
-            // per-statement, not deferred to commit. Hibernate does not
-            // guarantee the UPDATE that clears the old default runs before the
-            // UPDATE that sets the new one, so a plain save() lets the new
-            // default's INSERT/UPDATE hit the index while the old row is still
-            // is_default=true → 23505 duplicate-key violation (observed in prod
-            // 2026-05-29). Flushing the dethrone first frees the slot.
-            authFlowRepository
-                    .findAllByTenantIdAndOperationType(tenantId, flow.getOperationType())
-                    .stream()
-                    .filter(f -> f.isDefault() && !f.getId().equals(flow.getId()))
-                    .forEach(f -> {
-                        f.unsetDefault();
-                        authFlowRepository.saveAndFlush(f);
-                    });
+            dethroneExistingDefault(tenantId, flow.getOperationType(), flow.getId());
             flow.setAsDefault();
         }
         if (command.isActive() != null) {
@@ -184,6 +174,35 @@ public class ManageAuthFlowService implements ManageAuthFlowUseCase {
         }
 
         return AuthFlowResponse.from(authFlowRepository.save(flow));
+    }
+
+    /**
+     * Clear the {@code is_default} flag on any OTHER flow currently holding the
+     * default slot for this {@code (tenant, operationType)} pair, so a single
+     * flow owns the slot.
+     *
+     * <p>saveAndFlush (not save): the partial unique index
+     * {@code uq_auth_flow_default(tenant_id, operation_type)} is checked
+     * per-statement, not deferred to commit. Hibernate does not guarantee the
+     * UPDATE that clears the old default runs before the new default's
+     * INSERT/UPDATE, so a plain save() lets the new default hit the index while
+     * the old row is still {@code is_default=true} → 23505 duplicate-key
+     * (observed in prod 2026-05-29 for updateFlow, 2026-05-31 for createFlow).
+     * Flushing the dethrone first frees the slot.
+     *
+     * @param excludeFlowId the flow being promoted (skipped); {@code null} when
+     *                      creating a brand-new flow that has no id yet.
+     */
+    private void dethroneExistingDefault(UUID tenantId, OperationType operationType, UUID excludeFlowId) {
+        authFlowRepository
+                .findAllByTenantIdAndOperationType(tenantId, operationType)
+                .stream()
+                .filter(AuthFlow::isDefault)
+                .filter(f -> excludeFlowId == null || !f.getId().equals(excludeFlowId))
+                .forEach(f -> {
+                    f.unsetDefault();
+                    authFlowRepository.saveAndFlush(f);
+                });
     }
 
     @Override

@@ -38,4 +38,17 @@ public interface AuthenticateUserUseCase {
      * @param clientId the OAuth client_id of the hosted login surface (may be null)
      */
     void checkTenantEligibility(String email, String clientId);
+
+    /**
+     * Resolve the home-tenant id of the user that owns {@code email}, for the
+     * cross-tenant dashboard's identifier-first step (so it can fetch that
+     * tenant's login-config — Layer-1 methods + step count — at the email
+     * screen). Returns {@code null} for an unknown email so the caller falls
+     * back to the platform default (no enumeration beyond the password-step
+     * gate). No password is checked and no lockout counter is touched.
+     *
+     * @param email the typed identifier
+     * @return the user's tenant id, or {@code null} if no such user
+     */
+    java.util.UUID resolveHomeTenantId(String email);
 }

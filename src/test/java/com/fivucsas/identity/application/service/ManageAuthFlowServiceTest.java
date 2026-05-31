@@ -325,6 +325,50 @@ class ManageAuthFlowServiceTest {
     }
 
     @Test
+    void createFlow_WhenDefaultRequestedAndAnotherDefaultExists_ShouldDethroneIncumbentFirst() {
+        // Regression (prod 2026-05-31, fivucsas tenant): creating a NEW is_default
+        // flow while another flow already held the (tenant, APP_LOGIN) default slot
+        // hit the partial unique index uq_auth_flow_default → 23505 → opaque 500 on
+        // the Auth Flows page. createFlow must dethrone the incumbent (saveAndFlush,
+        // freeing the slot per-statement) BEFORE inserting the new default — the
+        // same fix updateFlow already had (PR #115).
+        UUID tenantId = UUID.randomUUID();
+        UUID flowId = UUID.randomUUID();
+        Tenant tenant = mock(Tenant.class);
+        when(tenant.getId()).thenReturn(tenantId);
+        AuthFlow flow = mock(AuthFlow.class);
+        AuthFlow incumbent = mock(AuthFlow.class);
+        AuthMethod password = mock(AuthMethod.class);
+
+        when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+        when(flow.getId()).thenReturn(flowId);
+        when(flow.getTenant()).thenReturn(tenant);
+        when(flow.getName()).thenReturn("New Default");
+        when(flow.getDescription()).thenReturn("");
+        when(flow.getOperationType()).thenReturn(OperationType.APP_LOGIN);
+        when(flow.isDefault()).thenReturn(true);
+        when(flow.isActive()).thenReturn(true);
+        when(flow.getStepCount()).thenReturn(1);
+        when(flow.getSteps()).thenReturn(new ArrayList<>());
+        when(flow.getCreatedAt()).thenReturn(Instant.now());
+        when(flow.getUpdatedAt()).thenReturn(Instant.now());
+        when(incumbent.isDefault()).thenReturn(true);
+        when(authFlowRepository.findAllByTenantIdAndOperationType(tenantId, OperationType.APP_LOGIN))
+                .thenReturn(List.of(incumbent));
+        when(authFlowRepository.save(any())).thenReturn(flow);
+        when(authFlowRepository.findById(flowId)).thenReturn(Optional.of(flow));
+        when(authMethodRepository.findByType(AuthMethodType.PASSWORD)).thenReturn(Optional.of(password));
+
+        var steps = List.of(new CreateAuthFlowCommand.FlowStepSpec(
+                "PASSWORD", 1, true, 120, 3, null, false, null, null));
+        service.createFlow(tenantId,
+                new CreateAuthFlowCommand("New Default", "", OperationType.APP_LOGIN, true, steps));
+
+        verify(incumbent).unsetDefault();
+        verify(authFlowRepository).saveAndFlush(incumbent);
+    }
+
+    @Test
     void createFlow_WhenNoStepOneDefined_ShouldThrow() {
         // Structural check still in force: must define stepOrder=1.
         UUID tenantId = UUID.randomUUID();
