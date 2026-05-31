@@ -22,6 +22,9 @@ public record CreateAuthFlowCommand(
         int maxAttempts,
         String fallbackMethodType,
         boolean allowsDelegation,
-        String config
+        String config,
+        // CHOICE step: extra methods that ALSO satisfy THIS layer (user completes
+        // any one of {authMethodType} ∪ these). Empty/null ⇒ plain SEQUENTIAL step.
+        List<String> alternativeMethodTypes
     ) {}
 }

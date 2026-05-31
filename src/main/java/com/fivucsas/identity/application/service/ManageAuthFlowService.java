@@ -98,9 +98,34 @@ public class ManageAuthFlowService implements ManageAuthFlowUseCase {
                     fallback = authMethodRepository.findByType(fallbackType).orElse(null);
                 }
 
+                // CHOICE step: the user may satisfy THIS layer with any ONE of the
+                // primary method ∪ the alternatives. We store the FULL set (primary
+                // first) in alternativeMethods so the entity's getAvailableMethods()
+                // — which the login engine + default-impact read for CHOICE — returns
+                // every acceptable option. No alternatives ⇒ plain SEQUENTIAL step.
+                java.util.List<AuthMethod> choiceMethods = new java.util.ArrayList<>();
+                if (stepSpec.alternativeMethodTypes() != null) {
+                    for (String altName : stepSpec.alternativeMethodTypes()) {
+                        if (altName == null || altName.isBlank()) continue;
+                        AuthMethodType altType = AuthMethodType.valueOf(altName);
+                        if (altType == methodType) continue; // primary added below
+                        authMethodRepository.findByType(altType).ifPresent(choiceMethods::add);
+                    }
+                }
+                boolean isChoice = !choiceMethods.isEmpty();
+                java.util.List<AuthMethod> alternativeMethods = new java.util.ArrayList<>();
+                if (isChoice) {
+                    alternativeMethods.add(method);          // primary is one of the choices
+                    alternativeMethods.addAll(choiceMethods);
+                }
+
                 AuthFlowStep step = AuthFlowStep.builder()
                         .authFlow(savedFlow)
                         .authMethod(method)
+                        .stepType(isChoice
+                                ? com.fivucsas.identity.domain.model.auth.StepType.CHOICE
+                                : com.fivucsas.identity.domain.model.auth.StepType.SEQUENTIAL)
+                        .alternativeMethods(alternativeMethods)
                         .stepOrder(stepSpec.stepOrder())
                         .isRequired(stepSpec.isRequired())
                         .timeoutSeconds(stepSpec.timeoutSeconds() > 0 ? stepSpec.timeoutSeconds() : 120)
