@@ -9,8 +9,11 @@ import com.fivucsas.identity.domain.model.auth.AuthMethodType;
 import com.fivucsas.identity.domain.model.auth.OperationType;
 import com.fivucsas.identity.repository.JpaTenantRepository;
 import com.fivucsas.identity.entity.AuthFlow;
+import com.fivucsas.identity.entity.AuthFlowStep;
 import com.fivucsas.identity.entity.AuthMethod;
 import com.fivucsas.identity.entity.Tenant;
+import com.fivucsas.identity.domain.model.auth.StepType;
+import org.mockito.ArgumentCaptor;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -23,6 +26,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
@@ -68,7 +72,7 @@ class ManageAuthFlowServiceTest {
 
         var steps = List.of(
                 new CreateAuthFlowCommand.FlowStepSpec(
-                        "FACE", 1, true, 120, 3, null, false, null
+                        "FACE", 1, true, 120, 3, null, false, null, null
                 )
         );
         var command = new CreateAuthFlowCommand("Face-First Login", "desc", OperationType.APP_LOGIN, false, steps);
@@ -76,6 +80,47 @@ class ManageAuthFlowServiceTest {
         service.createFlow(tenantId, command);
 
         verify(authFlowStepRepository).save(any());
+    }
+
+    @Test
+    void createFlow_WhenLayerHasMultipleMethods_ShouldPersistAsChoiceWithFullSet() {
+        // Method-set model: a layer with >1 allowed method is a CHOICE — the user
+        // satisfies it with ANY ONE. We store the full set (primary first) in
+        // alternativeMethods + stepType=CHOICE so the login engine accepts either.
+        UUID tenantId = UUID.randomUUID();
+        UUID flowId = UUID.randomUUID();
+        Tenant tenant = mock(Tenant.class);
+        when(tenant.getId()).thenReturn(tenantId);
+        AuthFlow flow = mock(AuthFlow.class);
+        AuthMethod password = mock(AuthMethod.class);
+        AuthMethod emailOtp = mock(AuthMethod.class);
+
+        when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+        when(flow.getId()).thenReturn(flowId);
+        when(flow.getTenant()).thenReturn(tenant);
+        when(flow.getName()).thenReturn("Choice");
+        when(flow.getOperationType()).thenReturn(OperationType.APP_LOGIN);
+        when(flow.getSteps()).thenReturn(new ArrayList<>());
+        when(flow.getCreatedAt()).thenReturn(Instant.now());
+        when(flow.getUpdatedAt()).thenReturn(Instant.now());
+        when(authFlowRepository.save(any())).thenReturn(flow);
+        when(authFlowRepository.findById(flowId)).thenReturn(Optional.of(flow));
+        when(authMethodRepository.findByType(AuthMethodType.PASSWORD)).thenReturn(Optional.of(password));
+        when(authMethodRepository.findByType(AuthMethodType.EMAIL_OTP)).thenReturn(Optional.of(emailOtp));
+
+        var steps = List.of(
+                new CreateAuthFlowCommand.FlowStepSpec(
+                        "PASSWORD", 1, true, 120, 3, null, false, null, List.of("EMAIL_OTP")
+                )
+        );
+        service.createFlow(tenantId,
+                new CreateAuthFlowCommand("Choice", "", OperationType.APP_LOGIN, false, steps));
+
+        ArgumentCaptor<AuthFlowStep> captor = ArgumentCaptor.forClass(AuthFlowStep.class);
+        verify(authFlowStepRepository).save(captor.capture());
+        AuthFlowStep saved = captor.getValue();
+        assertThat(saved.getStepType()).isEqualTo(StepType.CHOICE);
+        assertThat(saved.getAlternativeMethods()).containsExactly(password, emailOtp);
     }
 
     @Test
@@ -109,10 +154,10 @@ class ManageAuthFlowServiceTest {
 
         var steps = List.of(
                 new CreateAuthFlowCommand.FlowStepSpec(
-                        "FACE", 1, true, 120, 3, null, false, null
+                        "FACE", 1, true, 120, 3, null, false, null, null
                 ),
                 new CreateAuthFlowCommand.FlowStepSpec(
-                        "TOTP", 2, true, 120, 3, null, false, null
+                        "TOTP", 2, true, 120, 3, null, false, null, null
                 )
         );
         var command = new CreateAuthFlowCommand("Passwordless Login", "desc", OperationType.APP_LOGIN, false, steps);
@@ -149,7 +194,7 @@ class ManageAuthFlowServiceTest {
 
         var steps = List.of(
                 new CreateAuthFlowCommand.FlowStepSpec(
-                        "PASSWORD", 1, true, 120, 3, null, false, null
+                        "PASSWORD", 1, true, 120, 3, null, false, null, null
                 )
         );
         var command = new CreateAuthFlowCommand("Login Flow", "desc", OperationType.APP_LOGIN, false, steps);
@@ -186,7 +231,7 @@ class ManageAuthFlowServiceTest {
 
         var steps = List.of(
                 new CreateAuthFlowCommand.FlowStepSpec(
-                        "FACE", 1, true, 120, 3, null, false, null
+                        "FACE", 1, true, 120, 3, null, false, null, null
                 )
         );
         var command = new CreateAuthFlowCommand("Door Flow", "desc", OperationType.DOOR_ACCESS, false, steps);
@@ -224,7 +269,7 @@ class ManageAuthFlowServiceTest {
 
         var steps = List.of(
                 new CreateAuthFlowCommand.FlowStepSpec(
-                        "TOTP", 1, true, 120, 3, null, false, null
+                        "TOTP", 1, true, 120, 3, null, false, null, null
                 )
         );
         var command = new CreateAuthFlowCommand("API Flow", "desc", OperationType.API_ACCESS, false, steps);
@@ -245,7 +290,7 @@ class ManageAuthFlowServiceTest {
 
         var steps = List.of(
                 new CreateAuthFlowCommand.FlowStepSpec(
-                        "PASSWORD", 2, true, 120, 3, null, false, null
+                        "PASSWORD", 2, true, 120, 3, null, false, null, null
                 )
         );
         var command = new CreateAuthFlowCommand("Broken", "desc", OperationType.APP_LOGIN, false, steps);
@@ -266,10 +311,10 @@ class ManageAuthFlowServiceTest {
 
         var steps = List.of(
                 new CreateAuthFlowCommand.FlowStepSpec(
-                        "PASSWORD", 1, true, 120, 3, null, false, null
+                        "PASSWORD", 1, true, 120, 3, null, false, null, null
                 ),
                 new CreateAuthFlowCommand.FlowStepSpec(
-                        "TOTP", 1, true, 120, 3, null, false, null
+                        "TOTP", 1, true, 120, 3, null, false, null, null
                 )
         );
         var command = new CreateAuthFlowCommand("Broken", "desc", OperationType.APP_LOGIN, false, steps);
