@@ -17,6 +17,7 @@ import com.fivucsas.identity.infrastructure.totp.TotpService;
 import com.fivucsas.identity.infrastructure.webauthn.WebAuthnService;
 import com.fivucsas.identity.dto.AuthResponse;
 import com.fivucsas.identity.dto.LoginRequest;
+import com.fivucsas.identity.dto.LoginPreflightRequest;
 import com.fivucsas.identity.dto.RefreshTokenRequest;
 import com.fivucsas.identity.dto.RegisterRequest;
 import com.fivucsas.identity.dto.ErrorResponse;
@@ -151,6 +152,29 @@ public class AuthController {
         AuthenticationResponse response = authenticateUserUseCase.execute(command);
 
         return ResponseEntity.ok(mapToAuthResponse(response));
+    }
+
+    /**
+     * Identifier-first pre-flight: check whether the typed email is eligible to
+     * sign in on this tenant-bound hosted surface, WITHOUT verifying a password.
+     * Returns 200 {@code {"eligible": true}} when fine; returns HTTP 403 with
+     * {@code errorCode: TENANT_MISMATCH} (via {@link com.fivucsas.identity.domain.exception.TenantMismatchException})
+     * when the email belongs to a different tenant — so the login UI shows
+     * "not a {tenant} member" on the email step instead of one step later. No
+     * password is checked and no lockout counter is touched; an unknown email is
+     * a silent 200 (no enumeration beyond the existing password-step gate).
+     */
+    @PostMapping("/login/preflight")
+    @Operation(summary = "Identifier-first pre-flight: tenant-eligibility check for a typed email (no password)")
+    public ResponseEntity<java.util.Map<String, Boolean>> loginPreflight(
+            @Valid @RequestBody LoginPreflightRequest request,
+            HttpServletRequest httpRequest) {
+        log.info("AUDIT: Login pre-flight — email={}, clientId={}, ip={}",
+                request.getEmail(), request.getClientId(), getClientIP(httpRequest));
+
+        authenticateUserUseCase.checkTenantEligibility(request.getEmail(), request.getClientId());
+
+        return ResponseEntity.ok(java.util.Map.of("eligible", true));
     }
 
     /**
