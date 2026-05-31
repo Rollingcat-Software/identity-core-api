@@ -107,6 +107,7 @@ public class AuthController {
     private final com.fivucsas.identity.application.port.output.AuditLogPort auditLogPort;
     private final com.fivucsas.identity.application.service.mfa.VerifyMfaStepService verifyMfaStepService;
     private final com.fivucsas.identity.application.service.LoginConfigService loginConfigService;
+    private final com.fivucsas.identity.application.service.mfa.AvailableMethodsResolver availableMethodsResolver;
 
     private static final String EMAIL_VERIFY_OTP_PREFIX = "email-verify:";
     private static final String PHONE_VERIFY_OTP_PREFIX = "phone-verify:";
@@ -1023,33 +1024,13 @@ public class AuthController {
 
     /** Build available methods for an MFA step, validated against actual backing data. */
     private List<AvailableMfaMethod> buildMfaAvailableMethods(AuthFlowStep step, User user) {
-        return buildMfaAvailableMethods(step, user, java.util.Collections.emptySet());
-    }
-
-    /**
-     * Build available methods for an MFA step, excluding any method already used
-     * earlier in this MFA session. Without this filter, a 3-step CHOICE flow
-     * where the same method appears in multiple steps (e.g. FINGERPRINT in both
-     * step 2 and step 3) would re-offer the just-completed method as the next
-     * step's primary, causing the same step to run twice.
-     */
-    private List<AvailableMfaMethod> buildMfaAvailableMethods(
-            AuthFlowStep step, User user, java.util.Set<String> alreadyCompleted) {
-        List<AuthMethod> methods = step.getAvailableMethods();
+        // Delegate to the single shared resolver (correct PASSWORD rule; full step set).
         Map<AuthMethodType, Boolean> healthStatus = enrollmentHealthService.validateEnrollments(user.getId());
-        String preferred = user.getPreferred2faMethod();
-        return methods.stream()
-            .filter(Objects::nonNull)
-            .filter(m -> !alreadyCompleted.contains(m.getType().name()))
-            .map(m -> AvailableMfaMethod.builder()
-                .methodType(m.getType().name())
-                .name(m.getName())
-                .category(m.getCategory().name())
-                .enrolled(Boolean.TRUE.equals(healthStatus.get(m.getType())) || !m.isRequiresEnrollment())
-                .preferred(m.getType().name().equals(preferred))
-                .requiresEnrollment(m.isRequiresEnrollment())
-                .build())
-            .collect(java.util.stream.Collectors.toList());
+        return availableMethodsResolver.build(
+                step,
+                com.fivucsas.identity.application.service.mfa.AvailableMethodsResolver.hasPassword(user.getPasswordHash()),
+                healthStatus,
+                user.getPreferred2faMethod());
     }
 
     /**

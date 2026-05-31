@@ -87,6 +87,12 @@ class AuthenticateUserServiceTest {
     @Mock
     private com.fivucsas.identity.application.service.ConfigDrivenLoginPolicy configDrivenLoginPolicy;
 
+    // Real (not mocked) — it's a pure helper; lets the layer-1 builder produce the
+    // actual enrolled flags so the begin/availableMethods assertions are meaningful.
+    @org.mockito.Spy
+    private com.fivucsas.identity.application.service.mfa.AvailableMethodsResolver availableMethodsResolver =
+            new com.fivucsas.identity.application.service.mfa.AvailableMethodsResolver();
+
     @InjectMocks
     private AuthenticateUserService authenticateUserService;
 

@@ -57,6 +57,7 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
     private final MfaSessionRepository mfaSessionRepository;
     private final EnrollmentHealthService enrollmentHealthService;
     private final ConfigDrivenLoginPolicy configDrivenLoginPolicy;
+    private final com.fivucsas.identity.application.service.mfa.AvailableMethodsResolver availableMethodsResolver;
 
     private static final int MAX_FAILED_ATTEMPTS = 5;
     private static final Duration LOCKOUT_DURATION = Duration.ofMinutes(15);
@@ -349,30 +350,14 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
      * Uses EnrollmentHealthService to verify backing data actually exists.
      */
     private List<AvailableMfaMethod> buildAvailableMethods(AuthFlowStep step, User user) {
-        List<AuthMethod> methods = step.getAvailableMethods();
-
-        // Validate enrollments against actual backing data (auto-revokes stale ones)
+        // Delegate to the single shared resolver so EVERY login layer uses the same
+        // enrolled rule (incl. PASSWORD-by-password-hash). See AvailableMethodsResolver.
         Map<AuthMethodType, Boolean> healthStatus = enrollmentHealthService.validateEnrollments(user.getId());
-
-        String preferred = user.getPreferred2faMethod();
-
-        return methods.stream()
-            .filter(Objects::nonNull)
-            .map(m -> AvailableMfaMethod.builder()
-                .methodType(m.getType().name())
-                .name(m.getName())
-                // PASSWORD is "enrolled" iff the user has a password hash — it is set
-                // at user creation, not via the biometric enrollment flow, so
-                // EnrollmentHealthService doesn't track it (it returned false →
-                // the Layer-1 picker showed "Not enrolled" for password). Every
-                // other method uses its enrollment health (or needs none).
-                .enrolled(m.getType() == AuthMethodType.PASSWORD
-                        ? user.getPasswordHash() != null && !user.getPasswordHash().isBlank()
-                        : Boolean.TRUE.equals(healthStatus.get(m.getType())) || !m.isRequiresEnrollment())
-                .preferred(m.getType().name().equals(preferred))
-                .requiresEnrollment(m.isRequiresEnrollment())
-                .build())
-            .collect(Collectors.toList());
+        return availableMethodsResolver.build(
+                step,
+                com.fivucsas.identity.application.service.mfa.AvailableMethodsResolver.hasPassword(user.getPasswordHash()),
+                healthStatus,
+                user.getPreferred2faMethod());
     }
 
     /**
