@@ -606,4 +606,15 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
         userRepository.findByEmail(email)
                 .ifPresent(user -> enforceTenantLock(user, clientId, email, null));
     }
+
+    @Override
+    @Transactional(readOnly = true)
+    public UUID resolveHomeTenantId(String email) {
+        if (email == null || email.isBlank()) {
+            return null;
+        }
+        return userRepository.findByEmail(email)
+                .map(user -> user.getTenant() != null ? user.getTenant().getId() : null)
+                .orElse(null);
+    }
 }

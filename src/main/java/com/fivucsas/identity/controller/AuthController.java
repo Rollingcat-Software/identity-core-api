@@ -165,8 +165,8 @@ public class AuthController {
      * a silent 200 (no enumeration beyond the existing password-step gate).
      */
     @PostMapping("/login/preflight")
-    @Operation(summary = "Identifier-first pre-flight: tenant-eligibility check for a typed email (no password)")
-    public ResponseEntity<java.util.Map<String, Boolean>> loginPreflight(
+    @Operation(summary = "Identifier-first pre-flight: tenant-eligibility check + resolved login-config for a typed email (no password)")
+    public ResponseEntity<com.fivucsas.identity.application.dto.response.LoginPreflightResponse> loginPreflight(
             @Valid @RequestBody LoginPreflightRequest request,
             HttpServletRequest httpRequest) {
         log.info("AUDIT: Login pre-flight — email={}, clientId={}, ip={}",
@@ -174,7 +174,15 @@ public class AuthController {
 
         authenticateUserUseCase.checkTenantEligibility(request.getEmail(), request.getClientId());
 
-        return ResponseEntity.ok(java.util.Map.of("eligible", true));
+        // Resolve the caller's ACTUAL tenant flow so the cross-tenant dashboard
+        // can render the real Layer-1 + step count from the email step (it has
+        // no tenantId/clientId of its own). Enumeration-safe: unknown email →
+        // null tenant → platform default.
+        UUID homeTenantId = authenticateUserUseCase.resolveHomeTenantId(request.getEmail());
+        LoginConfigResponse loginConfig = loginConfigService.getLoginConfigForTenantOrPlatform(homeTenantId);
+
+        return ResponseEntity.ok(
+                new com.fivucsas.identity.application.dto.response.LoginPreflightResponse(true, loginConfig));
     }
 
     /**
