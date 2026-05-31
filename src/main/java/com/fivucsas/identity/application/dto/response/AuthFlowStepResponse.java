@@ -9,6 +9,13 @@ import java.util.UUID;
 public record AuthFlowStepResponse(
     UUID id,
     int stepOrder,
+    // The step's PRIMARY method type as a bare enum-name string. The web auth-flow
+    // builder reads `step.authMethodType` (FlowStepSpec) to reconstruct a layer's
+    // method set as [authMethodType, ...alternativeMethodTypes]; without it the
+    // primary method rendered UNCHECKED on every edit (the "one method always
+    // unchecked / my changes don't persist" bug). Kept alongside the richer
+    // `authMethod` object for consumers that want the full descriptor.
+    String authMethodType,
     AuthMethodResponse authMethod,
     boolean isRequired,
     int timeoutSeconds,
@@ -37,6 +44,7 @@ public record AuthFlowStepResponse(
         return new AuthFlowStepResponse(
             entity.getId(),
             entity.getStepOrder(),
+            primaryType,
             AuthMethodResponse.from(entity.getAuthMethod()),
             entity.isRequired(),
             entity.getTimeoutSeconds(),
