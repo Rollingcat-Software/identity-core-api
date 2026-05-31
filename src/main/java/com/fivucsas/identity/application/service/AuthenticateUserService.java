@@ -617,4 +617,110 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
                 .map(user -> user.getTenant() != null ? user.getTenant().getId() : null)
                 .orElse(null);
     }
+
+    @Override
+    @Transactional
+    public AuthenticationResponse beginIdentifierLogin(String email, String clientId, String ipAddress, String userAgent) {
+        Optional<User> userOpt = (email == null || email.isBlank())
+                ? Optional.empty()
+                : userRepository.findByEmail(email);
+        if (userOpt.isEmpty()) {
+            return decoyBeginResponse();
+        }
+        User user = userOpt.get();
+
+        // Tenant-lock (hosted surface bound to a tenant) — 403 on mismatch, same
+        // as the password path, so the email step shows "not a {tenant} member".
+        enforceTenantLock(user, clientId, email, ipAddress);
+
+        // Arbitrary-first-factor is part of the config-driven engine. When OFF for
+        // the tenant (or no default flow), there is no password-less entry — return
+        // a decoy so the surface is indistinguishable from an unknown identifier.
+        boolean configDriven = user.getTenant() != null
+                && configDrivenLoginPolicy.isEnabledFor(user.getTenant().getId());
+        Optional<AuthFlow> defaultLoginFlow = !configDriven
+                ? Optional.empty()
+                : authFlowRepository.findByTenantIdAndIsDefaultTrueAndIsActiveTrueAndOperationType(
+                        user.getTenant().getId(), OperationType.APP_LOGIN);
+        if (defaultLoginFlow.isEmpty()) {
+            return decoyBeginResponse();
+        }
+        AuthFlow flow = defaultLoginFlow.get();
+
+        // The steps the user will actually face (step 1 onward). Optional steps the
+        // user can't satisfy are skipped; required ones are dead-end-checked below.
+        Map<AuthMethodType, Boolean> healthStatus = enrollmentHealthService.validateEnrollments(user.getId());
+        List<AuthFlowStep> steps = flow.getSteps().stream()
+                .sorted(Comparator.comparingInt(AuthFlowStep::getStepOrder))
+                .filter(step -> step.getStepOrder() == 1 || step.isRequired()
+                        || stepHasBiometricEnrollment(step, healthStatus))
+                .toList();
+        AuthFlowStep step1 = steps.stream()
+                .filter(s -> s.getStepOrder() == 1)
+                .findFirst()
+                .orElse(null);
+        if (step1 == null) {
+            return decoyBeginResponse();
+        }
+
+        // Dead-end guard (login edge case #5): bubbles NeedsEnrollmentException so
+        // the client routes the user to enroll instead of stranding them mid-flow.
+        verifyUserCanCompleteFlow(user, steps);
+
+        List<AvailableMfaMethod> availableMethods = buildAvailableMethods(step1, user);
+        String primaryMethod = pickPrimaryMethod(availableMethods, user.getPreferred2faMethod());
+
+        String sessionToken = UUID.randomUUID().toString().replace("-", "");
+        MfaSession mfaSession = MfaSession.builder()
+                .sessionToken(sessionToken)
+                .userId(user.getId())
+                .tenantId(user.getTenant().getId())
+                .flowId(flow.getId())
+                .currentStep(1)               // run the chosen Layer-1 method as step 1
+                .totalSteps(flow.getStepCount())
+                .stepsData("[]")              // nothing satisfied yet — no password pre-credit
+                .ipAddress(ipAddress)
+                .userAgent(userAgent)
+                .clientId(clientId)
+                .expiresAt(Instant.now().plus(MFA_SESSION_TTL))
+                .build();
+        mfaSessionRepository.save(mfaSession);
+
+        log.info("AUDIT: identifier-first begin — userId={}, layer1Options={}, totalSteps={}, ip={}",
+                user.getId(), availableMethods.size(), flow.getStepCount(), ipAddress);
+
+        // user=null: no profile is exposed before any factor is proven (the password
+        // path returns the user only AFTER the password is verified). Enumeration-safe.
+        return AuthenticationResponse.ofMfaPending(
+                sessionToken, flow.getStepCount(), 1, primaryMethod, availableMethods, null, List.of());
+    }
+
+    /**
+     * Enumeration-safe decoy for {@link #beginIdentifierLogin}: an MFA-pending
+     * shape with a random token that maps to NO persisted {@link MfaSession}, so
+     * any {@code /auth/mfa/step} submission returns "invalid/expired session".
+     *
+     * <p>A decoy is necessarily SYNTHETIC — an unknown identifier resolves to no
+     * user → no tenant → no flow to read, and deriving the shape from anything
+     * real would itself be the enumeration leak. To avoid inventing a second
+     * "default" we mirror the SINGLE platform-default baseline that
+     * {@code /auth/login/preflight} and {@code LoginConfigService.passwordFirstConfig}
+     * already present for an unresolved surface: PASSWORD-only, one step. So
+     * begin/preflight stay consistent and an unknown email looks exactly like a
+     * tenant whose Layer-1 is a lone password. Mirrors {@code ApproveLoginService}.
+     */
+    private AuthenticationResponse decoyBeginResponse() {
+        String token = UUID.randomUUID().toString().replace("-", "");
+        List<AvailableMfaMethod> platformDefault = List.of(
+                AvailableMfaMethod.builder()
+                        .methodType(AuthMethodType.PASSWORD.name())
+                        .name("Password")
+                        .category(com.fivucsas.identity.domain.model.auth.AuthMethodCategory.BASIC.name())
+                        .enrolled(true)
+                        .preferred(true)
+                        .requiresEnrollment(false)
+                        .build());
+        return AuthenticationResponse.ofMfaPending(
+                token, 1, 1, AuthMethodType.PASSWORD.name(), platformDefault, null, List.of());
+    }
 }
