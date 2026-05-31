@@ -474,6 +474,9 @@ public class AuthController {
     }
 
     private static final String TWO_FA_OTP_PREFIX = "2fa-login:";
+    /** SMS 2FA OTP Redis key prefix. A single source so the generate and validate
+     *  sides can never drift on a typo (which would silently break SMS-OTP login). */
+    private static final String SMS_2FA_OTP_PREFIX = "2fa-sms:";
 
     @PostMapping("/2fa/send")
     @Operation(summary = "Send 2FA verification code to user's email", security = @SecurityRequirement(name = "bearer-jwt"))
@@ -562,7 +565,7 @@ public class AuthController {
                     // propagate the NIST 800-63B 5-strike exhaustion so the user
                     // gets "request a new code" instead of waiting the full TTL.
                     OtpService.ValidationResult smsResult =
-                            otpService.validateWithResult("2fa-sms:" + user.getId(), code);
+                            otpService.validateWithResult(SMS_2FA_OTP_PREFIX + user.getId(), code);
                     if (smsResult.isExhausted()) {
                         throw new OtpAttemptsExhaustedException();
                     }
@@ -954,7 +957,7 @@ public class AuthController {
             } else if (requestedType == AuthMethodType.SMS_OTP) {
                 String phone = user.getPhoneNumber();
                 if (phone != null && !phone.isBlank()) {
-                    String code = otpService.generate("2fa-sms:" + user.getId());
+                    String code = otpService.generate(SMS_2FA_OTP_PREFIX + user.getId());
                     smsService.sendOtp(phone, code);
                 }
             }
@@ -1080,7 +1083,7 @@ public class AuthController {
             if (phone == null || phone.isBlank()) {
                 return ResponseEntity.badRequest().body(Map.of("message", "No phone number on file"));
             }
-            String code = otpService.generate("2fa-sms:" + user.getId());
+            String code = otpService.generate(SMS_2FA_OTP_PREFIX + user.getId());
             smsService.sendOtp(phone, code);
             String maskedPhone = phone.length() > 4 ? "***" + phone.substring(phone.length() - 4) : "***";
             return ResponseEntity.ok(Map.of("message", "SMS code sent", "phone", maskedPhone));
@@ -1099,7 +1102,7 @@ public class AuthController {
         User user = userRepository.findByEmail(authentication.getName())
                 .orElseThrow(() -> new UserNotFoundException(authentication.getName()));
 
-        String code = otpService.generate("2fa-sms:" + user.getId());
+        String code = otpService.generate(SMS_2FA_OTP_PREFIX + user.getId());
         String phone = user.getPhoneNumber();
         if (phone == null || phone.isBlank()) {
             return ResponseEntity.badRequest().body(Map.of("message", "No phone number on file"));
