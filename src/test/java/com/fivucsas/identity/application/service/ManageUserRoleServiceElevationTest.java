@@ -18,18 +18,23 @@ import java.util.Optional;
 import java.util.UUID;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * Verifies the elevate-on-grant sync wiring in {@link ManageUserRoleService}:
- * assigning a role routes the granted role's id + name to
- * {@link UserTypeElevationPort#elevateForGrantedRole} (the ongoing half of the
- * role / user_type unification — see docs/IDENTITY_ROLE_UNIFICATION.md).
+ * Verifies role assignment is TIER-NEUTRAL in {@link ManageUserRoleService}:
+ * assigning a role grants RBAC permissions only and must NOT change the platform
+ * tier ({@code users.user_type}).
  *
- * <p>The tier-mapping + elevate-only semantics themselves are unit-tested in
- * {@code UserTypeElevationAdapterTest}; here we only assert the choke-point
- * service invokes the port with the correct arguments on every assignment.</p>
+ * <p>SECURITY (2026-06-01, LOGIC_AUDIT P0-3 decouple): the previous
+ * "elevate-on-grant" coupling — which routed the granted role to
+ * {@link UserTypeElevationPort#elevateForGrantedRole} and let a role grant raise
+ * the tier (e.g. the ROOT role → {@code user_type=ROOT}) — was removed. It
+ * conflated the two orthogonal axes (tier = trust, role = within-tenant
+ * permissions) and created the escalation surface. Platform tier is now set
+ * EXPLICITLY via {@code ManageUserService.applyUserType}.
+ * See docs/IDENTITY_ROLE_UNIFICATION.md.</p>
  */
 @ExtendWith(MockitoExtension.class)
 class ManageUserRoleServiceElevationTest {
@@ -45,8 +50,8 @@ class ManageUserRoleServiceElevationTest {
             UUID.fromString("10000000-0000-0000-0000-000000000001");
 
     @Test
-    @DisplayName("assignRole → port.elevateForGrantedRole called with the granted role's id + name")
-    void assignRoleTriggersElevation() {
+    @DisplayName("assignRole persists the grant but does NOT change the platform tier (decoupled)")
+    void assignRoleDoesNotElevateTier() {
         UUID userId = UUID.randomUUID();
         AssignRoleToUserCommand command = AssignRoleToUserCommand.builder()
                 .userId(userId.toString())
@@ -62,9 +67,9 @@ class ManageUserRoleServiceElevationTest {
 
         service.assignRoleToUser(command);
 
-        // The assignment is persisted AND the tier sync is invoked with the
-        // granted role's identity so the adapter can elevate user_type → ROOT.
+        // The RBAC grant is persisted, but the platform tier is NEVER touched by a role
+        // assignment — even granting the ROOT role must not elevate user_type (P0-3 decouple).
         verify(userRoleRepository).save(any());
-        verify(userTypeElevationPort).elevateForGrantedRole(userId, ROOT_ROLE_ID, "ROOT");
+        verify(userTypeElevationPort, never()).elevateForGrantedRole(any(), any(), any());
     }
 }

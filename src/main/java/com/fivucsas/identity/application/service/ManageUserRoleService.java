@@ -67,15 +67,19 @@ public class ManageUserRoleService implements ManageUserRoleUseCase {
         UserRole userRole = UserRole.create(user, role, assignedBy, command.getExpiresAt());
         userRoleRepository.save(userRole);
 
-        // Role / user_type unification — elevate-on-grant. Granting the ROOT or a
-        // TENANT_ADMIN role raises the user's platform tier (users.user_type) to
-        // match, so the role and the tier can never drift again. ELEVATE-ONLY:
-        // never lowers a higher existing tier, and revoke never auto-demotes.
-        // Routed through an output port so this service stays clear of entity.User
-        // (UserDomainBoundaryTest). See docs/IDENTITY_ROLE_UNIFICATION.md.
-        userTypeElevationPort.elevateForGrantedRole(userId, roleId, role.getName());
+        // SECURITY (2026-06-01, LOGIC_AUDIT P0-3 — decouple user_type from role).
+        // Role assignment is now TIER-NEUTRAL: it grants RBAC permissions only and NEVER
+        // changes the platform tier (users.user_type). This previously called
+        // userTypeElevationPort.elevateForGrantedRole(), so granting the ROOT role
+        // promoted the target to user_type=ROOT — conflating the two orthogonal axes
+        // (tier = trust, role = within-tenant permissions) and creating the escalation
+        // surface, while ALSO disagreeing with the /users admin path (applyRoleIds), which
+        // already keeps tier out. The platform tier is the SOLE authority and is set
+        // EXPLICITLY via ManageUserService.applyUserType (the /users form's user_type
+        // field). Decoupling removes the whole "role grant can escalate tier" class.
+        // See docs/IDENTITY_ROLE_UNIFICATION.md.
 
-        log.info("Role {} assigned to user {} successfully", roleId, userId);
+        log.info("Role {} assigned to user {} (tier unchanged — user_type is set explicitly)", roleId, userId);
     }
 
     @Override
