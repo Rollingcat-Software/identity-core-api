@@ -9,6 +9,9 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.util.List;
+import java.util.UUID;
+
 @Data
 @Builder
 @NoArgsConstructor
@@ -53,4 +56,24 @@ public class CreateUserRequest {
     private String role; // Optional - role name to assign after creation
 
     private String tenantId; // Optional - tenant to assign user to
+
+    /**
+     * Platform-level tier ({@link com.fivucsas.identity.entity.UserType} NAME —
+     * ROOT / TENANT_ADMIN / TENANT_MEMBER / GUEST). Independent of the
+     * within-tenant RBAC {@link #roleIds}. {@code null} = the system default
+     * (TENANT_MEMBER). See docs/IDENTITY_ROLE_UNIFICATION.md.
+     *
+     * <p><b>Authorization (fail-closed):</b> only a caller whose own
+     * {@code user_type=ROOT} may set this to ROOT or TENANT_ADMIN; a non-ROOT
+     * caller that requests an elevated tier is rejected with 403.</p>
+     */
+    private String userType;
+
+    /**
+     * Within-tenant RBAC role ids to assign to the newly-created user (in
+     * addition to the optional named {@link #role}). A TENANT_ADMIN may only
+     * assign roles belonging to their own tenant (or global/system roles);
+     * otherwise the request is rejected with 403.
+     */
+    private List<UUID> roleIds;
 }

@@ -5,6 +5,9 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.util.List;
+import java.util.UUID;
+
 /**
  * Command for creating a new user (admin operation).
  *
@@ -29,4 +32,14 @@ public class CreateUserCommand {
     private String idNumber;
     private String role; // Optional - role name to assign after creation
     private String tenantId; // Optional - tenant to assign user to
+
+    /**
+     * Platform-tier ({@link com.fivucsas.identity.entity.UserType} NAME) for the
+     * new user. {@code null} = system default (TENANT_MEMBER). Setting ROOT /
+     * TENANT_ADMIN is ROOT-caller-only.
+     */
+    private String userType;
+
+    /** Within-tenant RBAC role ids to assign to the new user. */
+    private List<UUID> roleIds;
 }
