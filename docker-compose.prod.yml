@@ -63,6 +63,14 @@ services:
       # → canary one tenant (set _TENANTS to its UUID) → global (_LOGIN=true).
       APP_AUTH_CONFIG_DRIVEN_LOGIN: ${APP_AUTH_CONFIG_DRIVEN_LOGIN:-false}
       APP_AUTH_CONFIG_DRIVEN_LOGIN_TENANTS: ${APP_AUTH_CONFIG_DRIVEN_LOGIN_TENANTS:-}
+      # NFC serial-only login (2026-06-01). MUST be listed here — the service uses an
+      # explicit `environment:` block, NOT `env_file:`, so a var only in .env.prod is
+      # NOT passed into the container (this exact gap left the flag dead after the
+      # 2026-06-01 rebuild). Campus/MIFARE cards have STATIC UIDs and work via serial
+      # match; this enables that path. NOTE: passport/eID chip documents emit a RANDOM
+      # UID per tap, so serial-match can NEVER match them — those need chip passive-auth
+      # (CSCA trust store, currently unprovisioned). Kill-switch: false + `up -d`. No rebuild.
+      FIVUCSAS_NFC_SERIAL_ONLY_AUTH_ENABLED: ${FIVUCSAS_NFC_SERIAL_ONLY_AUTH_ENABLED:-false}
       CORS_ALLOWED_ORIGINS: https://api.fivucsas.com,https://app.fivucsas.com,https://demo.fivucsas.com,https://verify.fivucsas.com
       CORS_ALLOWED_METHODS: GET,POST,PUT,DELETE,OPTIONS,PATCH
       CORS_ALLOWED_HEADERS: Authorization,Content-Type,X-Tenant-ID,X-Request-ID,Accept
