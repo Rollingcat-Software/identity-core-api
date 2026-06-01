@@ -181,6 +181,85 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.FORBIDDEN).body(body);
     }
 
+    /**
+     * Login-time enforcement of the tenant Auth-Methods toggles: the submitted
+     * login method is EXPLICITLY disabled for the tenant. HTTP 403 Forbidden —
+     * the method is forbidden for THIS tenant (fail-closed for that method
+     * only; other enabled methods still work). The body carries the rejected
+     * {@code method} so the frontend can render a localized "method disabled —
+     * choose another" message.
+     */
+    @ExceptionHandler(AuthMethodDisabledException.class)
+    public ResponseEntity<java.util.Map<String, Object>> handleAuthMethodDisabled(
+            AuthMethodDisabledException ex,
+            HttpServletRequest request) {
+        log.warn("Login method disabled for tenant: method={}, path={}",
+                ex.getMethod(), request.getRequestURI());
+
+        java.util.Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("timestamp", java.time.Instant.now().toString());
+        body.put("status", HttpStatus.FORBIDDEN.value());
+        body.put("error", ex.getErrorCode());
+        body.put("errorCode", ex.getErrorCode());
+        body.put("message", ex.getMessage());
+        body.put("method", ex.getMethod());
+        body.put("path", request.getRequestURI());
+
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(body);
+    }
+
+    /**
+     * Write-side no-lock-out guard: an admin tried to disable a login method
+     * that is still required by one or more ACTIVE auth flows. HTTP 409 Conflict
+     * — the request is well-formed but the current flow configuration forbids
+     * the change. The body lists {@code activeFlows} so the admin UI can name
+     * the dependent flows and offer an explicit override.
+     */
+    @ExceptionHandler(AuthMethodInUseException.class)
+    public ResponseEntity<java.util.Map<String, Object>> handleAuthMethodInUse(
+            AuthMethodInUseException ex,
+            HttpServletRequest request) {
+        log.warn("Auth method disable refused — in use by active flow(s): method={}, flows={}, path={}",
+                ex.getMethod(), ex.getActiveFlowNames(), request.getRequestURI());
+
+        java.util.Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("timestamp", java.time.Instant.now().toString());
+        body.put("status", HttpStatus.CONFLICT.value());
+        body.put("error", ex.getErrorCode());
+        body.put("errorCode", ex.getErrorCode());
+        body.put("message", ex.getMessage());
+        body.put("method", ex.getMethod());
+        body.put("activeFlows", ex.getActiveFlowNames());
+        body.put("path", request.getRequestURI());
+
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(body);
+    }
+
+    /**
+     * Auth-flow builder no-lock-out guard: the flow references a method that is
+     * explicitly disabled for the tenant. HTTP 422 Unprocessable Entity — the
+     * request is well-formed but semantically refused. The body lists
+     * {@code disabledMethods} so the admin UI can name them.
+     */
+    @ExceptionHandler(AuthFlowMethodDisabledException.class)
+    public ResponseEntity<java.util.Map<String, Object>> handleAuthFlowMethodDisabled(
+            AuthFlowMethodDisabledException ex,
+            HttpServletRequest request) {
+        log.warn("Auth flow save refused — references tenant-disabled method(s): {}, path={}",
+                ex.getDisabledMethods(), request.getRequestURI());
+
+        java.util.Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("timestamp", java.time.Instant.now().toString());
+        body.put("status", HttpStatus.UNPROCESSABLE_ENTITY.value());
+        body.put("error", ex.getErrorCode());
+        body.put("errorCode", ex.getErrorCode());
+        body.put("message", ex.getMessage());
+        body.put("disabledMethods", ex.getDisabledMethods());
+        body.put("path", request.getRequestURI());
+
+        return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(body);
+    }
+
     @ExceptionHandler(DuplicateEmailException.class)
     public ResponseEntity<ErrorResponse> handleDuplicateEmail(
             DuplicateEmailException ex,

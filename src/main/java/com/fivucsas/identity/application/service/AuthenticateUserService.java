@@ -58,6 +58,7 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
     private final EnrollmentHealthService enrollmentHealthService;
     private final ConfigDrivenLoginPolicy configDrivenLoginPolicy;
     private final com.fivucsas.identity.application.service.mfa.AvailableMethodsResolver availableMethodsResolver;
+    private final TenantAuthMethodPolicy tenantAuthMethodPolicy;
 
     private static final int MAX_FAILED_ATTEMPTS = 5;
     private static final Duration LOCKOUT_DURATION = Duration.ofMinutes(15);
@@ -165,6 +166,39 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
                 : Set.of();
         boolean layer1IsPassword = layer1Methods.isEmpty()
                 || layer1Methods.contains(AuthMethodType.PASSWORD);
+
+        // ENFORCEMENT (Layer-1 of the login path): reject a Layer-1 factor that
+        // is EXPLICITLY disabled for the tenant (tenant_auth_methods row with
+        // is_enabled=false). SAFE semantics: no row = allowed, so a tenant that
+        // never touched its Auth-Methods toggles is never locked out. For a
+        // PASSWORD Layer-1 we gate on PASSWORD; for an identifier-first Layer-1
+        // (EMAIL_OTP / FACE / …) we gate on each configured Layer-1 option and
+        // block only when EVERY option is disabled (one enabled option still
+        // lets the user in — fail-closed for the disabled method only).
+        UUID tenantIdForPolicy = user.getTenant() != null ? user.getTenant().getId() : null;
+        if (layer1IsPassword) {
+            if (tenantAuthMethodPolicy.isLoginMethodExplicitlyDisabled(
+                    tenantIdForPolicy, AuthMethodType.PASSWORD)) {
+                log.warn("AUDIT: Login refused — PASSWORD disabled for tenant, email={}, tenantId={}, ip={}",
+                        command.getEmail(), tenantIdForPolicy, command.getIpAddress());
+                auditLogPort.logAuthenticationFailed(command.getEmail(), command.getIpAddress(),
+                        "auth_method_disabled_for_tenant:PASSWORD");
+                throw new com.fivucsas.identity.domain.exception.AuthMethodDisabledException(
+                        AuthMethodType.PASSWORD.name());
+            }
+        } else {
+            boolean allLayer1Disabled = !layer1Methods.isEmpty()
+                    && layer1Methods.stream().allMatch(m ->
+                            tenantAuthMethodPolicy.isLoginMethodExplicitlyDisabled(tenantIdForPolicy, m));
+            if (allLayer1Disabled) {
+                log.warn("AUDIT: Login refused — all Layer-1 methods disabled for tenant, email={}, tenantId={}, methods={}, ip={}",
+                        command.getEmail(), tenantIdForPolicy, layer1Methods, command.getIpAddress());
+                auditLogPort.logAuthenticationFailed(command.getEmail(), command.getIpAddress(),
+                        "auth_method_disabled_for_tenant:" + layer1Methods);
+                throw new com.fivucsas.identity.domain.exception.AuthMethodDisabledException(
+                        layer1Methods.iterator().next().name());
+            }
+        }
 
         if (layer1IsPassword && !passwordEncoder.matches(command.getPassword(), user.getPasswordHash())) {
             // Increment failed attempts and potentially lock account

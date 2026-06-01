@@ -39,6 +39,10 @@ class ManageAuthFlowServiceTest {
     @Mock private AuthMethodRepositoryPort authMethodRepository;
     @Mock private JpaTenantRepository tenantRepository;
     @Mock private TenantAuthMethodRepositoryPort tenantAuthMethodRepository;
+    // Default mock returns false for the boolean isLoginMethodExplicitlyDisabled
+    // → "not disabled / allowed", so the happy-path tests above keep passing
+    // without a stub. The dedicated test below overrides it.
+    @Mock private TenantAuthMethodPolicy tenantAuthMethodPolicy;
 
     @InjectMocks
     private ManageAuthFlowService service;
@@ -366,6 +370,37 @@ class ManageAuthFlowServiceTest {
 
         verify(incumbent).unsetDefault();
         verify(authFlowRepository).saveAndFlush(incumbent);
+    }
+
+    @Test
+    void createFlow_WhenStepMethodDisabledForTenant_ShouldReject422() {
+        // No-lock-out guard (write side): a flow that references a method
+        // EXPLICITLY disabled for the tenant must be refused so login
+        // enforcement can never block a method an active flow demands.
+        UUID tenantId = UUID.randomUUID();
+        Tenant tenant = mock(Tenant.class);
+        when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+        when(authFlowRepository.save(any())).thenReturn(AuthFlow.builder()
+                .tenant(tenant).name("Has-Disabled").operationType(OperationType.APP_LOGIN).build());
+        // TOTP is disabled for this tenant; PASSWORD (the other referenced
+        // method) is allowed. lenient() because the validation also probes
+        // PASSWORD and the probe order isn't contractual.
+        lenient().when(tenantAuthMethodPolicy.isLoginMethodExplicitlyDisabled(tenantId, AuthMethodType.TOTP))
+                .thenReturn(true);
+        lenient().when(tenantAuthMethodPolicy.isLoginMethodExplicitlyDisabled(tenantId, AuthMethodType.PASSWORD))
+                .thenReturn(false);
+
+        var steps = List.of(
+                new CreateAuthFlowCommand.FlowStepSpec(
+                        "PASSWORD", 1, true, 120, 3, null, false, null, null),
+                new CreateAuthFlowCommand.FlowStepSpec(
+                        "TOTP", 2, true, 120, 3, null, false, null, null));
+        var command = new CreateAuthFlowCommand("Has-Disabled", "", OperationType.APP_LOGIN, false, steps);
+
+        assertThatThrownBy(() -> service.createFlow(tenantId, command))
+                .isInstanceOf(com.fivucsas.identity.domain.exception.AuthFlowMethodDisabledException.class);
+        // The flow's steps are never persisted when a disabled method is present.
+        verify(authFlowStepRepository, never()).save(any());
     }
 
     @Test
