@@ -492,10 +492,14 @@ public class ManageUserService implements ManageUserUseCase {
 
             if (!callerIsRoot) {
                 UUID roleTenantId = role.getTenant() != null ? role.getTenant().getId() : null;
-                // Scoped caller may assign their own tenant's roles or global
-                // (tenant-less) system role DEFINITIONS — never another tenant's.
-                boolean accessible = roleTenantId == null
-                        || (callerScope != null && callerScope.equals(roleTenantId));
+                // SECURITY (2026-06-01, LOGIC_AUDIT P0-3): a GLOBAL role (tenant_id IS
+                // NULL) is the platform-level ROOT/SYSTEM and is ROOT-only to assign.
+                // The previous `roleTenantId == null || ...` treated the global ROOT role
+                // as accessible, so a TENANT_ADMIN could grant ROOT via the /users form
+                // and elevate user_type=ROOT. Scoped callers may assign ONLY their own
+                // tenant's roles (never global, never another tenant's).
+                boolean accessible = roleTenantId != null
+                        && callerScope != null && callerScope.equals(roleTenantId);
                 if (!accessible) {
                     log.warn("AUDIT: role assignment refused — caller scope {} may not assign role {} (tenant {}) to user {}",
                             callerScope, roleId, roleTenantId, user.getId());

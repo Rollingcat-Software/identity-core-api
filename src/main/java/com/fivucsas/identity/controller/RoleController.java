@@ -191,7 +191,11 @@ public class RoleController {
 
     @PostMapping("/api/v1/users/{userId}/roles/{roleId}")
     @Operation(summary = "Assign a role to a user")
-    @PreAuthorize("@rbac.hasPermission('user_role:assign')")
+    // SECURITY (2026-06-01, LOGIC_AUDIT P0-3): was @rbac.hasPermission('user_role:assign')
+    // — which a TENANT_ADMIN holds implicitly with NO role-id ceiling, so they could
+    // assign the global ROOT role and escalate. canAssignRole enforces the real ceiling
+    // (own-tenant roles only for non-ROOT; global ROOT/SYSTEM are ROOT-only).
+    @PreAuthorize("@rbac.canAssignRole(#roleId)")
     public ResponseEntity<Void> assignRole(
             @PathVariable String userId,
             @PathVariable String roleId,

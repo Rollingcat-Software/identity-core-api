@@ -39,13 +39,16 @@ class RbacAuthorizationServiceTest {
     private UserRepository userRepository;
 
     @Mock
+    private com.fivucsas.identity.repository.RoleRepository roleRepository;
+
+    @Mock
     private TenantFilterBypass tenantFilterBypass;
 
     private RbacAuthorizationService rbac;
 
     @BeforeEach
     void setUp() {
-        rbac = new RbacAuthorizationService(userRepository, tenantFilterBypass);
+        rbac = new RbacAuthorizationService(userRepository, roleRepository, tenantFilterBypass);
         // The bypass executes the supplied work directly in tests.
         lenient().when(tenantFilterBypass.runWithoutTenantFilter(any()))
                 .thenAnswer(inv -> ((Supplier<?>) inv.getArgument(0)).get());

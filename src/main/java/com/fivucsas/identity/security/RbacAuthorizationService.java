@@ -1,8 +1,10 @@
 package com.fivucsas.identity.security;
 
+import com.fivucsas.identity.entity.Role;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.entity.UserType;
 import com.fivucsas.identity.infrastructure.multitenancy.TenantFilterBypass;
+import com.fivucsas.identity.repository.RoleRepository;
 import com.fivucsas.identity.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -35,6 +37,7 @@ import java.util.UUID;
 public class RbacAuthorizationService {
 
     private final UserRepository userRepository;
+    private final RoleRepository roleRepository;
     private final TenantFilterBypass tenantFilterBypass;
 
     /**
@@ -163,15 +166,46 @@ public class RbacAuthorizationService {
      */
     public boolean canAssignRole(UUID roleId) {
         User currentUser = getCurrentUser().orElse(null);
-        if (currentUser == null) return false;
+        if (currentUser == null || roleId == null) return false;
 
         if (currentUser.getUserType() == UserType.ROOT) return true;
 
-        if (currentUser.getUserType() == UserType.TENANT_ADMIN) {
-            return hasPermission(currentUser, "user_role:assign");
+        if (currentUser.getUserType() != UserType.TENANT_ADMIN
+                || !hasPermission(currentUser, "user_role:assign")) {
+            return false;
         }
 
-        return false;
+        // SECURITY (2026-06-01, LOGIC_AUDIT P0-3): the role-id argument was loaded
+        // by nobody and ignored — a TENANT_ADMIN could assign ANY role, including the
+        // global ROOT role (which sets user_type=ROOT and bypasses all checks). Enforce
+        // the real ceiling: a non-ROOT caller may assign ONLY roles that belong to their
+        // OWN tenant. GLOBAL roles (tenant_id IS NULL — the platform-level ROOT/SYSTEM)
+        // are ROOT-only. The Hibernate tenantFilter already hides other tenants' roles,
+        // so a foreign role-id resolves to empty here.
+        Role role = roleRepository.findById(roleId).orElse(null);
+        if (role == null) return false;
+        UUID roleTenantId = role.getTenant() != null ? role.getTenant().getId() : null;
+        UUID callerTenantId = currentUser.getTenant() != null ? currentUser.getTenant().getId() : null;
+        boolean ok = roleTenantId != null && callerTenantId != null && callerTenantId.equals(roleTenantId);
+        if (!ok) {
+            log.warn("AUDIT: role assignment refused — TENANT_ADMIN {} may not assign role {} (roleTenant={}, callerTenant={})",
+                    currentUser.getEmail(), roleId, roleTenantId, callerTenantId);
+        }
+        return ok;
+    }
+
+    /**
+     * String-typed overload of {@link #canAssignRole(UUID)} for SpEL
+     * {@code @PreAuthorize} on a {@code String} path variable. Fail-closed on
+     * null/blank/non-UUID input (returns false instead of throwing → 403, not 500).
+     */
+    public boolean canAssignRole(String roleId) {
+        if (roleId == null || roleId.isBlank()) return false;
+        try {
+            return canAssignRole(UUID.fromString(roleId));
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
     }
 
     /**
