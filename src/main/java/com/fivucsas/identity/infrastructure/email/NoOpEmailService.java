@@ -13,7 +13,13 @@ public class NoOpEmailService implements EmailService {
 
     @Override
     public void sendOtp(String to, String code) {
-        log.info("Mail disabled - OTP for {}: {}", to, code);
+        sendOtp(to, code, OtpPurpose.LOGIN_VERIFICATION, null);
+    }
+
+    @Override
+    public void sendOtp(String to, String code, OtpPurpose purpose, String locale) {
+        log.info("Mail disabled - OTP for {} (purpose={}, locale={}): {}",
+                to, purpose, locale, code);
     }
 
     @Override

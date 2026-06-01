@@ -5,6 +5,7 @@ import com.fivucsas.identity.entity.AuthFlowStep;
 import com.fivucsas.identity.entity.AuthSession;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.infrastructure.email.EmailService;
+import com.fivucsas.identity.infrastructure.email.OtpPurpose;
 import com.fivucsas.identity.infrastructure.otp.OtpService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -85,7 +86,7 @@ class EmailOtpAuthHandlerTest {
 
         assertThat(result.isSuccess()).isTrue();
         assertThat(result.data()).containsEntry("otpSent", "true");
-        verify(emailService).sendOtp("user@test.com", "654321");
+        verify(emailService).sendOtp("user@test.com", "654321", OtpPurpose.LOGIN_VERIFICATION, null);
     }
 
     @Test

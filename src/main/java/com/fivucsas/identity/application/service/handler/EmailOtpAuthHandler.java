@@ -5,6 +5,7 @@ import com.fivucsas.identity.domain.model.auth.AuthMethodType;
 import com.fivucsas.identity.entity.AuthFlowStep;
 import com.fivucsas.identity.entity.AuthSession;
 import com.fivucsas.identity.infrastructure.email.EmailService;
+import com.fivucsas.identity.infrastructure.email.OtpPurpose;
 import com.fivucsas.identity.infrastructure.otp.OtpService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -80,7 +81,7 @@ public class EmailOtpAuthHandler implements AuthMethodHandler {
 
         String otpKey = buildOtpKey(session.getId().toString(), step.getStepOrder());
         String code = otpService.generate(otpKey);
-        emailService.sendOtp(session.getUser().getEmail(), code);
+        emailService.sendOtp(session.getUser().getEmail(), code, OtpPurpose.LOGIN_VERIFICATION, null);
 
         log.info("OTP sent for session: {}", session.getId());
         return StepResult.success(Map.of("otpSent", "true"));

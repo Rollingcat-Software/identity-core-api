@@ -11,6 +11,7 @@ import com.fivucsas.identity.domain.exception.ResourceNotFoundException;
 import com.fivucsas.identity.entity.Identity;
 import com.fivucsas.identity.entity.IdentityEmail;
 import com.fivucsas.identity.infrastructure.email.EmailService;
+import com.fivucsas.identity.infrastructure.email.OtpPurpose;
 import com.fivucsas.identity.infrastructure.otp.OtpService;
 import com.fivucsas.identity.repository.IdentityEmailRepository;
 import com.fivucsas.identity.repository.IdentityRepository;
@@ -82,7 +83,7 @@ public class IdentityLinkService implements IdentityLinkUseCase {
         // Send the OTP to the TARGET email (proof of control of the other account).
         String otpKey = buildOtpKey(callerUserId, normalizedEmail);
         String code = otpService.generate(otpKey);
-        emailService.sendOtp(normalizedEmail, code);
+        emailService.sendOtp(normalizedEmail, code, OtpPurpose.ACCOUNT_LINK, null);
 
         auditLogPort.logSecurityEvent(
                 callerUserId.toString(),

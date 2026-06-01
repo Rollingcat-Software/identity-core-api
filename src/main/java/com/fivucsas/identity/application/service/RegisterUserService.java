@@ -199,7 +199,8 @@ public class RegisterUserService implements RegisterUserUseCase {
         // Send email verification code
         try {
             String verificationCode = otpService.generate("email-verify:" + newUserId);
-            emailService.sendOtp(newUserEmail, verificationCode);
+            emailService.sendOtp(newUserEmail, verificationCode,
+                    com.fivucsas.identity.infrastructure.email.OtpPurpose.EMAIL_VERIFICATION, null);
             log.info("Email verification code sent to: {}", newUserEmail);
         } catch (Exception e) {
             log.warn("Failed to send email verification code to: {}", newUserEmail, e);

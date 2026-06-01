@@ -24,6 +24,7 @@ import com.fivucsas.identity.dto.ErrorResponse;
 import com.fivucsas.identity.entity.AuthFlow;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.infrastructure.email.EmailService;
+import com.fivucsas.identity.infrastructure.email.OtpPurpose;
 import com.fivucsas.identity.infrastructure.otp.OtpService;
 import com.fivucsas.identity.infrastructure.sms.SmsService;
 import com.fivucsas.identity.infrastructure.sms.VerifiableSmsService;
@@ -320,7 +321,10 @@ public class AuthController {
         userRepository.findByEmail(email).ifPresent(user -> {
             String otpKey = "password-reset:" + user.getId();
             String code = otpService.generate(otpKey);
-            emailService.sendOtp(email, code);
+            // Send a clearly-labeled "password reset code" email — NOT the
+            // generic "verification code" copy. The reset flow is code-based
+            // (the frontend /reset-password page collects this 6-digit code).
+            emailService.sendOtp(email, code, OtpPurpose.PASSWORD_RESET, null);
             log.info("Password reset code sent to: {}", email);
         });
 

@@ -5,6 +5,7 @@ import com.fivucsas.identity.entity.AuthFlowStep;
 import com.fivucsas.identity.entity.AuthSession;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.infrastructure.email.EmailService;
+import com.fivucsas.identity.infrastructure.email.OtpPurpose;
 import com.fivucsas.identity.infrastructure.otp.OtpService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -48,7 +49,7 @@ class EmailOtpAuthHandlerEdgeCasesTest {
 
         assertThat(result.isSuccess()).isTrue();
         assertThat(result.data()).containsEntry("otpSent", "true");
-        verify(emailService).sendOtp("user@example.com", "654321");
+        verify(emailService).sendOtp("user@example.com", "654321", OtpPurpose.LOGIN_VERIFICATION, null);
     }
 
     @Test
@@ -65,7 +66,7 @@ class EmailOtpAuthHandlerEdgeCasesTest {
 
         assertThat(result.isSuccess()).isTrue();
         assertThat(result.data()).containsEntry("otpSent", "true");
-        verify(emailService).sendOtp("user@example.com", "111222");
+        verify(emailService).sendOtp("user@example.com", "111222", OtpPurpose.LOGIN_VERIFICATION, null);
     }
 
     // ── Null / empty code variations ────────────────────────────────────
@@ -145,7 +146,7 @@ class EmailOtpAuthHandlerEdgeCasesTest {
         when(step.getStepOrder()).thenReturn(1);
         when(otpService.generate(anyString())).thenReturn("654321");
         doThrow(new RuntimeException("SMTP connection refused"))
-                .when(emailService).sendOtp("user@example.com", "654321");
+                .when(emailService).sendOtp("user@example.com", "654321", OtpPurpose.LOGIN_VERIFICATION, null);
 
         try {
             handler.validate(session, step, Map.of("action", "send"));
@@ -187,8 +188,8 @@ class EmailOtpAuthHandlerEdgeCasesTest {
         StepResult result = handler.validate(session, step, Map.of("action", "send"));
 
         assertThat(result.isSuccess()).isTrue();
-        verify(emailService).sendOtp("user@example.com", "111111");
-        verify(emailService).sendOtp("user@example.com", "222222");
+        verify(emailService).sendOtp("user@example.com", "111111", OtpPurpose.LOGIN_VERIFICATION, null);
+        verify(emailService).sendOtp("user@example.com", "222222", OtpPurpose.LOGIN_VERIFICATION, null);
         verify(otpService, times(2)).generate("otp:" + sessionId + ":1:EMAIL_OTP");
     }
 

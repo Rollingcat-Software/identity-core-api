@@ -24,13 +24,13 @@ public class EmailServicePortAdapter implements EmailServicePort {
     @Override
     public void sendRegistrationEmail(String toEmail, String name, String verificationToken) {
         log.info("Sending registration email to domain: {}", maskEmail(toEmail));
-        emailService.sendOtp(toEmail, verificationToken);
+        emailService.sendOtp(toEmail, verificationToken, OtpPurpose.EMAIL_VERIFICATION, null);
     }
 
     @Override
     public void sendPasswordResetEmail(String toEmail, String name, String resetToken) {
         log.info("Sending password reset email to domain: {}", maskEmail(toEmail));
-        emailService.sendOtp(toEmail, resetToken);
+        emailService.sendOtp(toEmail, resetToken, OtpPurpose.PASSWORD_RESET, null);
     }
 
     @Override
@@ -41,7 +41,7 @@ public class EmailServicePortAdapter implements EmailServicePort {
     @Override
     public void send2FACode(String toEmail, String name, String code) {
         log.info("Sending 2FA code to domain: {}", maskEmail(toEmail));
-        emailService.sendOtp(toEmail, code);
+        emailService.sendOtp(toEmail, code, OtpPurpose.LOGIN_VERIFICATION, null);
     }
 
     @Override

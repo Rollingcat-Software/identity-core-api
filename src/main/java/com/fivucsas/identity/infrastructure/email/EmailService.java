@@ -3,7 +3,39 @@ package com.fivucsas.identity.infrastructure.email;
 import java.time.Instant;
 
 public interface EmailService {
+
+    /**
+     * Sends a branded, bilingual (EN/TR) one-time-code email.
+     *
+     * <p>Prefer the {@code purpose}-aware overload below — it labels the code
+     * correctly (login verification vs. registration vs. account-link vs.
+     * password reset) and is what new call-sites should use. This
+     * zero-extra-argument form is kept for backwards compatibility and is
+     * equivalent to {@code sendOtp(to, code, OtpPurpose.LOGIN_VERIFICATION,
+     * null)} (English login-verification copy).</p>
+     *
+     * @param to   recipient email address
+     * @param code the one-time code
+     */
     void sendOtp(String to, String code);
+
+    /**
+     * Sends a branded, bilingual (EN/TR) one-time-code email whose subject and
+     * copy are tailored to the {@code purpose} of the code.
+     *
+     * <p>The body is an inline-styled HTML message (FIVUCSAS wordmark header,
+     * the code shown prominently, an expiry note, a plain footer) with a
+     * plain-text fallback for clients that cannot render HTML. The recipient's
+     * locale selects EN or TR copy; any unsupported/blank locale falls back to
+     * English (mirrors {@link #sendGuestInvitation}).</p>
+     *
+     * @param to      recipient email address
+     * @param code    the one-time code
+     * @param purpose what the code is for — drives the subject + body wording
+     *                (null is treated as {@link OtpPurpose#LOGIN_VERIFICATION})
+     * @param locale  BCP-47 language tag of the recipient ("tr"/"en"; null/blank → EN)
+     */
+    void sendOtp(String to, String code, OtpPurpose purpose, String locale);
 
     /**
      * Sends a guest invitation email containing a prominent accept link.

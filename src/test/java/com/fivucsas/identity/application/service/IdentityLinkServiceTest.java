@@ -10,6 +10,7 @@ import com.fivucsas.identity.domain.exception.ResourceNotFoundException;
 import com.fivucsas.identity.entity.Identity;
 import com.fivucsas.identity.entity.IdentityEmail;
 import com.fivucsas.identity.infrastructure.email.EmailService;
+import com.fivucsas.identity.infrastructure.email.OtpPurpose;
 import com.fivucsas.identity.infrastructure.otp.OtpService;
 import com.fivucsas.identity.repository.IdentityEmailRepository;
 import com.fivucsas.identity.repository.IdentityRepository;
@@ -90,7 +91,7 @@ class IdentityLinkServiceTest {
 
         service.initiateLink(callerUserId, "  Target@Marun.edu.tr  ");
 
-        verify(emailService).sendOtp(eq(targetEmail), eq("123456"));
+        verify(emailService).sendOtp(eq(targetEmail), eq("123456"), eq(OtpPurpose.ACCOUNT_LINK), eq(null));
         verify(auditLogPort).logSecurityEvent(eq(callerUserId.toString()),
                 eq("IDENTITY_LINK_INITIATED"), any(), anyString());
     }
@@ -110,7 +111,7 @@ class IdentityLinkServiceTest {
                 .isInstanceOf(IdentityLinkException.class)
                 .hasMessageContaining("same");
 
-        verify(emailService, never()).sendOtp(anyString(), anyString());
+        verify(emailService, never()).sendOtp(anyString(), anyString(), any(), any());
     }
 
     @Test
@@ -146,7 +147,7 @@ class IdentityLinkServiceTest {
                 .isInstanceOf(IdentityLinkException.class);
 
         verify(userPort, never()).findMembershipByEmail(anyString());
-        verify(emailService, never()).sendOtp(anyString(), anyString());
+        verify(emailService, never()).sendOtp(anyString(), anyString(), any(), any());
     }
 
     // ---- confirm -----------------------------------------------------------
