@@ -228,6 +228,7 @@ public class ManageUserService implements ManageUserUseCase {
         return users.stream()
             .map(this::mapToUserResponse)
             .map(this::enrichWithLoginInfo)
+            .map(this::stripListPii)
             .collect(Collectors.toList());
     }
 
@@ -245,6 +246,7 @@ public class ManageUserService implements ManageUserUseCase {
         return users.stream()
             .map(this::mapToUserResponse)
             .map(this::enrichWithLoginInfo)
+            .map(this::stripListPii)
             .collect(Collectors.toList());
     }
 
@@ -549,6 +551,22 @@ public class ManageUserService implements ManageUserUseCase {
         return response.toBuilder()
             .lastLoginAt(auditLastLogin != null ? auditLastLogin : response.getLastLoginAt())
             .lastLoginIp(auditLastIp != null ? auditLastIp : response.getLastLoginIp())
+            .build();
+    }
+
+    /**
+     * Strips PII from the {@code /api/v1/users} LIST projection that the
+     * dashboard never renders: the full {@code phoneNumber} and the
+     * {@code lastLoginIp}. These remain available on the single-user detail
+     * read ({@code getUserById}) and the self-profile ({@code /auth/me}); only
+     * the multi-row list/search payloads are trimmed so an admin list response
+     * stops broadcasting every member's phone + last-login IP. {@code idNumber}
+     * is already masked by the mapper and is intentionally left as-is.
+     */
+    private UserResponse stripListPii(UserResponse response) {
+        return response.toBuilder()
+            .phoneNumber(null)
+            .lastLoginIp(null)
             .build();
     }
 

@@ -80,7 +80,16 @@ public class RegisterUserService implements RegisterUserUseCase {
         //   3. Legacy tenants.domain column — single-domain fall-back during
         //      V44 rollout so tenants whose admin has not yet migrated to
         //      tenant_email_domains continue to resolve correctly.
-        //   4. Default tenant (configurable slug) — last-resort fall-back.
+        //   4. Explicit "default" tenant (configurable slug) — opt-in catch-all
+        //      that an operator must deliberately provision.
+        // FAIL-CLOSED (security fix): if NONE of the above resolves, registration
+        // is REJECTED. The previous final fallback —
+        // tenantRepository.findAll().stream().findFirst() — silently dropped an
+        // unmatched-domain self-registration into an ARBITRARY real tenant
+        // (whichever row sorted first; a red-team registered into "Marmara
+        // University" this way). An open self-registration must never join a
+        // tenant it cannot be matched to; the caller must use a matched domain or
+        // an explicit tenant/clientId (TenantContext).
         // Tracks whether the tenant was AUTO-BOUND from a VERIFIED email domain
         // (V63/V64). Only that path triggers default-role-on-join — an explicit
         // tenant context (invitation/header) or the default-tenant fallback do
@@ -93,13 +102,13 @@ public class RegisterUserService implements RegisterUserUseCase {
                 .orElseThrow(() -> new com.fivucsas.identity.domain.exception.TenantNotFoundException(contextTenantId.toString()));
         } else {
             defaultTenant = resolveTenantByEmailDomain(email.getDomain(), autoBoundViaVerifiedDomain)
-                .orElseGet(() -> {
-                    Tenant fallback = tenantRepository.findBySlug(defaultTenantSlug)
-                        .orElseGet(() -> tenantRepository.findAll().stream().findFirst()
-                            .orElseThrow(() -> new IllegalStateException("No tenant found in the system")));
-                    log.warn("No tenant context or email-domain match for {}, falling back to default tenant: {}",
-                        email.getValue(), fallback.getSlug());
-                    return fallback;
+                .or(() -> tenantRepository.findBySlug(defaultTenantSlug))
+                .orElseThrow(() -> {
+                    log.warn("AUDIT: Registration refused — no tenant context, no email-domain match for '{}', "
+                            + "and no '{}' catch-all tenant. Self-registration will NOT join an arbitrary tenant.",
+                        email.getDomain(), defaultTenantSlug);
+                    return new com.fivucsas.identity.domain.exception.EmailDomainNotAllowedException(
+                        email.getDomain());
                 });
         }
 

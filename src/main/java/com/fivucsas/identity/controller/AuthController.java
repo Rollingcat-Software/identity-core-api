@@ -669,7 +669,12 @@ public class AuthController {
                 }
                 case QR_CODE -> {
                     String token = (String) data.get("token");
-                    yield token != null && otpService.validate("2fa-qr:" + user.getId(), token);
+                    // P1-2 fix: validate via the token-keyed QrCodeService store
+                    // (matches QrCodeService.generateToken + the working
+                    // QrCodeAuthHandler). The previous otpService.validate(
+                    // "2fa-qr:" + userId, token) read a store nothing writes, so
+                    // QR_CODE on the legacy /2fa/verify-method path always failed.
+                    yield token != null && qrCodeService.validateToken(token, user.getId());
                 }
                 case EMAIL_OTP -> {
                     String code = (String) data.get("code");

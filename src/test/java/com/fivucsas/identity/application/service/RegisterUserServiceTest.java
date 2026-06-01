@@ -135,9 +135,14 @@ class RegisterUserServiceTest {
             .expiryDate(Instant.now().plus(Duration.ofDays(7)))
             .build();
 
-        // Configure tenant repository mock to return test tenant
+        // Configure tenant repository mock to return test tenant.
+        // FAIL-CLOSED fix (security): RegisterUserService no longer drops an
+        // unmatched-domain registration into an ARBITRARY tenant (the removed
+        // findAll().findFirst() fallback). The legitimate catch-all is now the
+        // explicit "default" tenant slug, so the happy-path tests point the
+        // configurable slug at the test tenant and stub findBySlug accordingly.
         lenient().when(tenantRepository.findBySlug("test-tenant")).thenReturn(Optional.of(testTenant));
-        lenient().when(tenantRepository.findAll()).thenReturn(List.of(testTenant));
+        ReflectionTestUtils.setField(registerUserService, "defaultTenantSlug", "test-tenant");
         // P0-#7: tenant user-quota count defaults to 0 (well below max_users
         // = 100) for the existing happy-path tests. The dedicated quota
         // exceedance test below overrides this stub explicitly.
@@ -694,6 +699,31 @@ class RegisterUserServiceTest {
                     com.fivucsas.identity.infrastructure.multitenancy.TenantContext.clear();
                 }
             }
+        }
+
+        @Test
+        @DisplayName("Unmatched domain with NO default tenant is REJECTED (fail-closed, never joins an arbitrary tenant)")
+        void unmatchedDomainWithNoDefaultTenantIsRejected() {
+            // Security fix: the removed findAll().findFirst() fallback used to drop
+            // an unmatched-domain self-registration into an ARBITRARY real tenant.
+            // With no domain match AND no "default" catch-all tenant, registration
+            // must now be REJECTED — not silently bound to whatever tenant sorts first.
+            String emailAddress = "stranger@no-such-tenant.example";
+            ReflectionTestUtils.setField(registerUserService, "defaultTenantSlug", "default");
+            when(userRepository.existsByEmail(emailAddress)).thenReturn(false);
+            when(tenantEmailDomainRepository.findByIdEmailDomainIgnoreCaseAndVerifiedTrue("no-such-tenant.example"))
+                .thenReturn(Optional.empty());
+            when(tenantRepository.findByLegacyDomainIgnoreCase("no-such-tenant.example"))
+                .thenReturn(Optional.empty());
+            when(tenantRepository.findBySlug("default")).thenReturn(Optional.empty());
+
+            assertThatThrownBy(() -> registerUserService.execute(registrationFor(emailAddress)))
+                .isInstanceOf(com.fivucsas.identity.domain.exception.EmailDomainNotAllowedException.class);
+
+            // Fail-closed BEFORE any persistence / token issuance / bcrypt hash.
+            verify(userRepository, never()).save(any(User.class));
+            verify(tokenGenerator, never()).generateAccessToken(any());
+            verify(passwordEncoder, never()).encode(any());
         }
 
         @Test

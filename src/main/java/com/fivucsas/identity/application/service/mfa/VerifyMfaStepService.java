@@ -24,6 +24,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Collections;
 import java.util.EnumMap;
+import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -198,6 +199,38 @@ public class VerifyMfaStepService {
             auditLogPort.logMfaStepFailed(session.getUserId().toString(), req.method(),
                     "auth_method_disabled_for_tenant", req.clientIp(), req.userAgent());
             throw new com.fivucsas.identity.domain.exception.AuthMethodDisabledException(methodType.name());
+        }
+
+        // SECURITY (P1-1): bind the submitted method to the CURRENT step. The
+        // submitted method MUST be one of the current step's permitted methods
+        // (its available set + configured fallback) — exactly the rule
+        // /auth/mfa/switch-method enforces. Without this a caller could answer
+        // any step with any registered method (e.g. submit TOTP to satisfy a
+        // FACE step). CHOICE steps stay "any-one-of" because getAvailableMethods()
+        // returns the full alternatives list. Runs BEFORE the challenge
+        // short-circuit and handler dispatch, so a non-permitted method never
+        // triggers a verification side-effect (challenge mint, counter bump).
+        //
+        // A method that was already completed earlier AND is not permitted here
+        // is left to the more specific METHOD_ALREADY_USED substitution guard
+        // below (so the client still gets the "you already used this" signal);
+        // this guard only rejects methods that are entirely off-step. The
+        // empty-set case (flow/step unresolvable) is treated as "do not enforce"
+        // to preserve the legacy fail-open behaviour on a broken flow rather than
+        // locking every method out.
+        Set<AuthMethodType> permittedTypes = resolveCurrentStepPermittedTypes(session);
+        boolean alreadyCompletedElsewhere = session.getCompletedMethods().contains(methodType.name());
+        if (!permittedTypes.isEmpty() && !permittedTypes.contains(methodType) && !alreadyCompletedElsewhere) {
+            log.warn("AUDIT: MFA step rejected — method {} not permitted on step {} for userId={}, ip={}",
+                    methodType, session.getCurrentStep(), session.getUserId(), req.clientIp());
+            auditLogPort.logMfaStepFailed(session.getUserId().toString(), req.method(),
+                    "method_not_permitted_for_step", req.clientIp(), req.userAgent());
+            return VerifyMfaStepResponse.methodNotPermitted(
+                    session.getCurrentStep(),
+                    session.getTotalSteps(),
+                    permittedTypes.stream().map(Enum::name)
+                            .collect(java.util.stream.Collectors.toCollection(java.util.TreeSet::new)),
+                    session.getCompletedMethods());
         }
 
         Map<String, Object> data = req.data() != null ? req.data() : Map.of();
@@ -464,6 +497,43 @@ public class VerifyMfaStepService {
         body.put("alternativeMethods", alternativeMethods);
         body.put("completedMethods", session.getCompletedMethods());
         return VerifyMfaStepResponse.passthrough(body);
+    }
+
+    /**
+     * Resolves the set of {@link AuthMethodType} a caller is permitted to submit
+     * at the session's CURRENT step: the step's available methods (SEQUENTIAL →
+     * primary; CHOICE → every alternative) PLUS the configured fallback method.
+     * Mirrors the {@code permitted} set computed by
+     * {@code AuthController.switchMfaMethod}. Returns an empty set when the flow
+     * or step cannot be resolved, which the caller treats as "do not enforce"
+     * (legacy fail-open on a broken flow rather than locking the user out).
+     */
+    private Set<AuthMethodType> resolveCurrentStepPermittedTypes(MfaSession session) {
+        try {
+            AuthFlow currentFlow = authFlowRepository.findById(session.getFlowId()).orElse(null);
+            if (currentFlow == null) return Collections.emptySet();
+            int currentStepOrder = session.getCurrentStep();
+            AuthFlowStep currentStep = currentFlow.getSteps().stream()
+                    .filter(s -> s.getStepOrder() == currentStepOrder)
+                    .findFirst()
+                    .orElse(null);
+            if (currentStep == null) return Collections.emptySet();
+            Set<AuthMethodType> permitted = EnumSet.noneOf(AuthMethodType.class);
+            for (AuthMethod m : currentStep.getAvailableMethods()) {
+                if (m != null && m.getType() != null) {
+                    permitted.add(m.getType());
+                }
+            }
+            if (currentStep.getFallbackMethod() != null
+                    && currentStep.getFallbackMethod().getType() != null) {
+                permitted.add(currentStep.getFallbackMethod().getType());
+            }
+            return permitted;
+        } catch (Exception e) {
+            log.warn("Failed to resolve permitted MFA step methods (sessionId={}): {}",
+                    session.getId(), e.getMessage());
+            return Collections.emptySet();
+        }
     }
 
     private Set<String> resolveCurrentStepMethodNames(MfaSession session) {

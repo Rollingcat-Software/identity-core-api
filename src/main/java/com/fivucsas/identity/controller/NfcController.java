@@ -90,12 +90,28 @@ public class NfcController {
                 ? UUID.fromString(userIdStr)
                 : null;
 
-        EnrollResult result = manageNfcCardService.enrollCard(requestedUserId, cardSerial, cardType, label);
+        // P1-8: explicit re-authorization for the two otherwise-refused re-enroll
+        // transitions (reactivate a revoked card / reassign ownership). Absent or
+        // any non-"true" value keeps the safe default (false).
+        boolean reauthorize = "true".equalsIgnoreCase(trimToNull(request.get("reauthorize")));
+
+        EnrollResult result = manageNfcCardService.enrollCard(
+                requestedUserId, cardSerial, cardType, label, reauthorize);
 
         return switch (result.status()) {
             case CONFLICT -> ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of(
                     "success", false,
                     "message", "Card is already enrolled in this tenant"));
+            case CARD_REVOKED -> ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of(
+                    "success", false,
+                    "errorCode", "NFC_CARD_REVOKED",
+                    "message", "This card was revoked. Re-enrolling it requires explicit "
+                            + "re-authorization (set reauthorize=true)."));
+            case OWNED_BY_ANOTHER_USER -> ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of(
+                    "success", false,
+                    "errorCode", "NFC_CARD_OWNED_BY_ANOTHER_USER",
+                    "message", "This card is enrolled to a different user. Reassigning it requires "
+                            + "explicit re-authorization (set reauthorize=true)."));
             case USER_NOT_FOUND -> ResponseEntity.badRequest().body(Map.of(
                     "success", false,
                     "message", "User not found"));

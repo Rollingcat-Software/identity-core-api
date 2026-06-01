@@ -426,6 +426,82 @@ class VerifyMfaStepServiceTest {
         verify(mfaSessionRepository, never()).save(any());
     }
 
+    // ============== Step-binding guard (P1-1) ==============
+
+    @Test
+    void offStepMethod_isRejectedAsMethodNotPermitted_beforeHandlerDispatch() {
+        // Flow PASSWORD → TOTP, user on step 1 (configured method PASSWORD).
+        // Submitting TOTP — a method NOT in step 1's permitted set — must be
+        // rejected with METHOD_NOT_PERMITTED (409) BEFORE the handler runs.
+        UUID userId = UUID.randomUUID();
+        UUID flowId = UUID.randomUUID();
+        MfaSession session = mfaSessionAt(SESSION_TOKEN, userId, flowId, 1, 2, "[]");
+        AuthFlow flow = flowOf(flowId,
+                stepOf(1, AuthMethodType.PASSWORD),
+                stepOf(2, AuthMethodType.TOTP));
+        User user = userMock(userId);
+
+        when(mfaSessionRepository.findBySessionTokenForUpdate(SESSION_TOKEN))
+                .thenReturn(Optional.of(session));
+        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+        when(authFlowRepository.findById(flowId)).thenReturn(Optional.of(flow));
+
+        VerifyMfaStepResponse result = service.execute(req("TOTP", Map.of("code", "123456")));
+
+        assertThat(result.status()).isEqualTo(VerifyMfaStepResponse.Status.CONFLICT);
+        assertThat(result.body())
+                .containsEntry("error", "METHOD_NOT_PERMITTED")
+                .containsEntry("currentStep", 1)
+                .containsEntry("totalSteps", 2)
+                .containsEntry("nextAction", "SWITCH_METHOD")
+                .containsKey("permittedMethods");
+        // Handler MUST NOT run — no verification side-effect for an off-step method.
+        verify(totpHandler, never()).verify(any(), any(), any());
+        verify(mfaSessionRepository, never()).save(any());
+        verify(auditLogPort).logMfaStepFailed(eq(userId.toString()), eq("TOTP"),
+                eq("method_not_permitted_for_step"), eq(CLIENT_IP), eq(UA));
+    }
+
+    @Test
+    void choiceStep_anyConfiguredAlternative_isPermitted() {
+        // CHOICE step offering {TOTP, FACE}; user on step 1. Submitting FACE (an
+        // alternative on this step) must NOT trip the step-binding guard.
+        UUID userId = UUID.randomUUID();
+        UUID flowId = UUID.randomUUID();
+        MfaSession session = mfaSessionAt(SESSION_TOKEN, userId, flowId, 1, 1, "[]");
+        AuthFlowStep choiceStep = AuthFlowStep.builder()
+                .id(UUID.randomUUID())
+                .stepOrder(1)
+                .stepType(StepType.CHOICE)
+                .alternativeMethods(List.of(methodOf(AuthMethodType.TOTP), methodOf(AuthMethodType.FACE)))
+                .isRequired(true)
+                .timeoutSeconds(120)
+                .maxAttempts(3)
+                .allowsDelegation(true)
+                .config("{}")
+                .build();
+        AuthFlow flow = flowOf(flowId, choiceStep);
+        User user = userMock(userId);
+
+        when(mfaSessionRepository.findBySessionTokenForUpdate(SESSION_TOKEN))
+                .thenReturn(Optional.of(session));
+        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+        when(authFlowRepository.findById(flowId)).thenReturn(Optional.of(flow));
+        when(faceHandler.verify(eq(session), eq(user), any())).thenReturn(MfaStepResult.ok());
+        when(mfaSessionRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(tokenGenerator.generateAccessToken(anyString(), any())).thenReturn("jwt");
+        when(tokenGenerator.getExpirationMillis()).thenReturn(86400000L);
+        RefreshToken refresh = org.mockito.Mockito.mock(RefreshToken.class);
+        when(refresh.getToken()).thenReturn("rt");
+        when(refreshTokenService.createRefreshToken(any(), any(), any())).thenReturn(refresh);
+
+        VerifyMfaStepResponse result = service.execute(req("FACE", Map.of("image", "base64")));
+
+        assertThat(result.status()).isEqualTo(VerifyMfaStepResponse.Status.OK);
+        assertThat(result.body()).doesNotContainKey("error");
+        verify(faceHandler).verify(eq(session), eq(user), any());
+    }
+
     // ============== Substitution guard — ported from legacy AuthControllerTest ==============
 
     @Test

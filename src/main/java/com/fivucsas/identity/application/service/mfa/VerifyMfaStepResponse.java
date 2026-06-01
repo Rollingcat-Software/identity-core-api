@@ -95,4 +95,34 @@ public record VerifyMfaStepResponse(Status status, Map<String, Object> body) {
         body.put("nextAction", "SWITCH_METHOD");
         return new VerifyMfaStepResponse(Status.CONFLICT, body);
     }
+
+    /**
+     * Step-binding rejection (P1-1): the submitted method is not part of the
+     * CURRENT step's permitted set (the step's available methods plus its
+     * configured fallback). Without this guard a caller could submit ANY
+     * registered method for the current step (e.g. answer a FACE step with a
+     * TOTP code), defeating per-step method enforcement.
+     *
+     * <p>Mapped to HTTP 409 (Conflict) — the request is well-formed but
+     * conflicts with the session's current-step configuration. Mirrors the
+     * {@code METHOD_NOT_PERMITTED} contract already enforced by
+     * {@code POST /api/v1/auth/mfa/switch-method}. The guard runs BEFORE handler
+     * dispatch, so a non-permitted method has no verification side-effect.
+     */
+    public static VerifyMfaStepResponse methodNotPermitted(
+            int currentStep,
+            int totalSteps,
+            Set<String> permittedMethods,
+            List<String> completedMethods) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("status", "ERROR");
+        body.put("error", "METHOD_NOT_PERMITTED");
+        body.put("message", "This authentication method is not permitted for the current step.");
+        body.put("currentStep", currentStep);
+        body.put("totalSteps", totalSteps);
+        body.put("permittedMethods", permittedMethods != null ? permittedMethods : Set.of());
+        body.put("completedMethods", completedMethods != null ? completedMethods : List.of());
+        body.put("nextAction", "SWITCH_METHOD");
+        return new VerifyMfaStepResponse(Status.CONFLICT, body);
+    }
 }

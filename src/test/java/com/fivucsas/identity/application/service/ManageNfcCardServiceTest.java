@@ -138,6 +138,118 @@ class ManageNfcCardServiceTest {
                 .startEnrollment(eq(targetUserId), eq(tenantId), eq(AuthMethodType.NFC_DOCUMENT));
     }
 
+    // ------------------------------------------------------------------
+    // P1-8: re-enroll must not silently reactivate a REVOKED card nor
+    // silently reassign ownership. Both require explicit re-authorization.
+    // ------------------------------------------------------------------
+
+    @Test
+    @DisplayName("enrollCard → CARD_REVOKED when re-enrolling a revoked card without re-authorization")
+    void enrollCard_WhenExistingCardRevoked_AndNotReauthorized_ShouldRefuse() {
+        UUID targetUserId = currentUserId;
+        NfcCard revoked = mock(NfcCard.class);
+        when(revoked.isActive()).thenReturn(false);
+        when(revoked.getRevokedAt()).thenReturn(java.time.Instant.now());
+
+        when(nfcCardRepository.existsByCardSerialAndTenantIdAndIsActiveTrue("AABB", tenantId))
+                .thenReturn(false);
+        when(userRepository.findById(targetUserId)).thenReturn(Optional.of(currentUser));
+        when(nfcCardRepository.findByCardSerialAndTenantId("AABB", tenantId))
+                .thenReturn(Optional.of(revoked));
+
+        ManageNfcCardService.EnrollResult result =
+                service.enrollCard(null, "AABB", "MIFARE", "Test card");
+
+        assertThat(result.status()).isEqualTo(ManageNfcCardService.EnrollResult.Status.CARD_REVOKED);
+        verify(nfcCardRepository, never()).save(any(NfcCard.class));
+        verify(revoked, never()).activate();
+    }
+
+    @Test
+    @DisplayName("enrollCard → reactivates a revoked card when reauthorize=true")
+    void enrollCard_WhenExistingCardRevoked_AndReauthorized_ShouldReactivate() {
+        UUID targetUserId = currentUserId;
+        NfcCard revoked = mock(NfcCard.class);
+        when(revoked.isActive()).thenReturn(false);
+        when(revoked.getRevokedAt()).thenReturn(java.time.Instant.now());
+        when(revoked.getUser()).thenReturn(currentUser);
+
+        when(nfcCardRepository.existsByCardSerialAndTenantIdAndIsActiveTrue("AABB", tenantId))
+                .thenReturn(false);
+        when(userRepository.findById(targetUserId)).thenReturn(Optional.of(currentUser));
+        when(nfcCardRepository.findByCardSerialAndTenantId("AABB", tenantId))
+                .thenReturn(Optional.of(revoked));
+        when(nfcCardRepository.save(any(NfcCard.class))).thenAnswer(inv -> {
+            NfcCard saved = mock(NfcCard.class);
+            when(saved.getId()).thenReturn(UUID.randomUUID());
+            when(saved.getCardSerial()).thenReturn("AABB");
+            return saved;
+        });
+
+        ManageNfcCardService.EnrollResult result =
+                service.enrollCard(null, "AABB", "MIFARE", "Test card", true);
+
+        assertThat(result.status()).isEqualTo(ManageNfcCardService.EnrollResult.Status.OK);
+        verify(revoked).activate();
+        verify(nfcCardRepository).save(any(NfcCard.class));
+    }
+
+    @Test
+    @DisplayName("enrollCard → OWNED_BY_ANOTHER_USER when re-pointing a card to a different owner without re-authorization")
+    void enrollCard_WhenCardOwnedByAnotherUser_AndNotReauthorized_ShouldRefuse() {
+        UUID otherOwnerId = UUID.randomUUID();
+        UUID targetUserId = UUID.randomUUID();
+        User otherOwner = mock(User.class);
+        when(otherOwner.getId()).thenReturn(otherOwnerId);
+        User targetUser = mock(User.class);
+
+        // An ACTIVE card currently belongs to otherOwner; a new enroll targets targetUser.
+        NfcCard existing = mock(NfcCard.class);
+        when(existing.isActive()).thenReturn(true);
+        when(existing.getUser()).thenReturn(otherOwner);
+
+        when(nfcCardRepository.existsByCardSerialAndTenantIdAndIsActiveTrue("CCDD", tenantId))
+                .thenReturn(false);
+        when(userRepository.findById(targetUserId)).thenReturn(Optional.of(targetUser));
+        when(nfcCardRepository.findByCardSerialAndTenantId("CCDD", tenantId))
+                .thenReturn(Optional.of(existing));
+
+        ManageNfcCardService.EnrollResult result =
+                service.enrollCard(targetUserId, "CCDD", "MIFARE", null);
+
+        assertThat(result.status())
+                .isEqualTo(ManageNfcCardService.EnrollResult.Status.OWNED_BY_ANOTHER_USER);
+        verify(nfcCardRepository, never()).save(any(NfcCard.class));
+        verify(existing, never()).setUser(any());
+    }
+
+    @Test
+    @DisplayName("enrollCard → OK re-enroll of the SAME owner's still-active card (benign reactivation unaffected)")
+    void enrollCard_WhenSameOwnerActiveCard_ShouldReenrollWithoutReauthorization() {
+        NfcCard existing = mock(NfcCard.class);
+        when(existing.isActive()).thenReturn(true);
+        when(existing.getUser()).thenReturn(currentUser); // same owner as target (self-enroll)
+
+        when(nfcCardRepository.existsByCardSerialAndTenantIdAndIsActiveTrue("EE11", tenantId))
+                .thenReturn(false);
+        when(userRepository.findById(currentUserId)).thenReturn(Optional.of(currentUser));
+        when(nfcCardRepository.findByCardSerialAndTenantId("EE11", tenantId))
+                .thenReturn(Optional.of(existing));
+        when(nfcCardRepository.save(any(NfcCard.class))).thenAnswer(inv -> {
+            NfcCard saved = mock(NfcCard.class);
+            when(saved.getId()).thenReturn(UUID.randomUUID());
+            when(saved.getCardSerial()).thenReturn("EE11");
+            return saved;
+        });
+
+        ManageNfcCardService.EnrollResult result =
+                service.enrollCard(null, "EE11", "MIFARE", "Personal");
+
+        assertThat(result.status()).isEqualTo(ManageNfcCardService.EnrollResult.Status.OK);
+        verify(existing).activate();
+        verify(existing).setUser(currentUser);
+    }
+
     @Test
     @DisplayName("removeAllUserEnrollments → returns 0 when the user has no NFC cards (parity with previous controller body)")
     void removeAllUserEnrollments_WhenUserHasNoCards_ShouldReturnZero() {

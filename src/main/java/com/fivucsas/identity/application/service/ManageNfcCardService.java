@@ -48,16 +48,41 @@ public class ManageNfcCardService {
 
     /**
      * Outcome of an enroll attempt. {@link Status#OK} carries the saved card;
-     * {@link Status#CONFLICT}/{@link Status#USER_NOT_FOUND} carry no payload
-     * and are mapped to HTTP status by the controller.
+     * the rejection statuses carry no payload and are mapped to HTTP status by
+     * the controller.
+     *
+     * <p>P1-8: {@link Status#CARD_REVOKED} and {@link Status#OWNED_BY_ANOTHER_USER}
+     * fail-close the two silent re-enroll transitions that re-enrolling a card
+     * previously triggered — auto-reactivating an administratively revoked card,
+     * and silently re-pointing a card to a different owner. Both require an
+     * explicit re-authorization (the {@code reauthorize} flag) rather than
+     * happening as an invisible side-effect of a tap.</p>
      */
     public record EnrollResult(Status status, NfcCard card, UUID targetUserId) {
-        public enum Status { OK, CONFLICT, USER_NOT_FOUND }
+        public enum Status { OK, CONFLICT, USER_NOT_FOUND, CARD_REVOKED, OWNED_BY_ANOTHER_USER }
     }
 
     @Transactional
     public EnrollResult enrollCard(UUID requestedUserId, String rawCardSerial,
                                    String cardType, String label) {
+        return enrollCard(requestedUserId, rawCardSerial, cardType, label, false);
+    }
+
+    /**
+     * Enroll (or re-enroll) an NFC card.
+     *
+     * @param reauthorize when {@code true}, the caller has EXPLICITLY
+     *        re-authorized the two otherwise-refused re-enroll transitions:
+     *        reactivating a previously revoked card, and reassigning a card to a
+     *        different owner. When {@code false} (the default), those transitions
+     *        are rejected ({@link EnrollResult.Status#CARD_REVOKED} /
+     *        {@link EnrollResult.Status#OWNED_BY_ANOTHER_USER}) so they never
+     *        happen as a silent side-effect of a tap (P1-8). A benign re-enroll
+     *        of the SAME owner's still-active card is unaffected.
+     */
+    @Transactional
+    public EnrollResult enrollCard(UUID requestedUserId, String rawCardSerial,
+                                   String cardType, String label, boolean reauthorize) {
         User currentUser = rbacService.getCurrentUser()
                 .orElseThrow(UnauthorizedException::new);
         Tenant tenant = currentUser.getTenant();
@@ -82,13 +107,42 @@ public class ManageNfcCardService {
         NfcCard saved;
         if (existingCard.isPresent()) {
             NfcCard existing = existingCard.get();
+
+            // P1-8 — fail-closed guards against silent privilege transitions on
+            // re-enroll. Both are bypassable ONLY with an explicit reauthorize=true.
+            //
+            // (1) A card that was deliberately REVOKED (deactivate() flips
+            //     isActive=false AND stamps revokedAt — e.g. a lost/stolen card an
+            //     admin deactivated) must NOT be auto-promoted back to active by a
+            //     re-tap. Reactivating a revoked credential is a security decision,
+            //     not an implicit consequence of presenting the card.
+            boolean isRevoked = !existing.isActive() && existing.getRevokedAt() != null;
+            if (isRevoked && !reauthorize) {
+                log.warn("AUDIT: NFC re-enroll refused — card revoked, explicit re-authorization required: "
+                        + "serial={} tenant={} requestedBy={}", cardSerial, tenant.getId(), currentUser.getId());
+                return new EnrollResult(EnrollResult.Status.CARD_REVOKED, null, targetUserId);
+            }
+
+            // (2) A card currently owned by a DIFFERENT user must NOT be silently
+            //     re-pointed to the target user. Ownership reassignment is a
+            //     deliberate administrative action, never a side-effect of enroll.
+            UUID existingOwnerId = existing.getUser() != null ? existing.getUser().getId() : null;
+            boolean differentOwner = existingOwnerId != null && !existingOwnerId.equals(targetUserId);
+            if (differentOwner && !reauthorize) {
+                log.warn("AUDIT: NFC re-enroll refused — card owned by another user, explicit re-authorization "
+                        + "required: serial={} tenant={} currentOwner={} requestedTarget={} requestedBy={}",
+                        cardSerial, tenant.getId(), existingOwnerId, targetUserId, currentUser.getId());
+                return new EnrollResult(EnrollResult.Status.OWNED_BY_ANOTHER_USER, null, targetUserId);
+            }
+
             existing.activate();
             existing.setUser(targetUser);
             existing.setCardType(cardType);
             if (label != null) existing.setLabel(label);
             existing.setEnrolledAt(Instant.now());
             saved = nfcCardRepository.save(existing);
-            log.info("NFC card reactivated: serial={} user={} tenant={}", cardSerial, targetUserId, tenant.getId());
+            log.info("NFC card reactivated: serial={} user={} tenant={} reauthorized={}",
+                    cardSerial, targetUserId, tenant.getId(), reauthorize);
         } else {
             NfcCard card = NfcCard.builder()
                     .user(targetUser)
