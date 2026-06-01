@@ -9,6 +9,9 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.util.List;
+import java.util.UUID;
+
 @Data
 @Builder
 @NoArgsConstructor
@@ -44,4 +47,30 @@ public class UpdateUserRequest {
     private String address;
 
     private UserStatus status;
+
+    /**
+     * Platform-level tier ({@link com.fivucsas.identity.entity.UserType} NAME —
+     * ROOT / TENANT_ADMIN / TENANT_MEMBER / GUEST). This is the SOLE authority
+     * for global standing, independent of the within-tenant RBAC {@link #roleIds}.
+     * See docs/IDENTITY_ROLE_UNIFICATION.md.
+     *
+     * <p><b>Authorization (fail-closed):</b> only a caller whose own
+     * {@code user_type=ROOT} may SET or CHANGE this — especially granting ROOT or
+     * TENANT_ADMIN. A non-ROOT caller that sends a value which would change the
+     * target's tier is rejected with 403 (a TENANT_ADMIN can never self-elevate
+     * to ROOT). {@code null} = leave the tier unchanged.</p>
+     */
+    private String userType;
+
+    /**
+     * Within-tenant RBAC role assignment — the COMPLETE desired set of role ids
+     * for this user (replace semantics: roles not in the list are revoked,
+     * roles in the list are assigned). {@code null} = leave assignments
+     * untouched; an empty list = revoke all role assignments.
+     *
+     * <p><b>Authorization (fail-closed):</b> a TENANT_ADMIN may only assign roles
+     * that belong to their own tenant (or global/system role definitions);
+     * assigning a role scoped to another tenant is rejected with 403.</p>
+     */
+    private List<UUID> roleIds;
 }

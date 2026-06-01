@@ -145,6 +145,8 @@ public class UserController {
             .idNumber(request.getIdNumber())
             .role(request.getRole())
             .tenantId(request.getTenantId())
+            .userType(request.getUserType())
+            .roleIds(request.getRoleIds())
             .build();
 
         return ResponseEntity.status(HttpStatus.CREATED).body(manageUserUseCase.createUser(command));
@@ -164,6 +166,8 @@ public class UserController {
             .lastName(request.getLastName())
             .phoneNumber(request.getPhoneNumber())
             .address(request.getAddress())
+            .userType(request.getUserType())
+            .roleIds(request.getRoleIds())
             .build();
 
         return ResponseEntity.ok(manageUserUseCase.updateUser(command));

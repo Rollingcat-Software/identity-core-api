@@ -15,6 +15,7 @@ import com.fivucsas.identity.domain.exception.TenantNotFoundException;
 import com.fivucsas.identity.domain.exception.TenantUserQuotaExceededException;
 import com.fivucsas.identity.domain.exception.RoleNotFoundException;
 import com.fivucsas.identity.domain.exception.UserNotFoundException;
+import com.fivucsas.identity.domain.exception.UnauthorizedException;
 import com.fivucsas.identity.domain.model.user.*;
 import com.fivucsas.identity.domain.repository.UserRepository;
 import com.fivucsas.identity.entity.User;
@@ -22,9 +23,11 @@ import com.fivucsas.identity.entity.Tenant;
 import com.fivucsas.identity.entity.Role;
 import com.fivucsas.identity.entity.UserRole;
 import com.fivucsas.identity.entity.UserStatus;
+import com.fivucsas.identity.entity.UserType;
 import com.fivucsas.identity.repository.JpaTenantRepository;
 import com.fivucsas.identity.application.port.output.RoleRepositoryPort;
 import com.fivucsas.identity.application.port.output.UserRoleRepositoryPort;
+import com.fivucsas.identity.security.RbacAuthorizationService;
 import com.fivucsas.identity.security.TenantScopeResolver;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -34,7 +37,9 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.data.domain.PageRequest;
 
 import java.time.Instant;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -56,6 +61,7 @@ public class ManageUserService implements ManageUserUseCase {
     private final AuditLogQueryPort auditLogQueryPort;
     private final AuditLogPort auditLogPort;
     private final TenantScopeResolver tenantScopeResolver;
+    private final RbacAuthorizationService rbacService;
 
     @Override
     @Transactional
@@ -130,6 +136,20 @@ public class ManageUserService implements ManageUserUseCase {
             } catch (RoleNotFoundException e) {
                 log.warn("Role {} not found for user creation, skipping role assignment", command.getRole());
             }
+        }
+
+        // Platform-tier (user_type) — ROOT-caller-only when it elevates to a
+        // privileged tier. Applies the requested tier on the freshly-created row.
+        boolean tierChanged = applyUserType(user, command.getUserType());
+
+        // Within-tenant RBAC role assignment (by id) — tenant-scoped, fail-closed.
+        applyRoleIds(user, command.getRoleIds());
+
+        // Re-persist only when the tier actually changed (role assignments
+        // persist via user_roles, not the user row) — keeps a no-op create to a
+        // single user save.
+        if (tierChanged) {
+            user = userRepository.save(user);
         }
 
         UserResponse createdResponse = mapToUserResponse(user);
@@ -314,6 +334,12 @@ public class ManageUserService implements ManageUserUseCase {
             user.updateAddress(address);
         }
 
+        // Platform-tier (user_type) change — ROOT-caller-only, fail-closed.
+        applyUserType(user, command.getUserType());
+
+        // Within-tenant RBAC role assignment (replace semantics) — tenant-scoped.
+        applyRoleIds(user, command.getRoleIds());
+
         user = userRepository.save(user);
         log.info("User updated successfully: {}", command.getUserId());
 
@@ -373,6 +399,133 @@ public class ManageUserService implements ManageUserUseCase {
                 null,
                 String.format("Soft-deleted; actorTenant=%s", actorTenantId)
         );
+    }
+
+    /**
+     * Applies a requested platform-tier ({@code user_type}) change to the user,
+     * enforcing the fail-closed elevation rule.
+     *
+     * <p><b>Authorization.</b> {@code user_type} is the SOLE platform-standing
+     * authority (ROOT &gt; TENANT_ADMIN &gt; TENANT_MEMBER &gt; GUEST). Only a
+     * caller whose own {@code user_type=ROOT} may SET or CHANGE another user's
+     * tier. A non-ROOT caller (e.g. a TENANT_ADMIN) that requests a value which
+     * would change the current tier is rejected with 403 — this is what stops a
+     * TENANT_ADMIN from self-elevating (or elevating anyone) to ROOT/TENANT_ADMIN.
+     * A no-op request (value equals the current tier, or {@code null}/blank) is
+     * allowed regardless of caller so idempotent saves don't 403.</p>
+     *
+     * @param user    the target user entity (already loaded)
+     * @param rawType the requested {@link UserType} name, or {@code null} to leave unchanged
+     * @return {@code true} if the tier was actually changed (so the caller knows
+     *         to persist), {@code false} for a null/blank/no-op request
+     */
+    private boolean applyUserType(User user, String rawType) {
+        if (rawType == null || rawType.isBlank()) {
+            return false; // leave the tier unchanged
+        }
+
+        UserType requested;
+        try {
+            requested = UserType.valueOf(rawType.trim().toUpperCase(java.util.Locale.ROOT));
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException("Invalid userType: " + rawType);
+        }
+
+        UserType current = user.getUserType();
+        if (requested == current) {
+            return false; // no-op — don't gate an idempotent value
+        }
+
+        // Fail-closed: changing the platform tier is a ROOT-only operation.
+        if (!rbacService.isRoot()) {
+            log.warn("AUDIT: user_type change refused — non-ROOT caller attempted to set user {} to {} (current {})",
+                    user.getId(), requested, current);
+            throw new UnauthorizedException(
+                    "Only a ROOT user may change a user's platform tier (user_type)");
+        }
+
+        user.setUserType(requested);
+        log.info("user_type set to {} for user {} by ROOT caller", requested, user.getId());
+        return true;
+    }
+
+    /**
+     * Replaces the user's within-tenant RBAC role assignments with the requested
+     * set of role ids (replace semantics: ids not in the set are revoked, new ids
+     * are assigned). {@code null} leaves the current assignments untouched; an
+     * empty list revokes them all.
+     *
+     * <p><b>Authorization.</b> A scoped caller (TENANT_ADMIN) may only assign
+     * roles that belong to a tenant they can access (their own tenant) or
+     * global/system role definitions ({@code tenant_id IS NULL}). A role scoped
+     * to another tenant is rejected with 403. ROOT may assign any role. Reuses
+     * the same {@code user_roles} persistence path as
+     * {@code POST /api/v1/users/{userId}/roles/{roleId}} (no duplicate write
+     * logic) and the elevate-on-grant tier sync stays out of this admin path —
+     * tier is governed explicitly by {@link #applyUserType}.</p>
+     *
+     * @param user    the target user (already loaded)
+     * @param roleIds the COMPLETE desired role-id set, or {@code null} to skip
+     */
+    private void applyRoleIds(User user, List<UUID> roleIds) {
+        if (roleIds == null) {
+            return; // caller did not touch role assignments
+        }
+
+        UUID callerScope = tenantScopeResolver.currentScope(); // null = ROOT
+        boolean callerIsRoot = rbacService.isRoot();
+
+        // De-duplicate the requested set.
+        Set<UUID> desired = new HashSet<>(roleIds);
+
+        // Current assignments (by role id).
+        Set<UUID> current = userRoleRepository.findByIdUserId(user.getId()).stream()
+                .map(UserRole::getRoleId)
+                .collect(Collectors.toCollection(HashSet::new));
+
+        // Validate every desired role exists and is accessible BEFORE mutating,
+        // so a bad/foreign role id fails the whole operation atomically (the
+        // method runs inside the @Transactional updateUser/createUser tx).
+        for (UUID roleId : desired) {
+            Role role = roleRepository.findById(roleId)
+                    .orElseThrow(() -> new RoleNotFoundException(roleId.toString()));
+
+            if (!callerIsRoot) {
+                UUID roleTenantId = role.getTenant() != null ? role.getTenant().getId() : null;
+                // Scoped caller may assign their own tenant's roles or global
+                // (tenant-less) system role DEFINITIONS — never another tenant's.
+                boolean accessible = roleTenantId == null
+                        || (callerScope != null && callerScope.equals(roleTenantId));
+                if (!accessible) {
+                    log.warn("AUDIT: role assignment refused — caller scope {} may not assign role {} (tenant {}) to user {}",
+                            callerScope, roleId, roleTenantId, user.getId());
+                    throw new UnauthorizedException(
+                            "You may not assign roles that belong to another tenant");
+                }
+            }
+        }
+
+        // Assign newly-requested roles (desired \ current).
+        for (UUID roleId : desired) {
+            if (!current.contains(roleId)) {
+                Role role = roleRepository.findById(roleId)
+                        .orElseThrow(() -> new RoleNotFoundException(roleId.toString()));
+                userRoleRepository.save(UserRole.create(user, role, null, null));
+                log.info("Role {} assigned to user {} via admin user form", roleId, user.getId());
+            }
+        }
+
+        // Revoke roles no longer desired (current \ desired). A scoped caller can
+        // only ever reach here for roles they were allowed to assign, but revokes
+        // touch the user's EXISTING assignments which may include roles from the
+        // user's own tenant — same tenant as a TENANT_ADMIN caller — so this is
+        // safe. (ROOT manages cross-tenant by design.)
+        for (UUID roleId : current) {
+            if (!desired.contains(roleId)) {
+                userRoleRepository.deleteByUserIdAndRoleId(user.getId(), roleId);
+                log.info("Role {} revoked from user {} via admin user form", roleId, user.getId());
+            }
+        }
     }
 
     private UserResponse mapToUserResponse(User user) {

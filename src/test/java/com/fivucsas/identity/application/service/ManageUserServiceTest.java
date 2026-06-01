@@ -7,11 +7,19 @@ import com.fivucsas.identity.application.dto.query.GetUserByIdQuery;
 import com.fivucsas.identity.application.dto.query.SearchUsersQuery;
 import com.fivucsas.identity.application.dto.response.UserResponse;
 import com.fivucsas.identity.application.port.output.PasswordEncoderPort;
+import com.fivucsas.identity.application.port.output.RoleRepositoryPort;
+import com.fivucsas.identity.application.port.output.UserRoleRepositoryPort;
 import com.fivucsas.identity.domain.exception.DuplicateEmailException;
+import com.fivucsas.identity.domain.exception.UnauthorizedException;
 import com.fivucsas.identity.domain.exception.UserNotFoundException;
 import com.fivucsas.identity.domain.repository.UserRepository;
+import com.fivucsas.identity.entity.Role;
+import com.fivucsas.identity.entity.Tenant;
 import com.fivucsas.identity.entity.User;
+import com.fivucsas.identity.entity.UserRole;
 import com.fivucsas.identity.entity.UserStatus;
+import com.fivucsas.identity.entity.UserType;
+import com.fivucsas.identity.security.RbacAuthorizationService;
 import com.fivucsas.identity.security.TenantScopeResolver;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -54,6 +62,15 @@ class ManageUserServiceTest {
 
     @Mock
     private com.fivucsas.identity.application.port.output.AuditLogPort auditLogPort;
+
+    @Mock
+    private RbacAuthorizationService rbacService;
+
+    @Mock
+    private RoleRepositoryPort roleRepository;
+
+    @Mock
+    private UserRoleRepositoryPort userRoleRepository;
 
     @InjectMocks
     private ManageUserService manageUserService;
@@ -460,6 +477,186 @@ class ManageUserServiceTest {
                 .isInstanceOf(UserNotFoundException.class);
 
             verify(userRepository, never()).delete(any());
+        }
+    }
+
+    @Nested
+    @DisplayName("Platform-tier (user_type) authorization")
+    class UserTypeAuthorizationTests {
+
+        /** Builds a user that belongs to {@code tenantId} so enforceTenantScope passes. */
+        private User memberInTenant(UUID tenantId) {
+            Tenant tenant = Tenant.builder().id(tenantId).name("Caller Tenant").build();
+            return User.builder()
+                .id(userId)
+                .email("test@example.com")
+                .passwordHash(VALID_BCRYPT_HASH)
+                .firstName("John").lastName("Doe")
+                .status(UserStatus.ACTIVE)
+                .tenant(tenant)
+                .isBiometricEnrolled(false).verificationCount(0)
+                .createdAt(Instant.now()).updatedAt(Instant.now())
+                .build();
+        }
+
+        @Test
+        @DisplayName("Non-ROOT caller cannot elevate a user's user_type → 403")
+        void nonRootCannotElevateUserType() {
+            // user defaults to TENANT_MEMBER; request elevation to ROOT.
+            UUID callerTenant = UUID.randomUUID();
+            UpdateUserCommand command = UpdateUserCommand.builder()
+                .userId(userId.toString())
+                .userType("ROOT")
+                .build();
+
+            when(tenantScopeResolver.currentScope()).thenReturn(callerTenant);
+            when(userRepository.findById(userId)).thenReturn(Optional.of(memberInTenant(callerTenant)));
+            when(rbacService.isRoot()).thenReturn(false);
+
+            assertThatThrownBy(() -> manageUserService.updateUser(command))
+                .isInstanceOf(UnauthorizedException.class);
+
+            // Fail-closed: no persistence happened.
+            verify(userRepository, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("TENANT_ADMIN cannot self-elevate to TENANT_ADMIN tier on a member → 403")
+        void tenantAdminCannotGrantTenantAdminTier() {
+            UUID callerTenant = UUID.randomUUID();
+            UpdateUserCommand command = UpdateUserCommand.builder()
+                .userId(userId.toString())
+                .userType("TENANT_ADMIN")
+                .build();
+
+            when(tenantScopeResolver.currentScope()).thenReturn(callerTenant);
+            when(userRepository.findById(userId)).thenReturn(Optional.of(memberInTenant(callerTenant)));
+            when(rbacService.isRoot()).thenReturn(false);
+
+            assertThatThrownBy(() -> manageUserService.updateUser(command))
+                .isInstanceOf(UnauthorizedException.class);
+
+            verify(userRepository, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("ROOT caller may change a user's user_type")
+        void rootMayChangeUserType() {
+            UpdateUserCommand command = UpdateUserCommand.builder()
+                .userId(userId.toString())
+                .userType("TENANT_ADMIN")
+                .build();
+
+            when(tenantScopeResolver.currentScope()).thenReturn(null); // ROOT
+            when(userRepository.findById(userId)).thenReturn(Optional.of(existingUser));
+            when(rbacService.isRoot()).thenReturn(true);
+            when(userRepository.save(any(User.class))).thenAnswer(inv -> inv.getArgument(0));
+
+            manageUserService.updateUser(command);
+
+            ArgumentCaptor<User> captor = ArgumentCaptor.forClass(User.class);
+            verify(userRepository).save(captor.capture());
+            assertThat(captor.getValue().getUserType()).isEqualTo(UserType.TENANT_ADMIN);
+        }
+
+        @Test
+        @DisplayName("No-op user_type (equal to current) is allowed for a non-ROOT caller")
+        void noOpUserTypeAllowedForNonRoot() {
+            // user is TENANT_MEMBER; requesting the same tier must not 403.
+            UUID callerTenant = UUID.randomUUID();
+            UpdateUserCommand command = UpdateUserCommand.builder()
+                .userId(userId.toString())
+                .userType("TENANT_MEMBER")
+                .build();
+
+            when(tenantScopeResolver.currentScope()).thenReturn(callerTenant);
+            when(userRepository.findById(userId)).thenReturn(Optional.of(memberInTenant(callerTenant)));
+            when(userRepository.save(any(User.class))).thenAnswer(inv -> inv.getArgument(0));
+
+            manageUserService.updateUser(command);
+
+            // rbacService.isRoot() must NOT even be consulted for a no-op tier.
+            verify(rbacService, never()).isRoot();
+            verify(userRepository).save(any(User.class));
+        }
+    }
+
+    @Nested
+    @DisplayName("Within-tenant role assignment authorization")
+    class RoleAssignmentAuthorizationTests {
+
+        /** Builds a user that belongs to {@code tenantId} so enforceTenantScope passes. */
+        private User memberInTenant(UUID tenantId) {
+            Tenant tenant = Tenant.builder().id(tenantId).name("Caller Tenant").build();
+            return User.builder()
+                .id(userId)
+                .email("test@example.com")
+                .passwordHash(VALID_BCRYPT_HASH)
+                .firstName("John").lastName("Doe")
+                .status(UserStatus.ACTIVE)
+                .tenant(tenant)
+                .isBiometricEnrolled(false).verificationCount(0)
+                .createdAt(Instant.now()).updatedAt(Instant.now())
+                .build();
+        }
+
+        @Test
+        @DisplayName("TENANT_ADMIN cannot assign a role from another tenant → 403")
+        void tenantAdminCannotAssignForeignTenantRole() {
+            UUID callerTenant = UUID.randomUUID();
+            UUID foreignTenant = UUID.randomUUID();
+            UUID roleId = UUID.randomUUID();
+
+            Tenant otherTenant = Tenant.builder().id(foreignTenant).name("Other").build();
+            Role foreignRole = Role.builder()
+                .id(roleId).name("EDITOR").tenant(otherTenant).build();
+
+            UpdateUserCommand command = UpdateUserCommand.builder()
+                .userId(userId.toString())
+                .roleIds(List.of(roleId))
+                .build();
+
+            when(tenantScopeResolver.currentScope()).thenReturn(callerTenant);
+            when(userRepository.findById(userId)).thenReturn(Optional.of(memberInTenant(callerTenant)));
+            when(rbacService.isRoot()).thenReturn(false);
+            when(userRoleRepository.findByIdUserId(userId)).thenReturn(Collections.emptyList());
+            when(roleRepository.findById(roleId)).thenReturn(Optional.of(foreignRole));
+
+            assertThatThrownBy(() -> manageUserService.updateUser(command))
+                .isInstanceOf(UnauthorizedException.class);
+
+            // Fail-closed: no assignment was persisted.
+            verify(userRoleRepository, never()).save(any());
+            verify(userRepository, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("TENANT_ADMIN may assign a role from their own tenant")
+        void tenantAdminMayAssignOwnTenantRole() {
+            UUID callerTenant = UUID.randomUUID();
+            UUID roleId = UUID.randomUUID();
+
+            Tenant ownTenant = Tenant.builder().id(callerTenant).name("Own").build();
+            Role ownRole = Role.builder()
+                .id(roleId).name("EDITOR").tenant(ownTenant).build();
+
+            UpdateUserCommand command = UpdateUserCommand.builder()
+                .userId(userId.toString())
+                .roleIds(List.of(roleId))
+                .build();
+
+            when(tenantScopeResolver.currentScope()).thenReturn(callerTenant);
+            when(userRepository.findById(userId)).thenReturn(Optional.of(memberInTenant(callerTenant)));
+            when(rbacService.isRoot()).thenReturn(false);
+            when(userRoleRepository.findByIdUserId(userId)).thenReturn(Collections.emptyList());
+            when(roleRepository.findById(roleId)).thenReturn(Optional.of(ownRole));
+            when(userRepository.save(any(User.class))).thenAnswer(inv -> inv.getArgument(0));
+
+            manageUserService.updateUser(command);
+
+            ArgumentCaptor<UserRole> captor = ArgumentCaptor.forClass(UserRole.class);
+            verify(userRoleRepository).save(captor.capture());
+            assertThat(captor.getValue().getRoleId()).isEqualTo(roleId);
         }
     }
 }
