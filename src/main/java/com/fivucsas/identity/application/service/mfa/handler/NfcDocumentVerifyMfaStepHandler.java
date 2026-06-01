@@ -3,6 +3,7 @@ package com.fivucsas.identity.application.service.mfa.handler;
 import com.fivucsas.identity.application.port.output.NfcCardRepositoryPort;
 import com.fivucsas.identity.application.service.mfa.MfaStepResult;
 import com.fivucsas.identity.application.service.mfa.VerifyMfaStepHandler;
+import com.fivucsas.identity.domain.model.NfcSerial;
 import com.fivucsas.identity.domain.model.auth.AuthMethodType;
 import com.fivucsas.identity.entity.MfaSession;
 import com.fivucsas.identity.entity.User;
@@ -30,9 +31,14 @@ import java.util.Map;
  * {@link MfaStepResult#fail()} regardless of serial match.
  *
  * <p>The legacy serial-match behavior can be explicitly re-enabled (opt-in) via
- * {@code fivucsas.nfc.serial-only-auth-enabled=true}. This is intended only for
- * environments that have accepted the documented risk; it should remain
- * disabled in production.
+ * {@code fivucsas.nfc.serial-only-auth-enabled=true}, for environments that have
+ * accepted the documented risk. This is ENABLED in production (2026-06-01):
+ * student/campus cards are plain MIFARE (UID/serial only, no ICAO chip), so chip
+ * passive-authentication can never apply to them, and NFC is consumed here only
+ * as one factor inside an MFA flow (never a sole high-assurance factor). The serial
+ * is canonicalized to the same UPPERHEX form used at enrollment before lookup, so a
+ * web tap matches a card enrolled from any client. Revert with no redeploy by
+ * unsetting {@code FIVUCSAS_NFC_SERIAL_ONLY_AUTH_ENABLED} (kill-switch).
  */
 @Component
 @Slf4j
@@ -75,8 +81,14 @@ public class NfcDocumentVerifyMfaStepHandler implements VerifyMfaStepHandler {
         if (nfcData == null || nfcData.isBlank()) {
             return MfaStepResult.fail();
         }
+        // Canonicalize to the same UPPERHEX, no-separators form used at enrollment
+        // (ManageNfcCardService.enrollCard + NfcDocumentAuthHandler.validate) so a
+        // web tap (lowercase-with-colons "04:a2:24:..") matches a card regardless of
+        // the client it was enrolled from. Without this, web logins miss the stored
+        // canonical serial ("04A224..") even though the card IS enrolled and active.
+        String cardSerial = NfcSerial.canonicalize(nfcData);
         boolean ok = nfcCardRepository
-                .findByCardSerialAndUserIdAndIsActiveTrue(nfcData, user.getId())
+                .findByCardSerialAndUserIdAndIsActiveTrue(cardSerial, user.getId())
                 .isPresent();
         return ok ? MfaStepResult.ok() : MfaStepResult.fail();
     }
