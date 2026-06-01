@@ -50,8 +50,21 @@ not a real biometric. The `AuthMethodType.FINGERPRINT` enum value is retained
   (strip `: - . space`, upper-case, keep stripped value iff pure hex; non-hex/opaque
   serials are upper-cased + trimmed only, separators preserved). Stored + looked-up
   value is always canonical, so a mobile-enrolled card matches a web verify and
-  vice-versa. Applied in `ManageNfcCardService.{enrollCard,verifyCard,searchByCardSerial}`
-  and `NfcDocumentAuthHandler.validate`.
+  vice-versa. Applied in `ManageNfcCardService.{enrollCard,verifyCard,searchByCardSerial}`,
+  `NfcDocumentAuthHandler.validate`, AND `NfcDocumentVerifyMfaStepHandler.verify`
+  (the latter was MISSING canonicalize on its opt-in branch → web taps failed even
+  when serial-only was enabled; fixed 2026-06-01).
+- **NFC serial-only login ENABLED in prod (2026-06-01)**: the live login path is
+  `POST /auth/mfa/step` → `VerifyMfaStepService` → `NfcDocumentVerifyMfaStepHandler`,
+  which was **fail-closed by default** (`fivucsas.nfc.serial-only-auth-enabled=false`)
+  — so an enrolled student card always failed as "Verification failed for NFC_DOCUMENT"
+  (audit reason `nfc_card_not_found_or_not_owned`, even though the lookup never ran).
+  Set `FIVUCSAS_NFC_SERIAL_ONLY_AUTH_ENABLED=true` in `.env.prod` (accepted documented
+  risk: campus/student cards are plain MIFARE UID-only, no ICAO chip → chip passive-auth
+  can never apply to them; NFC is one factor inside MFA, never sole). Kill-switch: unset
+  the var + `up -d` to revert to fail-closed (no rebuild). NOTE the legacy
+  `NfcDocumentAuthHandler` (AuthMethodHandler path) was never fail-closed — the two
+  NFC handlers disagreed; the modern `/auth/mfa/step` handler is the live one.
 - **NFC chip passive-authentication (WS2 trust gate, 2026-05-30)**: serial-only
   proves "this serial is enrolled" but NOT that the physical chip is genuine. The
   `biometric-processor` validates the eMRTD `EF.SOD → Document Signer → CSCA` chain
