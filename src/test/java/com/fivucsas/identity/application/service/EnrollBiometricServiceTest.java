@@ -30,6 +30,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
@@ -118,7 +119,7 @@ class EnrollBiometricServiceTest {
         void shouldEnrollBiometricSuccessfully() {
             // Given
             when(userRepository.findById(userId)).thenReturn(Optional.of(existingUser));
-            when(biometricService.enrollFace(eq(userId), eq(faceImage), eq(null), eq(null), eq(null)))
+            when(biometricService.enrollFace(eq(userId), eq(faceImage), eq(null), eq(null), eq(null), eq(false)))
                 .thenReturn(Map.of(
                     "success", true,
                     "message", "Face enrolled successfully"
@@ -135,8 +136,30 @@ class EnrollBiometricServiceTest {
             assertThat(response.getUserId()).isEqualTo(userId.toString());
 
             verify(userRepository).findById(userId);
-            verify(biometricService).enrollFace(userId, faceImage, null, null, null);
+            verify(biometricService).enrollFace(userId, faceImage, null, null, null, false);
             verify(userRepository).save(any(User.class));
+        }
+
+        @Test
+        @DisplayName("Should forward optimize=true to the biometric service on re-enroll & optimize")
+        void shouldForwardOptimizeFlag() {
+            // Given a re-enroll & optimize command
+            EnrollBiometricCommand optimizeCommand = EnrollBiometricCommand.builder()
+                .userId(userId.toString())
+                .faceImage(faceImage)
+                .optimize(true)
+                .build();
+            when(userRepository.findById(userId)).thenReturn(Optional.of(existingUser));
+            when(biometricService.enrollFace(eq(userId), eq(faceImage), eq(null), eq(null), eq(null), eq(true)))
+                .thenReturn(Map.of("success", true, "message", "Face enrolled successfully"));
+            when(userRepository.save(any(User.class))).thenReturn(existingUser);
+
+            // When
+            BiometricResponse response = enrollBiometricService.execute(optimizeCommand);
+
+            // Then the optimize flag reaches the biometric service unchanged
+            assertThat(response.isSuccess()).isTrue();
+            verify(biometricService).enrollFace(userId, faceImage, null, null, null, true);
         }
 
         @Test
@@ -147,7 +170,7 @@ class EnrollBiometricServiceTest {
             // user_enrollments row so the admin Enrollments table renders
             // real numbers instead of "-".
             when(userRepository.findById(userId)).thenReturn(Optional.of(existingUser));
-            when(biometricService.enrollFace(eq(userId), eq(faceImage), eq(null), eq(null), eq(null)))
+            when(biometricService.enrollFace(eq(userId), eq(faceImage), eq(null), eq(null), eq(null), eq(false)))
                 .thenReturn(Map.of(
                     "success", true,
                     "message", "Face enrolled",
@@ -173,7 +196,7 @@ class EnrollBiometricServiceTest {
         void scoreWriterFailureShouldNotFailEnrollment() {
             // Given
             when(userRepository.findById(userId)).thenReturn(Optional.of(existingUser));
-            when(biometricService.enrollFace(eq(userId), eq(faceImage), eq(null), eq(null), eq(null)))
+            when(biometricService.enrollFace(eq(userId), eq(faceImage), eq(null), eq(null), eq(null), eq(false)))
                 .thenReturn(Map.of(
                     "success", true,
                     "quality_score", 0.91
@@ -196,7 +219,7 @@ class EnrollBiometricServiceTest {
         void shouldUpdateUserEnrollmentStatus() {
             // Given
             when(userRepository.findById(userId)).thenReturn(Optional.of(existingUser));
-            when(biometricService.enrollFace(eq(userId), eq(faceImage), eq(null), eq(null), eq(null)))
+            when(biometricService.enrollFace(eq(userId), eq(faceImage), eq(null), eq(null), eq(null), eq(false)))
                 .thenReturn(Map.of("success", true));
             when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
@@ -214,7 +237,7 @@ class EnrollBiometricServiceTest {
         void shouldReturnDefaultMessageWhenNoneProvided() {
             // Given
             when(userRepository.findById(userId)).thenReturn(Optional.of(existingUser));
-            when(biometricService.enrollFace(eq(userId), eq(faceImage), eq(null), eq(null), eq(null)))
+            when(biometricService.enrollFace(eq(userId), eq(faceImage), eq(null), eq(null), eq(null), eq(false)))
                 .thenReturn(Map.of("success", true));
             when(userRepository.save(any(User.class))).thenReturn(existingUser);
 
@@ -247,7 +270,7 @@ class EnrollBiometricServiceTest {
                 .isInstanceOf(UserNotFoundException.class)
                 .hasMessageContaining(nonExistentId.toString());
 
-            verify(biometricService, never()).enrollFace(any(), any(), any(), any(), any());
+            verify(biometricService, never()).enrollFace(any(), any(), any(), any(), any(), anyBoolean());
             verify(userRepository, never()).save(any());
         }
 
@@ -256,7 +279,7 @@ class EnrollBiometricServiceTest {
         void shouldThrowBiometricEnrollmentExceptionWhenServiceFails() {
             // Given
             when(userRepository.findById(userId)).thenReturn(Optional.of(existingUser));
-            when(biometricService.enrollFace(eq(userId), eq(faceImage), eq(null), eq(null), eq(null)))
+            when(biometricService.enrollFace(eq(userId), eq(faceImage), eq(null), eq(null), eq(null), eq(false)))
                 .thenReturn(Map.of(
                     "success", false,
                     "message", "Poor image quality"
@@ -275,7 +298,7 @@ class EnrollBiometricServiceTest {
         void shouldThrowBiometricEnrollmentExceptionWhenSuccessIsNull() {
             // Given
             when(userRepository.findById(userId)).thenReturn(Optional.of(existingUser));
-            when(biometricService.enrollFace(eq(userId), eq(faceImage), eq(null), eq(null), eq(null)))
+            when(biometricService.enrollFace(eq(userId), eq(faceImage), eq(null), eq(null), eq(null), eq(false)))
                 .thenReturn(Map.of("message", "Unknown error"));
 
             // When/Then
@@ -323,7 +346,7 @@ class EnrollBiometricServiceTest {
                 .build();
 
             when(userRepository.findById(userId)).thenReturn(Optional.of(enrolledUser));
-            when(biometricService.enrollFace(eq(userId), eq(faceImage), eq(null), eq(null), eq(null)))
+            when(biometricService.enrollFace(eq(userId), eq(faceImage), eq(null), eq(null), eq(null), eq(false)))
                 .thenReturn(Map.of("success", true, "message", "Re-enrollment successful"));
             when(userRepository.save(any(User.class))).thenReturn(enrolledUser);
 

@@ -52,7 +52,8 @@ public class EnrollBiometricService implements EnrollBiometricUseCase {
                 command.getFaceImage(),
                 command.getTenantId(),
                 command.getClientEmbedding(),
-                command.getClientEmbeddings());
+                command.getClientEmbeddings(),
+                command.isOptimize());
 
         Boolean success = (Boolean) response.get("success");
         String message = (String) response.get("message");

@@ -44,4 +44,12 @@ public class EnrollBiometricCommand {
      * be null/empty.
      */
     private String clientEmbeddings;
+
+    /**
+     * "Re-enroll &amp; optimize": when true (and the user already has a stored
+     * template), the biometric-processor FUSES this capture into the existing
+     * centroid instead of a plain append/replace. Forwarded to the bio
+     * {@code /enroll} endpoint. Default false (normal enroll).
+     */
+    private boolean optimize;
 }

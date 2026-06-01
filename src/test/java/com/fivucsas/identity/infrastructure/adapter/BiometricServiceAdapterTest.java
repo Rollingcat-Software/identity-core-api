@@ -165,6 +165,58 @@ class BiometricServiceAdapterTest {
     }
 
     @Test
+    @DisplayName("enrollFace forwards optimize=true multipart part on re-enroll & optimize")
+    void enrollFace_forwardsOptimizeWhenTrue() {
+        mockServer.expect(requestTo(BIO_URL + "/enroll"))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(req -> {
+                    String body = bodyAsString(req);
+                    assertThat(body).contains("name=\"optimize\"")
+                            .contains("true")
+                            .contains("name=\"user_id\"")
+                            .contains("name=\"file\"");
+                })
+                .andRespond(withSuccess("{\"success\":true}", MediaType.APPLICATION_JSON));
+
+        var result = adapter.enrollFace(USER_ID, imageFile, TENANT_ID, null, null, true);
+
+        assertThat(result).containsEntry("success", true);
+        mockServer.verify();
+    }
+
+    @Test
+    @DisplayName("enrollFace omits the optimize part on a normal enroll (optimize=false)")
+    void enrollFace_omitsOptimizeWhenFalse() {
+        mockServer.expect(requestTo(BIO_URL + "/enroll"))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(req -> {
+                    String body = bodyAsString(req);
+                    assertThat(body).doesNotContain("name=\"optimize\"");
+                })
+                .andRespond(withSuccess("{\"success\":true}", MediaType.APPLICATION_JSON));
+
+        adapter.enrollFace(USER_ID, imageFile, TENANT_ID, null, null, false);
+        mockServer.verify();
+    }
+
+    @Test
+    @DisplayName("enrollVoice forwards optimize=true in the JSON body on re-enroll & optimize")
+    void enrollVoice_forwardsOptimizeWhenTrue() {
+        mockServer.expect(requestTo(BIO_URL + "/voice/enroll"))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(req -> {
+                    String body = bodyAsString(req);
+                    assertThat(body).contains("\"optimize\":true");
+                })
+                .andRespond(withSuccess("{\"success\":true}", MediaType.APPLICATION_JSON));
+
+        var result = adapter.enrollVoice(USER_ID, "base64-voice-data", true);
+
+        assertThat(result).containsEntry("success", true);
+        mockServer.verify();
+    }
+
+    @Test
     @DisplayName("Backward-compat: legacy 2-arg enrollFace omits optional parts")
     void enrollFace_backwardCompat_noTenantOrEmbedding() {
         mockServer.expect(requestTo(BIO_URL + "/enroll"))
