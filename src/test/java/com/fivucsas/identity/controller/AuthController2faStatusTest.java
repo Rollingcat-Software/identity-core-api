@@ -140,6 +140,7 @@ class AuthController2faStatusTest {
     @MockBean private TotpSecretCipher totpSecretCipher;
     @MockBean private com.fivucsas.identity.application.service.mfa.VerifyMfaStepService verifyMfaStepService;
     @MockBean private com.fivucsas.identity.application.service.LoginConfigService loginConfigService;
+    @MockBean private com.fivucsas.identity.application.service.mfa.AvailableMethodsResolver availableMethodsResolver;
 
     @BeforeEach
     void setUp() {
