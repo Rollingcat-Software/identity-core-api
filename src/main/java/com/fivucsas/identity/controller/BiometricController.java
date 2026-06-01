@@ -404,6 +404,31 @@ public class BiometricController {
         ));
     }
 
+    @PostMapping("/api/v1/biometric/puzzles/verify-challenge")
+    @Operation(summary = "Server-validate a single biometric-puzzle training challenge",
+            description = "Thin proxy to the biometric-processor /liveness/verify-challenge "
+                    + "structural validator (action enum, timestamp monotonicity, duration + "
+                    + "confidence floors). Backs the BiometricPuzzlesPage training surface so a "
+                    + "completed challenge is not resolved purely client-side. Lightweight "
+                    + "training surface, not a security gate — soft-passes if bio is unavailable.")
+    public ResponseEntity<Map<String, Object>> verifyPuzzleChallenge(
+            @RequestBody Map<String, Object> request) {
+        // Stamp the authenticated principal so the bio audit log attributes the
+        // challenge to the real caller, not a client-supplied id. The endpoint is
+        // authenticated (dashboard training surface); if a principal is somehow
+        // absent we forward the client-provided ids rather than failing the
+        // training UX with a 500.
+        Map<String, Object> body = new java.util.HashMap<>(request != null ? request : Map.of());
+        rbacService.getCurrentUser().ifPresent(user -> {
+            body.put("user_id", user.getId().toString());
+            if (user.getTenant() != null) {
+                body.put("tenant_id", user.getTenant().getId().toString());
+            }
+        });
+
+        return ResponseEntity.ok(biometricServicePort.verifyPuzzleChallenge(body));
+    }
+
     private BiometricVerificationResponse mapToVerificationResponse(BiometricResponse response) {
         return BiometricVerificationResponse.builder()
             .verified(response.isSuccess())
