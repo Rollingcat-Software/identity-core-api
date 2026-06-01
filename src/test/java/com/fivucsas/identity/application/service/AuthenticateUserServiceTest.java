@@ -93,6 +93,9 @@ class AuthenticateUserServiceTest {
     @Mock
     private com.fivucsas.identity.application.service.TenantAuthMethodPolicy tenantAuthMethodPolicy;
 
+    @Mock
+    private com.fivucsas.identity.application.service.LoginAccountStateGuard loginAccountStateGuard;
+
     // Real (not mocked) — it's a pure helper; lets the layer-1 builder produce the
     // actual enrolled flags so the begin/availableMethods assertions are meaningful.
     @org.mockito.Spy
