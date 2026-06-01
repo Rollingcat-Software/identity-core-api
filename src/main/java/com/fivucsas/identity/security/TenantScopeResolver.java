@@ -183,6 +183,14 @@ public class TenantScopeResolver {
      */
     public boolean canAccessTenant(UUID targetTenantId) {
         if (targetTenantId == null) return false;
+        // A cross-tenant admin (ROOT) may act on ANY tenant regardless of the
+        // currently-selected X-Tenant-ID scope — mirrors TenantController.getAllTenants
+        // using isCrossTenantAdmin(). Without this, a ROOT who has a tenant selected
+        // (the dashboard ALWAYS sends X-Tenant-ID) gets a spurious 404 when viewing or
+        // editing a DIFFERENT tenant — e.g. "Edit Tenant: Marmara" 404s while the home
+        // tenant is active. Non-ROOT callers stay restricted to their own tenant, so the
+        // S1 cross-tenant-write (IDOR) guard for TENANT_ADMIN is unchanged.
+        if (isCrossTenantAdmin()) return true;
         UUID scope = currentScope();
         return scope == null || scope.equals(targetTenantId);
     }
