@@ -448,10 +448,11 @@ public class BiometricServiceAdapter implements BiometricServicePort {
                     e.getStatusCode(), e.getMessage());
             return puzzleVerdict(false, action, "INVALID_REQUEST",
                     "Challenge submission was rejected as malformed.");
-        } catch (ResourceAccessException | RestClientException e) {
-            // Bio unreachable or 5xx. This is a lightweight training surface, NOT a
-            // security gate (the real liveness gate is enrollment/verify), so we
-            // soft-pass on infrastructure failure rather than block the user.
+        } catch (RestClientException e) {
+            // Bio unreachable (ResourceAccessException) or 5xx (HttpServerErrorException)
+            // — both subclasses of RestClientException. This is a lightweight training
+            // surface, NOT a security gate (the real liveness gate is enrollment/verify),
+            // so we soft-pass on infrastructure failure rather than block the user.
             log.error("Biometric service unavailable for puzzle challenge — soft-passing: {}",
                     e.getMessage());
             return puzzleVerdict(true, action, "VALIDATION_UNAVAILABLE", "");
