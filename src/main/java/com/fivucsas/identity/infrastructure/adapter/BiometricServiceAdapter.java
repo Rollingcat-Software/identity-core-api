@@ -97,13 +97,18 @@ public class BiometricServiceAdapter implements BiometricServicePort {
                                           MultipartFile faceImage,
                                           String tenantId,
                                           String clientEmbedding,
-                                          String clientEmbeddings) {
-        log.info("Calling biometric service to enroll face for user: {} (tenant: {})", userId, tenantId);
+                                          String clientEmbeddings,
+                                          boolean optimize) {
+        log.info("Calling biometric service to enroll face for user: {} (tenant: {}, optimize: {})",
+                userId, tenantId, optimize);
         try {
             MultipartBodyBuilder bodyBuilder = new MultipartBodyBuilder();
             bodyBuilder.part("file", faceImage.getResource()).contentType(MediaType.IMAGE_JPEG);
             bodyBuilder.part("user_id", userId.toString());
             addOptionalTenantAndEmbeddingParts(bodyBuilder, tenantId, clientEmbedding, clientEmbeddings);
+            if (optimize) {
+                bodyBuilder.part("optimize", "true");
+            }
 
             Map<String, Object> response = postMultipart("/enroll", bodyBuilder.build());
             log.info("Biometric enrollment response received for user: {}", userId);
@@ -155,11 +160,16 @@ public class BiometricServiceAdapter implements BiometricServicePort {
     }
 
     @Override
-    public Map<String, Object> enrollVoice(UUID userId, String voiceData) {
-        log.info("Calling biometric service to enroll voice for user: {}", userId);
+    public Map<String, Object> enrollVoice(UUID userId, String voiceData, boolean optimize) {
+        log.info("Calling biometric service to enroll voice for user: {} (optimize: {})", userId, optimize);
         try {
-            Map<String, Object> response = postJson("/voice/enroll",
-                    Map.of("user_id", userId.toString(), "voice_data", voiceData));
+            // postJsonObject (not postJson) so `optimize` serializes as a real
+            // JSON boolean (the bio VoiceRequest.optimize field is typed bool).
+            Map<String, Object> body = new java.util.LinkedHashMap<>();
+            body.put("user_id", userId.toString());
+            body.put("voice_data", voiceData);
+            body.put("optimize", optimize);
+            Map<String, Object> response = postJsonObject("/voice/enroll", body);
             log.info("Voice enrollment response received for user: {}", userId);
             return response;
         } catch (ResourceAccessException e) {
@@ -221,9 +231,10 @@ public class BiometricServiceAdapter implements BiometricServicePort {
                                                List<MultipartFile> images,
                                                String tenantId,
                                                String clientEmbedding,
-                                               String clientEmbeddings) {
-        log.info("Calling biometric service for multi-image enrollment: userId={}, images={}, tenant={}",
-                userId, images.size(), tenantId);
+                                               String clientEmbeddings,
+                                               boolean optimize) {
+        log.info("Calling biometric service for multi-image enrollment: userId={}, images={}, tenant={}, optimize={}",
+                userId, images.size(), tenantId, optimize);
         try {
             MultipartBodyBuilder bodyBuilder = new MultipartBodyBuilder();
             bodyBuilder.part("user_id", userId.toString());
@@ -235,6 +246,9 @@ public class BiometricServiceAdapter implements BiometricServicePort {
                         .filename(filename);
             }
             addOptionalTenantAndEmbeddingParts(bodyBuilder, tenantId, clientEmbedding, clientEmbeddings);
+            if (optimize) {
+                bodyBuilder.part("optimize", "true");
+            }
             return postMultipart("/enroll/multi", bodyBuilder.build());
         } catch (HttpClientErrorException e) {
             return errorResponse("Multi-enrollment rejected: " + e.getResponseBodyAsString());

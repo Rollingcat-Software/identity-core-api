@@ -95,9 +95,10 @@ public class BiometricController {
             @RequestParam("image") MultipartFile image,
             @RequestParam(value = "tenant_id", required = false) String tenantId,
             @RequestParam(value = "client_embedding", required = false) String clientEmbedding,
-            @RequestParam(value = "client_embeddings", required = false) String clientEmbeddings) {
+            @RequestParam(value = "client_embeddings", required = false) String clientEmbeddings,
+            @RequestParam(value = "optimize", required = false, defaultValue = "false") boolean optimize) {
 
-        log.info("Face enrollment request for user: {} (tenant: {})", userId, tenantId);
+        log.info("Face enrollment request for user: {} (tenant: {}, optimize: {})", userId, tenantId, optimize);
 
         EnrollBiometricCommand command = EnrollBiometricCommand.builder()
             .userId(userId.toString())
@@ -105,6 +106,7 @@ public class BiometricController {
             .tenantId(tenantId)
             .clientEmbedding(clientEmbedding)
             .clientEmbeddings(clientEmbeddings)
+            .optimize(optimize)
             .build();
 
         BiometricResponse response = enrollBiometricUseCase.execute(command);
@@ -120,12 +122,13 @@ public class BiometricController {
             @RequestParam("files") List<MultipartFile> files,
             @RequestParam(value = "tenant_id", required = false) String tenantId,
             @RequestParam(value = "client_embedding", required = false) String clientEmbedding,
-            @RequestParam(value = "client_embeddings", required = false) String clientEmbeddings) {
+            @RequestParam(value = "client_embeddings", required = false) String clientEmbeddings,
+            @RequestParam(value = "optimize", required = false, defaultValue = "false") boolean optimize) {
 
-        log.info("Multi-image face enrollment for user: {}, images: {}, tenant: {}",
-                userId, files.size(), tenantId);
+        log.info("Multi-image face enrollment for user: {}, images: {}, tenant: {}, optimize: {}",
+                userId, files.size(), tenantId, optimize);
         Map<String, Object> result = biometricServicePort.enrollFaceMulti(
-                userId, files, tenantId, clientEmbedding, clientEmbeddings);
+                userId, files, tenantId, clientEmbedding, clientEmbeddings, optimize);
         recordEnrollmentScores(userId, AuthMethodType.FACE, result);
         return ResponseEntity.ok(result);
     }
@@ -206,7 +209,11 @@ public class BiometricController {
                     .message("Maximum number of voice enrollments reached").build());
         }
 
-        Map<String, Object> result = biometricServicePort.enrollVoice(userId, voiceData);
+        // "Re-enroll & optimize" — optional flag in the same JSON body (string
+        // "true"/"false" since the body is Map<String,String>). Default false.
+        boolean optimize = Boolean.parseBoolean(request.getOrDefault("optimize", "false"));
+
+        Map<String, Object> result = biometricServicePort.enrollVoice(userId, voiceData, optimize);
         boolean success = Boolean.TRUE.equals(result.get("success"))
                 || "true".equalsIgnoreCase(String.valueOf(result.get("success")));
 

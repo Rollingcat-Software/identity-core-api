@@ -54,11 +54,30 @@ public interface BiometricServicePort {
      *                         (JSON string). Either field may be null/empty.
      * @return Map containing enrollment response data
      */
+    default Map<String, Object> enrollFace(UUID userId,
+                                           MultipartFile faceImage,
+                                           String tenantId,
+                                           String clientEmbedding,
+                                           String clientEmbeddings) {
+        return enrollFace(userId, faceImage, tenantId, clientEmbedding, clientEmbeddings, false);
+    }
+
+    /**
+     * Enrolls a user's face, optionally as a "re-enroll &amp; optimize" — when
+     * {@code optimize} is true and the user already has a stored template, the
+     * biometric-processor FUSES this capture into the existing centroid instead
+     * of a plain append/replace (improves robustness across captures). When
+     * false, behaviour is identical to the legacy enroll. The flag is forwarded
+     * to the bio {@code /enroll} endpoint as the {@code optimize} multipart
+     * field; an older bio build that doesn't know the field simply ignores it
+     * (graceful fallback to plain re-enroll).
+     */
     Map<String, Object> enrollFace(UUID userId,
                                    MultipartFile faceImage,
                                    String tenantId,
                                    String clientEmbedding,
-                                   String clientEmbeddings);
+                                   String clientEmbeddings,
+                                   boolean optimize);
 
     /**
      * Verifies a user's face against enrolled biometric data.
@@ -90,7 +109,18 @@ public interface BiometricServicePort {
      * @return Map containing enrollment response data
      * @throws com.fivucsas.identity.domain.exception.BiometricEnrollmentException if enrollment fails
      */
-    Map<String, Object> enrollVoice(UUID userId, String voiceData);
+    default Map<String, Object> enrollVoice(UUID userId, String voiceData) {
+        return enrollVoice(userId, voiceData, false);
+    }
+
+    /**
+     * Enrolls a user's voice, optionally as a "re-enroll &amp; optimize" — when
+     * {@code optimize} is true and the user already has a voiceprint, the
+     * biometric-processor FUSES this sample into the existing centroid. The flag
+     * is forwarded to bio {@code /voice/enroll} as the {@code optimize} JSON
+     * body field; an older bio build ignores it (graceful fallback).
+     */
+    Map<String, Object> enrollVoice(UUID userId, String voiceData, boolean optimize);
 
     /**
      * Verifies a user's voice against enrolled biometric data.
@@ -145,11 +175,27 @@ public interface BiometricServicePort {
      * Multi-image face enrollment with tenant scoping and optional client
      * embedding telemetry (D2 log-only).
      */
+    default Map<String, Object> enrollFaceMulti(UUID userId,
+                                                List<MultipartFile> images,
+                                                String tenantId,
+                                                String clientEmbedding,
+                                                String clientEmbeddings) {
+        return enrollFaceMulti(userId, images, tenantId, clientEmbedding, clientEmbeddings, false);
+    }
+
+    /**
+     * Multi-image face enrollment, optionally as a "re-enroll &amp; optimize".
+     * When {@code optimize} is true and the user already has a template, the
+     * fused batch is in turn fused into the existing centroid (forwarded to bio
+     * {@code /enroll/multi} as the {@code optimize} multipart field). When
+     * false, behaviour is identical to the legacy multi-enroll.
+     */
     Map<String, Object> enrollFaceMulti(UUID userId,
                                         List<MultipartFile> images,
                                         String tenantId,
                                         String clientEmbedding,
-                                        String clientEmbeddings);
+                                        String clientEmbeddings,
+                                        boolean optimize);
 
     Map<String, Object> searchVoice(String voiceData);
 
