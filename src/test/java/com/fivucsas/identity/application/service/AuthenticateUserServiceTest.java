@@ -87,6 +87,12 @@ class AuthenticateUserServiceTest {
     @Mock
     private com.fivucsas.identity.application.service.ConfigDrivenLoginPolicy configDrivenLoginPolicy;
 
+    // Default mock: isLoginMethodExplicitlyDisabled returns false → "allowed",
+    // so every existing login-path test keeps its behavior. The enforcement test
+    // below stubs PASSWORD as disabled.
+    @Mock
+    private com.fivucsas.identity.application.service.TenantAuthMethodPolicy tenantAuthMethodPolicy;
+
     // Real (not mocked) — it's a pure helper; lets the layer-1 builder produce the
     // actual enrolled flags so the begin/availableMethods assertions are meaningful.
     @org.mockito.Spy
@@ -877,6 +883,27 @@ class AuthenticateUserServiceTest {
                     .tenant(tenant)
                     .createdAt(Instant.now()).updatedAt(Instant.now())
                     .build();
+        }
+
+        @Test
+        @DisplayName("ENFORCEMENT: PASSWORD Layer-1 explicitly disabled for tenant ⇒ login refused (AUTH_METHOD_DISABLED), password never checked")
+        void passwordLayer1DisabledForTenantRefusesLogin() {
+            UUID tenantId = UUID.randomUUID();
+            User user = tenantUser(tenantId);
+
+            when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
+            // PASSWORD is the Layer-1 (engine OFF default), but the tenant has an
+            // explicit is_enabled=false row for PASSWORD → blocked.
+            when(tenantAuthMethodPolicy.isLoginMethodExplicitlyDisabled(
+                    tenantId, com.fivucsas.identity.domain.model.auth.AuthMethodType.PASSWORD))
+                    .thenReturn(true);
+
+            assertThatThrownBy(() -> authenticateUserService.execute(validCommand))
+                    .isInstanceOf(com.fivucsas.identity.domain.exception.AuthMethodDisabledException.class);
+
+            // Fail-closed BEFORE the password is ever checked; no token minted.
+            verify(passwordEncoder, never()).matches(any(), any());
+            verify(refreshTokenService, never()).createRefreshToken(any(), any(), any());
         }
 
         @Test

@@ -44,6 +44,7 @@ public class ManageAuthFlowService implements ManageAuthFlowUseCase {
     private final TenantAuthMethodRepositoryPort tenantAuthMethodRepository;
     private final UserEnrollmentRepositoryPort userEnrollmentRepository;
     private final com.fivucsas.identity.repository.UserRepository userRepository;
+    private final TenantAuthMethodPolicy tenantAuthMethodPolicy;
 
     @Override
     public List<AuthFlowResponse> listFlows(UUID tenantId, OperationType operationType) {
@@ -98,6 +99,11 @@ public class ManageAuthFlowService implements ManageAuthFlowUseCase {
         {
             validateFirstStepStructure(command.steps());
             validateNoRequiredUnsupportedMethods(command.steps());
+            // No-lock-out guard (write side): refuse to build a flow that
+            // references a method EXPLICITLY disabled for this tenant. Otherwise
+            // login enforcement would later block that method and strand any
+            // user the flow routes through it. 422 with the offending method(s).
+            validateNoDisabledMethods(tenantId, command.steps());
             for (CreateAuthFlowCommand.FlowStepSpec stepSpec : command.steps()) {
                 AuthMethodType methodType = AuthMethodType.valueOf(stepSpec.authMethodType());
                 AuthMethod method = authMethodRepository.findByType(methodType)
@@ -164,7 +170,16 @@ public class ManageAuthFlowService implements ManageAuthFlowUseCase {
                     command.description() != null ? command.description() : flow.getDescription()
             );
         }
-        if (command.isDefault() != null && command.isDefault()) {
+        // No-lock-out guard (write side): promoting a flow to DEFAULT or
+        // ACTIVATING it makes it part of the live login surface — refuse if it
+        // references a method explicitly disabled for the tenant (otherwise a
+        // user routed through that step would be blocked by login enforcement).
+        boolean becomingDefault = command.isDefault() != null && command.isDefault();
+        boolean becomingActive = command.isActive() != null && command.isActive();
+        if (becomingDefault || becomingActive) {
+            validateExistingFlowHasNoDisabledMethods(tenantId, flow);
+        }
+        if (becomingDefault) {
             dethroneExistingDefault(tenantId, flow.getOperationType(), flow.getId());
             flow.setAsDefault();
         }
@@ -392,6 +407,69 @@ public class ManageAuthFlowService implements ManageAuthFlowUseCase {
                     + "mandatory factor (" + REQUIRED_UNSUPPORTED_METHODS + "): " + blockedLayers
                     + ". Add a supported method to the layer (so the user has a way to complete it), "
                     + "or make the layer optional.");
+        }
+    }
+
+    /**
+     * No-lock-out guard (write side, create path): every method referenced by
+     * the submitted steps (primary + alternatives + fallback) must NOT be
+     * EXPLICITLY disabled for the tenant. Throws
+     * {@link com.fivucsas.identity.domain.exception.AuthFlowMethodDisabledException}
+     * (→ HTTP 422) naming the offending method(s) so the admin re-enables the
+     * method first or drops it from the flow. SAFE: a method with no
+     * {@code tenant_auth_methods} row is allowed (no false rejection).
+     */
+    private void validateNoDisabledMethods(UUID tenantId, List<CreateAuthFlowCommand.FlowStepSpec> steps) {
+        Set<AuthMethodType> referenced = new java.util.LinkedHashSet<>();
+        for (CreateAuthFlowCommand.FlowStepSpec s : steps) {
+            addTypeIfParseable(referenced, s.authMethodType());
+            if (s.alternativeMethodTypes() != null) {
+                for (String alt : s.alternativeMethodTypes()) addTypeIfParseable(referenced, alt);
+            }
+            addTypeIfParseable(referenced, s.fallbackMethodType());
+        }
+        List<String> disabled = referenced.stream()
+                .filter(m -> tenantAuthMethodPolicy.isLoginMethodExplicitlyDisabled(tenantId, m))
+                .map(AuthMethodType::name)
+                .toList();
+        if (!disabled.isEmpty()) {
+            throw new com.fivucsas.identity.domain.exception.AuthFlowMethodDisabledException(disabled);
+        }
+    }
+
+    /**
+     * No-lock-out guard (write side, update/activate path): the existing flow
+     * about to become default/active must not reference a tenant-disabled
+     * method. Same 422 contract as {@link #validateNoDisabledMethods}.
+     */
+    private void validateExistingFlowHasNoDisabledMethods(UUID tenantId, AuthFlow flow) {
+        Set<AuthMethodType> referenced = new java.util.LinkedHashSet<>();
+        for (AuthFlowStep step : flow.getSteps()) {
+            step.getAvailableMethods().stream()
+                    .filter(java.util.Objects::nonNull)
+                    .map(AuthMethod::getType)
+                    .filter(java.util.Objects::nonNull)
+                    .forEach(referenced::add);
+            if (step.getFallbackMethod() != null && step.getFallbackMethod().getType() != null) {
+                referenced.add(step.getFallbackMethod().getType());
+            }
+        }
+        List<String> disabled = referenced.stream()
+                .filter(m -> tenantAuthMethodPolicy.isLoginMethodExplicitlyDisabled(tenantId, m))
+                .map(AuthMethodType::name)
+                .toList();
+        if (!disabled.isEmpty()) {
+            throw new com.fivucsas.identity.domain.exception.AuthFlowMethodDisabledException(disabled);
+        }
+    }
+
+    private static void addTypeIfParseable(Set<AuthMethodType> sink, String name) {
+        if (name == null || name.isBlank()) return;
+        try {
+            sink.add(AuthMethodType.valueOf(name));
+        } catch (IllegalArgumentException ignored) {
+            // Unknown method names are rejected elsewhere (createFlow resolves
+            // each to a concrete AuthMethod row); ignore here.
         }
     }
 }

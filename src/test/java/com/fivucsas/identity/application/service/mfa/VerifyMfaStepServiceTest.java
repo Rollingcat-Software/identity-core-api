@@ -90,6 +90,7 @@ class VerifyMfaStepServiceTest {
     @Mock private VerifyMfaStepHandler faceHandler;
     @Mock private VerifyMfaStepHandler hardwareKeyHandler;
     @Mock private VerifyMfaStepHandler emailOtpHandler;
+    @Mock private com.fivucsas.identity.application.service.TenantAuthMethodPolicy tenantAuthMethodPolicy;
 
     private VerifyMfaStepService service;
 
@@ -108,11 +109,17 @@ class VerifyMfaStepServiceTest {
         lenient().when(hardwareKeyHandler.supports()).thenReturn(AuthMethodType.HARDWARE_KEY);
         lenient().when(emailOtpHandler.supports()).thenReturn(AuthMethodType.EMAIL_OTP);
 
+        // Default: no method explicitly disabled (fail-open) — every existing
+        // test exercises the happy path. The dedicated enforcement test below
+        // overrides this for the method under test.
+        lenient().when(tenantAuthMethodPolicy.isLoginMethodAllowedForTenant(any(), any()))
+                .thenReturn(true);
+
         service = new VerifyMfaStepService(
                 List.of(passwordHandler, totpHandler, faceHandler, hardwareKeyHandler, emailOtpHandler),
                 mfaSessionRepository, userRepository, authFlowRepository,
                 enrollmentHealthService, tokenGenerator, refreshTokenService, auditLogPort,
-                new AvailableMethodsResolver());
+                new AvailableMethodsResolver(), tenantAuthMethodPolicy);
     }
 
     // ============== Handler dispatch — 4 representative methods ==============
@@ -143,6 +150,56 @@ class VerifyMfaStepServiceTest {
         verify(totpHandler, never()).verify(any(), any(), any());
         verify(faceHandler, never()).verify(any(), any(), any());
         verify(hardwareKeyHandler, never()).verify(any(), any(), any());
+    }
+
+    // ============== Tenant Auth-Method enforcement ==============
+
+    @Test
+    void rejectsStepWhoseMethodIsDisabledForTenant_andNeverInvokesHandler() {
+        UUID userId = UUID.randomUUID();
+        UUID flowId = UUID.randomUUID();
+        MfaSession session = mfaSessionAt(SESSION_TOKEN, userId, flowId, 2, 2, "[\"PASSWORD\"]");
+        User user = userMock(userId);
+
+        when(mfaSessionRepository.findBySessionTokenForUpdate(SESSION_TOKEN))
+                .thenReturn(Optional.of(session));
+        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+        // TOTP is explicitly disabled for this session's tenant.
+        when(tenantAuthMethodPolicy.isLoginMethodAllowedForTenant(
+                session.getTenantId(), AuthMethodType.TOTP)).thenReturn(false);
+
+        assertThatThrownBy(() -> service.execute(req("TOTP", Map.of("code", "123456"))))
+                .isInstanceOf(com.fivucsas.identity.domain.exception.AuthMethodDisabledException.class);
+
+        // The handler must NOT run — no verification side-effects for a disabled method.
+        verify(totpHandler, never()).verify(any(), any(), any());
+        verify(auditLogPort).logMfaStepFailed(eq(userId.toString()), eq("TOTP"),
+                eq("auth_method_disabled_for_tenant"), any(), any());
+    }
+
+    @Test
+    void allowsStepWhenMethodHasNoExplicitDisableRow() {
+        UUID userId = UUID.randomUUID();
+        UUID flowId = UUID.randomUUID();
+        MfaSession session = mfaSessionAt(SESSION_TOKEN, userId, flowId, 2, 3, "[\"PASSWORD\"]");
+        AuthFlow flow = flowOf(flowId,
+                stepOf(1, AuthMethodType.PASSWORD),
+                stepOf(2, AuthMethodType.TOTP),
+                stepOf(3, AuthMethodType.EMAIL_OTP));
+        User user = userMock(userId);
+
+        when(mfaSessionRepository.findBySessionTokenForUpdate(SESSION_TOKEN))
+                .thenReturn(Optional.of(session));
+        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+        when(authFlowRepository.findById(flowId)).thenReturn(Optional.of(flow));
+        when(totpHandler.verify(eq(session), eq(user), any())).thenReturn(MfaStepResult.ok());
+        when(mfaSessionRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(enrollmentHealthService.validateEnrollments(any())).thenReturn(Map.of());
+        // No-row default (allow) is the @BeforeEach stub — TOTP proceeds normally.
+
+        service.execute(req("TOTP", Map.of("code", "123456")));
+
+        verify(totpHandler).verify(eq(session), eq(user), any());
     }
 
     @Test
