@@ -43,6 +43,9 @@ class RefreshTokenServiceTest {
     @Mock
     private AuditLogPort auditLogPort;
 
+    @Mock
+    private RefreshTokenFamilyRevoker familyRevoker;
+
     @InjectMocks
     private RefreshTokenService service;
 

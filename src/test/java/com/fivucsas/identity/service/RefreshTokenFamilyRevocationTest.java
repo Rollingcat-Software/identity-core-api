@@ -49,6 +49,9 @@ class RefreshTokenFamilyRevocationTest {
     @Mock
     private AuditLogPort auditLogPort;
 
+    @Mock
+    private RefreshTokenFamilyRevoker familyRevoker;
+
     @InjectMocks
     private RefreshTokenService service;
 
@@ -94,13 +97,16 @@ class RefreshTokenFamilyRevocationTest {
             UUID familyId = UUID.randomUUID();
             RefreshToken revoked = aPersistedToken(user, familyId, /*revoked*/ true);
             // Repository reports 3 family members were live before bulk revoke.
-            when(refreshTokenRepository.revokeFamily(eq(familyId), any(Instant.class)))
+            // P0-4: the family revoke now runs in its own committed transaction via
+            // RefreshTokenFamilyRevoker (REQUIRES_NEW), so it survives the rollback from
+            // the TokenRevokedException thrown below.
+            when(familyRevoker.revokeFamily(eq(familyId)))
                     .thenReturn(3);
 
             assertThatThrownBy(() -> service.verifyExpiration(revoked))
                     .isInstanceOf(TokenRevokedException.class);
 
-            verify(refreshTokenRepository).revokeFamily(eq(familyId), any(Instant.class));
+            verify(familyRevoker).revokeFamily(eq(familyId));
             ArgumentCaptor<String> action = ArgumentCaptor.forClass(String.class);
             ArgumentCaptor<String> detail = ArgumentCaptor.forClass(String.class);
             verify(auditLogPort).logSecurityEvent(
@@ -123,7 +129,7 @@ class RefreshTokenFamilyRevocationTest {
             RefreshToken result = service.verifyExpiration(active);
 
             assertThat(result).isSameAs(active);
-            verify(refreshTokenRepository, never()).revokeFamily(any(UUID.class), any(Instant.class));
+            verify(familyRevoker, never()).revokeFamily(any(UUID.class));
             verifyNoInteractions(auditLogPort);
         }
     }

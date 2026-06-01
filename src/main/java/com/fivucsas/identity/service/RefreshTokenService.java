@@ -37,6 +37,7 @@ public class RefreshTokenService implements com.fivucsas.identity.application.po
 
     private final RefreshTokenRepository refreshTokenRepository;
     private final AuditLogPort auditLogPort;
+    private final RefreshTokenFamilyRevoker familyRevoker;
 
     @Value("${jwt.refresh-expiration:604800000}") // 7 days in milliseconds
     private long refreshTokenDurationMs;
@@ -122,7 +123,11 @@ public class RefreshTokenService implements com.fivucsas.identity.application.po
             // require revoking every descendant in the rotation family so the
             // attacker's "winning" token is killed even if the legitimate
             // client races ahead.
-            int killed = refreshTokenRepository.revokeFamily(token.getFamilyId(), Instant.now());
+            // SECURITY (2026-06-01, P0-4): revoke in a SEPARATE committed transaction
+            // (REQUIRES_NEW via familyRevoker) so it SURVIVES the rollback caused by the
+            // TokenRevokedException thrown below — otherwise the family-wide revoke was a
+            // silent no-op and a stolen sibling token kept working.
+            int killed = familyRevoker.revokeFamily(token.getFamilyId());
             log.warn("Refresh-token reuse detected for user={} family={} — revoked {} family member(s)",
                     token.getUser().getEmail(), token.getFamilyId(), killed);
             auditLogPort.logSecurityEvent(
