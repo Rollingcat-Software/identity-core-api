@@ -75,8 +75,11 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
                 UserDetails userDetails = userDetailsService.loadUserByUsername(userEmail);
 
-                // Validate token
-                if (jwtService.isTokenValid(jwt, userEmail)) {
+                // Validate token. SECURITY (2026-06-01, LOGIC_AUDIT): also reject a
+                // structurally-valid token whose account is no longer enabled
+                // (CustomUserDetailsService maps SUSPENDED/INACTIVE → enabled=false),
+                // so an admin suspension takes effect on already-issued tokens too.
+                if (jwtService.isTokenValid(jwt, userEmail) && userDetails.isEnabled()) {
                     UsernamePasswordAuthenticationToken authToken = new UsernamePasswordAuthenticationToken(
                             userDetails,
                             null,

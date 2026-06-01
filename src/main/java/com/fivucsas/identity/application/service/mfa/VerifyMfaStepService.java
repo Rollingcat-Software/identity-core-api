@@ -89,6 +89,7 @@ public class VerifyMfaStepService {
     private final AuditLogPort auditLogPort;
     private final AvailableMethodsResolver availableMethodsResolver;
     private final com.fivucsas.identity.application.service.TenantAuthMethodPolicy tenantAuthMethodPolicy;
+    private final com.fivucsas.identity.application.service.LoginAccountStateGuard loginAccountStateGuard;
 
     public VerifyMfaStepService(
             List<VerifyMfaStepHandler> handlerBeans,
@@ -100,7 +101,8 @@ public class VerifyMfaStepService {
             RefreshTokenService refreshTokenService,
             AuditLogPort auditLogPort,
             AvailableMethodsResolver availableMethodsResolver,
-            com.fivucsas.identity.application.service.TenantAuthMethodPolicy tenantAuthMethodPolicy) {
+            com.fivucsas.identity.application.service.TenantAuthMethodPolicy tenantAuthMethodPolicy,
+            com.fivucsas.identity.application.service.LoginAccountStateGuard loginAccountStateGuard) {
         Map<AuthMethodType, VerifyMfaStepHandler> map = new EnumMap<>(AuthMethodType.class);
         for (VerifyMfaStepHandler h : handlerBeans) {
             VerifyMfaStepHandler prior = map.put(h.supports(), h);
@@ -120,6 +122,7 @@ public class VerifyMfaStepService {
         this.auditLogPort = auditLogPort;
         this.availableMethodsResolver = availableMethodsResolver;
         this.tenantAuthMethodPolicy = tenantAuthMethodPolicy;
+        this.loginAccountStateGuard = loginAccountStateGuard;
     }
 
     /**
@@ -161,6 +164,13 @@ public class VerifyMfaStepService {
 
         User user = userRepository.findById(session.getUserId())
                 .orElseThrow(() -> new UserNotFoundException("User not found for MFA session"));
+
+        // SECURITY (2026-06-01, LOGIC_AUDIT): enforce per-account lockout + account
+        // status on the LIVE config-driven /auth/mfa/step path. Previously ONLY the
+        // legacy /auth/login path checked these, so online guessing here never tripped
+        // the 5-strike lock and SUSPENDED/INACTIVE users could still complete MFA.
+        // Throws 423 (locked) / 403 (not active) before any factor is verified.
+        loginAccountStateGuard.enforceLoginAllowed(user, user.getEmail(), req.clientIp());
 
         AuthMethodType methodType;
         try {
@@ -301,6 +311,12 @@ public class VerifyMfaStepService {
                     session.getTotalSteps(), req.clientIp(), req.userAgent());
             auditLogPort.logMfaStepFailed(user.getId().toString(), req.method(), reason,
                     req.clientIp(), req.userAgent());
+            // SECURITY (2026-06-01): path-independent strike counter — record the
+            // failed factor so online guessing through this path trips the lock at
+            // MAX_FAILED_ATTEMPTS. We do NOT throw here (returning the structured
+            // failure below) so the increment/lock commits; the lock is enforced on
+            // the NEXT attempt via enforceLoginAllowed (avoids a rollback-on-throw).
+            loginAccountStateGuard.recordFailedAttempt(user.getId(), user.getEmail(), req.clientIp());
             // Edge case #5: include currentStep + expectedMethod + completedMethods so
             // clients can render "retry or switch method" UX without a separate GET.
             return VerifyMfaStepResponse.failed(
@@ -312,6 +328,8 @@ public class VerifyMfaStepService {
         }
 
         // Step verified — advance session.
+        // Reset the per-account strike counter on a successful factor (path-independent).
+        loginAccountStateGuard.recordSuccess(user.getId());
         session.addCompletedMethod(reuseKey);
         session.advanceStep();
 

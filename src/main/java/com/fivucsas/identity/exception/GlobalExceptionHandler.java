@@ -208,6 +208,23 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.FORBIDDEN).body(body);
     }
 
+    @ExceptionHandler(com.fivucsas.identity.domain.exception.AccountNotActiveException.class)
+    public ResponseEntity<java.util.Map<String, Object>> handleAccountNotActive(
+            com.fivucsas.identity.domain.exception.AccountNotActiveException ex,
+            HttpServletRequest request) {
+        log.warn("Login refused — account not active: path={}", request.getRequestURI());
+
+        java.util.Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("timestamp", java.time.Instant.now().toString());
+        body.put("status", HttpStatus.FORBIDDEN.value());
+        body.put("error", ex.getErrorCode());
+        body.put("errorCode", ex.getErrorCode());
+        body.put("message", ex.getMessage());
+        body.put("path", request.getRequestURI());
+
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(body);
+    }
+
     /**
      * Write-side no-lock-out guard: an admin tried to disable a login method
      * that is still required by one or more ACTIVE auth flows. HTTP 409 Conflict

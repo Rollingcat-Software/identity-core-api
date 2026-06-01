@@ -59,6 +59,7 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
     private final ConfigDrivenLoginPolicy configDrivenLoginPolicy;
     private final com.fivucsas.identity.application.service.mfa.AvailableMethodsResolver availableMethodsResolver;
     private final TenantAuthMethodPolicy tenantAuthMethodPolicy;
+    private final LoginAccountStateGuard loginAccountStateGuard;
 
     private static final int MAX_FAILED_ATTEMPTS = 5;
     private static final Duration LOCKOUT_DURATION = Duration.ofMinutes(15);
@@ -116,6 +117,19 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
                         : 0L;
                 throw new AccountLockedException(remainingSeconds);
             }
+        }
+
+        // SECURITY (2026-06-01, LOGIC_AUDIT): reject SUSPENDED/INACTIVE accounts on
+        // the legacy /auth/login path too (the modern paths enforce this via
+        // LoginAccountStateGuard). Without this, an admin-suspended/deactivated user
+        // could still authenticate through every login path.
+        if (!user.isActive()) {
+            String state = user.isSuspended() ? "SUSPENDED" : "INACTIVE";
+            log.warn("AUDIT: Login refused — email={}, reason: account_not_active ({}), ip={}",
+                    command.getEmail(), state, command.getIpAddress());
+            auditLogPort.logAuthenticationFailed(command.getEmail(), command.getIpAddress(),
+                    "Account not active: " + state);
+            throw new com.fivucsas.identity.domain.exception.AccountNotActiveException();
         }
 
         // Tenant lock — when the login originates from an OAuth client that is
@@ -201,33 +215,21 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
         }
 
         if (layer1IsPassword && !passwordEncoder.matches(command.getPassword(), user.getPasswordHash())) {
-            // Increment failed attempts and potentially lock account
-            user.incrementFailedLoginAttempts();
-            boolean justLocked = false;
-            if (user.getFailedLoginAttempts() >= MAX_FAILED_ATTEMPTS) {
-                user.lockAccount(LOCKOUT_DURATION);
-                justLocked = true;
-                log.warn("AUDIT: Account locked — email={}, failedAttempts={}, ip={}", command.getEmail(), MAX_FAILED_ATTEMPTS, command.getIpAddress());
-                auditLogPort.logAuthenticationFailed(command.getEmail(), command.getIpAddress(),
-                        "Account locked after " + MAX_FAILED_ATTEMPTS + " failed attempts");
-            } else {
-                auditLogPort.logAuthenticationFailed(command.getEmail(), command.getIpAddress(),
-                        "Invalid password (attempt " + user.getFailedLoginAttempts() + "/" + MAX_FAILED_ATTEMPTS + ")");
-            }
-            userRepository.save(user);
-            log.warn("AUDIT: Login failed — email={}, reason: invalid_password, attempt: {}/{}, ip={}",
-                    command.getEmail(), user.getFailedLoginAttempts(), MAX_FAILED_ATTEMPTS, command.getIpAddress());
-            // P0-#5: when this very attempt triggered the lockout, surface
-            // AccountLockedException so the user gets the lockout message
-            // instead of "invalid credentials" on the 5th wrong-password try.
+            // SECURITY (2026-06-01): record the failed attempt in its OWN committed
+            // transaction (LoginAccountStateGuard, REQUIRES_NEW) so the strike
+            // counter / lock SURVIVES the rollback caused by throwing below. The
+            // previous inline increment+save ran inside this @Transactional method
+            // and was discarded when it threw InvalidCredentialsException — so the
+            // 5-strike lockout never actually persisted (confirmed on staging:
+            // 6 wrong passwords left failed_login_attempts=0).
+            boolean justLocked = loginAccountStateGuard.recordFailedAttempt(
+                    user.getId(), command.getEmail(), command.getIpAddress());
+            log.warn("AUDIT: Login failed — email={}, reason: invalid_password, ip={}",
+                    command.getEmail(), command.getIpAddress());
+            // P0-#5: when this attempt triggered the lockout, surface AccountLocked
+            // (HTTP 423) instead of "invalid credentials" on the 5th wrong try.
             if (justLocked) {
-                // Cache lockedUntil — single call site keeps the ArchUnit
-                // FreezingArchRule baseline (UserDomainBoundaryTest) green.
-                Instant lockedUntil = user.getLockedUntil();
-                long remainingSeconds = lockedUntil != null
-                        ? Math.max(0L, Duration.between(Instant.now(), lockedUntil).getSeconds())
-                        : LOCKOUT_DURATION.getSeconds();
-                throw new AccountLockedException(remainingSeconds);
+                throw new AccountLockedException(LOCKOUT_DURATION.getSeconds());
             }
             throw new InvalidCredentialsException();
         }
@@ -676,6 +678,10 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
             return decoyBeginResponse();
         }
         User user = userOpt.get();
+
+        // SECURITY (2026-06-01, LOGIC_AUDIT): enforce per-account lockout + account
+        // status on the identifier-first path too (previously unchecked here).
+        loginAccountStateGuard.enforceLoginAllowed(user, email, ipAddress);
 
         // Tenant-lock (hosted surface bound to a tenant) — 403 on mismatch, same
         // as the password path, so the email step shows "not a {tenant} member".
