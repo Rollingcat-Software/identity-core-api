@@ -1,6 +1,7 @@
 package com.fivucsas.identity.infrastructure.adapter;
 
 import com.fivucsas.identity.application.port.output.TenantAuthMethodRepositoryPort;
+import com.fivucsas.identity.domain.model.auth.AuthMethodType;
 import com.fivucsas.identity.entity.TenantAuthMethod;
 import com.fivucsas.identity.repository.TenantAuthMethodRepository;
 import lombok.RequiredArgsConstructor;
@@ -24,6 +25,11 @@ public class TenantAuthMethodRepositoryAdapter implements TenantAuthMethodReposi
     @Override
     public Optional<TenantAuthMethod> findByTenantIdAndAuthMethodId(UUID tenantId, UUID authMethodId) {
         return jpaRepository.findByTenantIdAndAuthMethodId(tenantId, authMethodId);
+    }
+
+    @Override
+    public Optional<TenantAuthMethod> findByTenantIdAndType(UUID tenantId, AuthMethodType type) {
+        return jpaRepository.findByTenantIdAndAuthMethod_Type(tenantId, type);
     }
 
     @Override

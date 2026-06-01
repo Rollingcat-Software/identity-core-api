@@ -49,7 +49,11 @@ public class AuthMethodController {
             @PathVariable UUID tenantId,
             @PathVariable UUID authMethodId,
             @RequestParam(defaultValue = "true") boolean enabled,
+            // No-lock-out guard: disabling a method still required by an ACTIVE
+            // auth flow is rejected (409) unless force=true. Default false so a
+            // bare disable cannot silently break login.
+            @RequestParam(defaultValue = "false") boolean force,
             @RequestBody(required = false) String configuration) {
-        return ResponseEntity.ok(manageAuthMethodUseCase.configureTenantMethod(tenantId, authMethodId, enabled, configuration));
+        return ResponseEntity.ok(manageAuthMethodUseCase.configureTenantMethod(tenantId, authMethodId, enabled, configuration, force));
     }
 }

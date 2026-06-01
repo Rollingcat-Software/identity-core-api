@@ -88,6 +88,7 @@ public class VerifyMfaStepService {
     private final RefreshTokenService refreshTokenService;
     private final AuditLogPort auditLogPort;
     private final AvailableMethodsResolver availableMethodsResolver;
+    private final com.fivucsas.identity.application.service.TenantAuthMethodPolicy tenantAuthMethodPolicy;
 
     public VerifyMfaStepService(
             List<VerifyMfaStepHandler> handlerBeans,
@@ -98,7 +99,8 @@ public class VerifyMfaStepService {
             TokenGenerationPort tokenGenerator,
             RefreshTokenService refreshTokenService,
             AuditLogPort auditLogPort,
-            AvailableMethodsResolver availableMethodsResolver) {
+            AvailableMethodsResolver availableMethodsResolver,
+            com.fivucsas.identity.application.service.TenantAuthMethodPolicy tenantAuthMethodPolicy) {
         Map<AuthMethodType, VerifyMfaStepHandler> map = new EnumMap<>(AuthMethodType.class);
         for (VerifyMfaStepHandler h : handlerBeans) {
             VerifyMfaStepHandler prior = map.put(h.supports(), h);
@@ -117,6 +119,7 @@ public class VerifyMfaStepService {
         this.refreshTokenService = refreshTokenService;
         this.auditLogPort = auditLogPort;
         this.availableMethodsResolver = availableMethodsResolver;
+        this.tenantAuthMethodPolicy = tenantAuthMethodPolicy;
     }
 
     /**
@@ -169,6 +172,22 @@ public class VerifyMfaStepService {
         VerifyMfaStepHandler handler = handlers.get(methodType);
         if (handler == null) {
             return VerifyMfaStepResponse.badRequest("No handler registered for: " + methodType);
+        }
+
+        // ENFORCEMENT CHOKEPOINT (single place): reject a step whose method is
+        // EXPLICITLY disabled for the tenant (a tenant_auth_methods row with
+        // is_enabled=false). Fail-closed for THIS method only — other enabled
+        // methods on the same CHOICE step still work. SAFE semantics: no row =
+        // allowed, so a tenant that never configured its toggles is never
+        // locked out. Runs AFTER session/handler resolution (so we know the
+        // tenant + method) and BEFORE any verification side-effect (counters,
+        // challenges) so a disabled method can never advance the flow.
+        if (!tenantAuthMethodPolicy.isLoginMethodAllowedForTenant(session.getTenantId(), methodType)) {
+            log.warn("AUDIT: MFA step rejected — method {} is disabled for tenantId={}, userId={}, ip={}",
+                    methodType, session.getTenantId(), session.getUserId(), req.clientIp());
+            auditLogPort.logMfaStepFailed(session.getUserId().toString(), req.method(),
+                    "auth_method_disabled_for_tenant", req.clientIp(), req.userAgent());
+            throw new com.fivucsas.identity.domain.exception.AuthMethodDisabledException(methodType.name());
         }
 
         Map<String, Object> data = req.data() != null ? req.data() : Map.of();
