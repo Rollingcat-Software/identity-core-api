@@ -295,7 +295,15 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
                 List<AuthFlowStep> remainingSteps = flow.getSteps().stream()
                     .filter(step -> step.getStepOrder() >= startStep)
                     .sorted(Comparator.comparingInt(AuthFlowStep::getStepOrder))
-                    .filter(step -> step.isRequired() || stepHasBiometricEnrollment(step, healthStatus))
+                    // SECURITY (2026-06-01): a non-PASSWORD identifier-first Layer-1
+                    // step is the user's FIRST and only proof of identity — it must
+                    // ALWAYS run, even when marked optional + non-enrollment. Mirrors
+                    // the beginIdentifierLogin() guard. Without this, an optional
+                    // non-enrollment step 1 (e.g. optional EMAIL_OTP) was filtered
+                    // out, remainingSteps went empty, and execute() fell through to
+                    // mint a session with ZERO factors verified (auth bypass).
+                    .filter(step -> (!layer1IsPassword && step.getStepOrder() == startStep)
+                            || step.isRequired() || stepHasBiometricEnrollment(step, healthStatus))
                     .toList();
 
                 if (!remainingSteps.isEmpty()) {
@@ -364,6 +372,21 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
             throw e;
         } catch (Exception e) {
             log.warn("Failed to check tenant auth flow for user {}: {}", user.getId(), e.getMessage(), e);
+        }
+
+        // SECURITY (2026-06-01) — fail-closed defense-in-depth against a zero-factor
+        // mint. Only a PASSWORD Layer-1 (verified at line ~203) may reach this
+        // single-factor token mint. A non-PASSWORD identifier-first Layer-1 MUST run
+        // its own step via the MFA-pending branch above; arriving here with
+        // layer1IsPassword=false means NO factor was verified (optional non-enrollment
+        // step 1 filtered out, no default flow, or the flow block threw and was
+        // swallowed by the catch above). Never issue a session in that case.
+        if (!layer1IsPassword) {
+            log.error("AUDIT: Login bypass prevented — identifier-first Layer-1 reached the single-factor mint with no verified factor; userId={}, layer1={}, ip={}",
+                    user.getId(), layer1Methods, command.getIpAddress());
+            auditLogPort.logAuthenticationFailed(command.getEmail(), command.getIpAddress(),
+                    "identifier_first_no_factor_verified");
+            throw new InvalidCredentialsException();
         }
 
         // No MFA required — single-factor login, issue JWT immediately. The amr
