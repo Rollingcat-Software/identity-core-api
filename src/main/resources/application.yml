@@ -66,6 +66,14 @@ app:
     # production before the global flip. Invalid UUIDs are skipped with a warn
     # (never widens the rollout / crashes startup).
     config-driven-login-tenants: ${APP_AUTH_CONFIG_DRIVEN_LOGIN_TENANTS:}
+    # KILL-SWITCH for the tenant Auth-Methods true-gate. When true (default) an
+    # explicitly-disabled login method (tenant_auth_methods row is_enabled=false)
+    # is rejected at login time (TenantAuthMethodPolicy enforces). Flip to false
+    # to DISABLE enforcement instantly with no redeploy (the policy then returns
+    # ALLOWED unconditionally — login reverts to legacy behaviour where the
+    # toggles are cosmetic). The write-side no-lock-out guards (flow builder /
+    # method-disable 409/422) are unaffected; this only governs login-time gating.
+    enforce-tenant-auth-methods: ${APP_AUTH_ENFORCE_TENANT_AUTH_METHODS:true}
   # Public self-service tenant onboarding (POST /api/v1/onboarding/register).
   onboarding:
     # Master switch for the public endpoint. When false the endpoint returns 400.

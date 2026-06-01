@@ -3,8 +3,8 @@ package com.fivucsas.identity.application.service;
 import com.fivucsas.identity.application.port.output.TenantAuthMethodRepositoryPort;
 import com.fivucsas.identity.domain.model.auth.AuthMethodType;
 import com.fivucsas.identity.entity.TenantAuthMethod;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -29,19 +29,47 @@ import java.util.UUID;
  * active flow requires a disabled method.
  */
 @Service
-@RequiredArgsConstructor
 @Slf4j
 public class TenantAuthMethodPolicy {
 
     private final TenantAuthMethodRepositoryPort tenantAuthMethodRepository;
 
     /**
-     * @return {@code false} ONLY when an explicit {@code is_enabled=false} row
-     *         exists for {@code (tenantId, methodType)}; {@code true} in every
-     *         other case (no row, enabled row, null tenant, lookup failure).
+     * KILL-SWITCH (config flag {@code app.auth.enforce-tenant-auth-methods},
+     * env {@code APP_AUTH_ENFORCE_TENANT_AUTH_METHODS}, DEFAULT {@code true}).
+     * When {@code false}, {@link #isLoginMethodAllowedForTenant} returns
+     * {@code true} unconditionally — login-time enforcement of the tenant
+     * Auth-Methods toggles is OFF (instant revert to legacy behaviour with no
+     * redeploy if the gate ever misbehaves in prod). The write-side no-lock-out
+     * guards (which call {@link #isLoginMethodExplicitlyDisabled}) intentionally
+     * still honour an explicit disable so the admin can't author a broken flow,
+     * but with the switch OFF no method is ever "explicitly disabled" either, so
+     * those guards effectively go quiet too — the whole feature reverts cleanly.
+     */
+    private final boolean enforcementEnabled;
+
+    public TenantAuthMethodPolicy(
+            TenantAuthMethodRepositoryPort tenantAuthMethodRepository,
+            @Value("${app.auth.enforce-tenant-auth-methods:true}") boolean enforcementEnabled) {
+        this.tenantAuthMethodRepository = tenantAuthMethodRepository;
+        this.enforcementEnabled = enforcementEnabled;
+        log.info("TenantAuthMethodPolicy login-time enforcement is {} (app.auth.enforce-tenant-auth-methods)",
+                enforcementEnabled ? "ENABLED" : "DISABLED (kill-switch off — toggles are cosmetic)");
+    }
+
+    /**
+     * @return {@code false} ONLY when enforcement is ENABLED <em>and</em> an
+     *         explicit {@code is_enabled=false} row exists for
+     *         {@code (tenantId, methodType)}; {@code true} in every other case
+     *         (kill-switch off, no row, enabled row, null tenant, lookup
+     *         failure).
      */
     @Transactional(readOnly = true)
     public boolean isLoginMethodAllowedForTenant(UUID tenantId, AuthMethodType methodType) {
+        if (!enforcementEnabled) {
+            // Kill-switch OFF ⇒ enforcement disabled ⇒ everything allowed.
+            return true;
+        }
         if (tenantId == null || methodType == null) {
             // No tenant context / unknown method ⇒ cannot prove an explicit
             // disable ⇒ fail OPEN (allow). The caller's other gates still apply.

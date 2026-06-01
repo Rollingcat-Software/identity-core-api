@@ -5,9 +5,9 @@ import com.fivucsas.identity.domain.model.auth.AuthMethodCategory;
 import com.fivucsas.identity.domain.model.auth.AuthMethodType;
 import com.fivucsas.identity.entity.AuthMethod;
 import com.fivucsas.identity.entity.TenantAuthMethod;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -16,23 +16,31 @@ import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.when;
 
 /**
  * Unit tests for the SAFE / fail-open enforcement semantics. This gates
- * dashboard login, so the three cases below pin the contract:
+ * dashboard login, so the cases below pin the contract:
  *   - no configuration row  → ALLOWED  (today's default; never lock out)
- *   - explicit enabled=false → BLOCKED
+ *   - explicit enabled=false → BLOCKED  (only when the kill-switch is ON)
  *   - explicit enabled=true  → ALLOWED
+ *   - kill-switch OFF        → ALLOWED unconditionally (no lookup at all)
  */
 @ExtendWith(MockitoExtension.class)
 class TenantAuthMethodPolicyTest {
 
     @Mock private TenantAuthMethodRepositoryPort tenantAuthMethodRepository;
 
-    @InjectMocks private TenantAuthMethodPolicy policy;
+    // Enforcement ON by default for the contract tests below.
+    private TenantAuthMethodPolicy policy;
 
     private final UUID tenantId = UUID.randomUUID();
+
+    @BeforeEach
+    void setUp() {
+        policy = new TenantAuthMethodPolicy(tenantAuthMethodRepository, true);
+    }
 
     private TenantAuthMethod row(AuthMethodType type, boolean enabled) {
         AuthMethod method = AuthMethod.builder()
@@ -87,5 +95,19 @@ class TenantAuthMethodPolicyTest {
 
         // A misconfigured/unavailable lookup must NEVER lock a tenant out.
         assertThat(policy.isLoginMethodAllowedForTenant(tenantId, AuthMethodType.FACE)).isTrue();
+    }
+
+    @Test
+    void killSwitchOff_allowsEverythingWithoutLookup() {
+        // app.auth.enforce-tenant-auth-methods=false → enforcement OFF. Even an
+        // explicit is_enabled=false row is ignored (and the repo is never hit),
+        // so the gate reverts to legacy "toggles are cosmetic" behaviour.
+        TenantAuthMethodPolicy disabled =
+                new TenantAuthMethodPolicy(tenantAuthMethodRepository, false);
+        lenient().when(tenantAuthMethodRepository.findByTenantIdAndType(tenantId, AuthMethodType.SMS_OTP))
+                .thenReturn(Optional.of(row(AuthMethodType.SMS_OTP, false)));
+
+        assertThat(disabled.isLoginMethodAllowedForTenant(tenantId, AuthMethodType.SMS_OTP)).isTrue();
+        assertThat(disabled.isLoginMethodExplicitlyDisabled(tenantId, AuthMethodType.SMS_OTP)).isFalse();
     }
 }
