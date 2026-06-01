@@ -198,4 +198,30 @@ public interface BiometricServicePort {
      * @return Map containing verification result (success, liveness_confirmed, score, etc.)
      */
     Map<String, Object> verifyLivenessPuzzle(String puzzleId, List<MultipartFile> frames);
+
+    /**
+     * Server-validates a single completed biometric-puzzle training challenge.
+     *
+     * <p>Thin proxy to the biometric-processor {@code POST /liveness/verify-challenge}
+     * route (pure structural validation — action enum, timestamp monotonicity,
+     * duration + confidence floors; no ML). Backs the {@code BiometricPuzzlesPage}
+     * training surface so a completed challenge is not resolved purely
+     * client-side.</p>
+     *
+     * <p><b>Graceful degradation:</b> this is a lightweight TRAINING surface, not
+     * a security gate (the real liveness gate is enrollment/verify). If the bio
+     * service is unreachable or returns 5xx, the implementation returns a
+     * soft-pass verdict ({@code verified=true},
+     * {@code reason_code=VALIDATION_UNAVAILABLE}) so the training UI never
+     * hard-blocks on infrastructure. A genuine bio rejection
+     * ({@code verified=false} with a reason) is forwarded faithfully.</p>
+     *
+     * @param request the challenge completion record (snake_case keys matching
+     *                 the bio {@code VerifyChallengeRequest}: action,
+     *                 start_timestamp_ms, end_timestamp_ms, confidence,
+     *                 tenant_id, user_id, metrics)
+     * @return Map containing the verdict (verified, action, duration_seconds,
+     *         reason_code, message)
+     */
+    Map<String, Object> verifyPuzzleChallenge(Map<String, Object> request);
 }

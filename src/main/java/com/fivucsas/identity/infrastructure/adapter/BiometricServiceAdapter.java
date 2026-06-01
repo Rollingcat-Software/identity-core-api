@@ -422,6 +422,54 @@ public class BiometricServiceAdapter implements BiometricServicePort {
         }
     }
 
+    @Override
+    public Map<String, Object> verifyPuzzleChallenge(Map<String, Object> request) {
+        Object action = request != null ? request.get("action") : null;
+        log.debug("Calling biometric service to verify puzzle challenge: action={}", action);
+        try {
+            return restClient.post()
+                    .uri("/liveness/verify-challenge")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(request)
+                    .retrieve()
+                    .body(MAP_TYPE);
+        } catch (HttpClientErrorException.NotFound e) {
+            // Bio route missing — an older biometric-processor image without the
+            // /liveness/verify-challenge endpoint. Treat as unavailable (NOT a
+            // malformed request) and soft-pass so the training UI keeps working
+            // during a rollout where api ships ahead of bio.
+            log.warn("Bio /liveness/verify-challenge returned 404 (route not deployed) — soft-passing");
+            return puzzleVerdict(true, action, "VALIDATION_UNAVAILABLE", "");
+        } catch (HttpClientErrorException e) {
+            // Bio rejected the payload as malformed (other 4xx, e.g. pydantic 422).
+            // On a TRAINING surface surface this as a clean verified=false verdict
+            // rather than a 5xx so the web shows a reason instead of an error toast.
+            log.warn("Puzzle challenge rejected by biometric service ({}): {}",
+                    e.getStatusCode(), e.getMessage());
+            return puzzleVerdict(false, action, "INVALID_REQUEST",
+                    "Challenge submission was rejected as malformed.");
+        } catch (ResourceAccessException | RestClientException e) {
+            // Bio unreachable or 5xx. This is a lightweight training surface, NOT a
+            // security gate (the real liveness gate is enrollment/verify), so we
+            // soft-pass on infrastructure failure rather than block the user.
+            log.error("Biometric service unavailable for puzzle challenge — soft-passing: {}",
+                    e.getMessage());
+            return puzzleVerdict(true, action, "VALIDATION_UNAVAILABLE", "");
+        }
+    }
+
+    /** Builds a {@code VerifyChallengeResponse}-shaped verdict map for the puzzle proxy. */
+    private Map<String, Object> puzzleVerdict(boolean verified, Object action,
+                                              String reasonCode, String message) {
+        Map<String, Object> verdict = new java.util.HashMap<>();
+        verdict.put("verified", verified);
+        verdict.put("action", action);
+        verdict.put("duration_seconds", 0.0);
+        verdict.put("reason_code", reasonCode);
+        verdict.put("message", message);
+        return verdict;
+    }
+
     private Map<String, Object> deleteResource(String path) {
         return restClient.delete()
                 .uri(path)
