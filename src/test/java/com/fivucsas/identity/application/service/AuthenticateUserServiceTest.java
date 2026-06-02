@@ -334,6 +334,11 @@ class AuthenticateUserServiceTest {
 
             when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(userOnVerge));
             when(passwordEncoder.matches("Password123!", VALID_BCRYPT_HASH)).thenReturn(false);
+            // Strike-counting now lives in LoginAccountStateGuard.recordFailedAttempt
+            // (REQUIRES_NEW so it survives the caller's rollback). It returns true when
+            // THIS failure triggered the lock — that is what makes execute() raise
+            // AccountLockedException instead of InvalidCredentialsException.
+            when(loginAccountStateGuard.recordFailedAttempt(any(), any(), any())).thenReturn(true);
 
             // When/Then — must surface AccountLockedException, NOT InvalidCredentialsException
             assertThatThrownBy(() -> authenticateUserService.execute(validCommand))
@@ -345,7 +350,8 @@ class AuthenticateUserServiceTest {
                         .isBetween(890L, 900L);
                 });
 
-            verify(userRepository).save(any(User.class));
+            // The guard (not execute()) persists the strike now.
+            verify(loginAccountStateGuard).recordFailedAttempt(any(), any(), any());
         }
 
         @Test
@@ -807,9 +813,13 @@ class AuthenticateUserServiceTest {
         }
 
         @Test
-        @DisplayName("Should authenticate user with different status")
-        void shouldAuthenticateUserWithDifferentStatus() {
-            // Given
+        @DisplayName("Should REJECT login for a non-ACTIVE user (account-status guard)")
+        void shouldRejectNonActiveUser() {
+            // Given — an INACTIVE user. The account-status guard now refuses login for
+            // any non-ACTIVE status BEFORE the password is even checked, so this must
+            // surface AccountNotActiveException rather than a successful login. (The old
+            // test asserted a non-ACTIVE user could still authenticate, which is exactly
+            // the hole the status guard closed.)
             User inactiveUser = User.builder()
                 .id(UUID.randomUUID())
                 .email("test@example.com")
@@ -822,16 +832,10 @@ class AuthenticateUserServiceTest {
                 .build();
 
             when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(inactiveUser));
-            when(passwordEncoder.matches("Password123!", VALID_BCRYPT_HASH)).thenReturn(true);
-            // Single-factor login path issues JWT with amr=["pwd"] via the two-arg variant.
-            when(tokenGenerator.generateAccessToken("test@example.com", List.of("pwd"))).thenReturn("access-token");
-            when(refreshTokenService.createRefreshToken(any(), any(), any())).thenReturn(refreshToken);
 
-            // When
-            AuthenticationResponse response = authenticateUserService.execute(validCommand);
-
-            // Then
-            assertThat(response.getUser().getStatus()).isEqualTo("INACTIVE");
+            // When/Then
+            assertThatThrownBy(() -> authenticateUserService.execute(validCommand))
+                .isInstanceOf(com.fivucsas.identity.domain.exception.AccountNotActiveException.class);
         }
     }
 
