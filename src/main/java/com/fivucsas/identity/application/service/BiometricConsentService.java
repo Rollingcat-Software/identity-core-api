@@ -7,7 +7,9 @@ import com.fivucsas.identity.application.port.output.AuditLogPort;
 import com.fivucsas.identity.application.port.output.BiometricConsentResolver;
 import com.fivucsas.identity.domain.exception.UnauthorizedException;
 import com.fivucsas.identity.entity.IdentityTenantBiometricConsent;
+import com.fivucsas.identity.entity.Tenant;
 import com.fivucsas.identity.repository.IdentityTenantBiometricConsentRepository;
+import com.fivucsas.identity.repository.JpaTenantRepository;
 import com.fivucsas.identity.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -15,8 +17,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 /**
  * Manages per-tenant biometric consent (Model A, Phase 3) AND resolves the
@@ -38,6 +43,7 @@ public class BiometricConsentService
 
     private final IdentityTenantBiometricConsentRepository consentRepository;
     private final UserRepository userRepository;
+    private final JpaTenantRepository tenantRepository;
     private final AuditLogPort auditLogPort;
 
     // ── ManageBiometricConsentUseCase ──────────────────────────────────────
@@ -45,9 +51,32 @@ public class BiometricConsentService
     @Override
     @Transactional(readOnly = true)
     public List<BiometricConsentResponse> listConsents(UUID identityId) {
-        return consentRepository.findByIdentityId(identityId).stream()
-                .map(BiometricConsentResponse::from)
+        List<IdentityTenantBiometricConsent> consents = consentRepository.findByIdentityId(identityId);
+
+        // Batch-resolve tenant display names (avoids N+1). Soft-deleted/missing
+        // tenants are filtered out by Tenant's @SQLRestriction, so they simply
+        // don't appear in the map and the name stays null (UI falls back to the id).
+        Set<UUID> tenantIds = consents.stream()
+                .map(IdentityTenantBiometricConsent::getTenantId)
+                .collect(Collectors.toSet());
+        Map<UUID, String> tenantNames = tenantRepository.findAllById(tenantIds).stream()
+                .collect(Collectors.toMap(Tenant::getId, Tenant::getName, (a, b) -> a));
+
+        return consents.stream()
+                .map(c -> BiometricConsentResponse.from(c, tenantNames.get(c.getTenantId())))
                 .toList();
+    }
+
+    /**
+     * Resolves a tenant's display name, null-safe: a missing or soft-deleted
+     * tenant (filtered by {@code Tenant}'s {@code @SQLRestriction}) yields null so
+     * the UI can fall back to the raw id.
+     */
+    private String resolveTenantName(UUID tenantId) {
+        if (tenantId == null) {
+            return null;
+        }
+        return tenantRepository.findById(tenantId).map(Tenant::getName).orElse(null);
     }
 
     @Override
@@ -89,7 +118,7 @@ public class BiometricConsentService
 
         log.info("Biometric consent {} for identity {} tenant {} method {}",
                 grant ? "granted" : "revoked", identityId, tenantId, method == null ? "ALL" : method);
-        return BiometricConsentResponse.from(saved);
+        return BiometricConsentResponse.from(saved, resolveTenantName(tenantId));
     }
 
     // ── BiometricConsentResolver ───────────────────────────────────────────
