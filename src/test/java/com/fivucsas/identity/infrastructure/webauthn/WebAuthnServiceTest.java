@@ -238,6 +238,47 @@ class WebAuthnServiceTest {
     }
 
     @Nested
+    @DisplayName("User Verification flag (P1-4) — UV required on assertions")
+    class UserVerificationFlag {
+
+        /** 37-byte authData with the given flags byte at offset 32. */
+        private String authDataWithFlags(int flags) {
+            byte[] data = new byte[37];
+            data[32] = (byte) (flags & 0xFF);
+            return b64UrlNoPad(data);
+        }
+
+        @Test
+        @DisplayName("UV bit (0x04) set -> flag detected")
+        void uvSetDetected() {
+            // UP|UV = 0x05
+            assertThat(webAuthnService.isUserVerificationFlagSet(authDataWithFlags(0x05))).isTrue();
+            // UV alone = 0x04
+            assertThat(webAuthnService.isUserVerificationFlagSet(authDataWithFlags(0x04))).isTrue();
+        }
+
+        @Test
+        @DisplayName("UP-only (0x01) -> UV flag NOT detected (rejected as not UV-strong)")
+        void upOnlyHasNoUv() {
+            assertThat(webAuthnService.isUserVerificationFlagSet(authDataWithFlags(0x01))).isFalse();
+        }
+
+        @Test
+        @DisplayName("no flags set -> UV flag NOT detected")
+        void noFlagsNoUv() {
+            assertThat(webAuthnService.isUserVerificationFlagSet(authDataWithFlags(0x00))).isFalse();
+        }
+
+        @Test
+        @DisplayName("null / short authData -> UV flag NOT detected (defensive)")
+        void nullOrShortNoUv() {
+            assertThat(webAuthnService.isUserVerificationFlagSet(null)).isFalse();
+            assertThat(webAuthnService.isUserVerificationFlagSet("")).isFalse();
+            assertThat(webAuthnService.isUserVerificationFlagSet(b64UrlNoPad(new byte[10]))).isFalse();
+        }
+    }
+
+    @Nested
     @DisplayName("Empty allowlist disables WebAuthn (defensive default)")
     class EmptyAllowlist {
 

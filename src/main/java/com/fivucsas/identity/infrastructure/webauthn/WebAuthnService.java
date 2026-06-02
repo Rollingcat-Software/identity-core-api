@@ -315,11 +315,28 @@ public class WebAuthnService {
         }
     }
 
+    /** authenticatorData flags byte (offset 32): User Present. */
+    static final int FLAG_USER_PRESENT = 0x01;
+    /** authenticatorData flags byte (offset 32): User Verified. */
+    static final int FLAG_USER_VERIFIED = 0x04;
+
     /**
      * Validates authenticatorData per WebAuthn spec:
      * - Must be at least 37 bytes (32 rpIdHash + 1 flags + 4 signCount)
      * - RP ID hash must match expected RP ID
-     * - User Present (UP) flag must be set
+     * - User Present (UP, 0x01) flag must be set
+     * - User Verified (UV, 0x04) flag must be set (P1-4, 2026-06-02)
+     *
+     * <p>P1-4: previously only UP was checked, so a UP-only assertion (mere
+     * presence — a touch with NO biometric/PIN user-verification) was accepted
+     * as if it were UV-strong. For a login factor we require UV. Registration
+     * for the discoverable-passkey path already sets
+     * {@code userVerification="required"} (DeviceController passkey
+     * register-options), so passkeys created there carry UV. NOTE: the legacy
+     * platform/fingerprint register-options + the non-passkey authenticate-
+     * options request {@code userVerification="preferred"} — an authenticator
+     * that returns a UP-only assertion under "preferred" will now FAIL here.
+     * See the PR description for the rollout/rollback note.
      */
     private boolean validateAuthenticatorData(String authenticatorDataB64) {
         if (authenticatorDataB64 == null || authenticatorDataB64.isEmpty()) {
@@ -349,15 +366,44 @@ public class WebAuthnService {
 
             // Verify flags (byte 32)
             byte flags = authData[32];
-            boolean userPresent = (flags & 0x01) != 0;
+            boolean userPresent = (flags & FLAG_USER_PRESENT) != 0;
             if (!userPresent) {
                 log.warn("WebAuthn User Present flag not set");
+                return false;
+            }
+
+            // P1-4: require User Verification on assertions. A UP-only assertion
+            // (presence without biometric/PIN) must not satisfy a login factor.
+            boolean userVerified = (flags & FLAG_USER_VERIFIED) != 0;
+            if (!userVerified) {
+                log.warn("WebAuthn User Verified flag not set (UP-only assertion rejected)");
                 return false;
             }
 
             return true;
         } catch (Exception e) {
             log.warn("WebAuthn authenticatorData validation failed: {}", e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Visible-for-test: is the User Verified (UV, 0x04) flag set in the flags
+     * byte (offset 32) of the given base64 authenticatorData? Returns false
+     * when the data is null/short/undecodable. Mirrors the byte-level parsing
+     * style of {@link #extractSignCount(String)}.
+     */
+    boolean isUserVerificationFlagSet(String authenticatorDataB64) {
+        if (authenticatorDataB64 == null || authenticatorDataB64.isEmpty()) {
+            return false;
+        }
+        try {
+            byte[] authData = decodeBase64(authenticatorDataB64);
+            if (authData.length < 33) {
+                return false;
+            }
+            return (authData[32] & FLAG_USER_VERIFIED) != 0;
+        } catch (Exception e) {
             return false;
         }
     }
