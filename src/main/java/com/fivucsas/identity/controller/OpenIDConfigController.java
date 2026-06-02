@@ -68,9 +68,11 @@ public class OpenIDConfigController {
         // identity-derived per-RP pseudonym, OIDC Core §8).
         config.put("subject_types_supported",
                 List.of(pairwiseSubjectEnabled ? "pairwise" : "public"));
-        // BE-H1: dual-alg coexistence. HS512 (legacy symmetric) + RS256 (OIDC best practice).
-        // The default signing algorithm is governed by fivucsas.jwt.default-algo.
-        config.put("id_token_signing_alg_values_supported", List.of("RS256", "HS512"));
+        // id_tokens are RS256-signed (fivucsas.jwt.default-algo=RS256) and verified by
+        // relying parties via JWKS — which can only carry asymmetric keys. A symmetric
+        // alg (HS512) can never appear in JWKS, so an RP cannot verify an HS512 id_token;
+        // advertising it was misleading (doubly so now that allow-hs512=false). RS256 only.
+        config.put("id_token_signing_alg_values_supported", List.of("RS256"));
         config.put("scopes_supported", List.of("openid", "profile", "email", "phone"));
         config.put("token_endpoint_auth_methods_supported", List.of("client_secret_post", "none"));
         config.put("claims_supported", List.of(
@@ -81,8 +83,10 @@ public class OpenIDConfigController {
                 "updated_at"
         ));
 
-        // PKCE support (RFC 7636)
-        config.put("code_challenge_methods_supported", List.of("S256", "plain"));
+        // PKCE support (RFC 7636). Only S256 is accepted — validateAuthorizeRequest
+        // rejects code_challenge_method=plain for public clients, so advertising
+        // "plain" was a metadata/enforcement mismatch. Advertise S256 only.
+        config.put("code_challenge_methods_supported", List.of("S256"));
 
         // Service documentation
         config.put("service_documentation", "https://app.fivucsas.com/developer-portal");

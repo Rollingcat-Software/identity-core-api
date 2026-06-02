@@ -33,15 +33,27 @@ class OpenIDConfigControllerTest {
     }
 
     @Test
-    @DisplayName("/.well-known/openid-configuration advertises RS256 AND HS512")
+    @DisplayName("discovery advertises RS256 ONLY for id_token signing (no symmetric HS512 — never in JWKS)")
     @SuppressWarnings("unchecked")
-    void discoveryAdvertisesBothAlgs() {
+    void discoveryAdvertisesRs256Only() {
         ResponseEntity<Map<String, Object>> resp = controller.openidConfiguration();
         assertThat(resp.getBody()).isNotNull();
         Object algs = resp.getBody().get("id_token_signing_alg_values_supported");
         assertThat(algs).isInstanceOf(List.class);
         List<String> algList = (List<String>) algs;
-        assertThat(algList).contains("RS256", "HS512");
+        assertThat(algList).containsExactly("RS256");
+        assertThat(algList).doesNotContain("HS512");
+    }
+
+    @Test
+    @DisplayName("discovery advertises S256 ONLY for PKCE (server rejects plain — no metadata/enforcement mismatch)")
+    @SuppressWarnings("unchecked")
+    void discoveryAdvertisesS256PkceOnly() {
+        ResponseEntity<Map<String, Object>> resp = controller.openidConfiguration();
+        assertThat(resp.getBody()).isNotNull();
+        List<String> methods = (List<String>) resp.getBody().get("code_challenge_methods_supported");
+        assertThat(methods).containsExactly("S256");
+        assertThat(methods).doesNotContain("plain");
     }
 
     @Test
