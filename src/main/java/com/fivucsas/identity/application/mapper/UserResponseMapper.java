@@ -20,6 +20,70 @@ public final class UserResponseMapper {
     }
 
     /**
+     * Stable, descending privilege ordering of known role names. Lower index =
+     * higher privilege. Used to pick a DETERMINISTIC primary role from the
+     * non-deterministic {@code HashSet} returned by {@code User.getRoleNames()}.
+     */
+    private static final java.util.List<String> ROLE_PRIVILEGE_ORDER = java.util.List.of(
+            "ROOT",
+            "SUPER_ADMIN",      // legacy alias of ROOT (pre-V69 rename) — kept for safety
+            "TENANT_ADMIN",
+            "TENANT_MANAGER",
+            "TENANT_EDITOR",
+            "TENANT_MEMBER",
+            "TENANT_VIEWER",
+            "VIEWER",
+            "USER",
+            "GUEST");
+
+    /**
+     * Picks the DETERMINISTIC primary role for a user.
+     *
+     * <p>Previously this read {@code roleNames.iterator().next()} over a
+     * non-deterministic {@code HashSet}, so a multi-role user (e.g. a ROOT who
+     * also holds TENANT_ADMIN) could render as either role arbitrarily and the
+     * displayed value could flicker between requests. This caused tenant-switcher
+     * confusion when a ROOT appeared as "Tenant Admin".
+     *
+     * <p>Selection is now stable and tier-aware:
+     * <ol>
+     *   <li>If the user's platform tier is ROOT, prefer the ROOT role when held.</li>
+     *   <li>Otherwise pick the highest-privilege known role per
+     *       {@link #ROLE_PRIVILEGE_ORDER}.</li>
+     *   <li>Any unknown roles (not in the ordering) are ranked last and broken by
+     *       alphabetical order, so the result never flickers.</li>
+     * </ol>
+     *
+     * @param roleNames the user's role names (may be empty)
+     * @param userTypeName {@code user.getUserType().name()} or {@code null}
+     * @return the deterministic primary role, defaulting to {@code "USER"} when empty
+     */
+    static String resolvePrimaryRole(java.util.Set<String> roleNames, String userTypeName) {
+        if (roleNames == null || roleNames.isEmpty()) {
+            return "USER";
+        }
+        // Tier-aware: a ROOT must always render as ROOT when it holds that role,
+        // regardless of any other (lower) roles it may also carry.
+        if ("ROOT".equals(userTypeName) && roleNames.contains("ROOT")) {
+            return "ROOT";
+        }
+        return roleNames.stream()
+                .min(java.util.Comparator
+                        .comparingInt(UserResponseMapper::rolePrivilegeRank)
+                        .thenComparing(java.util.Comparator.naturalOrder()))
+                .orElse("USER");
+    }
+
+    /**
+     * Rank of a role within {@link #ROLE_PRIVILEGE_ORDER}; unknown roles rank
+     * after all known ones (then broken alphabetically by the caller).
+     */
+    private static int rolePrivilegeRank(String roleName) {
+        int idx = ROLE_PRIVILEGE_ORDER.indexOf(roleName);
+        return idx >= 0 ? idx : ROLE_PRIVILEGE_ORDER.size();
+    }
+
+    /**
      * Maps a JPA User entity to UserResponse DTO.
      * Used by services that still work with JPA entities directly.
      */
@@ -56,7 +120,7 @@ public final class UserResponseMapper {
                 .status(user.getStatus().name())
                 .emailVerified(user.isEmailVerified())
                 .phoneVerified(user.isPhoneVerified())
-                .role(roleNames.isEmpty() ? "USER" : roleNames.iterator().next())
+                .role(resolvePrimaryRole(roleNames, user.getUserType() != null ? user.getUserType().name() : null))
                 .roles(roleNames.isEmpty() ? java.util.Set.of("USER") : roleNames)
                 .userType(user.getUserType() != null ? user.getUserType().name() : null)
                 .tenantId(tenantId)
@@ -100,7 +164,7 @@ public final class UserResponseMapper {
                 .status(user.getStatus().name())
                 .emailVerified(user.isEmailVerified())
                 .phoneVerified(user.isPhoneVerified())
-                .role(roleNames.isEmpty() ? "USER" : roleNames.iterator().next())
+                .role(resolvePrimaryRole(roleNames, user.getUserType() != null ? user.getUserType().name() : null))
                 .roles(roleNames.isEmpty() ? java.util.Set.of("USER") : roleNames)
                 .userType(user.getUserType() != null ? user.getUserType().name() : null)
                 .tenantId(user.getTenantId() != null ? user.getTenantId().toString() : null)

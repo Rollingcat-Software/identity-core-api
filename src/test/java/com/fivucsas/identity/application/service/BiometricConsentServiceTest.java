@@ -6,7 +6,9 @@ import com.fivucsas.identity.application.port.output.AuditLogPort;
 import com.fivucsas.identity.application.port.output.BiometricConsentResolver.CanonicalTarget;
 import com.fivucsas.identity.domain.exception.UnauthorizedException;
 import com.fivucsas.identity.entity.IdentityTenantBiometricConsent;
+import com.fivucsas.identity.entity.Tenant;
 import com.fivucsas.identity.repository.IdentityTenantBiometricConsentRepository;
+import com.fivucsas.identity.repository.JpaTenantRepository;
 import com.fivucsas.identity.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -25,6 +27,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyIterable;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
@@ -40,6 +43,7 @@ class BiometricConsentServiceTest {
 
     @Mock private IdentityTenantBiometricConsentRepository consentRepository;
     @Mock private UserRepository userRepository;
+    @Mock private JpaTenantRepository tenantRepository;
     @Mock private AuditLogPort auditLogPort;
 
     @InjectMocks private BiometricConsentService service;
@@ -67,12 +71,15 @@ class BiometricConsentServiceTest {
                     .thenReturn(Optional.empty());
             when(consentRepository.save(any(IdentityTenantBiometricConsent.class)))
                     .thenAnswer(inv -> inv.getArgument(0));
+            when(tenantRepository.findById(tenantId))
+                    .thenReturn(Optional.of(Tenant.builder().id(tenantId).name("Marmara University").build()));
 
             BiometricConsentResponse resp = service.setConsent(identityId, actorUserId,
                     new BiometricConsentRequest(tenantId, "FACE", true));
 
             assertThat(resp.granted()).isTrue();
             assertThat(resp.tenantId()).isEqualTo(tenantId);
+            assertThat(resp.tenantName()).isEqualTo("Marmara University");
             assertThat(resp.method()).isEqualTo("FACE");
             assertThat(resp.grantedAt()).isNotNull();
             assertThat(resp.revokedAt()).isNull();
@@ -128,6 +135,40 @@ class BiometricConsentServiceTest {
 
             verify(consentRepository, never()).save(any());
             verify(auditLogPort, never()).logSecurityEvent(any(), any(), any(), any());
+        }
+    }
+
+    @Nested
+    @DisplayName("listConsents (tenant-name resolution)")
+    class ListConsents {
+
+        @Test
+        @DisplayName("resolves the tenant display name for each consent row, null-safe for missing/soft-deleted tenants")
+        void resolvesTenantNames() {
+            UUID tenantA = UUID.randomUUID();
+            UUID tenantB = UUID.randomUUID(); // soft-deleted / missing → no Tenant row
+
+            IdentityTenantBiometricConsent rowA = IdentityTenantBiometricConsent.builder()
+                    .identityId(identityId).tenantId(tenantA).method("FACE").build();
+            rowA.apply(true);
+            IdentityTenantBiometricConsent rowB = IdentityTenantBiometricConsent.builder()
+                    .identityId(identityId).tenantId(tenantB).method(null).build();
+            rowB.apply(true);
+
+            when(consentRepository.findByIdentityId(identityId)).thenReturn(List.of(rowA, rowB));
+            // Only tenantA still exists (Tenant @SQLRestriction filters out tenantB).
+            when(tenantRepository.findAllById(anyIterable()))
+                    .thenReturn(List.of(Tenant.builder().id(tenantA).name("Marmara University").build()));
+
+            List<BiometricConsentResponse> result = service.listConsents(identityId);
+
+            assertThat(result).hasSize(2);
+            BiometricConsentResponse a = result.stream()
+                    .filter(r -> r.tenantId().equals(tenantA)).findFirst().orElseThrow();
+            BiometricConsentResponse b = result.stream()
+                    .filter(r -> r.tenantId().equals(tenantB)).findFirst().orElseThrow();
+            assertThat(a.tenantName()).isEqualTo("Marmara University");
+            assertThat(b.tenantName()).isNull(); // UI falls back to the raw UUID
         }
     }
 
