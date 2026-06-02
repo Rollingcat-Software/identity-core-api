@@ -61,6 +61,15 @@ public class OAuth2Controller {
     private final AuditLogPort auditLogPort;
     private final RateLimitService rateLimitService;
 
+    /**
+     * The `system` sentinel tenant (V59). Clients bound to it are FIRST-PARTY
+     * platform apps (web dashboard, native mobile) and authenticate users from
+     * EVERY tenant — the user↔client tenant guard is skipped for them. See
+     * {@code validateAuthorizeRequest}.
+     */
+    private static final UUID PLATFORM_TENANT_ID =
+            UUID.fromString("00000000-0000-0000-0000-000000000000");
+
     @Value("${app.hosted-login-url:https://verify.fivucsas.com/login}")
     private String hostedLoginUrl;
 
@@ -356,8 +365,19 @@ public class OAuth2Controller {
         // Tenant isolation: a code must never be minted for a client that belongs
         // to a different tenant than the authenticated user. RFC 6749 §5.2 maps
         // this to 400 invalid_request (not 403) to avoid leaking policy info.
-        if (user.getTenant() == null || client.getTenant() == null
-                || !user.getTenant().getId().equals(client.getTenant().getId())) {
+        //
+        // EXCEPTION — platform first-party clients. A client bound to the `system`
+        // sentinel tenant (0000…0000) is a FIRST-PARTY platform app (the web
+        // dashboard, the native mobile app). Like the cross-tenant dashboard login,
+        // it serves EVERY tenant's users, so the user↔client tenant guard does not
+        // apply to it. The minted token still carries the USER's real tenant_id, so
+        // downstream isolation is unaffected. A CUSTOMER-tenant client (a tenant
+        // integrating their own app) stays strictly isolated to its own tenant.
+        boolean platformClient = client.getTenant() != null
+                && PLATFORM_TENANT_ID.equals(client.getTenant().getId());
+        if (!platformClient
+                && (user.getTenant() == null || client.getTenant() == null
+                    || !user.getTenant().getId().equals(client.getTenant().getId()))) {
             log.warn("OAuth2 authorize — tenant mismatch: userTenant={}, clientTenant={}",
                     user.getTenant() == null ? null : user.getTenant().getId(),
                     client.getTenant() == null ? null : client.getTenant().getId());
