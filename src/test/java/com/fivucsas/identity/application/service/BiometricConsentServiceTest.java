@@ -254,5 +254,38 @@ class BiometricConsentServiceTest {
 
             assertThat(service.resolveConsentedCanonicalTarget(requestingUser, "FACE")).isPresent();
         }
+
+        @Test
+        @DisplayName("P1-7: a method-specific REVOKE overrides a broad all-methods GRANT (DENY wins)")
+        void methodRevokeBeatsAllMethodsGrant() {
+            wireIdentityAndCanonical();
+            IdentityTenantBiometricConsent allMethodsGrant = IdentityTenantBiometricConsent.builder()
+                    .identityId(identityId).tenantId(requestingTenant).method(null).build();
+            allMethodsGrant.apply(true);                 // "allow everything"
+            IdentityTenantBiometricConsent faceRevoke = IdentityTenantBiometricConsent.builder()
+                    .identityId(identityId).tenantId(requestingTenant).method("FACE").build();
+            faceRevoke.apply(false);                     // "...but NOT face"
+            when(consentRepository.findApplicable(identityId, requestingTenant, "FACE"))
+                    .thenReturn(List.of(allMethodsGrant, faceRevoke));
+
+            // The more-specific FACE revoke must win → no signal (default-DENY).
+            assertThat(service.resolveConsentedCanonicalTarget(requestingUser, "FACE")).isEmpty();
+        }
+
+        @Test
+        @DisplayName("P1-7: a method-specific GRANT overrides a broad all-methods REVOKE (ALLOW wins)")
+        void methodGrantBeatsAllMethodsRevoke() {
+            wireIdentityAndCanonical();
+            IdentityTenantBiometricConsent allMethodsRevoke = IdentityTenantBiometricConsent.builder()
+                    .identityId(identityId).tenantId(requestingTenant).method(null).build();
+            allMethodsRevoke.apply(false);               // "deny everything"
+            IdentityTenantBiometricConsent faceGrant = IdentityTenantBiometricConsent.builder()
+                    .identityId(identityId).tenantId(requestingTenant).method("FACE").build();
+            faceGrant.apply(true);                       // "...except allow face"
+            when(consentRepository.findApplicable(identityId, requestingTenant, "FACE"))
+                    .thenReturn(List.of(allMethodsRevoke, faceGrant));
+
+            assertThat(service.resolveConsentedCanonicalTarget(requestingUser, "FACE")).isPresent();
+        }
     }
 }

@@ -3,6 +3,7 @@ package com.fivucsas.identity.repository;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.entity.UserStatus;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -27,11 +28,61 @@ public interface UserRepository extends JpaRepository<User, UUID> {
 
     // JPA-specific query methods
 
-    @Query("SELECT u FROM User u WHERE u.email = :email AND u.deletedAt IS NULL")
-    Optional<User> findByEmail(@Param("email") String email);
+    /**
+     * Resolves a user by email.
+     *
+     * <p><b>P1-6 (data-correctness, 2026-06-02):</b> this used to be a plain
+     * JPQL query returning {@code Optional<User>}. The global active-email
+     * uniqueness ({@code idx_users_email_unique}, V7) keeps the normal case
+     * single-row, but account-linking (V66/V67/V70 — "same email = same
+     * person") deliberately allows the SAME email to hold memberships in
+     * several tenants (see V67's "NOT a global unique" rationale). With the
+     * Hibernate {@code tenantFilter} disabled (the self-lookup path —
+     * {@link com.fivucsas.identity.infrastructure.multitenancy.TenantFilterBypass}),
+     * such an identity matches more than one live row, and the {@code Optional}
+     * single-result contract then throws {@code NonUniqueResultException} →
+     * opaque HTTP 500 on the auth/caller-resolution path.
+     *
+     * <p>Fix: delegate to a deterministically-ORDERED, single-row query so the
+     * method NEVER throws on multiplicity. The normal single-row login case is
+     * unchanged (one match → that match). When duplicates exist we return the
+     * OLDEST membership (the person's original row; {@code createdAt ASC}, then
+     * {@code id ASC} as a stable tie-break) instead of failing. This keeps the
+     * {@code @SQLRestriction("deleted_at IS NULL")} soft-delete guard and the
+     * {@code tenantFilter} intact (still a JPQL entity query — NOT a native
+     * query — so a caller running under an active tenant filter is still scoped
+     * to its tenant, and a tenant-scoped lookup that matches one row behaves
+     * exactly as before).</p>
+     */
+    default Optional<User> findByEmail(String email) {
+        List<User> matches = findByEmailOrdered(email, PageRequest.of(0, 1));
+        return matches.isEmpty() ? Optional.empty() : Optional.of(matches.get(0));
+    }
+
+    /**
+     * Deterministically-ordered email lookup backing {@link #findByEmail(String)}.
+     * Caller passes {@code PageRequest.of(0, 1)} to fetch at most the oldest match.
+     * Not intended for direct use elsewhere — use {@link #findByEmail(String)}.
+     */
+    @Query("SELECT u FROM User u WHERE u.email = :email AND u.deletedAt IS NULL "
+            + "ORDER BY u.createdAt ASC, u.id ASC")
+    List<User> findByEmailOrdered(@Param("email") String email, Pageable pageable);
 
     @Query("SELECT COUNT(u) > 0 FROM User u WHERE u.email = :email AND u.deletedAt IS NULL")
     boolean existsByEmail(@Param("email") String email);
+
+    /**
+     * Tenant-scoped existing-email check (P1-9). Unlike {@link #existsByEmail(String)},
+     * which is GLOBAL, this only considers live ({@code deleted_at IS NULL}) rows in
+     * the given tenant. Used by the guest-invite accept path so a person who already
+     * holds an account in a DIFFERENT tenant under the same email is not blocked from
+     * accepting an invite into THIS tenant (account-linking allows the same email
+     * across tenants — V66/V67/V70). The {@code (tenant_id, email)} live-uniqueness
+     * (V78 {@code unique_tenant_email_active}) still backs this at the DB level.
+     */
+    @Query("SELECT COUNT(u) > 0 FROM User u "
+            + "WHERE u.email = :email AND u.tenant.id = :tenantId AND u.deletedAt IS NULL")
+    boolean existsByEmailAndTenantId(@Param("email") String email, @Param("tenantId") UUID tenantId);
 
     /**
      * Lightweight lookup of a user's tenant ID by user ID.

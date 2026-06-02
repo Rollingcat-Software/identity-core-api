@@ -35,6 +35,11 @@ public class UserRepositoryAdapter implements com.fivucsas.identity.domain.repos
     }
 
     @Override
+    public boolean existsByEmailAndTenantId(String email, UUID tenantId) {
+        return jpaRepository.existsByEmailAndTenantId(email, tenantId);
+    }
+
+    @Override
     public List<User> findByStatus(UserStatus status) {
         return jpaRepository.findByStatus(status);
     }
