@@ -58,6 +58,24 @@ import java.util.Set;
 @Slf4j
 public class VerifyMfaStepService {
 
+    /**
+     * Sliding TTL granted on each SUCCESSFUL step. A multi-step flow (esp. one
+     * with a FACE step) can outrun the base TTL the session was created with,
+     * producing "MFA session expired" 401s mid-flow. After a step verifies we
+     * push {@code expiresAt} forward by this much — but never past
+     * {@link #MFA_SESSION_MAX_TTL} from creation, so a stalled/abandoned session
+     * still expires on a bounded clock (no indefinite extension).
+     */
+    private static final java.time.Duration MFA_SESSION_STEP_EXTENSION =
+            java.time.Duration.ofMinutes(10);
+
+    /**
+     * Absolute ceiling for a single MFA session, measured from {@code createdAt}.
+     * The sliding extension can never push {@code expiresAt} beyond this.
+     */
+    private static final java.time.Duration MFA_SESSION_MAX_TTL =
+            java.time.Duration.ofMinutes(30);
+
     /** RFC 8176 Authentication Methods References mapping. */
     private static final Map<AuthMethodType, String> AMR_VALUES;
     static {
@@ -363,6 +381,13 @@ public class VerifyMfaStepService {
         // Step verified — advance session.
         // Reset the per-account strike counter on a successful factor (path-independent).
         loginAccountStateGuard.recordSuccess(user.getId());
+        // Sliding TTL: a verified step earns more time so a long multi-factor
+        // flow (notably a FACE step) doesn't expire the session out from under
+        // the user. Capped at MFA_SESSION_MAX_TTL from creation so an abandoned
+        // session still dies on a bounded clock. Persisted with the session by
+        // the save() that completeMfa / advanceToNextStep already perform — no
+        // extra write. Reversible: additive, no schema change.
+        extendSessionTtl(session);
         session.addCompletedMethod(reuseKey);
         session.advanceStep();
 
@@ -404,6 +429,27 @@ public class VerifyMfaStepService {
             t = t.getCause();
         }
         return false;
+    }
+
+    /**
+     * Slides {@code session.expiresAt} forward by {@link #MFA_SESSION_STEP_EXTENSION}
+     * on a successful step, capped at {@link #MFA_SESSION_MAX_TTL} from the
+     * session's {@code createdAt}. Never SHRINKS an already-later expiry (e.g. a
+     * session created with a longer base TTL), and never extends past the
+     * absolute ceiling. Visible-for-test.
+     */
+    static void extendSessionTtl(MfaSession session) {
+        java.time.Instant now = java.time.Instant.now();
+        java.time.Instant proposed = now.plus(MFA_SESSION_STEP_EXTENSION);
+        java.time.Instant ceiling = session.getCreatedAt() != null
+                ? session.getCreatedAt().plus(MFA_SESSION_MAX_TTL)
+                : proposed; // defensive: no createdAt → just grant the slide
+        java.time.Instant capped = proposed.isAfter(ceiling) ? ceiling : proposed;
+        // Only ever move expiry LATER — a step must not be able to shorten a
+        // session that was already granted a longer window.
+        if (session.getExpiresAt() == null || capped.isAfter(session.getExpiresAt())) {
+            session.setExpiresAt(capped);
+        }
     }
 
     private VerifyMfaStepResponse completeMfa(MfaSession session, User user, VerifyMfaStepRequest req) {

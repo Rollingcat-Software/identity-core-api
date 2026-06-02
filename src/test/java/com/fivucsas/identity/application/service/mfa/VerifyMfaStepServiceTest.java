@@ -725,4 +725,82 @@ class VerifyMfaStepServiceTest {
         lenient().when(user.isActive()).thenReturn(true);
         return user;
     }
+
+    // ─────────────────────────────────────────────────────────────────
+    // Sliding MFA-session TTL (2026-06-02): a successful step pushes
+    // expiresAt forward (now + STEP_EXTENSION) but never past the absolute
+    // ceiling (createdAt + MAX_TTL). Closes the FACE-step "MFA session
+    // expired" 401 (the 10-min clock expired mid-flow).
+    // ─────────────────────────────────────────────────────────────────
+
+    @Test
+    void extendSessionTtl_pushesExpiryForwardOnSuccessfulStep() {
+        Instant created = Instant.now().minusSeconds(120); // 2 min into the flow
+        MfaSession session = MfaSession.builder()
+                .sessionToken("s")
+                .userId(UUID.randomUUID())
+                .tenantId(UUID.randomUUID())
+                .flowId(UUID.randomUUID())
+                .currentStep(1)
+                .totalSteps(2)
+                .createdAt(created)
+                // about to expire (90s left) — without the slide a slow FACE
+                // step would 401.
+                .expiresAt(Instant.now().plusSeconds(90))
+                .build();
+
+        VerifyMfaStepService.extendSessionTtl(session);
+
+        // Slid to ~now + 10 min (allow a few seconds of wall-clock slack).
+        assertThat(session.getExpiresAt())
+                .isAfter(Instant.now().plusSeconds(9 * 60 + 30))
+                .isBefore(Instant.now().plusSeconds(10 * 60 + 5));
+    }
+
+    @Test
+    void extendSessionTtl_neverExceedsAbsoluteCeilingFromCreatedAt() {
+        // Session created 28 min ago: the 30-min ceiling leaves only ~2 min,
+        // so the 10-min slide must be clamped to createdAt + 30 min.
+        Instant created = Instant.now().minusSeconds(28 * 60);
+        MfaSession session = MfaSession.builder()
+                .sessionToken("s")
+                .userId(UUID.randomUUID())
+                .tenantId(UUID.randomUUID())
+                .flowId(UUID.randomUUID())
+                .currentStep(2)
+                .totalSteps(3)
+                .createdAt(created)
+                .expiresAt(Instant.now().plusSeconds(60))
+                .build();
+
+        VerifyMfaStepService.extendSessionTtl(session);
+
+        Instant ceiling = created.plusSeconds(30 * 60);
+        // Clamped at the ceiling (within a small slack) — not now + 10 min.
+        assertThat(session.getExpiresAt())
+                .isBeforeOrEqualTo(ceiling)
+                .isAfter(ceiling.minusSeconds(5));
+    }
+
+    @Test
+    void extendSessionTtl_neverShrinksAnAlreadyLaterExpiry() {
+        // A session that already has a longer window than the slide would grant
+        // must not be shortened.
+        Instant created = Instant.now();
+        Instant farExpiry = Instant.now().plusSeconds(25 * 60); // well past now+10m
+        MfaSession session = MfaSession.builder()
+                .sessionToken("s")
+                .userId(UUID.randomUUID())
+                .tenantId(UUID.randomUUID())
+                .flowId(UUID.randomUUID())
+                .currentStep(1)
+                .totalSteps(2)
+                .createdAt(created)
+                .expiresAt(farExpiry)
+                .build();
+
+        VerifyMfaStepService.extendSessionTtl(session);
+
+        assertThat(session.getExpiresAt()).isEqualTo(farExpiry);
+    }
 }
