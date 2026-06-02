@@ -78,6 +78,23 @@ public class OAuth2Client {
     @Builder.Default
     private boolean confidential = true;
 
+    /**
+     * EXPLICIT cross-tenant authorization flag (V81).
+     *
+     * <p>True for FIRST-PARTY platform apps (web dashboard, native mobile) that
+     * may authenticate users from EVERY tenant. False (default) for ordinary
+     * customer-tenant clients, which stay strictly isolated to their own tenant.</p>
+     *
+     * <p>Replaces the prior IMPLICIT rule that inferred this capability from
+     * {@code tenant_id == PLATFORM_TENANT_ID} (the `system` sentinel tenant). The
+     * minted token still carries the USER's real tenant_id, so downstream
+     * multi-tenant isolation is unaffected regardless of this flag. Read in
+     * {@code OAuth2Controller.validateAuthorizeRequest} via {@link #isCrossTenant()}.</p>
+     */
+    @Column(name = "cross_tenant", nullable = false)
+    @Builder.Default
+    private boolean crossTenant = false;
+
     @Column(name = "revoked_at")
     private Instant revokedAt;
 

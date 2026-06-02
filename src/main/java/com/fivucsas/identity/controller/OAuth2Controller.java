@@ -61,15 +61,6 @@ public class OAuth2Controller {
     private final AuditLogPort auditLogPort;
     private final RateLimitService rateLimitService;
 
-    /**
-     * The `system` sentinel tenant (V59). Clients bound to it are FIRST-PARTY
-     * platform apps (web dashboard, native mobile) and authenticate users from
-     * EVERY tenant — the user↔client tenant guard is skipped for them. See
-     * {@code validateAuthorizeRequest}.
-     */
-    private static final UUID PLATFORM_TENANT_ID =
-            UUID.fromString("00000000-0000-0000-0000-000000000000");
-
     @Value("${app.hosted-login-url:https://verify.fivucsas.com/login}")
     private String hostedLoginUrl;
 
@@ -366,15 +357,20 @@ public class OAuth2Controller {
         // to a different tenant than the authenticated user. RFC 6749 §5.2 maps
         // this to 400 invalid_request (not 403) to avoid leaking policy info.
         //
-        // EXCEPTION — platform first-party clients. A client bound to the `system`
-        // sentinel tenant (0000…0000) is a FIRST-PARTY platform app (the web
-        // dashboard, the native mobile app). Like the cross-tenant dashboard login,
-        // it serves EVERY tenant's users, so the user↔client tenant guard does not
-        // apply to it. The minted token still carries the USER's real tenant_id, so
+        // EXCEPTION — cross-tenant first-party clients. A client with the EXPLICIT
+        // cross_tenant flag (V81) is a FIRST-PARTY platform app (the web dashboard,
+        // the native mobile app). Like the cross-tenant dashboard login, it serves
+        // EVERY tenant's users, so the user↔client tenant guard does not apply to
+        // it. The minted token still carries the USER's real tenant_id, so
         // downstream isolation is unaffected. A CUSTOMER-tenant client (a tenant
-        // integrating their own app) stays strictly isolated to its own tenant.
-        boolean platformClient = client.getTenant() != null
-                && PLATFORM_TENANT_ID.equals(client.getTenant().getId());
+        // integrating their own app) has cross_tenant=FALSE and stays strictly
+        // isolated to its own tenant.
+        //
+        // This replaces the prior IMPLICIT rule (tenant_id == the `system` sentinel
+        // tenant 0000…0000) with an explicit, auditable column — a client can no
+        // longer inherit cross-tenant power merely by being bound to the system
+        // tenant.
+        boolean platformClient = client.isCrossTenant();
         if (!platformClient
                 && (user.getTenant() == null || client.getTenant() == null
                     || !user.getTenant().getId().equals(client.getTenant().getId()))) {
@@ -516,27 +512,45 @@ public class OAuth2Controller {
      * Client authentication via client_secret_post (RFC 6749 Section 2.3.1).
      */
     @PostMapping("/token")
-    @Operation(summary = "Exchange authorization code for tokens")
+    @Operation(summary = "Exchange authorization code or refresh token for tokens")
     public ResponseEntity<?> token(
             @RequestParam("grant_type") String grantType,
-            @RequestParam("code") String code,
-            @RequestParam("redirect_uri") String redirectUri,
+            @Parameter(description = "Authorization code (required for grant_type=authorization_code)")
+            @RequestParam(value = "code", required = false) String code,
+            @Parameter(description = "Redirect URI (required for grant_type=authorization_code)")
+            @RequestParam(value = "redirect_uri", required = false) String redirectUri,
             @RequestParam("client_id") String clientId,
             @RequestParam(value = "client_secret", required = false) String clientSecret,
             @Parameter(description = "PKCE code verifier (RFC 7636)")
             @RequestParam(value = "code_verifier", required = false) String codeVerifier,
+            @Parameter(description = "Refresh token (required for grant_type=refresh_token, RFC 6749 §6)")
+            @RequestParam(value = "refresh_token", required = false) String refreshToken,
             HttpServletRequest httpRequest) {
 
         log.info("OAuth2 token request: grant_type={}, client_id={}", grantType, clientId);
 
+        // RFC 6749 §6 — refresh-token grant. Branched before the
+        // authorization_code path because it requires neither code nor redirect_uri.
+        if ("refresh_token".equals(grantType)) {
+            return refreshTokenGrant(refreshToken, clientId, httpRequest);
+        }
+
         if (!"authorization_code".equals(grantType)) {
             return errorResponse(400, "unsupported_grant_type",
-                    "Only grant_type=authorization_code is supported", null);
+                    "Only grant_type=authorization_code and grant_type=refresh_token are supported", null);
+        }
+
+        // authorization_code requires code + redirect_uri (they are optional at the
+        // binding layer so the refresh_token grant can omit them).
+        if (isBlank(code) || isBlank(redirectUri)) {
+            return errorResponse(400, "invalid_request",
+                    "code and redirect_uri are required for grant_type=authorization_code", null);
         }
 
         try {
             Map<String, Object> tokens = oAuth2Service.exchangeCode(
-                    code, clientId, redirectUri, clientSecret, codeVerifier);
+                    code, clientId, redirectUri, clientSecret, codeVerifier,
+                    getClientIP(httpRequest), getUserAgent(httpRequest));
             // RFC 6749 Section 5.1: must include Cache-Control: no-store
             return ResponseEntity.ok()
                     .header("Cache-Control", "no-store")
@@ -601,6 +615,56 @@ public class OAuth2Controller {
             }
             return errorResponse(400, errorCode, e.getMessage(), null);
         }
+    }
+
+    /**
+     * RFC 6749 §6 — {@code grant_type=refresh_token} handler. Validates the
+     * presented refresh token, rotates it, and issues a fresh access_token +
+     * id_token (+ the rotated refresh_token). Invalid / expired / reused tokens
+     * map to RFC 6749 {@code 400 invalid_grant} (RFC 6749 §5.2).
+     */
+    private ResponseEntity<?> refreshTokenGrant(
+            String refreshToken, String clientId, HttpServletRequest httpRequest) {
+        if (isBlank(refreshToken)) {
+            return errorResponse(400, "invalid_request",
+                    "refresh_token is required for grant_type=refresh_token", null);
+        }
+        try {
+            Map<String, Object> tokens = oAuth2Service.refreshAccessToken(
+                    refreshToken, clientId,
+                    getClientIP(httpRequest), getUserAgent(httpRequest));
+            // RFC 6749 §5.1: must include Cache-Control: no-store
+            return ResponseEntity.ok()
+                    .header("Cache-Control", "no-store")
+                    .header("Pragma", "no-cache")
+                    .body(tokens);
+        } catch (com.fivucsas.identity.domain.exception.TokenExpiredException
+                 | com.fivucsas.identity.domain.exception.TokenRevokedException e) {
+            // Expired, revoked, reused, or already-rotated refresh token. RFC 6749
+            // §5.2 — the presented grant is no longer valid → invalid_grant.
+            log.warn("OAuth2 refresh_token grant rejected (invalid_grant): clientId={}, reason={}",
+                    clientId, e.getMessage());
+            return errorResponse(400, "invalid_grant",
+                    "Refresh token is invalid, expired, or has been revoked", null);
+        } catch (com.fivucsas.identity.domain.exception.TenantSuspendedException e) {
+            // The user's tenant is no longer ACTIVE — mirror the legacy
+            // /auth/refresh suspension gate, surfaced as invalid_grant.
+            log.warn("OAuth2 refresh_token grant rejected — tenant not active: clientId={}", clientId);
+            return errorResponse(400, "invalid_grant",
+                    "Refresh token is no longer valid for this account", null);
+        } catch (IllegalArgumentException e) {
+            // Unknown/inactive client_id or malformed token value.
+            log.warn("OAuth2 refresh_token grant failed: {}", e.getMessage());
+            return errorResponse(400, "invalid_grant", e.getMessage(), null);
+        }
+    }
+
+    /**
+     * Resolve the request's User-Agent, recorded on minted/rotated refresh tokens
+     * for the session-audit trail (mirrors {@code AuthController.getUserAgent}).
+     */
+    private String getUserAgent(HttpServletRequest request) {
+        return request == null ? null : request.getHeader("User-Agent");
     }
 
     /**
