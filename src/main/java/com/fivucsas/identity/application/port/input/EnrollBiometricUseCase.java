@@ -25,4 +25,18 @@ public interface EnrollBiometricUseCase {
      * @throws com.fivucsas.identity.domain.exception.BiometricEnrollmentException if enrollment fails
      */
     BiometricResponse execute(EnrollBiometricCommand command);
+
+    /**
+     * Marks a user as biometric-enrolled (sets {@code is_biometric_enrolled} +
+     * {@code enrolled_at}). The single-image {@link #execute} path does this for FACE
+     * enrollment; the multi-image enroll path ({@code POST /biometric/enroll/multi})
+     * goes straight through {@code BiometricServicePort} and historically did NOT —
+     * so {@code /biometric/verify} (which gates on the flag) rejected multi-enrolled
+     * users with 412 "not enrolled" despite a stored embedding. The controller calls
+     * this on a successful multi-enroll. Idempotent (no-op if already enrolled).
+     *
+     * @param userId the user to mark enrolled
+     * @throws com.fivucsas.identity.domain.exception.UserNotFoundException if user doesn't exist
+     */
+    void markBiometricEnrolled(java.util.UUID userId);
 }
