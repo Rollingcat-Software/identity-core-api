@@ -45,6 +45,7 @@ class OAuth2ServiceTest {
     @Mock private StringRedisTemplate redisTemplate;
     @Mock private PasswordEncoder passwordEncoder;
     @Mock private MfaSessionRepository mfaSessionRepository;
+    @Mock private com.fivucsas.identity.service.RefreshTokenService refreshTokenService;
 
     // Phase 4: inject a REAL resolver with the pairwise flag OFF so these legacy
     // tests keep asserting sub == user.id (the default, zero-behaviour-change
@@ -56,6 +57,20 @@ class OAuth2ServiceTest {
 
     @InjectMocks
     private OAuth2Service service;
+
+    /**
+     * Stub the RFC 6749 §6 refresh-token mint that exchangeCode now performs on
+     * the success path. Returns a token whose transient wire value + expiry are
+     * read into the response body (refresh_token / refresh_expires_in).
+     */
+    private void stubRefreshTokenMint() {
+        com.fivucsas.identity.entity.RefreshToken minted =
+                mock(com.fivucsas.identity.entity.RefreshToken.class);
+        when(minted.getToken()).thenReturn("refresh-wire-token");
+        when(minted.getExpiryDate())
+                .thenReturn(java.time.Instant.now().plus(java.time.Duration.ofDays(7)));
+        when(refreshTokenService.createRefreshToken(any(), any(), any())).thenReturn(minted);
+    }
 
     @Test
     void validateClient_WhenValidClient_ShouldReturnClient() {
@@ -192,6 +207,7 @@ class OAuth2ServiceTest {
         when(jwtService.generateToken(anyMap(), eq("user@test.com"))).thenReturn("access-jwt");
         when(jwtService.generateIdToken(anyMap(), eq("user@test.com"))).thenReturn("id-jwt");
         when(jwtService.getExpirationMillis()).thenReturn(3600000L);
+        stubRefreshTokenMint();
 
         // when
         Map<String, Object> result = service.exchangeCode("test-code", "client-1", "https://cb.com", "secret");
@@ -201,6 +217,9 @@ class OAuth2ServiceTest {
         assertThat(result).containsEntry("token_type", "Bearer");
         assertThat(result).containsEntry("id_token", "id-jwt");
         assertThat(result).containsEntry("expires_in", 3600L);
+        // RFC 6749 §6: the authorization_code exchange now also returns a refresh_token.
+        assertThat(result).containsEntry("refresh_token", "refresh-wire-token");
+        assertThat(result).containsKey("refresh_expires_in");
         verify(redisTemplate).delete("oauth2:code:test-code");
 
         // P1-5 (2026-06-02): the ID token is minted via generateIdToken (NOT
@@ -291,6 +310,7 @@ class OAuth2ServiceTest {
         when(jwtService.generateToken(anyMap(), eq("user@test.com"))).thenReturn("access-jwt");
         when(jwtService.generateIdToken(anyMap(), eq("user@test.com"))).thenReturn("id-jwt");
         when(jwtService.getExpirationMillis()).thenReturn(3600000L);
+        stubRefreshTokenMint();
 
         // when
         Map<String, Object> result = service.exchangeCode(
@@ -298,6 +318,7 @@ class OAuth2ServiceTest {
 
         // then
         assertThat(result).containsEntry("access_token", "access-jwt");
+        assertThat(result).containsEntry("refresh_token", "refresh-wire-token");
         verify(redisTemplate).delete("oauth2:code:pkce-code");
     }
 
@@ -432,6 +453,7 @@ class OAuth2ServiceTest {
         when(jwtService.generateToken(anyMap(), eq("user@test.com"))).thenReturn("access-jwt");
         when(jwtService.generateIdToken(anyMap(), eq("user@test.com"))).thenReturn("id-jwt");
         when(jwtService.getExpirationMillis()).thenReturn(3600000L);
+        stubRefreshTokenMint();
 
         // when
         Map<String, Object> result = service.exchangeCode(
@@ -439,6 +461,7 @@ class OAuth2ServiceTest {
 
         // then
         assertThat(result).containsEntry("access_token", "access-jwt");
+        assertThat(result).containsEntry("refresh_token", "refresh-wire-token");
         verify(redisTemplate).delete("oauth2:code:conf-code-ok");
     }
 

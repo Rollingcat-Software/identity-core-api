@@ -142,7 +142,8 @@ class OAuth2ControllerTest {
         tokens.put("token_type", "Bearer");
         tokens.put("expires_in", 3600L);
         tokens.put("id_token", "id-jwt");
-        when(oAuth2Service.exchangeCode("valid-code", "test-client", "https://example.com/cb", null, null))
+        when(oAuth2Service.exchangeCode(eq("valid-code"), eq("test-client"),
+                eq("https://example.com/cb"), isNull(), isNull(), any(), any()))
                 .thenReturn(tokens);
 
         mockMvc.perform(post("/api/v1/oauth2/token")
@@ -164,7 +165,8 @@ class OAuth2ControllerTest {
         tokens.put("token_type", "Bearer");
         tokens.put("expires_in", 3600L);
         tokens.put("id_token", "id-jwt");
-        when(oAuth2Service.exchangeCode("valid-code", "test-client", "https://example.com/cb", null, "my-verifier"))
+        when(oAuth2Service.exchangeCode(eq("valid-code"), eq("test-client"),
+                eq("https://example.com/cb"), isNull(), eq("my-verifier"), any(), any()))
                 .thenReturn(tokens);
 
         mockMvc.perform(post("/api/v1/oauth2/token")
@@ -183,7 +185,7 @@ class OAuth2ControllerTest {
         // Phase D5a: service now throws PkceVerificationException for missing/
         // expired codes so the controller can audit + rate-limit. Wire format
         // remains invalid_grant (RFC 6749 §5.2) so SDK behaviour is unchanged.
-        when(oAuth2Service.exchangeCode(anyString(), anyString(), anyString(), any(), any()))
+        when(oAuth2Service.exchangeCode(anyString(), anyString(), anyString(), any(), any(), any(), any()))
                 .thenThrow(new com.fivucsas.identity.domain.exception.PkceVerificationException(
                         "test-client",
                         com.fivucsas.identity.domain.model.PkceFailureReason.CODE_NOT_FOUND,
@@ -553,7 +555,7 @@ class OAuth2ControllerTest {
     @DisplayName("POST /token - confidential client missing secret returns 401 invalid_client [BE-M2]")
     void token_ConfidentialClientMissingSecret_ShouldReturn401() throws Exception {
         when(oAuth2Service.exchangeCode(eq("code-x"), eq("confidential-app"),
-                eq("https://app.example.com/cb"), isNull(), isNull()))
+                eq("https://app.example.com/cb"), isNull(), isNull(), any(), any()))
                 .thenThrow(new com.fivucsas.identity.domain.exception.OAuth2Exception(
                         org.springframework.http.HttpStatus.UNAUTHORIZED,
                         "invalid_client",
@@ -604,7 +606,7 @@ class OAuth2ControllerTest {
     @Test
     @DisplayName("Phase D5a — PKCE verifier mismatch writes PKCE_FAILURE audit row")
     void token_WhenPkceVerifierMismatch_ShouldAuditPkceFailure() throws Exception {
-        when(oAuth2Service.exchangeCode(anyString(), eq("test-client"), anyString(), any(), any()))
+        when(oAuth2Service.exchangeCode(anyString(), eq("test-client"), anyString(), any(), any(), any(), any()))
                 .thenThrow(new com.fivucsas.identity.domain.exception.PkceVerificationException(
                         "test-client",
                         com.fivucsas.identity.domain.model.PkceFailureReason.VERIFIER_MISMATCH,
@@ -634,7 +636,7 @@ class OAuth2ControllerTest {
         // Simulate a second /token call with a code that was already consumed:
         // OAuth2Service throws PkceVerificationException(CODE_NOT_FOUND, …)
         // because Redis returned null on the second lookup.
-        when(oAuth2Service.exchangeCode(anyString(), eq("test-client"), anyString(), any(), any()))
+        when(oAuth2Service.exchangeCode(anyString(), eq("test-client"), anyString(), any(), any(), any(), any()))
                 .thenThrow(new com.fivucsas.identity.domain.exception.PkceVerificationException(
                         "test-client",
                         com.fivucsas.identity.domain.model.PkceFailureReason.CODE_NOT_FOUND,
@@ -657,7 +659,7 @@ class OAuth2ControllerTest {
     @Test
     @DisplayName("Phase D5b — repeated PKCE failures from one clientId return 429 with Retry-After")
     void token_WhenPkceFailureBudgetExhausted_ShouldReturn429() throws Exception {
-        when(oAuth2Service.exchangeCode(anyString(), eq("hot-client"), anyString(), any(), any()))
+        when(oAuth2Service.exchangeCode(anyString(), eq("hot-client"), anyString(), any(), any(), any(), any()))
                 .thenThrow(new com.fivucsas.identity.domain.exception.PkceVerificationException(
                         "hot-client",
                         com.fivucsas.identity.domain.model.PkceFailureReason.VERIFIER_MISMATCH,
