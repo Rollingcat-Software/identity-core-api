@@ -63,7 +63,15 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
 
     private static final int MAX_FAILED_ATTEMPTS = 5;
     private static final Duration LOCKOUT_DURATION = Duration.ofMinutes(15);
-    private static final Duration MFA_SESSION_TTL = Duration.ofMinutes(10);
+    // Base MFA-session lifetime, set once at creation. Bumped 10→15 min
+    // (2026-06-02): a multi-step hosted login that includes a FACE step burns
+    // minutes on camera permission + model load + retries, so a 10-min clock
+    // started at the email/Layer-1 step expired mid-flow → /auth/mfa/step 401s
+    // ("MFA session expired"). The per-step sliding extension in
+    // VerifyMfaStepService (capped at an absolute max) is the primary fix; this
+    // larger base floor just gives the first factor more headroom. Reversible:
+    // one-line constant, no migration.
+    private static final Duration MFA_SESSION_TTL = Duration.ofMinutes(15);
 
     @Override
     @Transactional

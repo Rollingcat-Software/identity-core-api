@@ -238,7 +238,7 @@ public class JwtService implements TokenGenerationPort {
 
     @Override
     public String generateAccessToken(String email) {
-        return buildToken(new HashMap<>(), email, jwtExpiration);
+        return buildToken(new HashMap<>(), email, jwtExpiration, true);
     }
 
     @Override
@@ -247,17 +247,35 @@ public class JwtService implements TokenGenerationPort {
         if (amr != null && !amr.isEmpty()) {
             claims.put("amr", amr);
         }
-        return buildToken(claims, email, jwtExpiration);
+        return buildToken(claims, email, jwtExpiration, true);
     }
 
     public String generateToken(Map<String, Object> extraClaims, String email) {
-        return buildToken(extraClaims, email, jwtExpiration);
+        // Access tokens: bind the API audience (fivucsas-api) so resource
+        // servers can reject tokens minted for a different deployment.
+        return buildToken(extraClaims, email, jwtExpiration, true);
+    }
+
+    /**
+     * Mints an OIDC ID token (P1-5, 2026-06-02). Unlike an access token, an
+     * ID token's {@code aud} MUST be the OAuth client_id of the relying party
+     * and MUST NOT also carry the API audience ({@code fivucsas-api}) — a
+     * strict OIDC RP validates {@code aud == its own client_id} and rejects a
+     * multi-audience token that additionally lacks an {@code azp}. The caller
+     * (OAuth2Service) is responsible for putting {@code aud=clientId} and
+     * {@code azp=clientId} into {@code extraClaims}; this method simply skips
+     * the access-token audience injection so the caller's {@code aud} survives
+     * as the sole audience.
+     */
+    public String generateIdToken(Map<String, Object> extraClaims, String email) {
+        return buildToken(extraClaims, email, jwtExpiration, false);
     }
 
     private String buildToken(
             Map<String, Object> extraClaims,
             String email,
-            long expiration
+            long expiration,
+            boolean injectAccessTokenAudience
     ) {
         var builder = Jwts
                 .builder()
@@ -280,7 +298,13 @@ public class JwtService implements TokenGenerationPort {
         // (2026-04-20, 2026-05-02, 2026-05-12) before this commit — see the
         // companion unit test JwtServiceAudienceTest to keep it from
         // disappearing again.
-        if (expectedAudience != null && !expectedAudience.isEmpty()) {
+        //
+        // P1-5 (2026-06-02): ONLY for access tokens. An OIDC ID token's aud is
+        // the RP client_id (set by the caller in extraClaims); appending the
+        // API audience here would make it a multi-audience token that strict
+        // RPs reject. generateIdToken passes injectAccessTokenAudience=false.
+        if (injectAccessTokenAudience
+                && expectedAudience != null && !expectedAudience.isEmpty()) {
             builder = builder.audience().add(expectedAudience).and();
         }
 

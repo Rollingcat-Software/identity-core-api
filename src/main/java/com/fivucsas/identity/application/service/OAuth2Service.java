@@ -386,7 +386,17 @@ public class OAuth2Service {
         // Phase 4: subject is identity-pairwise per RP when the flag is on; legacy
         // user.id otherwise (default). The resolver owns the entity.User access.
         idTokenClaims.put("sub", pairwiseSubjectResolver.resolveSubject(user, client));
+        // P1-5 (2026-06-02): the ID token audience is the RP client_id ONLY.
+        // Previously generateToken() also appended the API audience
+        // (fivucsas-api), so the id_token shipped aud=[clientId, fivucsas-api];
+        // a strict OIDC RP that asserts aud == its own client_id rejects a
+        // multi-audience token unless an azp is present. We now (a) mint via
+        // generateIdToken() which does NOT inject the API audience, and (b)
+        // stamp azp=clientId (OIDC Core §2: REQUIRED when aud has a single
+        // entry that is the RP, RECOMMENDED otherwise — always-present is safe
+        // and what RPs expect).
         idTokenClaims.put("aud", clientId);
+        idTokenClaims.put("azp", clientId);
         idTokenClaims.put("iat", Instant.now().getEpochSecond());
         idTokenClaims.put("exp", Instant.now().plusMillis(jwtService.getExpirationMillis()).getEpochSecond());
         idTokenClaims.put("auth_time", Instant.now().getEpochSecond());
@@ -412,7 +422,9 @@ public class OAuth2Service {
             idTokenClaims.put("phone_number_verified", user.isPhoneVerified());
         }
 
-        String idToken = jwtService.generateToken(idTokenClaims, userEmail);
+        // P1-5: generateIdToken skips the access-token (fivucsas-api) audience
+        // so the RP-only aud set above survives as the sole audience.
+        String idToken = jwtService.generateIdToken(idTokenClaims, userEmail);
 
         // Build response (RFC 6749 Section 5.1)
         Map<String, Object> response = new LinkedHashMap<>();

@@ -14,6 +14,7 @@ import com.fivucsas.identity.security.JwtService;
 import io.jsonwebtoken.Claims;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
@@ -188,7 +189,8 @@ class OAuth2ServiceTest {
         when(user.getTenant()).thenReturn(tenant);
         when(userRepository.findByEmail("user@test.com")).thenReturn(Optional.of(user));
 
-        when(jwtService.generateToken(anyMap(), eq("user@test.com"))).thenReturn("access-jwt", "id-jwt");
+        when(jwtService.generateToken(anyMap(), eq("user@test.com"))).thenReturn("access-jwt");
+        when(jwtService.generateIdToken(anyMap(), eq("user@test.com"))).thenReturn("id-jwt");
         when(jwtService.getExpirationMillis()).thenReturn(3600000L);
 
         // when
@@ -200,6 +202,18 @@ class OAuth2ServiceTest {
         assertThat(result).containsEntry("id_token", "id-jwt");
         assertThat(result).containsEntry("expires_in", 3600L);
         verify(redisTemplate).delete("oauth2:code:test-code");
+
+        // P1-5 (2026-06-02): the ID token is minted via generateIdToken (NOT
+        // generateToken, which appends the API audience), and its aud/azp are
+        // the RP client_id only. The access token still goes through
+        // generateToken (keeps aud=fivucsas-api).
+        ArgumentCaptor<Map<String, Object>> idClaims = ArgumentCaptor.forClass(Map.class);
+        verify(jwtService).generateIdToken(idClaims.capture(), eq("user@test.com"));
+        assertThat(idClaims.getValue()).containsEntry("aud", "client-1");
+        assertThat(idClaims.getValue()).containsEntry("azp", "client-1");
+        assertThat(idClaims.getValue()).containsEntry("type", "id_token");
+        // The access-token path is the only generateToken() caller.
+        verify(jwtService).generateToken(anyMap(), eq("user@test.com"));
     }
 
     @Test
@@ -274,7 +288,8 @@ class OAuth2ServiceTest {
         when(user.getTenant()).thenReturn(tenant);
         when(userRepository.findByEmail("user@test.com")).thenReturn(Optional.of(user));
 
-        when(jwtService.generateToken(anyMap(), eq("user@test.com"))).thenReturn("access-jwt", "id-jwt");
+        when(jwtService.generateToken(anyMap(), eq("user@test.com"))).thenReturn("access-jwt");
+        when(jwtService.generateIdToken(anyMap(), eq("user@test.com"))).thenReturn("id-jwt");
         when(jwtService.getExpirationMillis()).thenReturn(3600000L);
 
         // when
@@ -414,7 +429,8 @@ class OAuth2ServiceTest {
         when(user.getTenant()).thenReturn(tenant);
         when(userRepository.findByEmail("user@test.com")).thenReturn(Optional.of(user));
 
-        when(jwtService.generateToken(anyMap(), eq("user@test.com"))).thenReturn("access-jwt", "id-jwt");
+        when(jwtService.generateToken(anyMap(), eq("user@test.com"))).thenReturn("access-jwt");
+        when(jwtService.generateIdToken(anyMap(), eq("user@test.com"))).thenReturn("id-jwt");
         when(jwtService.getExpirationMillis()).thenReturn(3600000L);
 
         // when
