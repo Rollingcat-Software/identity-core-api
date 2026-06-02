@@ -110,6 +110,37 @@ class JwtServiceAudienceTest {
     }
 
     // ─────────────────────────────────────────────────────────────────
+    // P1-5 (2026-06-02) — OIDC ID token audience is the RP client_id ONLY
+    // ─────────────────────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("generateIdToken does NOT inject the API audience (fivucsas-api)")
+    void idTokenOmitsApiAudience() {
+        // expectedAudience is the API audience; an ID token must NOT carry it.
+        java.util.Map<String, Object> claims = new java.util.HashMap<>();
+        claims.put("aud", "rp-client-123");
+        claims.put("azp", "rp-client-123");
+        claims.put("type", "id_token");
+
+        String tok = service.generateIdToken(claims, TEST_EMAIL);
+
+        String payloadJson = decodePayload(tok);
+        // The RP client_id is the audience...
+        assertThat(payloadJson).contains("rp-client-123");
+        assertThat(payloadJson).contains("\"azp\"");
+        // ...and the API audience is NOT present (no multi-audience token).
+        assertThat(payloadJson).doesNotContain(EXPECTED_AUD);
+    }
+
+    @Test
+    @DisplayName("generateToken (access token) STILL injects the API audience")
+    void accessTokenKeepsApiAudience() {
+        // Regression guard: the access-token path must keep aud=fivucsas-api.
+        String tok = service.generateToken(new java.util.HashMap<>(), TEST_EMAIL);
+        assertThat(decodePayload(tok)).contains(EXPECTED_AUD);
+    }
+
+    // ─────────────────────────────────────────────────────────────────
     // §P1 — explicit revoked-kid list (defence-in-depth for hs-2026-04)
     // ─────────────────────────────────────────────────────────────────
 
