@@ -8,6 +8,7 @@ import com.fivucsas.identity.application.port.output.BiometricServicePort;
 import com.fivucsas.identity.domain.exception.BiometricEnrollmentException;
 import com.fivucsas.identity.domain.exception.UserNotFoundException;
 import com.fivucsas.identity.domain.model.auth.AuthMethodType;
+import com.fivucsas.identity.domain.repository.UserDomainRepository;
 import com.fivucsas.identity.domain.repository.UserRepository;
 import com.fivucsas.identity.entity.User;
 import lombok.RequiredArgsConstructor;
@@ -31,6 +32,7 @@ import java.util.UUID;
 public class EnrollBiometricService implements EnrollBiometricUseCase {
 
     private final UserRepository userRepository;
+    private final UserDomainRepository userDomainRepository;
     private final BiometricServicePort biometricService;
     private final ManageEnrollmentUseCase manageEnrollmentUseCase;
     private final com.fivucsas.identity.application.port.output.EventPublisherPort eventPublisher;
@@ -93,12 +95,17 @@ public class EnrollBiometricService implements EnrollBiometricUseCase {
     @Override
     @Transactional
     public void markBiometricEnrolled(UUID userId) {
-        User user = userRepository.findById(userId)
+        // Uses the domain repository + domain User (hexagonal boundary: application
+        // code must not depend on entity.User — see UserDomainBoundaryTest). The
+        // domain->entity adapter maps is_biometric_enrolled + enrolled_at, so the flag
+        // persists. `var` keeps the type as domain.model.user.User (the entity.User
+        // import above is only for the single-image execute() path).
+        var user = userDomainRepository.findById(userId)
             .orElseThrow(() -> new UserNotFoundException(userId.toString()));
-        if (!user.isBiometricEnrolled()) {
+        if (!user.hasBiometricEnrolled()) {
             user.enrollBiometric();
-            userRepository.save(user);
-            log.info("Marked user {} biometric-enrolled (multi-image enroll path)", user.getId());
+            userDomainRepository.save(user);
+            log.info("Marked user {} biometric-enrolled (multi-image enroll path)", userId);
         }
     }
 

@@ -7,6 +7,7 @@ import com.fivucsas.identity.application.port.output.BiometricServicePort;
 import com.fivucsas.identity.application.port.output.EventPublisherPort;
 import com.fivucsas.identity.domain.exception.BiometricEnrollmentException;
 import com.fivucsas.identity.domain.exception.UserNotFoundException;
+import com.fivucsas.identity.domain.repository.UserDomainRepository;
 import com.fivucsas.identity.domain.repository.UserRepository;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.entity.UserStatus;
@@ -68,6 +69,9 @@ class EnrollBiometricServiceTest {
 
     @Mock
     private UserRepository userRepository;
+
+    @Mock
+    private UserDomainRepository userDomainRepository;
 
     @Mock
     private BiometricServicePort biometricService;
@@ -363,41 +367,52 @@ class EnrollBiometricServiceTest {
     @DisplayName("markBiometricEnrolled (multi-image enroll path)")
     class MarkBiometricEnrolled {
 
+        // Uses the DOMAIN repository + domain User (hexagonal boundary — the service
+        // must not touch entity.User here; see UserDomainBoundaryTest).
+        private com.fivucsas.identity.domain.model.user.User domainUser(boolean enrolled) {
+            return com.fivucsas.identity.domain.model.user.User.builder()
+                .id(userId)
+                .email("test@example.com")
+                .isBiometricEnrolled(enrolled)
+                .build();
+        }
+
         @Test
-        @DisplayName("Sets is_biometric_enrolled + enrolled_at and saves when not yet enrolled")
+        @DisplayName("Sets enrolled flag + enrolled_at and saves when not yet enrolled")
         void marksEnrolledWhenNotEnrolled() {
-            when(userRepository.findById(userId)).thenReturn(Optional.of(existingUser));
-            when(userRepository.save(any(User.class))).thenAnswer(inv -> inv.getArgument(0));
+            var user = domainUser(false);
+            when(userDomainRepository.findById(userId)).thenReturn(Optional.of(user));
+            when(userDomainRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
             enrollBiometricService.markBiometricEnrolled(userId);
 
-            assertThat(existingUser.isBiometricEnrolled()).isTrue();
-            assertThat(existingUser.getEnrolledAt()).isNotNull();
-            verify(userRepository).save(existingUser);
+            assertThat(user.hasBiometricEnrolled()).isTrue();
+            assertThat(user.getEnrolledAt()).isNotNull();
+            verify(userDomainRepository).save(user);
         }
 
         @Test
         @DisplayName("Is idempotent — no save when already enrolled")
         void noOpWhenAlreadyEnrolled() {
-            existingUser.enrollBiometric(); // already enrolled
-            when(userRepository.findById(userId)).thenReturn(Optional.of(existingUser));
+            var user = domainUser(true);
+            when(userDomainRepository.findById(userId)).thenReturn(Optional.of(user));
 
             enrollBiometricService.markBiometricEnrolled(userId);
 
-            verify(userRepository, never()).save(any(User.class));
+            verify(userDomainRepository, never()).save(any());
         }
 
         @Test
         @DisplayName("Throws UserNotFoundException when the user does not exist")
         void throwsWhenUserMissing() {
             UUID missing = UUID.randomUUID();
-            when(userRepository.findById(missing)).thenReturn(Optional.empty());
+            when(userDomainRepository.findById(missing)).thenReturn(Optional.empty());
 
             assertThatThrownBy(() -> enrollBiometricService.markBiometricEnrolled(missing))
                 .isInstanceOf(UserNotFoundException.class)
                 .hasMessageContaining(missing.toString());
 
-            verify(userRepository, never()).save(any());
+            verify(userDomainRepository, never()).save(any());
         }
     }
 }
