@@ -30,6 +30,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
@@ -150,7 +151,7 @@ class NfcControllerVerifyAuthenticityTest {
     void enrollWithoutSodSkipsPassiveAuth() throws Exception {
         UUID userId = UUID.randomUUID();
         NfcCard card = NfcCard.builder().id(UUID.randomUUID()).cardSerial("04A2245B").build();
-        when(manageNfcCardService.enrollCard(any(), anyString(), anyString(), any()))
+        when(manageNfcCardService.enrollCard(any(), anyString(), anyString(), any(), anyBoolean()))
                 .thenReturn(new EnrollResult(EnrollResult.Status.OK, card, userId));
 
         mockMvc.perform(post("/api/v1/nfc/enroll")
@@ -185,7 +186,7 @@ class NfcControllerVerifyAuthenticityTest {
         NfcCard card = NfcCard.builder().id(UUID.randomUUID()).cardSerial("04A2245B").build();
         when(biometricServicePort.verifyNfcChipAuthenticity(anyString(), any()))
                 .thenReturn(Map.of("is_authentic", true));
-        when(manageNfcCardService.enrollCard(any(), anyString(), anyString(), any()))
+        when(manageNfcCardService.enrollCard(any(), anyString(), anyString(), any(), anyBoolean()))
                 .thenReturn(new EnrollResult(EnrollResult.Status.OK, card, userId));
 
         mockMvc.perform(post("/api/v1/nfc/enroll")
@@ -194,7 +195,7 @@ class NfcControllerVerifyAuthenticityTest {
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.success").value(true));
 
-        verify(manageNfcCardService).enrollCard(any(), eq("04A2245B"), anyString(), any());
+        verify(manageNfcCardService).enrollCard(any(), eq("04A2245B"), anyString(), any(), anyBoolean());
     }
 
     @Test
