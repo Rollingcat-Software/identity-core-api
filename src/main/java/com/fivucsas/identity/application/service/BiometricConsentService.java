@@ -150,11 +150,31 @@ public class BiometricConsentService
             return Optional.empty();
         }
 
-        // 3) Consent gate — default DENY. Either a method-specific or all-methods
-        //    (method IS NULL) granted row authorizes the route.
-        boolean consented = consentRepository
-                .findApplicable(identityId, requestingTenantId, normMethod).stream()
-                .anyMatch(IdentityTenantBiometricConsent::isGranted);
+        // 3) Consent gate — default DENY with method-specific precedence.
+        //
+        // P1-7 (2026-06-02): the old logic was `anyMatch(isGranted)` over BOTH the
+        // method-specific row AND the all-methods (method IS NULL) row. That let a
+        // broad all-methods GRANT silently OVERRIDE a deliberate method-specific
+        // REVOKE (e.g. "allow everything" + "but NOT face" → face was still
+        // authorized). The more specific signal must win. Precedence:
+        //   (a) if a row for THIS exact method exists, it is authoritative
+        //       (its granted flag decides — a method REVOKE beats an all-methods GRANT);
+        //   (b) otherwise fall back to the all-methods (method IS NULL) row;
+        //   (c) otherwise default-DENY.
+        List<IdentityTenantBiometricConsent> applicable =
+                consentRepository.findApplicable(identityId, requestingTenantId, normMethod);
+
+        Optional<IdentityTenantBiometricConsent> methodSpecific = applicable.stream()
+                .filter(c -> c.getMethod() != null && c.getMethod().equalsIgnoreCase(normMethod))
+                .findFirst();
+        Optional<IdentityTenantBiometricConsent> allMethods = applicable.stream()
+                .filter(c -> c.getMethod() == null)
+                .findFirst();
+
+        // The most-specific present row decides; absence of any row = default-DENY.
+        Optional<IdentityTenantBiometricConsent> authoritative =
+                methodSpecific.isPresent() ? methodSpecific : allMethods;
+        boolean consented = authoritative.map(IdentityTenantBiometricConsent::isGranted).orElse(false);
         if (!consented) {
             // No signal — caller MUST treat this identically to "not enrolled".
             return Optional.empty();
