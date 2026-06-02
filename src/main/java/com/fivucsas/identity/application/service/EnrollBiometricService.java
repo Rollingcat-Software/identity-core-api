@@ -90,6 +90,18 @@ public class EnrollBiometricService implements EnrollBiometricUseCase {
             .build();
     }
 
+    @Override
+    @Transactional
+    public void markBiometricEnrolled(UUID userId) {
+        User user = userRepository.findById(userId)
+            .orElseThrow(() -> new UserNotFoundException(userId.toString()));
+        if (!user.isBiometricEnrolled()) {
+            user.enrollBiometric();
+            userRepository.save(user);
+            log.info("Marked user {} biometric-enrolled (multi-image enroll path)", user.getId());
+        }
+    }
+
     /**
      * Extract a 0..1 score from the biometric-processor response. Tolerates
      * Number, numeric string, or absent / null values. Returns null when the

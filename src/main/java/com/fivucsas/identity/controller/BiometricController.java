@@ -130,6 +130,14 @@ public class BiometricController {
         Map<String, Object> result = biometricServicePort.enrollFaceMulti(
                 userId, files, tenantId, clientEmbedding, clientEmbeddings, optimize);
         recordEnrollmentScores(userId, AuthMethodType.FACE, result);
+        // The single-image enroll path (EnrollBiometricService) flips
+        // users.is_biometric_enrolled; the multi-image path historically did NOT, so
+        // /biometric/verify rejected multi-enrolled users with 412 "not enrolled"
+        // despite a stored embedding. Mark enrolled unless the proxy explicitly
+        // reported failure (errorResponse() returns success=false).
+        if (!Boolean.FALSE.equals(result.get("success"))) {
+            enrollBiometricUseCase.markBiometricEnrolled(userId);
+        }
         return ResponseEntity.ok(result);
     }
 

@@ -358,4 +358,46 @@ class EnrollBiometricServiceTest {
             verify(userRepository).save(any(User.class));
         }
     }
+
+    @Nested
+    @DisplayName("markBiometricEnrolled (multi-image enroll path)")
+    class MarkBiometricEnrolled {
+
+        @Test
+        @DisplayName("Sets is_biometric_enrolled + enrolled_at and saves when not yet enrolled")
+        void marksEnrolledWhenNotEnrolled() {
+            when(userRepository.findById(userId)).thenReturn(Optional.of(existingUser));
+            when(userRepository.save(any(User.class))).thenAnswer(inv -> inv.getArgument(0));
+
+            enrollBiometricService.markBiometricEnrolled(userId);
+
+            assertThat(existingUser.isBiometricEnrolled()).isTrue();
+            assertThat(existingUser.getEnrolledAt()).isNotNull();
+            verify(userRepository).save(existingUser);
+        }
+
+        @Test
+        @DisplayName("Is idempotent — no save when already enrolled")
+        void noOpWhenAlreadyEnrolled() {
+            existingUser.enrollBiometric(); // already enrolled
+            when(userRepository.findById(userId)).thenReturn(Optional.of(existingUser));
+
+            enrollBiometricService.markBiometricEnrolled(userId);
+
+            verify(userRepository, never()).save(any(User.class));
+        }
+
+        @Test
+        @DisplayName("Throws UserNotFoundException when the user does not exist")
+        void throwsWhenUserMissing() {
+            UUID missing = UUID.randomUUID();
+            when(userRepository.findById(missing)).thenReturn(Optional.empty());
+
+            assertThatThrownBy(() -> enrollBiometricService.markBiometricEnrolled(missing))
+                .isInstanceOf(UserNotFoundException.class)
+                .hasMessageContaining(missing.toString());
+
+            verify(userRepository, never()).save(any());
+        }
+    }
 }
