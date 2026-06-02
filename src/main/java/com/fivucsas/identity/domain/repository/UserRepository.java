@@ -38,6 +38,18 @@ public interface UserRepository {
     boolean existsByEmail(String email);
 
     /**
+     * Checks if a LIVE user with the given email exists IN A SPECIFIC TENANT.
+     * Tenant-scoped counterpart of {@link #existsByEmail(String)} — used by the
+     * guest-invite accept path (P1-9) so the same email may legitimately exist in
+     * other tenants (account-linking) without blocking acceptance into this tenant.
+     *
+     * @param email the email to check
+     * @param tenantId the tenant to scope the check to
+     * @return true if a non-deleted user with that email exists in that tenant
+     */
+    boolean existsByEmailAndTenantId(String email, UUID tenantId);
+
+    /**
      * Finds all users with a specific status.
      *
      * @param status the user status

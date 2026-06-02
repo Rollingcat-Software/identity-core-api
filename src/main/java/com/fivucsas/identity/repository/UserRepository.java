@@ -72,6 +72,19 @@ public interface UserRepository extends JpaRepository<User, UUID> {
     boolean existsByEmail(@Param("email") String email);
 
     /**
+     * Tenant-scoped existing-email check (P1-9). Unlike {@link #existsByEmail(String)},
+     * which is GLOBAL, this only considers live ({@code deleted_at IS NULL}) rows in
+     * the given tenant. Used by the guest-invite accept path so a person who already
+     * holds an account in a DIFFERENT tenant under the same email is not blocked from
+     * accepting an invite into THIS tenant (account-linking allows the same email
+     * across tenants — V66/V67/V70). The {@code (tenant_id, email)} live-uniqueness
+     * (V78 {@code unique_tenant_email_active}) still backs this at the DB level.
+     */
+    @Query("SELECT COUNT(u) > 0 FROM User u "
+            + "WHERE u.email = :email AND u.tenant.id = :tenantId AND u.deletedAt IS NULL")
+    boolean existsByEmailAndTenantId(@Param("email") String email, @Param("tenantId") UUID tenantId);
+
+    /**
      * Lightweight lookup of a user's tenant ID by user ID.
      *
      * Used by the audit-log writer (AuditLogAdapter) to populate

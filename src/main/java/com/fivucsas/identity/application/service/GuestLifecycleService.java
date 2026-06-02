@@ -8,6 +8,8 @@ import com.fivucsas.identity.application.port.output.UserRoleRepositoryPort;
 import com.fivucsas.identity.application.port.output.RoleRepositoryPort;
 import com.fivucsas.identity.domain.repository.RefreshTokenRepository;
 import com.fivucsas.identity.domain.exception.ResourceNotFoundException;
+import com.fivucsas.identity.domain.exception.TenantSuspendedException;
+import com.fivucsas.identity.domain.exception.TenantUserQuotaExceededException;
 import com.fivucsas.identity.exception.DomainStateConflictException;
 import com.fivucsas.identity.infrastructure.email.EmailService;
 import lombok.RequiredArgsConstructor;
@@ -209,12 +211,46 @@ public class GuestLifecycleService {
             throw new DomainStateConflictException("Invitation has expired");
         }
 
-        // An account with this email already exists — creating the guest user would
-        // hit the users.email unique constraint and surface as an opaque 500 ("An
-        // unexpected error occurred") on the accept-invite page. Fail gracefully.
-        if (userRepository.existsByEmail(invitation.getEmail())) {
+        Tenant tenant = invitation.getTenant();
+
+        // P1-9 (2026-06-02): the guest-accept path created a real user row but
+        // bypassed every gate the registration / admin-create paths enforce.
+        //
+        // 1) Tenant must be able to accept users. A SUSPENDED / INACTIVE / expired
+        //    tenant must not gain a new (guest) member through a stale invite. Mirrors
+        //    AuthenticateUserService's tenant-status gate. canAcceptUsers() = ACTIVE
+        //    or TRIAL; anything else → 423 TENANT_SUSPENDED.
+        if (tenant != null && !tenant.canAcceptUsers()) {
+            log.warn("AUDIT: Guest accept refused — tenant not accepting users, tenantId={}, status={}, email={}",
+                    tenant.getId(), tenant.getStatus(), invitation.getEmail());
+            throw new TenantSuspendedException(tenant.getStatus());
+        }
+
+        // 2) Enforce the tenant max_users quota (same gate as RegisterUserService /
+        //    ManageUserService.createUser). Without it a tenant grows past its
+        //    license one accepted invite at a time. countByTenantId is a single
+        //    COUNT; >= means we never silently exceed the cap. Checked BEFORE the
+        //    bcrypt hash so a flooded tenant doesn't pay for a hashing round.
+        if (tenant != null) {
+            long currentUserCount = userRepository.countByTenantId(tenant.getId());
+            if (currentUserCount >= tenant.getMaxUsers()) {
+                log.warn("AUDIT: Guest accept refused — tenant quota exceeded, tenantId={}, currentUsers={}, maxUsers={}",
+                        tenant.getId(), currentUserCount, tenant.getMaxUsers());
+                throw new TenantUserQuotaExceededException(tenant.getMaxUsers());
+            }
+        }
+
+        // 3) Existing-email check, scoped to THIS tenant. The previous global
+        //    existsByEmail wrongly blocked a person who holds an account in a
+        //    DIFFERENT tenant under the same email (account-linking allows that —
+        //    V66/V67/V70), and it would never have matched the real collision
+        //    target anyway: the users insert collides on the per-tenant
+        //    (tenant_id, email) live-unique (V78), not on a global one. Scope the
+        //    guard to the invitation's tenant so it agrees with the constraint and
+        //    fails gracefully (409) instead of surfacing an opaque 500.
+        if (tenant != null && userRepository.existsByEmailAndTenantId(invitation.getEmail(), tenant.getId())) {
             throw new DomainStateConflictException(
-                    "An account with this email already exists. Please sign in instead.");
+                    "An account with this email already exists in this tenant. Please sign in instead.");
         }
 
         // Create guest user
