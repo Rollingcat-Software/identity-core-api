@@ -296,7 +296,15 @@ public class OAuth2Controller {
         Map<String, Object> response = new LinkedHashMap<>();
         response.put("client_id", client.getClientId());
         response.put("client_name", client.getClientName());
-        response.put("tenant_name", client.getTenant() != null ? client.getTenant().getName() : null);
+        // A cross-tenant platform client (the mobile app, the web dashboard) serves
+        // EVERY tenant's users, so the hosted login must NOT brand the sign-in with the
+        // platform's own sentinel tenant ("system") — that's confusing for a user from
+        // any other tenant. Present a neutral product name. A customer-tenant client
+        // keeps its real tenant name so its hosted login reads "Signing in to <Tenant>".
+        String tenantName = client.isCrossTenant()
+                ? "FIVUCSAS"
+                : (client.getTenant() != null ? client.getTenant().getName() : null);
+        response.put("tenant_name", tenantName);
         return ResponseEntity.ok().header(HttpHeaders.CACHE_CONTROL, "public, max-age=60").body(response);
     }
 
