@@ -1,6 +1,7 @@
 package com.fivucsas.identity.controller;
 
 import com.fivucsas.identity.application.dto.response.EnrollmentResponse;
+import com.fivucsas.identity.application.port.input.EnrollBiometricUseCase;
 import com.fivucsas.identity.application.port.input.ManageEnrollmentUseCase;
 import com.fivucsas.identity.application.port.output.BiometricServicePort;
 import com.fivucsas.identity.application.service.EnrollmentHealthService;
@@ -46,6 +47,7 @@ public class EnrollmentController {
     private final EnrollmentQueryService enrollmentQueryService;
     private final UserEnrollmentRepository enrollmentRepository;
     private final ManageEnrollmentUseCase manageEnrollmentUseCase;
+    private final EnrollBiometricUseCase enrollBiometricUseCase;
     private final BiometricServicePort biometricService;
     private final RbacAuthorizationService rbacService;
     private final EnrollmentHealthService enrollmentHealthService;
@@ -173,10 +175,14 @@ public class EnrollmentController {
 
         User currentUser = rbacService.getCurrentUser()
                 .orElseThrow(() -> new UnauthorizedException());
+        // Resolve the id ONCE and reuse it everywhere below — this is the single
+        // entity.User access in this method (keeps the hexagonal-boundary surface
+        // minimal; see UserDomainBoundaryTest).
+        final UUID currentUserId = currentUser.getId();
 
-        log.info("Enrollment submission for user: {}, nationalId: {}", currentUser.getId(), nationalId);
+        log.info("Enrollment submission for user: {}, nationalId: {}", currentUserId, nationalId);
 
-        Map<String, Object> enrollResult = biometricService.enrollFace(currentUser.getId(), faceImage);
+        Map<String, Object> enrollResult = biometricService.enrollFace(currentUserId, faceImage);
 
         boolean success = Boolean.TRUE.equals(enrollResult.get("success"));
 
@@ -184,15 +190,29 @@ public class EnrollmentController {
         // so the admin Enrollments table can show real numbers. Best-effort:
         // never fail enrollment because of admin bookkeeping.
         if (success) {
+            // FLAG-CONSISTENCY FIX: this legacy path used to enroll the embedding
+            // in the bio store but NEVER flip users.is_biometric_enrolled, so
+            // every user who enrolled here was a guaranteed-412 on /biometric/verify
+            // (which gates on the flag). Route the flag-flip through the SAME
+            // canonical, transactional, idempotent path the single-image
+            // controller uses (EnrollBiometricService.markBiometricEnrolled →
+            // domain User.enrollBiometric + enrolled_at). Defensive: never fail
+            // the enrollment response because of the flag write.
+            try {
+                enrollBiometricUseCase.markBiometricEnrolled(currentUserId);
+            } catch (Exception e) {
+                log.warn("Failed to flip is_biometric_enrolled for user {} after legacy submit-enroll: {}",
+                        currentUserId, e.getMessage());
+            }
             try {
                 java.math.BigDecimal quality = com.fivucsas.identity.application.service.EnrollBiometricService
                         .extractScore(enrollResult, "quality_score");
                 java.math.BigDecimal liveness = parseLivenessScoreToBigDecimal(livenessScore);
                 manageEnrollmentUseCase.recordBiometricScores(
-                        currentUser.getId(), AuthMethodType.FACE, quality, liveness);
+                        currentUserId, AuthMethodType.FACE, quality, liveness);
             } catch (Exception e) {
                 log.warn("Failed to persist enrollment scores for user {}: {}",
-                        currentUser.getId(), e.getMessage());
+                        currentUserId, e.getMessage());
             }
         }
 

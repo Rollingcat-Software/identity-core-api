@@ -2,6 +2,7 @@ package com.fivucsas.identity.controller;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fivucsas.identity.application.dto.response.EnrollmentResponse;
+import com.fivucsas.identity.application.port.input.EnrollBiometricUseCase;
 import com.fivucsas.identity.application.port.input.ManageEnrollmentUseCase;
 import com.fivucsas.identity.application.port.output.BiometricServicePort;
 import com.fivucsas.identity.application.port.output.CachePort;
@@ -59,6 +60,7 @@ class EnrollmentControllerTest {
     @MockBean private EnrollmentQueryService enrollmentQueryService;
     @MockBean private UserEnrollmentRepository enrollmentRepository;
     @MockBean private ManageEnrollmentUseCase manageEnrollmentUseCase;
+    @MockBean private EnrollBiometricUseCase enrollBiometricUseCase;
     @MockBean private BiometricServicePort biometricService;
     @MockBean private RbacAuthorizationService rbacService;
     @MockBean private EnrollmentHealthService enrollmentHealthService;

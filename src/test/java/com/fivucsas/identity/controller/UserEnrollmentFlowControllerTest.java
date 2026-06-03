@@ -1,5 +1,6 @@
 package com.fivucsas.identity.controller;
 
+import com.fivucsas.identity.application.port.input.EnrollBiometricUseCase;
 import com.fivucsas.identity.application.port.input.ManageEnrollmentUseCase;
 import com.fivucsas.identity.application.port.output.BiometricServicePort;
 import com.fivucsas.identity.application.service.EnrollmentQueryService;
@@ -31,6 +32,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -40,6 +43,7 @@ class UserEnrollmentFlowControllerTest {
     @Mock private EnrollmentQueryService enrollmentQueryService;
     @Mock private UserEnrollmentRepository enrollmentRepository;
     @Mock private ManageEnrollmentUseCase manageEnrollmentUseCase;
+    @Mock private EnrollBiometricUseCase enrollBiometricUseCase;
     @Mock private BiometricServicePort biometricService;
     @Mock private RbacAuthorizationService rbacService;
 
@@ -93,6 +97,10 @@ class UserEnrollmentFlowControllerTest {
             assertThat(response.getBody()).containsEntry("status", "COMPLETED");
             assertThat(response.getBody()).containsEntry("qualityScore", 92.5);
             assertThat(response.getBody()).containsEntry("livenessScore", 0.95);
+            // FLAG-CONSISTENCY FIX: a successful legacy submit must flip
+            // is_biometric_enrolled via the canonical path (previously it never did,
+            // producing guaranteed-412 users on /biometric/verify).
+            verify(enrollBiometricUseCase).markBiometricEnrolled(userId);
         }
 
         @Test
@@ -112,6 +120,8 @@ class UserEnrollmentFlowControllerTest {
             assertThat(response.getStatusCode().value()).isEqualTo(200);
             assertThat(response.getBody()).containsEntry("status", "FAILED");
             assertThat(response.getBody()).containsEntry("errorMessage", "No face detected");
+            // On a failed bio enroll the flag must NOT be flipped.
+            verify(enrollBiometricUseCase, never()).markBiometricEnrolled(any());
         }
 
         @Test

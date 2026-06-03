@@ -16,8 +16,11 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import org.springframework.web.multipart.MultipartFile;
+
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -94,7 +97,83 @@ public class EnrollBiometricService implements EnrollBiometricUseCase {
 
     @Override
     @Transactional
+    public Map<String, Object> enrollFaceMulti(UUID userId,
+                                               List<MultipartFile> images,
+                                               String tenantId,
+                                               String clientEmbedding,
+                                               String clientEmbeddings,
+                                               boolean optimize) {
+        log.info("Multi-image biometric enrollment for user: {} ({} images, optimize: {})",
+                userId, images != null ? images.size() : 0, optimize);
+
+        // 1) Call the external biometric service. This persists the embedding
+        //    in the bio face store (separate database) when it succeeds.
+        Map<String, Object> result = biometricService.enrollFaceMulti(
+                userId, images, tenantId, clientEmbedding, clientEmbeddings, optimize);
+
+        // 2) Parse success ROBUSTLY. The bio proxy returns success=false on an
+        //    error (errorResponse()), success=true on a clean enroll. We treat
+        //    ONLY an explicit truthy value as success — NOT the previous
+        //    !Boolean.FALSE.equals(...) which also flipped the flag when
+        //    "success" was missing/null/non-boolean. Mirrors the voice-enroll
+        //    tolerant parsing for an older bio build returning "true" as a string.
+        if (!isSuccess(result)) {
+            log.warn("Multi-image enrollment did not succeed for user {} — NOT flipping is_biometric_enrolled. Response: {}",
+                    userId, result);
+            return result;
+        }
+
+        // 3) Best-effort: persist quality + liveness scores onto the matching
+        //    user_enrollments row. Inside the transaction but defensive: admin
+        //    bookkeeping must never fail the enrollment.
+        try {
+            manageEnrollmentUseCase.recordBiometricScores(
+                    userId,
+                    AuthMethodType.FACE,
+                    extractScore(result, "quality_score"),
+                    extractScore(result, "liveness_score"));
+        } catch (Exception e) {
+            log.warn("Failed to persist multi-enroll scores for user {}: {}", userId, e.getMessage());
+        }
+
+        // 4) Flip is_biometric_enrolled (+ enrolled_at) in the SAME transaction
+        //    as the score write, so the flag and the bio embedding can no longer
+        //    drift apart on a partial failure.
+        markBiometricEnrolledInternal(userId);
+
+        return result;
+    }
+
+    /**
+     * Tolerant success parsing for the loose biometric-processor response map:
+     * an explicit boolean {@code true}, or the string {@code "true"} (older bio
+     * builds). Anything else — including a missing/null/non-boolean value — is
+     * treated as NOT a success, so the flag is never flipped speculatively.
+     */
+    private static boolean isSuccess(Map<String, Object> result) {
+        if (result == null) {
+            return false;
+        }
+        Object success = result.get("success");
+        return Boolean.TRUE.equals(success)
+                || "true".equalsIgnoreCase(String.valueOf(success));
+    }
+
+    @Override
+    @Transactional
     public void markBiometricEnrolled(UUID userId) {
+        markBiometricEnrolledInternal(userId);
+    }
+
+    /**
+     * Flag-flip shared by {@link #markBiometricEnrolled(UUID)} and the atomic
+     * {@link #enrollFaceMulti} path. NOT annotated {@code @Transactional} itself
+     * so that, when called from {@code enrollFaceMulti}, it joins the caller's
+     * transaction (a self-invocation would otherwise bypass the proxy and run
+     * non-transactionally). The public {@code markBiometricEnrolled} keeps its
+     * own transaction for external callers.
+     */
+    private void markBiometricEnrolledInternal(UUID userId) {
         // Uses the domain repository + domain User (hexagonal boundary: application
         // code must not depend on entity.User — see UserDomainBoundaryTest). The
         // domain->entity adapter maps is_biometric_enrolled + enrolled_at, so the flag

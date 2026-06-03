@@ -16,8 +16,10 @@ import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -309,6 +311,64 @@ public class BiometricServiceAdapter implements BiometricServicePort {
         if (clientEmbeddings != null && !clientEmbeddings.isBlank()) {
             bodyBuilder.part("client_embeddings", clientEmbeddings);
         }
+    }
+
+    @Override
+    public boolean hasEnrollment(UUID userId, String tenantId) {
+        if (userId == null) {
+            return false;
+        }
+        // Backed by the bio service's existing /embeddings/export capability,
+        // which lists the user_ids enrolled under a tenant. We do NOT add a new
+        // bio endpoint here; the reconciler can also batch-list a whole tenant in
+        // one call via exportEnrolledUserIds(tenantId) below. Fail-CLOSED: any
+        // transport / shape problem yields false so a flag is never flipped on an
+        // unconfirmed enrollment.
+        try {
+            Set<String> enrolled = exportEnrolledUserIds(tenantId);
+            return enrolled.contains(userId.toString());
+        } catch (Exception e) {
+            log.warn("hasEnrollment check failed for user {} (tenant {}) — failing closed: {}",
+                    userId, tenantId, e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Lists the set of user_ids that actually have a FACE embedding under the
+     * given tenant, via the bio {@code GET /embeddings/export} endpoint. Returns
+     * an empty set on any error (fail-closed). Exposed package-internally so the
+     * reconciler can list a whole tenant in ONE round-trip instead of one
+     * {@link #hasEnrollment} call per candidate user.
+     */
+    Set<String> exportEnrolledUserIds(String tenantId) {
+        String tenant = (tenantId != null && !tenantId.isBlank()) ? tenantId : "default";
+        Map<String, Object> response = restClient.get()
+                .uri(uriBuilder -> uriBuilder.path("/embeddings/export")
+                        .queryParam("tenant_id", tenant)
+                        .queryParam("include_metadata", false)
+                        .build())
+                .retrieve()
+                .body(MAP_TYPE);
+        Set<String> userIds = new HashSet<>();
+        if (response == null) {
+            return userIds;
+        }
+        Object embeddings = response.get("embeddings");
+        if (embeddings instanceof List<?> list) {
+            for (Object row : list) {
+                if (row instanceof Map<?, ?> rowMap) {
+                    Object uid = rowMap.get("user_id");
+                    if (uid == null) {
+                        uid = rowMap.get("id");
+                    }
+                    if (uid != null) {
+                        userIds.add(String.valueOf(uid));
+                    }
+                }
+            }
+        }
+        return userIds;
     }
 
     @Override

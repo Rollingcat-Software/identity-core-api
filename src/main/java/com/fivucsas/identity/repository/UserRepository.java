@@ -104,6 +104,14 @@ public interface UserRepository extends JpaRepository<User, UUID> {
 
     long countByIsBiometricEnrolled(boolean enrolled);
 
+    /**
+     * Finds all users with the given {@code is_biometric_enrolled} flag value.
+     * Used by the biometric-enrollment reconciler to scan the (small) set of
+     * users whose flag is {@code false} for ones that nonetheless have a real
+     * embedding in the bio store ("enrolled-but-412" repair).
+     */
+    List<User> findByIsBiometricEnrolled(boolean enrolled);
+
     @Query("SELECT COALESCE(SUM(u.verificationCount), 0) FROM User u")
     Long sumVerificationCount();
 

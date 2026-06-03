@@ -200,6 +200,31 @@ public interface BiometricServicePort {
     Map<String, Object> searchVoice(String voiceData);
 
     /**
+     * Returns whether the bio face store actually holds a FACE embedding for the
+     * given user under the given tenant.
+     *
+     * <p>This is the authoritative "is there really an enrollment?" check against
+     * the embedding store (a SEPARATE database owned by the biometric-processor),
+     * as opposed to the denormalized {@code users.is_biometric_enrolled} boolean
+     * in identity_core. It backs the enrollment-flag reconciler
+     * ({@code BiometricEnrollmentReconciler}) that repairs users who have a real
+     * embedding but a stale {@code false} flag (the "enrolled-but-412" class).</p>
+     *
+     * <p><b>Fail-CLOSED:</b> any transport error, unreachable service, or
+     * malformed response returns {@code false} — the reconciler must never flip a
+     * flag to {@code true} on the basis of an unconfirmed enrollment. A
+     * confirmed-absent embedding also returns {@code false}.</p>
+     *
+     * @param userId   the user to check
+     * @param tenantId the tenant the embedding is scoped to (the bio store is
+     *                 tenant-scoped); when null/blank the bio side falls back to
+     *                 its default tenant
+     * @return {@code true} only when an embedding for {@code userId} is confirmed
+     *         present in {@code tenantId}; {@code false} otherwise (incl. errors)
+     */
+    boolean hasEnrollment(UUID userId, String tenantId);
+
+    /**
      * Verifies the passive-authentication (chip-authenticity) of an eMRTD
      * (electronic passport / TR e-ID) by validating the {@code EF.SOD} →
      * Document Signer → CSCA certificate chain and that the supplied Data Group

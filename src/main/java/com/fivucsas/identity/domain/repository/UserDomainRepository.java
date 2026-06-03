@@ -56,6 +56,14 @@ public interface UserDomainRepository {
     long countByIsBiometricEnrolled(boolean enrolled);
 
     /**
+     * Finds all users with the given {@code is_biometric_enrolled} flag value,
+     * returning domain models. Backs the biometric-enrollment reconciler, which
+     * scans users flagged {@code false} for ones that actually have a bio-store
+     * embedding (the "enrolled-but-412" repair).
+     */
+    List<User> findByIsBiometricEnrolled(boolean enrolled);
+
+    /**
      * Searches users by query (name, email, or ID number).
      */
     List<User> searchUsers(String query);

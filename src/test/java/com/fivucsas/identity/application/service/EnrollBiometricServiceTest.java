@@ -415,4 +415,133 @@ class EnrollBiometricServiceTest {
             verify(userDomainRepository, never()).save(any());
         }
     }
+
+    @Nested
+    @DisplayName("enrollFaceMulti (atomic, transactional flag-flip)")
+    class EnrollFaceMulti {
+
+        private com.fivucsas.identity.domain.model.user.User domainUser(boolean enrolled) {
+            return com.fivucsas.identity.domain.model.user.User.builder()
+                .id(userId)
+                .email("test@example.com")
+                .isBiometricEnrolled(enrolled)
+                .build();
+        }
+
+        @Test
+        @DisplayName("Success flips is_biometric_enrolled, records scores, and returns the bio response")
+        void successFlipsFlagAndRecordsScores() {
+            var user = domainUser(false);
+            when(biometricService.enrollFaceMulti(eq(userId), any(), eq("t1"), eq(null), eq(null), eq(false)))
+                .thenReturn(Map.of(
+                    "success", true,
+                    "message", "Multi enrolled",
+                    "quality_score", 0.9234,
+                    "liveness_score", 0.9501));
+            when(userDomainRepository.findById(userId)).thenReturn(Optional.of(user));
+            when(userDomainRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+            Map<String, Object> result = enrollBiometricService.enrollFaceMulti(
+                userId, java.util.List.of(faceImage), "t1", null, null, false);
+
+            // Response contract preserved (raw bio map returned unchanged)
+            assertThat(result).containsEntry("success", true).containsEntry("message", "Multi enrolled");
+            // Flag flipped in the domain user + persisted
+            assertThat(user.hasBiometricEnrolled()).isTrue();
+            verify(userDomainRepository).save(user);
+            // Scores recorded
+            verify(manageEnrollmentUseCase).recordBiometricScores(
+                eq(userId),
+                eq(com.fivucsas.identity.domain.model.auth.AuthMethodType.FACE),
+                eq(new java.math.BigDecimal("0.9234")),
+                eq(new java.math.BigDecimal("0.9501")));
+        }
+
+        @Test
+        @DisplayName("Bio failure (success=false) does NOT flip the flag and returns the raw response")
+        void bioFailureDoesNotFlipFlag() {
+            when(biometricService.enrollFaceMulti(eq(userId), any(), eq(null), eq(null), eq(null), eq(false)))
+                .thenReturn(Map.of("success", false, "message", "Biometric service unavailable"));
+
+            Map<String, Object> result = enrollBiometricService.enrollFaceMulti(
+                userId, java.util.List.of(faceImage), null, null, null, false);
+
+            assertThat(result).containsEntry("success", false);
+            // No flag flip, no save, no score recording on failure
+            verify(userDomainRepository, never()).findById(any());
+            verify(userDomainRepository, never()).save(any());
+            verify(manageEnrollmentUseCase, never()).recordBiometricScores(any(), any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("Missing/null 'success' is treated as NOT a success — the flag is never flipped speculatively")
+        void missingSuccessKeyDoesNotFlipFlag() {
+            // The OLD controller logic used !Boolean.FALSE.equals(success), which
+            // flipped the flag when "success" was absent/null. The new robust
+            // parsing must NOT flip in that case.
+            java.util.Map<String, Object> noSuccessKey = new java.util.HashMap<>();
+            noSuccessKey.put("message", "ambiguous");
+            when(biometricService.enrollFaceMulti(eq(userId), any(), eq(null), eq(null), eq(null), eq(false)))
+                .thenReturn(noSuccessKey);
+
+            Map<String, Object> result = enrollBiometricService.enrollFaceMulti(
+                userId, java.util.List.of(faceImage), null, null, null, false);
+
+            assertThat(result).containsEntry("message", "ambiguous");
+            verify(userDomainRepository, never()).save(any());
+            verify(manageEnrollmentUseCase, never()).recordBiometricScores(any(), any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("Tolerant parsing: string \"true\" success flips the flag (older bio build)")
+        void stringTrueSuccessFlipsFlag() {
+            var user = domainUser(false);
+            java.util.Map<String, Object> stringSuccess = new java.util.HashMap<>();
+            stringSuccess.put("success", "true");
+            when(biometricService.enrollFaceMulti(eq(userId), any(), eq(null), eq(null), eq(null), eq(false)))
+                .thenReturn(stringSuccess);
+            when(userDomainRepository.findById(userId)).thenReturn(Optional.of(user));
+            when(userDomainRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+            enrollBiometricService.enrollFaceMulti(
+                userId, java.util.List.of(faceImage), null, null, null, false);
+
+            assertThat(user.hasBiometricEnrolled()).isTrue();
+            verify(userDomainRepository).save(user);
+        }
+
+        @Test
+        @DisplayName("Score-writer failure on success must not fail the enrollment, and the flag still flips")
+        void scoreWriterFailureStillFlipsFlag() {
+            var user = domainUser(false);
+            when(biometricService.enrollFaceMulti(eq(userId), any(), eq(null), eq(null), eq(null), eq(false)))
+                .thenReturn(Map.of("success", true, "quality_score", 0.9));
+            when(userDomainRepository.findById(userId)).thenReturn(Optional.of(user));
+            when(userDomainRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+            doThrow(new RuntimeException("DB hiccup"))
+                .when(manageEnrollmentUseCase)
+                .recordBiometricScores(any(), any(), any(), any());
+
+            Map<String, Object> result = enrollBiometricService.enrollFaceMulti(
+                userId, java.util.List.of(faceImage), null, null, null, false);
+
+            assertThat(result).containsEntry("success", true);
+            assertThat(user.hasBiometricEnrolled()).isTrue();
+            verify(userDomainRepository).save(user);
+        }
+
+        @Test
+        @DisplayName("Idempotent: already-enrolled user is not re-saved on a successful re-enroll")
+        void alreadyEnrolledNoResave() {
+            var user = domainUser(true);
+            when(biometricService.enrollFaceMulti(eq(userId), any(), eq(null), eq(null), eq(null), eq(true)))
+                .thenReturn(Map.of("success", true));
+            when(userDomainRepository.findById(userId)).thenReturn(Optional.of(user));
+
+            enrollBiometricService.enrollFaceMulti(
+                userId, java.util.List.of(faceImage), null, null, null, true);
+
+            verify(userDomainRepository, never()).save(any());
+        }
+    }
 }
