@@ -166,6 +166,7 @@ public class UserController {
             .lastName(request.getLastName())
             .phoneNumber(request.getPhoneNumber())
             .address(request.getAddress())
+            .status(request.getStatus())
             .userType(request.getUserType())
             .roleIds(request.getRoleIds())
             .build();

@@ -1,5 +1,6 @@
 package com.fivucsas.identity.application.dto.command;
 
+import com.fivucsas.identity.entity.UserStatus;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -28,6 +29,12 @@ public class UpdateUserCommand {
     private String lastName;
     private String phoneNumber;
     private String address;
+
+    /**
+     * Account status ({@link UserStatus}) to set. {@code null} = leave unchanged.
+     * The User entity's {@code @PreUpdate} keeps {@code is_active} in sync.
+     */
+    private UserStatus status;
 
     /**
      * Platform-tier ({@link com.fivucsas.identity.entity.UserType} NAME) to set.
