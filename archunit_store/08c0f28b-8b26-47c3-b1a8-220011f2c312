@@ -600,3 +600,5 @@ Method <com.fivucsas.identity.service.RefreshTokenService.revokeToken(java.lang.
 Method <com.fivucsas.identity.service.RefreshTokenService.rotateRefreshToken(com.fivucsas.identity.entity.RefreshToken, java.lang.String, java.lang.String)> calls method <com.fivucsas.identity.entity.User.getEmail()> in (RefreshTokenService.java:220)
 Method <com.fivucsas.identity.service.RefreshTokenService.verifyExpiration(com.fivucsas.identity.entity.RefreshToken)> calls method <com.fivucsas.identity.entity.User.getEmail()> in (RefreshTokenService.java:127)
 Method <com.fivucsas.identity.service.RefreshTokenService.verifyExpiration(com.fivucsas.identity.entity.RefreshToken)> calls method <com.fivucsas.identity.entity.User.getId()> in (RefreshTokenService.java:129)
+Method <com.fivucsas.identity.application.service.ManageDeviceService.upsertPushTokenDevice(java.util.UUID, java.lang.String, java.lang.String)> calls method <com.fivucsas.identity.entity.User.getTenant()> in (ManageDeviceService.java:172)
+Method <com.fivucsas.identity.controller.UserController.listMyReceivedInvitations()> calls method <com.fivucsas.identity.entity.User.getEmail()> in (UserController.java:400)

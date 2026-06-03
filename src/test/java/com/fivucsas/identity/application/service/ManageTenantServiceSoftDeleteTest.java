@@ -59,6 +59,9 @@ class ManageTenantServiceSoftDeleteTest {
     @Mock
     private com.fivucsas.identity.security.RbacAuthorizationService rbacService;
 
+    @Mock
+    private com.fivucsas.identity.infrastructure.multitenancy.TenantFilterBypass tenantFilterBypass;
+
     @InjectMocks
     private ManageTenantService service;
 
@@ -70,6 +73,10 @@ class ManageTenantServiceSoftDeleteTest {
         // P1-4 added rbacService to ManageTenantService (audit actor via currentActorId()).
         org.mockito.Mockito.lenient().when(rbacService.getCurrentUserId())
                 .thenReturn(java.util.Optional.empty());
+        // #11 — mapToResponse counts members via tenantFilterBypass; run inline.
+        org.mockito.Mockito.lenient().when(tenantFilterBypass.runWithoutTenantFilter(
+                        org.mockito.ArgumentMatchers.any()))
+                .thenAnswer(inv -> ((java.util.function.Supplier<?>) inv.getArgument(0)).get());
         tenantId = UUID.randomUUID();
         Instant now = Instant.now();
         existingTenant = Tenant.reconstitute(

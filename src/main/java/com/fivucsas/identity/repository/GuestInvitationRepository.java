@@ -76,6 +76,18 @@ public interface GuestInvitationRepository extends JpaRepository<GuestInvitation
     List<GuestInvitation> findByInvitedByIdOrderByCreatedAtDesc(UUID invitedById);
 
     /**
+     * #10 — Find all invitations RECEIVED by an email address (the member-side
+     * "My Invitations" list), across every tenant, most-recent first.
+     * Case-insensitive so a differently-cased login email still matches the
+     * invitee address. GuestInvitation has no {@code @Filter(tenantFilter)}, so
+     * this naturally spans tenants — correct for "invitations addressed to me".
+     */
+    @Query("SELECT gi FROM GuestInvitation gi " +
+           "WHERE LOWER(gi.email) = LOWER(:email) " +
+           "ORDER BY gi.createdAt DESC")
+    List<GuestInvitation> findByEmailIgnoreCaseOrderByCreatedAtDesc(@Param("email") String email);
+
+    /**
      * Count active guests in a tenant.
      */
     @Query("SELECT COUNT(gi) FROM GuestInvitation gi " +

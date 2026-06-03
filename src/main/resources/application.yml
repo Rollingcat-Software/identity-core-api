@@ -27,6 +27,19 @@ app:
   # ({frontend-base-url}/accept-invite?token=...). Override per environment
   # with APP_FRONTEND_BASE_URL.
   frontend-base-url: ${APP_FRONTEND_BASE_URL:https://app.fivucsas.com}
+  # Bucket4j login + API limiter thresholds (RateLimitService). Defaults preserve
+  # the historical hardcoded behavior: login = 10 attempts / 5 min per IP;
+  # api = 100 requests / min per user. Override per environment via the
+  # APP_RATE_LIMIT_* env vars (no rebuild) — used by demo-day relief to relax
+  # the throttle. Other limiters (register, mfa-step, biometric, export, etc.)
+  # remain fixed by design.
+  rate-limit:
+    login:
+      capacity: ${APP_RATE_LIMIT_LOGIN_CAPACITY:10}
+      window-minutes: ${APP_RATE_LIMIT_LOGIN_WINDOW_MINUTES:5}
+    api:
+      capacity: ${APP_RATE_LIMIT_API_CAPACITY:100}
+      window-minutes: ${APP_RATE_LIMIT_API_WINDOW_MINUTES:1}
   # Identity / account-linking layer (Model A — docs/IDENTITY_ACCOUNT_LINKING_DESIGN.md).
   identity:
     # Phase 4 (LAST, widest blast radius — ships DORMANT). When false (default)

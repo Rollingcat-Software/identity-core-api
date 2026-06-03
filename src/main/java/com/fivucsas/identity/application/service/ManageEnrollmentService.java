@@ -4,6 +4,7 @@ import com.fivucsas.identity.application.dto.response.EnrollmentResponse;
 import com.fivucsas.identity.application.port.input.ManageEnrollmentUseCase;
 import com.fivucsas.identity.application.port.output.BiometricServicePort;
 import com.fivucsas.identity.application.port.output.NfcCardRepositoryPort;
+import com.fivucsas.identity.application.port.output.UserDeviceRepositoryPort;
 import com.fivucsas.identity.application.port.output.WebAuthnCredentialRepositoryPort;
 import com.fivucsas.identity.domain.model.auth.AuthMethodType;
 import com.fivucsas.identity.entity.NfcCard;
@@ -42,6 +43,7 @@ public class ManageEnrollmentService implements ManageEnrollmentUseCase {
     private final BiometricServicePort biometricServicePort;
     private final NfcCardRepositoryPort nfcCardRepository;
     private final WebAuthnCredentialRepositoryPort webAuthnCredentialRepository;
+    private final UserDeviceRepositoryPort userDeviceRepository;
     private final TenantFilterBypass tenantFilterBypass;
 
     @Override
@@ -78,6 +80,42 @@ public class ManageEnrollmentService implements ManageEnrollmentUseCase {
     private void ensureSessionBoundEnrollments(UUID userId) {
         ensureAutoBoundEnrollment(userId, AuthMethodType.EMAIL_OTP);
         ensureAutoBoundEnrollment(userId, AuthMethodType.QR_CODE);
+        // #21 — device-implicit methods. APPROVE_LOGIN and PASSKEY are seeded
+        // requires_enrollment=true, but they have no biometric "enrollment" flow:
+        // APPROVE_LOGIN works once the user has a device with a push token (now
+        // created on mobile login, see ManageDeviceService #15); PASSKEY works
+        // once the user has a discoverable WebAuthn credential. Without a row they
+        // were reported as a blocking "not enrolled" in the auth-methods UI. Bind
+        // them ENROLLED — but ONLY when the backing data actually exists, so an
+        // unprovisioned account still correctly shows them as not-yet-usable.
+        if (hasPushTokenDevice(userId)) {
+            ensureAutoBoundEnrollment(userId, AuthMethodType.APPROVE_LOGIN);
+        }
+        if (hasDiscoverablePasskey(userId)) {
+            ensureAutoBoundEnrollment(userId, AuthMethodType.PASSKEY);
+        }
+    }
+
+    /** APPROVE_LOGIN is device-implicit: usable once a device has a push token. */
+    private boolean hasPushTokenDevice(UUID userId) {
+        try {
+            return userDeviceRepository.findAllByUserId(userId).stream()
+                    .anyMatch(d -> d.getPushToken() != null && !d.getPushToken().isBlank());
+        } catch (Exception e) {
+            log.debug("APPROVE_LOGIN device check skipped for user {}: {}", userId, e.getMessage());
+            return false;
+        }
+    }
+
+    /** PASSKEY is device-implicit: usable once a discoverable credential exists. */
+    private boolean hasDiscoverablePasskey(UUID userId) {
+        try {
+            return webAuthnCredentialRepository.findAllByUserId(userId).stream()
+                    .anyMatch(com.fivucsas.identity.entity.WebAuthnCredential::isDiscoverable);
+        } catch (Exception e) {
+            log.debug("PASSKEY credential check skipped for user {}: {}", userId, e.getMessage());
+            return false;
+        }
     }
 
     private void ensureAutoBoundEnrollment(UUID userId, AuthMethodType methodType) {

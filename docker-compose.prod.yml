@@ -32,7 +32,14 @@ services:
       REDIS_DATABASE: 0
       REDIS_TIMEOUT: 5000
       JWT_SECRET: ${JWT_SECRET}
-      JWT_ACCESS_TOKEN_EXPIRATION: 3600000
+      # Access-token TTL. MUST be listed in this environment: block — the service
+      # uses an explicit environment: block, NOT env_file:, so a var only in
+      # .env.prod is NOT passed into the container. The app reads jwt.expiration
+      # (application-prod.yml:140 → JwtService @Value). Default 900000 (15min) =
+      # no behavior change; bump JWT_EXPIRATION in .env.prod + `up -d` (no rebuild)
+      # to lengthen the session for demo day. The old JWT_ACCESS_TOKEN_EXPIRATION
+      # var below was read by nothing; replaced by this controlling knob.
+      JWT_EXPIRATION: ${JWT_EXPIRATION:-900000}
       JWT_REFRESH_TOKEN_EXPIRATION: 604800000
       JWT_ISSUER: rollingcat-identity-core
       JWT_AUDIENCE: rollingcat-clients
@@ -78,8 +85,20 @@ services:
       ENCRYPTION_KEY: ${ENCRYPTION_KEY}
       ENCRYPTION_ALGORITHM: AES/GCM/NoPadding
       RATE_LIMIT_ENABLED: "true"
-      RATE_LIMIT_LOGIN_PER_MINUTE: 5
-      RATE_LIMIT_API_PER_MINUTE: 100
+      # Login + API Bucket4j limiter thresholds. These ARE now read by the app
+      # (RateLimitService @Value, 2026-06-03 — previously the constants were
+      # hardcoded and RATE_LIMIT_LOGIN_PER_MINUTE/RATE_LIMIT_API_PER_MINUTE were
+      # dead). Defaults below preserve today's behavior exactly:
+      #   login = 10 attempts per 5 minutes per IP
+      #   api   = 100 requests per minute per user
+      # Raise APP_RATE_LIMIT_LOGIN_CAPACITY / APP_RATE_LIMIT_API_CAPACITY (and,
+      # if needed, the *_WINDOW_MINUTES) in .env.prod + `up -d` (no rebuild) for
+      # demo-day relief. MUST be listed in this environment: block (env_file: is
+      # not used). Reversible: unset to restore the hardened defaults.
+      APP_RATE_LIMIT_LOGIN_CAPACITY: ${APP_RATE_LIMIT_LOGIN_CAPACITY:-10}
+      APP_RATE_LIMIT_LOGIN_WINDOW_MINUTES: ${APP_RATE_LIMIT_LOGIN_WINDOW_MINUTES:-5}
+      APP_RATE_LIMIT_API_CAPACITY: ${APP_RATE_LIMIT_API_CAPACITY:-100}
+      APP_RATE_LIMIT_API_WINDOW_MINUTES: ${APP_RATE_LIMIT_API_WINDOW_MINUTES:-1}
       MULTITENANCY_ENABLED: "true"
       MULTITENANCY_ISOLATION_LEVEL: ROW_LEVEL
       MULTITENANCY_DEFAULT_TENANT: system

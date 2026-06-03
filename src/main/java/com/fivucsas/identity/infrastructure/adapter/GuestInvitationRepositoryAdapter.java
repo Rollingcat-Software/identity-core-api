@@ -54,6 +54,11 @@ public class GuestInvitationRepositoryAdapter implements GuestInvitationReposito
     }
 
     @Override
+    public List<GuestInvitation> findByEmailIgnoreCaseOrderByCreatedAtDesc(String email) {
+        return jpaRepository.findByEmailIgnoreCaseOrderByCreatedAtDesc(email);
+    }
+
+    @Override
     public List<GuestInvitation> findAllOrderByCreatedAtDesc() {
         return jpaRepository.findAllByOrderByCreatedAtDesc();
     }

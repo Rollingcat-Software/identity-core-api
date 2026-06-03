@@ -250,8 +250,13 @@ public class ApproveLoginService {
         }
 
         // Number-matching: the approver must echo the number their device shows.
+        // matchNumber is a zero-padded two-digit STRING (e.g. "07"). Compare as
+        // a zero-pad-normalized string so a client that accidentally drops the
+        // leading zero (parsed "07" → 7 → "7") still matches — without ever
+        // coercing it through a numeric type on either side (which is what loses
+        // the leading zero in the first place). Defensive, demo-day hardening.
         String expectedNumber = (String) data.get("matchNumber");
-        if (expectedNumber == null || !expectedNumber.equals(presentedNumber)) {
+        if (!matchNumbersEqual(expectedNumber, presentedNumber)) {
             log.warn("Approve-login decide: match-number mismatch for session {}", sessionId);
             response.put("status", STATUS_PENDING);
             response.put("message", "Match number does not match");
@@ -307,5 +312,36 @@ public class ApproveLoginService {
         response.put("message", outcome.mfaPending() ? "Login approved — additional verification required"
                 : "Login approved");
         return response;
+    }
+
+    /**
+     * Zero-pad-safe match-number comparison. Trims, and if BOTH sides are purely
+     * numeric, left-pads each to two digits before comparing — so "07" and "7"
+     * (a client that dropped the leading zero) still match. Non-numeric or null
+     * inputs never match. Never routes the value through an int (that is exactly
+     * what strips the leading zero).
+     */
+    static boolean matchNumbersEqual(String expected, String presented) {
+        if (expected == null || presented == null) {
+            return false;
+        }
+        String e = expected.trim();
+        String p = presented.trim();
+        if (e.isEmpty() || p.isEmpty()) {
+            return false;
+        }
+        if (e.equals(p)) {
+            return true;
+        }
+        // Only normalize when both are short numeric strings (the match-number
+        // domain) — avoids surprising matches for arbitrary strings.
+        if (e.matches("\\d{1,2}") && p.matches("\\d{1,2}")) {
+            return padTwo(e).equals(padTwo(p));
+        }
+        return false;
+    }
+
+    private static String padTwo(String n) {
+        return n.length() == 1 ? "0" + n : n;
     }
 }

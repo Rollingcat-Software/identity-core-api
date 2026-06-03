@@ -276,4 +276,53 @@ class ApproveLoginServiceTest {
             assertThat(service.getSession("missing")).containsEntry("status", "EXPIRED");
         }
     }
+
+    @Nested
+    @DisplayName("matchNumber zero-pad-safe comparison (#21)")
+    class MatchNumberComparison {
+
+        @Test
+        @DisplayName("exact equal strings match")
+        void exactMatch() {
+            assertThat(ApproveLoginService.matchNumbersEqual("07", "07")).isTrue();
+            assertThat(ApproveLoginService.matchNumbersEqual("42", "42")).isTrue();
+        }
+
+        @Test
+        @DisplayName("leading-zero dropped by a client still matches (07 == 7)")
+        void leadingZeroNormalized() {
+            assertThat(ApproveLoginService.matchNumbersEqual("07", "7")).isTrue();
+            assertThat(ApproveLoginService.matchNumbersEqual("7", "07")).isTrue();
+            assertThat(ApproveLoginService.matchNumbersEqual("00", "0")).isTrue();
+        }
+
+        @Test
+        @DisplayName("whitespace is trimmed before comparing")
+        void trimmed() {
+            assertThat(ApproveLoginService.matchNumbersEqual("07", " 07 ")).isTrue();
+        }
+
+        @Test
+        @DisplayName("genuinely different numbers do not match")
+        void mismatch() {
+            assertThat(ApproveLoginService.matchNumbersEqual("07", "08")).isFalse();
+            assertThat(ApproveLoginService.matchNumbersEqual("12", "21")).isFalse();
+        }
+
+        @Test
+        @DisplayName("null / blank inputs never match")
+        void nullOrBlank() {
+            assertThat(ApproveLoginService.matchNumbersEqual(null, "07")).isFalse();
+            assertThat(ApproveLoginService.matchNumbersEqual("07", null)).isFalse();
+            assertThat(ApproveLoginService.matchNumbersEqual("", "")).isFalse();
+            assertThat(ApproveLoginService.matchNumbersEqual("07", "  ")).isFalse();
+        }
+
+        @Test
+        @DisplayName("non-numeric strings only match when exactly equal")
+        void nonNumeric() {
+            assertThat(ApproveLoginService.matchNumbersEqual("ab", "ab")).isTrue();
+            assertThat(ApproveLoginService.matchNumbersEqual("ab", "cd")).isFalse();
+        }
+    }
 }

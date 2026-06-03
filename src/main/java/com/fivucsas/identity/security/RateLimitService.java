@@ -4,6 +4,7 @@ import io.github.bucket4j.Bandwidth;
 import io.github.bucket4j.Bucket;
 import io.github.bucket4j.Refill;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
@@ -41,6 +42,26 @@ public class RateLimitService {
      * After this limit, oldest entries are evicted.
      */
     private static final int MAX_ENTRIES_PER_MAP = 10_000;
+
+    // ---------------------------------------------------------------------
+    // Configurable thresholds (2026-06-03 pre-demo). The login + api limiters
+    // were previously hardcoded, so the demo-day-relief script's
+    // RATE_LIMIT_LOGIN_PER_MINUTE / RATE_LIMIT_API_PER_MINUTE env knobs were
+    // dead. Defaults below preserve the EXACT prior behavior (login = 10 per
+    // 5 minutes per IP; api = 100 per minute per user). Reversible: leaving the
+    // env vars unset keeps today's limits; raising them relaxes the throttle
+    // for demo day without a rebuild. ADDITIVE — no other limiter is touched.
+    @Value("${app.rate-limit.login.capacity:10}")
+    private long loginCapacity;
+
+    @Value("${app.rate-limit.login.window-minutes:5}")
+    private long loginWindowMinutes;
+
+    @Value("${app.rate-limit.api.capacity:100}")
+    private long apiCapacity;
+
+    @Value("${app.rate-limit.api.window-minutes:1}")
+    private long apiWindowMinutes;
 
     // Separate buckets for different endpoints (with creation timestamps for eviction)
     private final ConcurrentHashMap<String, TimedBucket> loginBuckets = new ConcurrentHashMap<>();
@@ -358,8 +379,10 @@ public class RateLimitService {
     }
 
     private Bucket createLoginBucket() {
-        // 10 attempts per 5 minutes
-        Bandwidth limit = Bandwidth.classic(10, Refill.intervally(10, Duration.ofMinutes(5)));
+        // Default 10 attempts per 5 minutes per IP; configurable via
+        // app.rate-limit.login.{capacity,window-minutes} for demo-day relief.
+        Bandwidth limit = Bandwidth.classic(loginCapacity,
+            Refill.intervally(loginCapacity, Duration.ofMinutes(loginWindowMinutes)));
         return Bucket.builder()
             .addLimit(limit)
             .build();
@@ -390,8 +413,10 @@ public class RateLimitService {
     }
 
     private Bucket createApiBucket() {
-        // 100 requests per minute
-        Bandwidth limit = Bandwidth.classic(100, Refill.intervally(100, Duration.ofMinutes(1)));
+        // Default 100 requests per minute per user; configurable via
+        // app.rate-limit.api.{capacity,window-minutes} for demo-day relief.
+        Bandwidth limit = Bandwidth.classic(apiCapacity,
+            Refill.intervally(apiCapacity, Duration.ofMinutes(apiWindowMinutes)));
         return Bucket.builder()
             .addLimit(limit)
             .build();
