@@ -35,4 +35,21 @@ public interface NfcCardRepositoryPort {
     List<NfcCard> findByUserIdAndIsActiveTrue(UUID userId);
 
     List<NfcCard> findByUserId(UUID userId);
+
+    /**
+     * Cross-membership (NFC only, flag-gated): whether ANY active card exists
+     * across the person's ({@code identityId}) linked memberships, EXCLUDING the
+     * requesting membership's tenant. Controlled cross-tenant read backed by a
+     * native query (see the JPA repository javadoc).
+     */
+    boolean existsActiveCardForIdentityExcludingTenant(UUID identityId, UUID excludeTenantId);
+
+    /**
+     * Cross-membership (NFC only, flag-gated): resolves an active card matching
+     * the (canonical) {@code cardSerial} across the person's linked memberships,
+     * EXCLUDING the requesting membership's tenant. Controlled cross-tenant read
+     * backed by a native query (see the JPA repository javadoc).
+     */
+    Optional<NfcCard> findActiveCardBySerialForIdentityExcludingTenant(
+            String cardSerial, UUID identityId, UUID excludeTenantId);
 }

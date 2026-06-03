@@ -12,8 +12,8 @@ import com.fivucsas.identity.entity.NfcCard;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.entity.UserEnrollment;
 import com.fivucsas.identity.entity.WebAuthnCredential;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
@@ -30,7 +30,6 @@ import java.util.*;
  * genuinely usable options.
  */
 @Service
-@RequiredArgsConstructor
 @Slf4j
 public class EnrollmentHealthService {
 
@@ -74,6 +73,47 @@ public class EnrollmentHealthService {
     private final BiometricServicePort biometricServicePort;
 
     /**
+     * Spring Data {@code User} repository — used ONLY for the cross-membership
+     * identity helpers ({@code findIdentityIdById} / {@code findTenantIdById}),
+     * which the domain {@link UserRepository} port does not expose. Mirrors
+     * {@code BiometricConsentService}, the other established cross-membership
+     * resolver. NOT used for the per-user lookups (those stay on the domain port).
+     */
+    private final com.fivucsas.identity.repository.UserRepository userJpaRepository;
+
+    /**
+     * Cross-membership NFC enrollment resolution (NFC_DOCUMENT only). When false
+     * (default), enrollment health reads ONLY the active membership's cards —
+     * byte-identical to legacy behavior. When true, a card enrolled under another
+     * of the person's (identity) linked memberships counts as enrolled. NFC
+     * possession is identity-level → EXEMPT from biometric consent (product
+     * decision); every cross-identity match is audit-logged.
+     */
+    private final boolean crossMembershipNfcEnabled;
+
+    public EnrollmentHealthService(
+            UserEnrollmentRepositoryPort userEnrollmentRepository,
+            UserRepository userRepository,
+            WebAuthnCredentialRepositoryPort webAuthnCredentialRepository,
+            UserDeviceRepositoryPort userDeviceRepository,
+            NfcCardRepositoryPort nfcCardRepository,
+            StringRedisTemplate redisTemplate,
+            BiometricServicePort biometricServicePort,
+            com.fivucsas.identity.repository.UserRepository userJpaRepository,
+            @Value("${app.identity.cross-membership-enrollment-resolution:false}")
+            boolean crossMembershipNfcEnabled) {
+        this.userEnrollmentRepository = userEnrollmentRepository;
+        this.userRepository = userRepository;
+        this.webAuthnCredentialRepository = webAuthnCredentialRepository;
+        this.userDeviceRepository = userDeviceRepository;
+        this.nfcCardRepository = nfcCardRepository;
+        this.redisTemplate = redisTemplate;
+        this.biometricServicePort = biometricServicePort;
+        this.userJpaRepository = userJpaRepository;
+        this.crossMembershipNfcEnabled = crossMembershipNfcEnabled;
+    }
+
+    /**
      * Validates all ENROLLED enrollments for a user against actual backing data.
      * Returns a map of method type to whether it is genuinely usable.
      * Stale enrollments (ENROLLED but no backing data) are auto-revoked.
@@ -109,6 +149,20 @@ public class EnrollmentHealthService {
                 enrollment.revoke();
                 userEnrollmentRepository.save(enrollment);
             }
+        }
+
+        // Cross-membership NFC (flag-gated, NFC only): a person may hold their NFC
+        // card under one membership (e.g. tenant FIVUCSAS) but log in via another
+        // (e.g. tenant Marmara, reached through hosted login) whose active row has
+        // NO NFC user_enrollments row at all — so the loop above never produced an
+        // NFC entry. Surface NFC as enrolled when a sibling membership has an
+        // active card, so AvailableMethodsResolver offers it. (When the active row
+        // DOES have an NFC enrollment, hasActiveNfcCard already resolved it above —
+        // and that same cross-membership hit also prevents an erroneous auto-revoke
+        // of a legitimately empty active-row card set.)
+        if (crossMembershipNfcEnabled && !Boolean.TRUE.equals(healthMap.get(AuthMethodType.NFC_DOCUMENT))
+                && hasCrossMembershipActiveNfcCard(userId)) {
+            healthMap.put(AuthMethodType.NFC_DOCUMENT, true);
         }
 
         return healthMap;
@@ -234,10 +288,40 @@ public class EnrollmentHealthService {
     }
 
     /**
-     * Checks whether the user has at least one active NFC card.
+     * Checks whether the user has at least one active NFC card on the ACTIVE
+     * membership row. When the cross-membership flag is ON and the active row has
+     * none, falls back to the person's other linked memberships (NFC possession is
+     * identity-level, EXEMPT from biometric consent — product decision).
      */
     private boolean hasActiveNfcCard(UUID userId) {
         List<NfcCard> activeCards = nfcCardRepository.findByUserIdAndIsActiveTrue(userId);
-        return !activeCards.isEmpty();
+        if (!activeCards.isEmpty()) {
+            return true;
+        }
+        return crossMembershipNfcEnabled && hasCrossMembershipActiveNfcCard(userId);
+    }
+
+    /**
+     * Cross-membership resolution: whether the person ({@code identity_id}) holds
+     * an active NFC card under ANY linked membership OTHER than the active one.
+     * Uses the controlled native-bypass read (the {@code nfc_cards → users} join is
+     * not scoped by the Hibernate tenant filter). Audit-logs each cross-identity
+     * match. Returns false (and logs nothing) when the flag is OFF, the user has no
+     * identity, or no sibling card exists.
+     */
+    private boolean hasCrossMembershipActiveNfcCard(UUID userId) {
+        UUID identityId = userJpaRepository.findIdentityIdById(userId).orElse(null);
+        UUID requestingTenantId = userJpaRepository.findTenantIdById(userId).orElse(null);
+        if (identityId == null || requestingTenantId == null) {
+            return false;
+        }
+        boolean found = nfcCardRepository
+                .existsActiveCardForIdentityExcludingTenant(identityId, requestingTenantId);
+        if (found) {
+            log.info("AUDIT: cross-identity NFC enrollment resolved — user {} (tenant {}) "
+                    + "treated as NFC-enrolled via a sibling membership of identity {}",
+                    userId, requestingTenantId, identityId);
+        }
+        return found;
     }
 }

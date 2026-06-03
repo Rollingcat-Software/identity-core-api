@@ -63,6 +63,17 @@ app:
     # minted — limits blast radius if one session is stolen, since a switch can
     # reach a higher-privileged linked membership. v1 ships default-false.
     require-stepup-on-switch: ${APP_IDENTITY_REQUIRE_STEPUP_ON_SWITCH:false}
+    # Cross-membership ENROLLMENT RESOLUTION (NFC_DOCUMENT only — ships DARK).
+    # When false (default) factor-enrollment + NFC verify read ONLY the active
+    # membership row's data, byte-identical to today. When true, an NFC_DOCUMENT
+    # card enrolled under ANY of the person's (identity_id) linked memberships is
+    # treated as enrolled + accepted at verify, even when the active membership
+    # (e.g. a tenant reached via hosted login) has no card of its own. Possession
+    # of the physical document is identity-level, so this needs NO biometric
+    # consent (product decision); every cross-identity match is audit-logged.
+    # NFC-only by design — do NOT extend to TOTP/WebAuthn here. Flip without a
+    # redeploy via FIVUCSAS_CROSS_MEMBERSHIP_ENROLLMENT_RESOLUTION; revert = unset.
+    cross-membership-enrollment-resolution: ${FIVUCSAS_CROSS_MEMBERSHIP_ENROLLMENT_RESOLUTION:false}
   # Config-driven login engine (task #16). Ships DARK — default FALSE so the
   # entire login path is byte-identical to the legacy password-first behavior
   # (hard password gate stays; usernameless entry points mint tokens directly).
