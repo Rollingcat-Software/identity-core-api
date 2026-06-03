@@ -58,14 +58,25 @@ public class ManageNfcCardService {
      * explicit re-authorization (the {@code reauthorize} flag) rather than
      * happening as an invisible side-effect of a tap.</p>
      */
-    public record EnrollResult(Status status, NfcCard card, UUID targetUserId) {
+    public record EnrollResult(Status status, NfcCard card, UUID targetUserId, boolean alreadyRegistered) {
         public enum Status { OK, CONFLICT, USER_NOT_FOUND, CARD_REVOKED, OWNED_BY_ANOTHER_USER }
+
+        /** Rejection statuses carry no card and were never "already registered". */
+        static EnrollResult rejection(Status status, UUID targetUserId) {
+            return new EnrollResult(status, null, targetUserId, false);
+        }
     }
 
     @Transactional
     public EnrollResult enrollCard(UUID requestedUserId, String rawCardSerial,
                                    String cardType, String label) {
-        return enrollCard(requestedUserId, rawCardSerial, cardType, label, false);
+        return enrollCard(requestedUserId, rawCardSerial, cardType, label, false, null);
+    }
+
+    @Transactional
+    public EnrollResult enrollCard(UUID requestedUserId, String rawCardSerial,
+                                   String cardType, String label, boolean reauthorize) {
+        return enrollCard(requestedUserId, rawCardSerial, cardType, label, reauthorize, null);
     }
 
     /**
@@ -79,31 +90,54 @@ public class ManageNfcCardService {
      *        {@link EnrollResult.Status#OWNED_BY_ANOTHER_USER}) so they never
      *        happen as a silent side-effect of a tap (P1-8). A benign re-enroll
      *        of the SAME owner's still-active card is unaffected.
+     * @param documentNumber OPTIONAL stable eID/passport DG1 document number
+     *        (e.g. "A28883159"), read during a BAC chip read. When present it is
+     *        the STABLE identity of the card and is used as the canonical card
+     *        serial INSTEAD of the random NFC UID — an eID presents a DIFFERENT
+     *        random UID on every tap, so keying on the document number lets a
+     *        re-read UPDATE/REACTIVATE the existing row rather than inserting a
+     *        duplicate. {@code nfc_cards} has no separate document-number column,
+     *        so the document number IS the stored card_serial and the existing
+     *        serial-based de-dup naturally collapses the re-reads. When ABSENT
+     *        (plain MIFARE UID cards), behaviour is byte-for-byte the legacy
+     *        UID/serial-based de-dup.
      */
     @Transactional
     public EnrollResult enrollCard(UUID requestedUserId, String rawCardSerial,
-                                   String cardType, String label, boolean reauthorize) {
+                                   String cardType, String label, boolean reauthorize,
+                                   String documentNumber) {
         User currentUser = rbacService.getCurrentUser()
                 .orElseThrow(UnauthorizedException::new);
         Tenant tenant = currentUser.getTenant();
 
-        // Normalize the serial to the canonical UPPERHEX form at ingest so a
-        // card enrolled from mobile (UPPERHEX) matches one verified from web
-        // (lowercase:colons) and vice-versa. Stored value is always canonical.
-        String cardSerial = NfcSerial.canonicalize(rawCardSerial);
+        // De-dup key selection (NFC eID random-UID fix):
+        //   * documentNumber PRESENT (eID/passport BAC read) → the document number
+        //     is the STABLE card identity. Canonicalize THAT and store it as the
+        //     card_serial so a re-read (which presents a fresh random UID) resolves
+        //     to the SAME row and reactivates/updates it instead of inserting a
+        //     duplicate.
+        //   * documentNumber ABSENT (plain MIFARE UID card) → legacy behaviour:
+        //     canonicalize the raw UID/serial and de-dup on it.
+        // Stored value is always the canonical form so cross-client (web ↔ mobile)
+        // shapes resolve to one row.
+        String dedupSource = (documentNumber != null && !documentNumber.isBlank())
+                ? documentNumber
+                : rawCardSerial;
+        String cardSerial = NfcSerial.canonicalize(dedupSource);
 
         UUID targetUserId = requestedUserId != null ? requestedUserId : currentUser.getId();
 
         if (nfcCardRepository.existsByCardSerialAndTenantIdAndIsActiveTrue(cardSerial, tenant.getId())) {
-            return new EnrollResult(EnrollResult.Status.CONFLICT, null, targetUserId);
+            return EnrollResult.rejection(EnrollResult.Status.CONFLICT, targetUserId);
         }
 
         User targetUser = userRepository.findById(targetUserId).orElse(null);
         if (targetUser == null) {
-            return new EnrollResult(EnrollResult.Status.USER_NOT_FOUND, null, targetUserId);
+            return EnrollResult.rejection(EnrollResult.Status.USER_NOT_FOUND, targetUserId);
         }
 
         Optional<NfcCard> existingCard = nfcCardRepository.findByCardSerialAndTenantId(cardSerial, tenant.getId());
+        boolean alreadyRegistered = existingCard.isPresent();
         NfcCard saved;
         if (existingCard.isPresent()) {
             NfcCard existing = existingCard.get();
@@ -120,7 +154,7 @@ public class ManageNfcCardService {
             if (isRevoked && !reauthorize) {
                 log.warn("AUDIT: NFC re-enroll refused — card revoked, explicit re-authorization required: "
                         + "serial={} tenant={} requestedBy={}", cardSerial, tenant.getId(), currentUser.getId());
-                return new EnrollResult(EnrollResult.Status.CARD_REVOKED, null, targetUserId);
+                return EnrollResult.rejection(EnrollResult.Status.CARD_REVOKED, targetUserId);
             }
 
             // (2) A card currently owned by a DIFFERENT user must NOT be silently
@@ -132,7 +166,7 @@ public class ManageNfcCardService {
                 log.warn("AUDIT: NFC re-enroll refused — card owned by another user, explicit re-authorization "
                         + "required: serial={} tenant={} currentOwner={} requestedTarget={} requestedBy={}",
                         cardSerial, tenant.getId(), existingOwnerId, targetUserId, currentUser.getId());
-                return new EnrollResult(EnrollResult.Status.OWNED_BY_ANOTHER_USER, null, targetUserId);
+                return EnrollResult.rejection(EnrollResult.Status.OWNED_BY_ANOTHER_USER, targetUserId);
             }
 
             existing.activate();
@@ -165,7 +199,7 @@ public class ManageNfcCardService {
                     targetUserId, e.getMessage());
         }
 
-        return new EnrollResult(EnrollResult.Status.OK, saved, targetUserId);
+        return new EnrollResult(EnrollResult.Status.OK, saved, targetUserId, alreadyRegistered);
     }
 
     @Transactional(readOnly = true)

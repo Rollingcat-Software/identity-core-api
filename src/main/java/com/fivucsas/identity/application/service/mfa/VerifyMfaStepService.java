@@ -109,6 +109,8 @@ public class VerifyMfaStepService {
     private final AvailableMethodsResolver availableMethodsResolver;
     private final com.fivucsas.identity.application.service.TenantAuthMethodPolicy tenantAuthMethodPolicy;
     private final com.fivucsas.identity.application.service.LoginAccountStateGuard loginAccountStateGuard;
+    // #15 — best-effort login-device upsert on MFA completion (the input port).
+    private final com.fivucsas.identity.application.port.input.ManageDeviceUseCase manageDeviceUseCase;
 
     public VerifyMfaStepService(
             List<VerifyMfaStepHandler> handlerBeans,
@@ -121,7 +123,8 @@ public class VerifyMfaStepService {
             AuditLogPort auditLogPort,
             AvailableMethodsResolver availableMethodsResolver,
             com.fivucsas.identity.application.service.TenantAuthMethodPolicy tenantAuthMethodPolicy,
-            com.fivucsas.identity.application.service.LoginAccountStateGuard loginAccountStateGuard) {
+            com.fivucsas.identity.application.service.LoginAccountStateGuard loginAccountStateGuard,
+            com.fivucsas.identity.application.port.input.ManageDeviceUseCase manageDeviceUseCase) {
         Map<AuthMethodType, VerifyMfaStepHandler> map = new EnumMap<>(AuthMethodType.class);
         for (VerifyMfaStepHandler h : handlerBeans) {
             VerifyMfaStepHandler prior = map.put(h.supports(), h);
@@ -142,6 +145,7 @@ public class VerifyMfaStepService {
         this.availableMethodsResolver = availableMethodsResolver;
         this.tenantAuthMethodPolicy = tenantAuthMethodPolicy;
         this.loginAccountStateGuard = loginAccountStateGuard;
+        this.manageDeviceUseCase = manageDeviceUseCase;
     }
 
     /**
@@ -474,6 +478,11 @@ public class VerifyMfaStepService {
         log.info("AUDIT: MFA complete — methods: {}, userId={}, ip={}, userAgent={}",
                 amr, user.getId(), req.clientIp(), req.userAgent());
         auditLogPort.logMfaComplete(user.getId().toString(), amr, req.clientIp(), req.userAgent());
+
+        // #15 — MFA login completed: UPSERT a UserDevice row so the user surfaces
+        // in the dashboard Devices view. Best-effort (the impl swallows all errors)
+        // so device tracking can never fail the login.
+        manageDeviceUseCase.recordLoginDevice(user.getId(), req.userAgent());
 
         UserResponse userResponse =
                 com.fivucsas.identity.application.mapper.UserResponseMapper.toResponse(user);

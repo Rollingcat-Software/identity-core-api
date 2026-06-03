@@ -96,6 +96,11 @@ class AuthenticateUserServiceTest {
     @Mock
     private com.fivucsas.identity.application.service.LoginAccountStateGuard loginAccountStateGuard;
 
+    // #15 — best-effort login-device upsert; a mock no-op here keeps every login
+    // assertion focused on the auth response while the call site is still covered.
+    @Mock
+    private com.fivucsas.identity.application.port.input.ManageDeviceUseCase manageDeviceUseCase;
+
     // Real (not mocked) — it's a pure helper; lets the layer-1 builder produce the
     // actual enrolled flags so the begin/availableMethods assertions are meaningful.
     @org.mockito.Spy
