@@ -131,11 +131,12 @@ public class EnrollmentHealthService {
             case NFC_DOCUMENT -> hasActiveNfcCard(userId);
             case SMS_OTP -> user.getPhoneNumber() != null && !user.getPhoneNumber().isBlank();
             case EMAIL_OTP -> user.getEmail() != null && !user.getEmail().isBlank();
-            // #21 — device-implicit methods. APPROVE_LOGIN is usable while a
-            // device carries a push token; PASSKEY while a discoverable WebAuthn
-            // credential exists. So a bound enrollment auto-revokes honestly if
-            // the backing device/passkey is later removed.
-            case APPROVE_LOGIN -> hasPushTokenDevice(userId);
+            // #21 — device-implicit methods. APPROVE_LOGIN is usable while the
+            // user has ANY registered device (the approver POLLS — no FCM push
+            // token is involved); PASSKEY while a discoverable WebAuthn credential
+            // exists. So a bound enrollment auto-revokes honestly if the backing
+            // device/passkey is later removed.
+            case APPROVE_LOGIN -> hasApproverDevice(userId);
             case PASSKEY -> hasDiscoverablePasskey(userId);
             default -> true; // Unknown future types default to valid
         };
@@ -158,10 +159,14 @@ public class EnrollmentHealthService {
         }
     }
 
-    /** APPROVE_LOGIN is usable while the user has a device carrying a push token. */
-    private boolean hasPushTokenDevice(UUID userId) {
-        return userDeviceRepository.findAllByUserId(userId).stream()
-                .anyMatch(d -> d.getPushToken() != null && !d.getPushToken().isBlank());
+    /**
+     * APPROVE_LOGIN is usable while the user has ANY registered device. The
+     * approver polls for pending requests, so no FCM push token is required
+     * (gating on a push token the poll-based mobile app never sets left it
+     * permanently un-enrollable).
+     */
+    private boolean hasApproverDevice(UUID userId) {
+        return !userDeviceRepository.findAllByUserId(userId).isEmpty();
     }
 
     /** PASSKEY is usable while the user has a discoverable WebAuthn credential. */
