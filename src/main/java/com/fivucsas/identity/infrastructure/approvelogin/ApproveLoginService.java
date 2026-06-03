@@ -73,6 +73,13 @@ public class ApproveLoginService {
     public static final String STATUS_DENIED = "DENIED";
     public static final String STATUS_EXPIRED = "EXPIRED";
 
+    /** Marks a session as a mid-MFA-flow APPROVE_LOGIN FACTOR (not a fresh login). */
+    private static final String STEP_BOUND = "stepBound";
+    /** The user this step-bound session is issued for (only THEY may satisfy it). */
+    private static final String BOUND_USER = "boundUserId";
+    /** The user whose phone actually approved the session. */
+    private static final String APPROVER_USER = "approverUserId";
+
     /**
      * Creates a pending approve-login session for the account identified by
      * {@code email}. To avoid acting as an account-existence oracle the
@@ -287,6 +294,24 @@ public class ApproveLoginService {
             return response;
         }
 
+        // Step-bound (mid-MFA-flow APPROVE_LOGIN FACTOR): no token mint / no login
+        // outcome — just record the approver + mark APPROVED. The factor handler
+        // (ApproveLoginVerifyMfaStepHandler) verifies approverUserId == the user
+        // being authenticated. The owner check above already proved approverId owns
+        // the session, and the bound user IS the owner, so this is genuine proof.
+        if ("true".equals(data.get(STEP_BOUND))) {
+            Map<String, String> stepUpdates = new HashMap<>();
+            stepUpdates.put("status", STATUS_APPROVED);
+            stepUpdates.put(APPROVER_USER, approverId.toString());
+            redisTemplate.opsForHash().putAll(key, stepUpdates);
+            redisTemplate.expire(key, APPROVED_TTL);
+            redisTemplate.opsForSet().remove(USER_INDEX_PREFIX + approverId, sessionId);
+            log.info("Approve-login STEP session approved: {} by {}", sessionId, approverId);
+            response.put("status", STATUS_APPROVED);
+            response.put("message", "Approved");
+            return response;
+        }
+
         Optional<User> approver = userRepository.findByEmail(
                 ((String) data.get("email")).trim().toLowerCase(Locale.ROOT));
         if (approver.isEmpty() || !approver.get().getId().toString().equals(ownerId)) {
@@ -341,6 +366,73 @@ public class ApproveLoginService {
         response.put("message", outcome.mfaPending() ? "Login approved — additional verification required"
                 : "Login approved");
         return response;
+    }
+
+    /**
+     * Create a STEP-BOUND approve-login session for a mid-MFA-flow APPROVE_LOGIN
+     * FACTOR. Bound to the user currently being authenticated (no email lookup —
+     * the handler already has the user). Indexed under the user so it surfaces in
+     * THEIR mobile "Login Requests" / {@code listPending}; the approver decides
+     * via the SAME {@code /auth/approve-login/{id}/decide} endpoint (no mobile
+     * change). {@link #decide} mints NO tokens for it; {@link #isStepApprovedBy}
+     * is the cross-device proof that completes the step.
+     */
+    public Map<String, Object> createStepSession(UUID userId) {
+        String sessionId = UUID.randomUUID().toString();
+        String matchNumber = String.format(Locale.ROOT, "%02d", RANDOM.nextInt(100));
+        long now = Instant.now().getEpochSecond();
+        long expiresAt = now + SESSION_TTL.getSeconds();
+
+        Map<String, String> sessionData = new HashMap<>();
+        sessionData.put("status", STATUS_PENDING);
+        sessionData.put("matchNumber", matchNumber);
+        sessionData.put("userId", userId.toString());
+        sessionData.put(STEP_BOUND, "true");
+        sessionData.put(BOUND_USER, userId.toString());
+        sessionData.put("createdAt", String.valueOf(now));
+        sessionData.put("expiresAt", String.valueOf(expiresAt));
+
+        String key = SESSION_PREFIX + sessionId;
+        redisTemplate.opsForHash().putAll(key, sessionData);
+        redisTemplate.expire(key, SESSION_TTL);
+
+        String indexKey = USER_INDEX_PREFIX + userId;
+        redisTemplate.opsForSet().add(indexKey, sessionId);
+        redisTemplate.expire(indexKey, SESSION_TTL);
+
+        log.info("Approve-login STEP session created: {} for user {}", sessionId, userId);
+
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("sessionId", sessionId);
+        response.put("matchNumber", matchNumber);
+        response.put("status", STATUS_PENDING);
+        response.put("expiresAtEpochSeconds", expiresAt);
+        return response;
+    }
+
+    /**
+     * True iff a STEP-BOUND session was APPROVED by exactly the bound user — the
+     * phone that approved it belongs to the same person being authenticated.
+     * Single-use: consumes the session on a successful match.
+     */
+    public boolean isStepApprovedBy(String sessionId, UUID userId) {
+        if (sessionId == null || sessionId.isBlank() || userId == null) {
+            return false;
+        }
+        String key = SESSION_PREFIX + sessionId;
+        Map<Object, Object> data = redisTemplate.opsForHash().entries(key);
+        if (data.isEmpty()) {
+            return false;
+        }
+        String want = userId.toString();
+        boolean match = "true".equals(data.get(STEP_BOUND))
+                && STATUS_APPROVED.equals(data.get("status"))
+                && want.equals(data.get(APPROVER_USER))
+                && want.equals(data.get(BOUND_USER));
+        if (match) {
+            redisTemplate.delete(key); // single-use
+        }
+        return match;
     }
 
     /**

@@ -37,6 +37,12 @@ public class QrSessionService {
     private static final Duration SESSION_TTL = Duration.ofMinutes(5);
     private static final SecureRandom RANDOM = new SecureRandom();
     private static final String SESSION_PREFIX = "qr:session:";
+    /** Marks a session as a mid-MFA-flow QR FACTOR (not a fresh login). */
+    private static final String STEP_BOUND = "stepBound";
+    /** The user this step-bound session is issued for (only THEY may satisfy it). */
+    private static final String BOUND_USER = "boundUserId";
+    /** The user whose phone actually approved the session. */
+    private static final String APPROVER_USER = "approverUserId";
 
     public Map<String, Object> createSession(String platform) {
         String sessionId = UUID.randomUUID().toString();
@@ -173,6 +179,24 @@ public class QrSessionService {
             );
         }
 
+        // Step-bound session (mid-MFA-flow QR FACTOR, not a fresh login): just
+        // record the approver + mark APPROVED. NO token mint / NO login outcome —
+        // QrCodeVerifyMfaStepHandler later verifies approverUserId == the user
+        // being authenticated (cross-device proof; kills the self-fillable token).
+        if ("true".equals(data.get(STEP_BOUND))) {
+            Map<String, String> stepUpdates = new HashMap<>();
+            stepUpdates.put("status", "APPROVED");
+            stepUpdates.put(APPROVER_USER, approverId.toString());
+            redisTemplate.opsForHash().putAll(key, stepUpdates);
+            redisTemplate.expire(key, Duration.ofMinutes(2));
+            log.info("QR step session approved: {} by user {}", sessionId, approverId);
+            return Map.of(
+                    "sessionId", sessionId,
+                    "status", "APPROVED",
+                    "message", "Approved"
+            );
+        }
+
         User user = approver.get();
         String role = user.getRoleNames().stream()
                 .findFirst()
@@ -230,5 +254,71 @@ public class QrSessionService {
                 "message", mfaPending ? "Login approved — additional verification required"
                         : "Login approved"
         );
+    }
+
+    /**
+     * Create a STEP-BOUND QR session for a mid-MFA-flow QR FACTOR. Bound to the
+     * user currently being authenticated; only THAT user's phone approval
+     * satisfies the step (see {@link #isStepApprovedBy}). The phone approves via
+     * the SAME {@code POST /auth/qr/session/{id}/approve} endpoint it already uses
+     * for QR-login — no mobile change. Reuses the standard poll
+     * ({@code GET /auth/qr/session/{id}}). Distinct from {@link #createSession}
+     * (a fresh-login session) only by the {@code stepBound}/{@code boundUserId}
+     * markers, so {@link #approveSession} mints NO tokens for it.
+     */
+    public Map<String, Object> createStepSession(UUID boundUserId) {
+        String sessionId = UUID.randomUUID().toString();
+        byte[] qrBytes = new byte[32];
+        RANDOM.nextBytes(qrBytes);
+        String qrContent = Base64.getUrlEncoder().withoutPadding().encodeToString(qrBytes);
+        long expiresAt = Instant.now().plus(SESSION_TTL).getEpochSecond();
+
+        String key = SESSION_PREFIX + sessionId;
+        Map<String, String> sessionData = new HashMap<>();
+        sessionData.put("status", "PENDING_SCAN");
+        sessionData.put("qrContent", qrContent);
+        sessionData.put("platform", "WEB");
+        sessionData.put("expiresAt", String.valueOf(expiresAt));
+        sessionData.put(STEP_BOUND, "true");
+        sessionData.put(BOUND_USER, boundUserId.toString());
+
+        redisTemplate.opsForHash().putAll(key, sessionData);
+        redisTemplate.expire(key, SESSION_TTL);
+
+        log.info("QR step session created: {} bound to user {}", sessionId, boundUserId);
+
+        return Map.of(
+                "sessionId", sessionId,
+                "qrContent", qrContent,
+                "status", "PENDING_SCAN",
+                "expiresAtEpochSeconds", expiresAt
+        );
+    }
+
+    /**
+     * True iff a STEP-BOUND session was APPROVED by exactly the bound user — i.e.
+     * the phone that approved it belongs to the same person being authenticated.
+     * This is the cross-device proof that replaces the self-fillable token.
+     * Single-use: the session is consumed (deleted) on a successful match so it
+     * can't be replayed.
+     */
+    public boolean isStepApprovedBy(String sessionId, UUID boundUserId) {
+        if (sessionId == null || sessionId.isBlank() || boundUserId == null) {
+            return false;
+        }
+        String key = SESSION_PREFIX + sessionId;
+        Map<Object, Object> data = redisTemplate.opsForHash().entries(key);
+        if (data.isEmpty()) {
+            return false;
+        }
+        String want = boundUserId.toString();
+        boolean match = "true".equals(data.get(STEP_BOUND))
+                && "APPROVED".equals(data.get("status"))
+                && want.equals(data.get(APPROVER_USER))
+                && want.equals(data.get(BOUND_USER));
+        if (match) {
+            redisTemplate.delete(key); // single-use
+        }
+        return match;
     }
 }
