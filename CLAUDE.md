@@ -90,7 +90,7 @@ not a real biometric. The `AuthMethodType.FINGERPRINT` enum value is retained
   that SENDS a SOD will be rejected (serial-only flows are unaffected).
 - **CORS**: api.fivucsas.com, app.fivucsas.com, demo.fivucsas.com, verify.fivucsas.com
 
-## Flyway Migrations (V1-V61)
+## Flyway Migrations (V1-V82)
 
 V1-V15: Core schema | V16: Auth methods/flows | V17: Devices | V24: OAuth2 | V25: Enrollments
 V26-V28: Verification pipeline | V29: EMAIL_OTP default | V30: Adaptive MFA (CHOICE steps)
@@ -184,7 +184,7 @@ V76: scope tenant-scoped TENANT_ADMIN roles to TENANT-level permissions only —
      Idempotent DELETE; no runtime re-seed (DataInitializer doesn't touch
      role_permissions). Applies on the next api rebuild.
 
-**V34-V72 applied in prod. The 2026-05-30 rebuild added V72 (discoverable-passkey columns). 2026-05-31 rebuild adds V73-V76.**
+**V34-V82 applied in prod (max applied = V82, verified 2026-06-03). The 2026-05-30 rebuild added V72 (discoverable-passkey columns); the 2026-05-31 rebuild added V73-V76; the 2026-06-02/03 rebuilds added V77-V82 (incl. V80 fivucsas-mobile OAuth client, V81 consent singleton, V82 cross_tenant clients).**
 
 ### Identifier-first preflight now returns the resolved login-config (2026-05-31)
 
@@ -197,12 +197,13 @@ the caller's REAL flow (Layer-1 methods + step count → "1/3") at the email ste
 instead of the hardcoded platform PASSWORD-first/totalSteps=1. Enumeration-safe:
 unknown email → null tenant → platform default (indistinguishable from a single-step
 password tenant). Backward compatible (the old `eligible` field is unchanged).
-NOTE: the frontend `beginIdentifierLogin()` → `POST /auth/login/begin` is DEAD (no
-such endpoint; 401) and only reachable on a no-PASSWORD-Layer-1 surface — the dashboard
-stays password-first, which is correct for the fivucsas flow ("Password + any 2FA +
-any 3FA"). True arbitrary-first-factor (e.g. start with FACE when password is a Layer-1
-CHOICE) is NOT implemented on either surface — verify.fivucsas also falls back to
-password — and remains a future feature.
+NOTE: `POST /auth/login/begin` (the identifier-first `beginIdentifierLogin()` path)
+IS wired and live (corrected 2026-06-03 — the prior "DEAD / no such endpoint / 401"
+note was stale; an empty body now returns 400, and a real identifier-first begin for
+a `@marun.edu.tr` account was observed in prod logs). The dashboard still presents
+password-first by choice (the fivucsas flow is "Password + any 2FA + any 3FA"); true
+arbitrary first-factor (e.g. start with FACE when password is only a Layer-1 CHOICE)
+remains a future UI feature on both surfaces.
 
 ### Config-driven login engine — kill-switch (task #16, ships DARK 2026-05-30)
 
