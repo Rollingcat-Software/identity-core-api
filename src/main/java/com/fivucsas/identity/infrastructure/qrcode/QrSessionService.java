@@ -102,6 +102,9 @@ public class QrSessionService {
                 String totalSteps = (String) data.get("totalSteps");
                 response.put("currentStep", currentStep != null ? Integer.parseInt(currentStep) : 2);
                 response.put("totalSteps", totalSteps != null ? Integer.parseInt(totalSteps) : 0);
+                // NEXT step's selectable methods (issue #2/#6). Always an array
+                // (empty for old sessions written before this field existed).
+                response.put("availableMethods", parseAvailableMethods((String) data.get("availableMethods")));
                 response.put("message", "Login approved — additional verification required");
             } else {
                 String accessToken = (String) data.get("accessToken");
@@ -115,6 +118,26 @@ public class QrSessionService {
         }
 
         return response;
+    }
+
+    /**
+     * Parses the stored CSV of AuthMethodType NAME strings back into a list for
+     * the poll response. Null/blank (old session or a step with no resolvable
+     * methods) yields an empty list — never null — so the wire shape is a stable
+     * JSON array (issue #2/#6).
+     */
+    private static List<String> parseAvailableMethods(String csv) {
+        if (csv == null || csv.isBlank()) {
+            return List.of();
+        }
+        List<String> methods = new ArrayList<>();
+        for (String token : csv.split(",")) {
+            String trimmed = token.trim();
+            if (!trimmed.isEmpty()) {
+                methods.add(trimmed);
+            }
+        }
+        return methods;
     }
 
     public Map<String, Object> approveSession(String sessionId, UUID approverId) {
@@ -176,6 +199,10 @@ public class QrSessionService {
                 updates.put("mfaSessionToken", outcome.mfaSessionToken());
                 updates.put("currentStep", String.valueOf(outcome.currentStep()));
                 updates.put("totalSteps", String.valueOf(outcome.totalSteps()));
+                // NEXT step's selectable methods for the polling web method-picker
+                // (issue #2/#6). CSV of AuthMethodType NAME strings; parsed back to a
+                // JSON array in getSession. Backward-compatible (absent ⇒ empty array).
+                updates.put("availableMethods", String.join(",", outcome.availableMethods()));
             } else {
                 updates.put("accessToken", outcome.accessToken());
                 updates.put("refreshToken", outcome.refreshToken());

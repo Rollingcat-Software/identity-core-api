@@ -193,7 +193,7 @@ class ApproveLoginServiceTest {
                     eq(user), eq(AuthMethodType.APPROVE_LOGIN), eq("approve_login"),
                     eq("5.6.7.8"), eq("ua"), eq(null)))
                     .thenReturn(UsernamelessLoginFlowService.FlowOutcome
-                            .pending("mfa-session-tok", 2, 2));
+                            .pending("mfa-session-tok", 2, 2, java.util.List.of("TOTP", "EMAIL_OTP")));
 
             Map<String, Object> decision = service.decide(sessionId, userId, "allow", number, "5.6.7.8", "ua");
             assertThat(decision).containsEntry("status", "APPROVED");
@@ -204,6 +204,9 @@ class ApproveLoginServiceTest {
             assertThat(poll).containsEntry("mfaSessionToken", "mfa-session-tok");
             assertThat(poll).containsEntry("currentStep", 2);
             assertThat(poll).containsEntry("totalSteps", 2);
+            // Contract A (issue #2/#6): the NEXT step's selectable methods are
+            // surfaced on the poll so the web can render its method picker.
+            assertThat(poll).containsEntry("availableMethods", java.util.List.of("TOTP", "EMAIL_OTP"));
             assertThat(poll).doesNotContainKey("accessToken");
         }
 

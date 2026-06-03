@@ -152,6 +152,10 @@ public class ApproveLoginService {
                 String totalSteps = (String) data.get("totalSteps");
                 response.put("currentStep", currentStep != null ? Integer.parseInt(currentStep) : 2);
                 response.put("totalSteps", totalSteps != null ? Integer.parseInt(totalSteps) : 0);
+                // The NEXT step's selectable methods (issue #2/#6). Always an array
+                // (empty when nothing was stored — backward compatible for old
+                // sessions written before this field existed).
+                response.put("availableMethods", parseAvailableMethods((String) data.get("availableMethods")));
                 response.put("role", data.get("role"));
             } else {
                 response.put("accessToken", data.get("accessToken"));
@@ -163,6 +167,26 @@ public class ApproveLoginService {
         }
 
         return response;
+    }
+
+    /**
+     * Parses the stored CSV of AuthMethodType NAME strings back into a list for
+     * the poll response. A null/blank value (old session, or a step with no
+     * resolvable methods) yields an empty list — never null — so the wire shape
+     * is a stable JSON array.
+     */
+    private static List<String> parseAvailableMethods(String csv) {
+        if (csv == null || csv.isBlank()) {
+            return List.of();
+        }
+        List<String> methods = new ArrayList<>();
+        for (String token : csv.split(",")) {
+            String trimmed = token.trim();
+            if (!trimmed.isEmpty()) {
+                methods.add(trimmed);
+            }
+        }
+        return methods;
     }
 
     /**
@@ -288,6 +312,11 @@ public class ApproveLoginService {
             updates.put("mfaSessionToken", outcome.mfaSessionToken());
             updates.put("currentStep", String.valueOf(outcome.currentStep()));
             updates.put("totalSteps", String.valueOf(outcome.totalSteps()));
+            // Carry the NEXT step's selectable methods so the polling web client can
+            // render the method picker (issue #2/#6). Stored CSV of AuthMethodType
+            // NAME strings (uppercase enum names — no embedded commas). Backward-
+            // compatible: an absent/empty key surfaces as an empty array in getSession.
+            updates.put("availableMethods", String.join(",", outcome.availableMethods()));
             updates.put("role", role);
         } else {
             updates.put("status", STATUS_APPROVED);
