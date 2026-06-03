@@ -47,6 +47,15 @@ public class VerifyBiometricService implements VerifyBiometricUseCase {
         UUID targetUserId = userId;
         String targetTenantId = command.getTenantId();
 
+        // TODO(flag-consistency): the verify gate keys off the denormalized
+        // users.is_biometric_enrolled boolean, which can drift out of sync with
+        // the bio embedding store (the "enrolled-but-412" class this PR addresses
+        // on the WRITE side + via the admin reconciler). The more robust long-term
+        // fix is to gate on actual embedding presence — e.g. consult
+        // BiometricServicePort.hasEnrollment(userId, tenant) when the flag is false
+        // before throwing BiometricNotEnrolledException. NOT changed here: this is
+        // a security-sensitive, hot verify path and warrants its own well-tested PR
+        // (adds a bio round-trip + must stay fail-closed on bio errors).
         if (!user.isBiometricEnrolled()) {
             // Model A, Phase 3 — consent-gated cross-tenant verify. The requesting
             // user has NO local FACE enrollment. If the SAME PERSON (identity) has

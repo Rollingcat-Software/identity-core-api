@@ -2,6 +2,41 @@
 
 ## [Unreleased]
 
+### 2026-06-03 — Face-enrollment flag-consistency (fixes the "enrolled-but-412" class)
+
+Several enroll paths persisted a FACE embedding in the biometric-processor store
+but failed to flip the denormalized `users.is_biometric_enrolled` boolean that
+`/biometric/verify` gates on, so affected users got HTTP **412 BiometricNotEnrolled**
+on verify despite a real template. Fixed the write paths + added a reconciler to
+repair already-inconsistent rows. **No production DB was modified by this change.**
+
+- **Atomic multi-image enroll.** `POST /biometric/enroll/multi` now runs the bio
+  enroll + score recording + `is_biometric_enrolled` flag-flip inside ONE
+  `@Transactional` service method (`EnrollBiometricService.enrollFaceMulti`),
+  mirroring the single-image `execute()`. The controller previously made two
+  loose, non-transactional calls and flipped the flag on a fragile
+  `!Boolean.FALSE.equals(success)` check; success is now
+  `Boolean.TRUE.equals(success)` (with a tolerant `"true"` string fallback) so a
+  missing/null/ambiguous result never flips the flag speculatively. Response
+  contract unchanged.
+- **Legacy `submitEnrollment` flag-flip.** `POST /enrollment/submit` used to
+  enroll the embedding but never flip the flag (guaranteed-412 users). It now
+  routes the flip through the canonical, idempotent, transactional
+  `EnrollBiometricUseCase.markBiometricEnrolled`; the existing
+  `recordBiometricScores` call already creates/completes the `user_enrollments`
+  FACE row, matching the canonical path.
+- **Reconciliation mechanism (code only — NOT run against prod).** New
+  ROOT-gated `POST /api/v1/admin/biometric/reconcile-enrollment-flags`
+  (`BiometricReconcileAdminController` → `BiometricEnrollmentReconciler`),
+  **dry-run by default** (`apply=true` to write). It scans users with the flag
+  `false`, and for each one the bio store CONFIRMS holds an embedding
+  (`BiometricServicePort.hasEnrollment(userId, tenant)`, backed by the existing
+  bio `/embeddings/export`), flips `false → true`. Idempotent, fail-closed (any
+  bio error → no flip), and never sets a flag to `false` (cannot lock anyone out).
+- **Verify gate TODO.** Added a code TODO in `VerifyBiometricService` noting the
+  better long-term fix (gate on actual embedding presence, not the denormalized
+  boolean). The security-sensitive verify gate is **not** changed in this PR.
+
 ### 2026-05-30 — Config-driven login engine (task #16, A+B+C+F+G)
 
 **Ships DARK — feature-flagged, default OFF, instantly revertible without a

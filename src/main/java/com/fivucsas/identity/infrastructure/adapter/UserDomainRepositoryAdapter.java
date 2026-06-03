@@ -89,6 +89,11 @@ public class UserDomainRepositoryAdapter implements UserDomainRepository {
     }
 
     @Override
+    public List<User> findByIsBiometricEnrolled(boolean enrolled) {
+        return UserMapper.toDomainList(jpaRepository.findByIsBiometricEnrolled(enrolled));
+    }
+
+    @Override
     public List<User> searchUsers(String query) {
         return UserMapper.toDomainList(jpaRepository.searchUsers(query));
     }

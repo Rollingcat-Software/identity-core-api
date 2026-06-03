@@ -127,17 +127,16 @@ public class BiometricController {
 
         log.info("Multi-image face enrollment for user: {}, images: {}, tenant: {}, optimize: {}",
                 userId, files.size(), tenantId, optimize);
-        Map<String, Object> result = biometricServicePort.enrollFaceMulti(
+        // Atomic, transactional multi-enroll: the bio enroll + score recording +
+        // is_biometric_enrolled flag-flip now happen inside ONE @Transactional
+        // service method (mirrors the single-image EnrollBiometricService.execute).
+        // Previously the controller made two loose, non-transactional calls and
+        // flipped the flag on a fragile !Boolean.FALSE.equals(success) check, so a
+        // partial failure could leave a stored embedding with the flag still
+        // false → 412 "not enrolled" on verify. The flag is now flipped ONLY on a
+        // robustly-parsed Boolean.TRUE.equals(success). Response contract unchanged.
+        Map<String, Object> result = enrollBiometricUseCase.enrollFaceMulti(
                 userId, files, tenantId, clientEmbedding, clientEmbeddings, optimize);
-        recordEnrollmentScores(userId, AuthMethodType.FACE, result);
-        // The single-image enroll path (EnrollBiometricService) flips
-        // users.is_biometric_enrolled; the multi-image path historically did NOT, so
-        // /biometric/verify rejected multi-enrolled users with 412 "not enrolled"
-        // despite a stored embedding. Mark enrolled unless the proxy explicitly
-        // reported failure (errorResponse() returns success=false).
-        if (!Boolean.FALSE.equals(result.get("success"))) {
-            enrollBiometricUseCase.markBiometricEnrolled(userId);
-        }
         return ResponseEntity.ok(result);
     }
 

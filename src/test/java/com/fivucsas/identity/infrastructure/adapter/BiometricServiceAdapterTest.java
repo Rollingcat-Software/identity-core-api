@@ -308,4 +308,66 @@ class BiometricServiceAdapterTest {
         assertThat(result).containsEntry("reason_code", "MISSING_DG");
         mockServer.verify(); // verifies zero expected requests were made
     }
+
+    // --- hasEnrollment (flag-consistency reconciler backing) ---
+
+    @Test
+    @DisplayName("hasEnrollment returns true when the tenant export lists the user_id")
+    void hasEnrollment_userPresentInExport_returnsTrue() {
+        mockServer.expect(requestTo(BIO_URL + "/embeddings/export?tenant_id=" + TENANT_ID + "&include_metadata=false"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess(
+                        "{\"count\":2,\"embeddings\":[{\"user_id\":\"" + USER_ID + "\"},"
+                                + "{\"user_id\":\"99999999-0000-0000-0000-000000000000\"}]}",
+                        MediaType.APPLICATION_JSON));
+
+        assertThat(adapter.hasEnrollment(USER_ID, TENANT_ID)).isTrue();
+        mockServer.verify();
+    }
+
+    @Test
+    @DisplayName("hasEnrollment returns false when the user_id is absent from the tenant export")
+    void hasEnrollment_userAbsentFromExport_returnsFalse() {
+        mockServer.expect(requestTo(BIO_URL + "/embeddings/export?tenant_id=" + TENANT_ID + "&include_metadata=false"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess(
+                        "{\"count\":1,\"embeddings\":[{\"user_id\":\"99999999-0000-0000-0000-000000000000\"}]}",
+                        MediaType.APPLICATION_JSON));
+
+        assertThat(adapter.hasEnrollment(USER_ID, TENANT_ID)).isFalse();
+        mockServer.verify();
+    }
+
+    @Test
+    @DisplayName("hasEnrollment fails CLOSED (false) when the bio service errors")
+    void hasEnrollment_bioError_failsClosed() {
+        mockServer.expect(requestTo(BIO_URL + "/embeddings/export?tenant_id=" + TENANT_ID + "&include_metadata=false"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(org.springframework.test.web.client.response.MockRestResponseCreators
+                        .withStatus(org.springframework.http.HttpStatus.INTERNAL_SERVER_ERROR)
+                        .body("boom").contentType(MediaType.TEXT_PLAIN));
+
+        assertThat(adapter.hasEnrollment(USER_ID, TENANT_ID)).isFalse();
+        mockServer.verify();
+    }
+
+    @Test
+    @DisplayName("hasEnrollment falls back to the 'default' tenant when tenantId is blank")
+    void hasEnrollment_blankTenant_usesDefault() {
+        mockServer.expect(requestTo(BIO_URL + "/embeddings/export?tenant_id=default&include_metadata=false"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess(
+                        "{\"count\":1,\"embeddings\":[{\"user_id\":\"" + USER_ID + "\"}]}",
+                        MediaType.APPLICATION_JSON));
+
+        assertThat(adapter.hasEnrollment(USER_ID, "  ")).isTrue();
+        mockServer.verify();
+    }
+
+    @Test
+    @DisplayName("hasEnrollment returns false for a null userId without calling bio")
+    void hasEnrollment_nullUser_returnsFalseNoCall() {
+        assertThat(adapter.hasEnrollment(null, TENANT_ID)).isFalse();
+        mockServer.verify(); // zero outbound calls
+    }
 }
