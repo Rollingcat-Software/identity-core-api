@@ -382,6 +382,35 @@ public class UserController {
         return ResponseEntity.noContent().build();
     }
 
+    /**
+     * #10 — Member-side "My Invitations": the invitations RECEIVED by the
+     * currently-authenticated user (matched on their login email), across every
+     * tenant. Authenticated-only and intrinsically self-scoped (a caller can
+     * only ever see invitations addressed to THEIR OWN email), so it needs no
+     * admin/guest permission. Backs the mobile My-Invitations screen, which
+     * previously had no listing endpoint and surfaced a JSON-decode error.
+     */
+    @GetMapping("/api/v1/guests/my-invitations")
+    @Operation(summary = "List invitations received by the current user (across tenants)")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<List<GuestInvitationResponse>> listMyReceivedInvitations() {
+        User currentUser = rbacService.getCurrentUser()
+                .orElseThrow(UnauthorizedException::new);
+
+        String email = currentUser.getEmail();
+        if (email == null || email.isBlank()) {
+            return ResponseEntity.ok(List.of());
+        }
+
+        List<GuestInvitation> received =
+                invitationRepository.findByEmailIgnoreCaseOrderByCreatedAtDesc(email);
+
+        return ResponseEntity.ok(received.stream()
+                .limit(MAX_PLATFORM_WIDE_GUESTS)
+                .map(GuestInvitationResponse::from)
+                .collect(Collectors.toList()));
+    }
+
     @GetMapping("/api/v1/guests")
     @Operation(summary = "List guest invitations for current tenant (or platform-wide for ROOT)")
     @PreAuthorize("@rbac.isTenantAdmin() or @rbac.hasPermission('guest:read')")

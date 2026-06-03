@@ -66,6 +66,18 @@ app:
   # accept-invitation link emailed to recipients. Override with
   # APP_FRONTEND_BASE_URL in .env.prod if the dashboard host changes.
   frontend-base-url: ${APP_FRONTEND_BASE_URL:https://app.fivucsas.com}
+  # Login + API Bucket4j limiter thresholds (RateLimitService). Defaults preserve
+  # today's behavior exactly: login = 10 attempts / 5 min per IP; api = 100 / min
+  # per user. Demo-day relief raises these WITHOUT a rebuild by setting the
+  # APP_RATE_LIMIT_* vars in .env.prod (they MUST also be listed in the compose
+  # environment: block — env_file: is not used). Revert = unset → hardened defaults.
+  rate-limit:
+    login:
+      capacity: ${APP_RATE_LIMIT_LOGIN_CAPACITY:10}
+      window-minutes: ${APP_RATE_LIMIT_LOGIN_WINDOW_MINUTES:5}
+    api:
+      capacity: ${APP_RATE_LIMIT_API_CAPACITY:100}
+      window-minutes: ${APP_RATE_LIMIT_API_WINDOW_MINUTES:1}
   # Identity / account-linking (Model A). Phase 4 OIDC `sub` alignment ships
   # DORMANT in prod: default OFF so `sub` stays = users.id (zero behaviour
   # change). When true, `sub` is an identity-derived PAIRWISE pseudonym per RP

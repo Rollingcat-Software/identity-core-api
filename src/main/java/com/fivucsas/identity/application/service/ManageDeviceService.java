@@ -127,7 +127,15 @@ public class ManageDeviceService implements ManageDeviceUseCase {
     public DeviceResponse updatePushToken(UUID userId, String token, String platform) {
         List<UserDevice> devices = userDeviceRepository.findAllByUserId(userId);
         if (devices.isEmpty()) {
-            throw new EntityNotFoundException("No device registered for user: " + userId);
+            // #15 — UPSERT instead of throwing. A mobile-logged-in user has no
+            // UserDevice row (login/token paths don't create one), so the
+            // approve-login push-token registration used to 404 silently and the
+            // user never appeared in the dashboard Devices view. Create a device
+            // on first push-token call. The fingerprint is DETERMINISTIC
+            // (push:<userId>:<platform>) so repeated calls update the same row
+            // rather than accumulating duplicates. Correctly tenant-scoped to the
+            // user's own tenant. Additive + reversible.
+            return upsertPushTokenDevice(userId, token, platform);
         }
 
         // Prefer a device matching the requested platform; otherwise fall back
@@ -149,6 +157,46 @@ public class ManageDeviceService implements ManageDeviceUseCase {
 
         target.updatePushToken(token);
         return DeviceResponse.from(userDeviceRepository.save(target));
+    }
+
+    /**
+     * #15 — Creates (or refreshes, if it already exists) a UserDevice for a user
+     * who has none yet, so a mobile-logged-in user surfaces in the dashboard
+     * Devices view. The device is bound to the user's OWN tenant and uses a
+     * deterministic fingerprint so the operation is idempotent across repeated
+     * push-token registrations from the same platform.
+     */
+    private DeviceResponse upsertPushTokenDevice(UUID userId, String token, String platform) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new EntityNotFoundException("User not found: " + userId));
+        Tenant tenant = user.getTenant();
+        if (tenant == null) {
+            // A user row should always carry a tenant; if not, there is nowhere
+            // safe to scope the device, so preserve the prior fail behavior.
+            throw new EntityNotFoundException("No tenant for user: " + userId);
+        }
+        DevicePlatform resolvedPlatform = parsePlatform(platform);
+        if (resolvedPlatform == null) {
+            resolvedPlatform = DevicePlatform.ANDROID; // push tokens come from mobile
+        }
+        // Deterministic fingerprint → idempotent upsert (no duplicate rows).
+        String fingerprint = "push:" + userId + ":" + resolvedPlatform.name();
+
+        final DevicePlatform platformForBuild = resolvedPlatform;
+        UserDevice device = userDeviceRepository
+                .findByUserIdAndDeviceFingerprint(userId, fingerprint)
+                .orElseGet(() -> UserDevice.builder()
+                        .user(user)
+                        .tenant(tenant)
+                        .deviceName(platformForBuild.name() + " device")
+                        .deviceFingerprint(fingerprint)
+                        .platform(platformForBuild)
+                        .capabilities(List.of())
+                        .build());
+
+        device.updatePushToken(token);
+        device.updateLastUsed();
+        return DeviceResponse.from(userDeviceRepository.save(device));
     }
 
     private static DevicePlatform parsePlatform(String platform) {

@@ -49,9 +49,19 @@ class ManageTenantServiceTest {
     private TenantScopeResolver tenantScopeResolver;
     @Mock
     private RbacAuthorizationService rbacService;
+    @Mock
+    private com.fivucsas.identity.infrastructure.multitenancy.TenantFilterBypass tenantFilterBypass;
 
     @InjectMocks
     private ManageTenantService service;
+
+    @org.junit.jupiter.api.BeforeEach
+    void setUpFilterBypass() {
+        // #11 — mapToResponse counts members via tenantFilterBypass; run the
+        // supplied work inline so the count reaches the (mocked) repository.
+        lenient().when(tenantFilterBypass.runWithoutTenantFilter(org.mockito.ArgumentMatchers.any()))
+                .thenAnswer(inv -> ((java.util.function.Supplier<?>) inv.getArgument(0)).get());
+    }
 
     /** Reconstitutes the given tenant with a freshly-assigned id (mimics persistence). */
     private static Tenant withId(Tenant t) {

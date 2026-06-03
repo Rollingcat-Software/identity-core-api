@@ -10,6 +10,7 @@ import com.fivucsas.identity.domain.exception.TenantNotFoundException;
 import com.fivucsas.identity.domain.model.tenant.Tenant;
 import com.fivucsas.identity.domain.model.tenant.TenantConfiguration;
 import com.fivucsas.identity.domain.repository.TenantRepository;
+import com.fivucsas.identity.infrastructure.multitenancy.TenantFilterBypass;
 import com.fivucsas.identity.security.RbacAuthorizationService;
 import com.fivucsas.identity.security.TenantScopeResolver;
 import lombok.RequiredArgsConstructor;
@@ -39,6 +40,7 @@ public class ManageTenantService implements ManageTenantUseCase {
     private final AuditLogPort auditLogPort;
     private final TenantScopeResolver tenantScopeResolver;
     private final RbacAuthorizationService rbacService;
+    private final TenantFilterBypass tenantFilterBypass;
 
     /**
      * Resolves the acting admin's user id for audit attribution, or
@@ -310,7 +312,16 @@ public class ManageTenantService implements ManageTenantUseCase {
      *        N+1 domain query per tenant; single-tenant reads pass {@code true}.
      */
     private TenantResponse mapToResponse(Tenant tenant, boolean includeEmailDomains) {
-        long currentUsers = userRepository.countByTenantId(tenant.getId());
+        // #11 — count members of the tenant being mapped, NOT the active tenant.
+        // userRepository.countByTenantId runs under the Hibernate tenantFilter,
+        // which injects "AND tenant_id = :activeTenant". When a ROOT/admin browses
+        // tenant A (or the cross-tenant list with X-Tenant-ID set), every OTHER
+        // tenant's count came back 0. Suppress the filter for this COUNT only — a
+        // member count is not a cross-tenant data leak (no row data is exposed),
+        // and the WHERE clause still pins it to tenant.getId(). Same idiom as the
+        // /my endpoints (GetActiveSessionsService).
+        long currentUsers = tenantFilterBypass.runWithoutTenantFilter(
+            () -> userRepository.countByTenantId(tenant.getId()));
         java.util.List<com.fivucsas.identity.application.dto.response.TenantEmailDomainResponse> domains = null;
         if (includeEmailDomains) {
             domains = tenantEmailDomainRepository.findByIdTenantId(tenant.getId()).stream()

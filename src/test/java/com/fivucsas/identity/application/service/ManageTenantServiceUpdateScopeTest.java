@@ -64,6 +64,9 @@ class ManageTenantServiceUpdateScopeTest {
     @Mock
     private com.fivucsas.identity.security.RbacAuthorizationService rbacService;
 
+    @Mock
+    private com.fivucsas.identity.infrastructure.multitenancy.TenantFilterBypass tenantFilterBypass;
+
     @InjectMocks
     private ManageTenantService service;
 
@@ -77,6 +80,10 @@ class ManageTenantServiceUpdateScopeTest {
         // the audit path, so not every test reaches this call.
         org.mockito.Mockito.lenient().when(rbacService.getCurrentUserId())
                 .thenReturn(java.util.Optional.empty());
+        // #11 — mapToResponse counts members via tenantFilterBypass; run inline.
+        org.mockito.Mockito.lenient().when(tenantFilterBypass.runWithoutTenantFilter(
+                        org.mockito.ArgumentMatchers.any()))
+                .thenAnswer(inv -> ((java.util.function.Supplier<?>) inv.getArgument(0)).get());
         tenantId = UUID.randomUUID();
         Instant now = Instant.now();
         existingTenant = Tenant.reconstitute(

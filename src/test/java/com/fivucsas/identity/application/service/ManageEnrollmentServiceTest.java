@@ -42,6 +42,7 @@ class ManageEnrollmentServiceTest {
     @Mock private BiometricServicePort biometricServicePort;
     @Mock private NfcCardRepositoryPort nfcCardRepository;
     @Mock private WebAuthnCredentialRepositoryPort webAuthnCredentialRepository;
+    @Mock private com.fivucsas.identity.application.port.output.UserDeviceRepositoryPort userDeviceRepository;
     @Mock private com.fivucsas.identity.infrastructure.multitenancy.TenantFilterBypass tenantFilterBypass;
 
     @InjectMocks

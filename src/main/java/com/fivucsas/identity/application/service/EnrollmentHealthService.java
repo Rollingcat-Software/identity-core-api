@@ -2,6 +2,7 @@ package com.fivucsas.identity.application.service;
 
 import com.fivucsas.identity.application.port.output.BiometricServicePort;
 import com.fivucsas.identity.application.port.output.NfcCardRepositoryPort;
+import com.fivucsas.identity.application.port.output.UserDeviceRepositoryPort;
 import com.fivucsas.identity.application.port.output.UserEnrollmentRepositoryPort;
 import com.fivucsas.identity.application.port.output.WebAuthnCredentialRepositoryPort;
 import com.fivucsas.identity.domain.model.auth.AuthMethodType;
@@ -67,6 +68,7 @@ public class EnrollmentHealthService {
     private final UserEnrollmentRepositoryPort userEnrollmentRepository;
     private final UserRepository userRepository;
     private final WebAuthnCredentialRepositoryPort webAuthnCredentialRepository;
+    private final UserDeviceRepositoryPort userDeviceRepository;
     private final NfcCardRepositoryPort nfcCardRepository;
     private final StringRedisTemplate redisTemplate;
     private final BiometricServicePort biometricServicePort;
@@ -129,6 +131,12 @@ public class EnrollmentHealthService {
             case NFC_DOCUMENT -> hasActiveNfcCard(userId);
             case SMS_OTP -> user.getPhoneNumber() != null && !user.getPhoneNumber().isBlank();
             case EMAIL_OTP -> user.getEmail() != null && !user.getEmail().isBlank();
+            // #21 — device-implicit methods. APPROVE_LOGIN is usable while a
+            // device carries a push token; PASSKEY while a discoverable WebAuthn
+            // credential exists. So a bound enrollment auto-revokes honestly if
+            // the backing device/passkey is later removed.
+            case APPROVE_LOGIN -> hasPushTokenDevice(userId);
+            case PASSKEY -> hasDiscoverablePasskey(userId);
             default -> true; // Unknown future types default to valid
         };
     }
@@ -148,6 +156,18 @@ public class EnrollmentHealthService {
             // Fail open: if Redis is down but DB has no secret, consider it invalid
             return false;
         }
+    }
+
+    /** APPROVE_LOGIN is usable while the user has a device carrying a push token. */
+    private boolean hasPushTokenDevice(UUID userId) {
+        return userDeviceRepository.findAllByUserId(userId).stream()
+                .anyMatch(d -> d.getPushToken() != null && !d.getPushToken().isBlank());
+    }
+
+    /** PASSKEY is usable while the user has a discoverable WebAuthn credential. */
+    private boolean hasDiscoverablePasskey(UUID userId) {
+        return webAuthnCredentialRepository.findAllByUserId(userId).stream()
+                .anyMatch(WebAuthnCredential::isDiscoverable);
     }
 
     /**

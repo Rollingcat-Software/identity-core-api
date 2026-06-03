@@ -28,6 +28,12 @@ public interface GuestInvitationRepositoryPort {
     List<GuestInvitation> findByTenantIdAndStatus(UUID tenantId, InvitationStatus status);
 
     /**
+     * #10 — Invitations RECEIVED by an email (member-side "My Invitations"),
+     * across all tenants, most-recent first. Case-insensitive match.
+     */
+    List<GuestInvitation> findByEmailIgnoreCaseOrderByCreatedAtDesc(String email);
+
+    /**
      * Cross-tenant listing for ROOT. Returns every invitation in the
      * platform, ordered most-recent first.
      */
