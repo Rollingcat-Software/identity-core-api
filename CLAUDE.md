@@ -90,7 +90,7 @@ not a real biometric. The `AuthMethodType.FINGERPRINT` enum value is retained
   that SENDS a SOD will be rejected (serial-only flows are unaffected).
 - **CORS**: api.fivucsas.com, app.fivucsas.com, demo.fivucsas.com, verify.fivucsas.com
 
-## Flyway Migrations (V1-V82)
+## Flyway Migrations (V1-V83)
 
 V1-V15: Core schema | V16: Auth methods/flows | V17: Devices | V24: OAuth2 | V25: Enrollments
 V26-V28: Verification pipeline | V29: EMAIL_OTP default | V30: Adaptive MFA (CHOICE steps)
@@ -184,7 +184,7 @@ V76: scope tenant-scoped TENANT_ADMIN roles to TENANT-level permissions only —
      Idempotent DELETE; no runtime re-seed (DataInitializer doesn't touch
      role_permissions). Applies on the next api rebuild.
 
-**V34-V82 applied in prod (max applied = V82, verified 2026-06-03). The 2026-05-30 rebuild added V72 (discoverable-passkey columns); the 2026-05-31 rebuild added V73-V76; the 2026-06-02/03 rebuilds added V77-V82 (incl. V80 fivucsas-mobile OAuth client, V81 consent singleton, V82 cross_tenant clients).**
+**V34-V83 applied in prod (max applied = V83, verified 2026-06-04). The 2026-05-30 rebuild added V72 (discoverable-passkey columns); the 2026-05-31 rebuild added V73-V76; the 2026-06-02/03 rebuilds added V77-V82 (incl. V80 fivucsas-mobile OAuth client, V81 consent singleton, V82 cross_tenant clients); the 2026-06-04 rebuild added V83 — widen `chk_enrollment_method` to include APPROVE_LOGIN + PASSKEY (V73 added the enum but missed this constraint, so APPROVE_LOGIN auto-enrollment silently failed). Same rebuild shipped cross-device QR + APPROVE_LOGIN MFA factors + NFC cross-membership resolution (dark, flag `app.identity.cross-membership-enrollment-resolution`).**
 
 ### Identifier-first preflight now returns the resolved login-config (2026-05-31)
 
