@@ -46,13 +46,18 @@ public class ApproveLoginVerifyMfaStepHandler implements VerifyMfaStepHandler {
     @Override
     public MfaStepResult verify(MfaSession session, User user, Map<String, Object> data) {
         // Phase 1 — issue a step-bound approve session for this user.
+        // Body shape MUST mirror WebAuthnVerifySupport: {status:CHALLENGE, data:{...}}
+        // — the shared web MfaStepRenderer reads the fields from `response.data.data`.
         if ("challenge".equals(data.get("action"))) {
             Map<String, Object> s = approveLoginService.createStepSession(user.getId());
             return MfaStepResult.challenge(Map.of(
-                    "approveSessionId", s.get("sessionId"),
-                    "sessionId", s.get("sessionId"),
-                    "matchNumber", s.get("matchNumber"),
-                    "expiresAtEpochSeconds", s.get("expiresAtEpochSeconds")
+                    "status", "CHALLENGE",
+                    "data", Map.of(
+                            "approveSessionId", s.get("sessionId"),
+                            "sessionId", s.get("sessionId"),
+                            "matchNumber", s.get("matchNumber"),
+                            "expiresAtEpochSeconds", s.get("expiresAtEpochSeconds")
+                    )
             ));
         }
 

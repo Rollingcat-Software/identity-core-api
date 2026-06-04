@@ -59,13 +59,18 @@ public class QrCodeVerifyMfaStepHandler implements VerifyMfaStepHandler {
     @Override
     public MfaStepResult verify(MfaSession session, User user, Map<String, Object> data) {
         // Phase 1 — issue a step-bound session QR for this user.
+        // Body shape MUST mirror WebAuthnVerifySupport: {status:CHALLENGE, data:{...}}
+        // — the shared web MfaStepRenderer reads the fields from `response.data.data`.
         if ("challenge".equals(data.get("action"))) {
             Map<String, Object> s = qrSessionService.createStepSession(user.getId());
             return MfaStepResult.challenge(Map.of(
-                    "qrSessionId", s.get("sessionId"),
-                    "sessionId", s.get("sessionId"),
-                    "expiresAtEpochSeconds", s.get("expiresAtEpochSeconds"),
-                    "sessionApproval", true
+                    "status", "CHALLENGE",
+                    "data", Map.of(
+                            "qrSessionId", s.get("sessionId"),
+                            "sessionId", s.get("sessionId"),
+                            "expiresAtEpochSeconds", s.get("expiresAtEpochSeconds"),
+                            "sessionApproval", true
+                    )
             ));
         }
 
