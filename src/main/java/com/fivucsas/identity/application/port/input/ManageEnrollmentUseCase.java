@@ -36,4 +36,18 @@ public interface ManageEnrollmentUseCase {
                                BigDecimal livenessScore);
 
     void revokeEnrollment(UUID userId, AuthMethodType methodType);
+
+    /**
+     * Idempotently ensure an ENROLLED row exists for a DEVICE-BOUND method
+     * (WebAuthn FINGERPRINT / HARDWARE_KEY) that is created OUTSIDE the
+     * start→complete flow — the WebAuthn register ceremony saves a credential
+     * directly and has no prior PENDING row. Creates the row if missing,
+     * completes it if present, and NEVER throws "Enrollment not found".
+     *
+     * <p>Runs in its OWN transaction ({@code REQUIRES_NEW}) so a failure here
+     * can never mark the caller's credential-save transaction rollback-only
+     * (the bug that surfaced as "Beklenmeyen bir hata" on first-time fingerprint
+     * enrollment: the same-tx EntityNotFoundException poisoned the commit).
+     */
+    void autoBindEnrollment(UUID userId, AuthMethodType methodType);
 }

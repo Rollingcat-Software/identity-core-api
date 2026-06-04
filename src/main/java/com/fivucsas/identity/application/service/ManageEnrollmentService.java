@@ -21,6 +21,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
@@ -122,6 +123,15 @@ public class ManageEnrollmentService implements ManageEnrollmentUseCase {
             log.debug("PASSKEY credential check skipped for user {}: {}", userId, e.getMessage());
             return false;
         }
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void autoBindEnrollment(UUID userId, AuthMethodType methodType) {
+        // Runs in a SEPARATE transaction (see interface javadoc): even if the
+        // create/save below fails (e.g. a unique-constraint race), only THIS tx
+        // rolls back — the caller's WebAuthn credential save still commits.
+        ensureAutoBoundEnrollment(userId, methodType);
     }
 
     private void ensureAutoBoundEnrollment(UUID userId, AuthMethodType methodType) {
