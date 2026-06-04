@@ -20,17 +20,22 @@ import static org.assertj.core.api.Assertions.assertThat;
 class UserResponseMapperTest {
 
     @Test
-    @DisplayName("empty roles default to USER")
+    @DisplayName("empty roles default to USER (non-ROOT user_type)")
     void emptyRolesDefaultToUser() {
         assertThat(UserResponseMapper.resolvePrimaryRole(Set.of(), "TENANT_MEMBER")).isEqualTo("USER");
-        assertThat(UserResponseMapper.resolvePrimaryRole(null, "ROOT")).isEqualTo("USER");
+        assertThat(UserResponseMapper.resolvePrimaryRole(null, "TENANT_MEMBER")).isEqualTo("USER");
     }
 
     @Test
-    @DisplayName("ROOT user holding ROOT always renders as ROOT regardless of other roles")
-    void rootUserRendersAsRoot() {
-        Set<String> roles = Set.of("TENANT_ADMIN", "ROOT", "USER");
-        assertThat(UserResponseMapper.resolvePrimaryRole(roles, "ROOT")).isEqualTo("ROOT");
+    @DisplayName("ROOT user_type ALWAYS renders as ROOT — even with no or only lower role rows")
+    void rootUserTypeAlwaysRendersAsRoot() {
+        // Platform tier is authoritative (mirrors the web: user.isRoot() == userType=='ROOT').
+        // A ROOT promoted via user_type alone (empty / USER-only role rows) must NOT be
+        // downgraded to USER on mobile — that hid QR-login/admin surfaces (glsm, 2026-06-04).
+        assertThat(UserResponseMapper.resolvePrimaryRole(null, "ROOT")).isEqualTo("ROOT");
+        assertThat(UserResponseMapper.resolvePrimaryRole(Set.of(), "ROOT")).isEqualTo("ROOT");
+        assertThat(UserResponseMapper.resolvePrimaryRole(Set.of("USER"), "ROOT")).isEqualTo("ROOT");
+        assertThat(UserResponseMapper.resolvePrimaryRole(Set.of("TENANT_ADMIN", "ROOT", "USER"), "ROOT")).isEqualTo("ROOT");
     }
 
     @Test
@@ -72,9 +77,11 @@ class UserResponseMapperTest {
     }
 
     @Test
-    @DisplayName("legacy SUPER_ADMIN alias outranks tenant roles")
+    @DisplayName("legacy SUPER_ADMIN alias outranks tenant roles (ranking path, non-ROOT user_type)")
     void legacySuperAdminOutranksTenantRoles() {
-        assertThat(UserResponseMapper.resolvePrimaryRole(Set.of("SUPER_ADMIN", "TENANT_ADMIN"), "ROOT"))
+        // user_type is NON-ROOT here so the privilege-ranking path runs (a ROOT
+        // user_type now short-circuits to ROOT before ranking).
+        assertThat(UserResponseMapper.resolvePrimaryRole(Set.of("SUPER_ADMIN", "TENANT_ADMIN"), "TENANT_ADMIN"))
                 .isEqualTo("SUPER_ADMIN");
     }
 }

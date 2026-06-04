@@ -59,13 +59,18 @@ public final class UserResponseMapper {
      * @return the deterministic primary role, defaulting to {@code "USER"} when empty
      */
     static String resolvePrimaryRole(java.util.Set<String> roleNames, String userTypeName) {
+        // Platform tier is AUTHORITATIVE: a ROOT user_type ALWAYS renders as ROOT,
+        // even with no (or only lower) assigned role rows. The web already trusts
+        // userType (user.isRoot() == userType=='ROOT'); the mobile RBAC
+        // (NavigationPolicy) trusts THIS resolved role, so without this a ROOT whose
+        // role rows are empty/USER (e.g. promoted via user_type only) is downgraded
+        // to USER on mobile — hiding QR-login/admin surfaces it should have. Checked
+        // BEFORE the empty-roleNames guard so a ROOT with zero role rows still maps.
+        if ("ROOT".equals(userTypeName)) {
+            return "ROOT";
+        }
         if (roleNames == null || roleNames.isEmpty()) {
             return "USER";
-        }
-        // Tier-aware: a ROOT must always render as ROOT when it holds that role,
-        // regardless of any other (lower) roles it may also carry.
-        if ("ROOT".equals(userTypeName) && roleNames.contains("ROOT")) {
-            return "ROOT";
         }
         return roleNames.stream()
                 .min(java.util.Comparator
