@@ -220,7 +220,23 @@ public class ManageEnrollmentService implements ManageEnrollmentUseCase {
                                                  BigDecimal livenessScore) {
         UserEnrollment enrollment = userEnrollmentRepository
                 .findByUserIdAndAuthMethodType(userId, methodType)
-                .orElseThrow(() -> new EntityNotFoundException("Enrollment not found for user: " + userId + " method: " + methodType));
+                .orElseGet(() -> {
+                    // Upsert: a first-time / out-of-band completion (no prior PENDING
+                    // row from startEnrollment) CREATES the row instead of throwing
+                    // EntityNotFoundException — which, inside a caller's transaction,
+                    // would mark it rollback-only and 500 the commit (the WebAuthn
+                    // fingerprint bug class). Mirrors startEnrollment's create path.
+                    User user = userRepository.findById(userId)
+                            .orElseThrow(() -> new EntityNotFoundException("User not found: " + userId));
+                    if (user.getTenant() == null) {
+                        throw new EntityNotFoundException("User has no tenant: " + userId);
+                    }
+                    return UserEnrollment.builder()
+                            .user(user)
+                            .tenant(user.getTenant())
+                            .authMethodType(methodType)
+                            .build();
+                });
 
         enrollment.completeEnrollment(enrollmentData, qualityScore, livenessScore);
         return EnrollmentResponse.from(userEnrollmentRepository.save(enrollment));
@@ -250,7 +266,7 @@ public class ManageEnrollmentService implements ManageEnrollmentUseCase {
      * mirrors {@link #startEnrollment}'s race handling.
      */
     @Override
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void recordBiometricScores(UUID userId,
                                        AuthMethodType methodType,
                                        BigDecimal qualityScore,

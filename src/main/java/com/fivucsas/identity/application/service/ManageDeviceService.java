@@ -16,6 +16,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Comparator;
@@ -208,7 +209,7 @@ public class ManageDeviceService implements ManageDeviceUseCase {
      * the login it is observing.
      */
     @Override
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void recordLoginDevice(UUID userId, String userAgent) {
         try {
             User user = userRepository.findById(userId).orElse(null);
