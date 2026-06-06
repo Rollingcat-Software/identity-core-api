@@ -66,6 +66,7 @@ Classification per item: **CONFIG** (already possible, listed for sequencing) ·
 | F8 | RFC 7662 token introspection endpoint | GAP | M | Lets RP resource servers validate access tokens server-side without `/userinfo`. JWKS-offline + `/userinfo` is the current (valid) substitute; introspection is the standards-complete option. |
 | F9 | `client_credentials` grant (M2M) | GAP (optional) | M | Only if a service-to-service (no user) flow is ever needed. ~half a day: new grant branch in `OAuth2Controller.token` + service method. |
 | F10 | Dynamic client registration (RFC 7591) | GAP (optional) | M | Only if FIVUCSAS becomes a true *external* product with third-party self-service. Not needed for first-party apps. |
+| F15 | **`guardian_of` person→person delegation primitive** | GAP (new) | M–L | Reusable relationship entity (`subject→object`, `relation`, scope, `expires_at`, `revoked_at`) letting one identity act for/view a **different** person — account-linking is same-person-only (hard-gated), permissions are resource-*type* scoped, so neither expresses "guardian of student X". Exposed to an RP in *its* pairwise-`sub` space: `GET /api/v1/relationships?relation=guardian_of` (+ optional bounded token claim). **First consumer:** Sarnıç student–guardian access (see `Sarnic/docs/design/2026-06-06-student-guardian-access-design.md` §5) — promotes Sarnıç's interim `guardian_student` table into the platform. Future: any delegated/assistant access across the suite. |
 
 ### Phase 3 — Security & operational professionalization
 
