@@ -98,10 +98,13 @@ application-local.properties
 # ============================================================================
 # Environment & Secrets
 # ============================================================================
+# Catch-all: no env file is ever committed except the checked-in template.
+# (Plain `*.env` does NOT match `.env.hetzner` — that gap leaked a stale env
+#  file in f9f0f2d; `.env.*` closes it. See docs/SECURITY-rotate-credentials-2026-06-06.md)
 .env
-.env.local
-.env.*.local
+.env.*
 *.env
+!.env.example
 secrets/
 *.pem
 *.key
