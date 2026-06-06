@@ -6,6 +6,7 @@ import com.fivucsas.identity.domain.model.auth.AuthMethodType;
 import com.fivucsas.identity.entity.MfaSession;
 import com.fivucsas.identity.entity.NfcCard;
 import com.fivucsas.identity.entity.User;
+import com.fivucsas.identity.repository.UserRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -34,14 +35,23 @@ import static org.mockito.Mockito.when;
 class NfcDocumentVerifyMfaStepHandlerTest {
 
     @Mock private NfcCardRepositoryPort nfcCardRepository;
+    @Mock private UserRepository userRepository;
 
     private static final String SERIAL = "04A2B3C4D5E6F7";
 
+    /** serial-only ON, cross-membership OFF (the prod-today config). */
+    private NfcDocumentVerifyMfaStepHandler handler(boolean serialOnly) {
+        return new NfcDocumentVerifyMfaStepHandler(nfcCardRepository, userRepository, serialOnly, false);
+    }
+
+    /** Both flags ON (the new cross-membership behavior under test). */
+    private NfcDocumentVerifyMfaStepHandler handlerCrossMembership() {
+        return new NfcDocumentVerifyMfaStepHandler(nfcCardRepository, userRepository, true, true);
+    }
+
     @Test
     void supports_returnsNfcDocument() {
-        NfcDocumentVerifyMfaStepHandler handler =
-                new NfcDocumentVerifyMfaStepHandler(nfcCardRepository, false);
-        assertThat(handler.supports()).isEqualTo(AuthMethodType.NFC_DOCUMENT);
+        assertThat(handler(false).supports()).isEqualTo(AuthMethodType.NFC_DOCUMENT);
     }
 
     // ============== Fail-closed (flag OFF, default) ==============
@@ -57,8 +67,7 @@ class NfcDocumentVerifyMfaStepHandlerTest {
         lenient().when(nfcCardRepository.findByCardSerialAndUserIdAndIsActiveTrue(SERIAL, userId))
                 .thenReturn(Optional.of(activeCard(userId)));
 
-        NfcDocumentVerifyMfaStepHandler handler =
-                new NfcDocumentVerifyMfaStepHandler(nfcCardRepository, false);
+        NfcDocumentVerifyMfaStepHandler handler = handler(false);
 
         MfaStepResult result = handler.verify(session(userId), user, Map.of("nfcData", SERIAL));
 
@@ -72,8 +81,7 @@ class NfcDocumentVerifyMfaStepHandlerTest {
     @Test
     void flagOff_failsClosed_whenNfcDataMissing() {
         UUID userId = UUID.randomUUID();
-        NfcDocumentVerifyMfaStepHandler handler =
-                new NfcDocumentVerifyMfaStepHandler(nfcCardRepository, false);
+        NfcDocumentVerifyMfaStepHandler handler = handler(false);
 
         MfaStepResult result = handler.verify(session(userId), userMock(userId), Map.of());
 
@@ -91,8 +99,7 @@ class NfcDocumentVerifyMfaStepHandlerTest {
         when(nfcCardRepository.findByCardSerialAndUserIdAndIsActiveTrue(SERIAL, userId))
                 .thenReturn(Optional.of(activeCard(userId)));
 
-        NfcDocumentVerifyMfaStepHandler handler =
-                new NfcDocumentVerifyMfaStepHandler(nfcCardRepository, true);
+        NfcDocumentVerifyMfaStepHandler handler = handler(true);
 
         MfaStepResult result = handler.verify(session(userId), user, Map.of("nfcData", SERIAL));
 
@@ -107,8 +114,7 @@ class NfcDocumentVerifyMfaStepHandlerTest {
         when(nfcCardRepository.findByCardSerialAndUserIdAndIsActiveTrue(SERIAL, userId))
                 .thenReturn(Optional.empty());
 
-        NfcDocumentVerifyMfaStepHandler handler =
-                new NfcDocumentVerifyMfaStepHandler(nfcCardRepository, true);
+        NfcDocumentVerifyMfaStepHandler handler = handler(true);
 
         MfaStepResult result = handler.verify(session(userId), user, Map.of("nfcData", SERIAL));
 
@@ -118,14 +124,110 @@ class NfcDocumentVerifyMfaStepHandlerTest {
     @Test
     void flagOn_failsWhenNfcDataMissing() {
         UUID userId = UUID.randomUUID();
-        NfcDocumentVerifyMfaStepHandler handler =
-                new NfcDocumentVerifyMfaStepHandler(nfcCardRepository, true);
+        NfcDocumentVerifyMfaStepHandler handler = handler(true);
 
         MfaStepResult result = handler.verify(session(userId), userMock(userId), Map.of());
 
         assertThat(result.valid()).isFalse();
         verify(nfcCardRepository, never())
                 .findByCardSerialAndUserIdAndIsActiveTrue(any(), any());
+    }
+
+    // ============== Cross-membership resolution (both flags ON) ==============
+
+    @Test
+    void crossMembershipOff_doesNotConsultSiblingMemberships_whenActiveRowMisses() {
+        // serial-only ON but cross-membership OFF (prod-today): an active-row miss
+        // fails and the sibling lookup is NEVER attempted (byte-identical to legacy).
+        UUID userId = UUID.randomUUID();
+        User user = userMock(userId);
+        when(nfcCardRepository.findByCardSerialAndUserIdAndIsActiveTrue(SERIAL, userId))
+                .thenReturn(Optional.empty());
+
+        MfaStepResult result = handler(true).verify(session(userId), user, Map.of("nfcData", SERIAL));
+
+        assertThat(result.valid()).isFalse();
+        verify(nfcCardRepository, never())
+                .findActiveCardBySerialForIdentityExcludingTenant(any(), any(), any());
+        verify(userRepository, never()).findIdentityIdById(any());
+    }
+
+    @Test
+    void crossMembershipOn_passesWhenSerialMatchesSiblingMembershipCard() {
+        UUID userId = UUID.randomUUID();
+        UUID identityId = UUID.randomUUID();
+        UUID tenantId = UUID.randomUUID();
+        UUID siblingUserId = UUID.randomUUID();
+        User user = userMock(userId);
+
+        // Active membership row has no matching card...
+        when(nfcCardRepository.findByCardSerialAndUserIdAndIsActiveTrue(SERIAL, userId))
+                .thenReturn(Optional.empty());
+        when(userRepository.findIdentityIdById(userId)).thenReturn(Optional.of(identityId));
+        when(userRepository.findTenantIdById(userId)).thenReturn(Optional.of(tenantId));
+        // ...but a sibling membership of the same identity holds an active card.
+        NfcCard sibling = org.mockito.Mockito.mock(NfcCard.class);
+        User siblingUser = userMock(siblingUserId);
+        lenient().when(sibling.getUser()).thenReturn(siblingUser);
+        when(nfcCardRepository.findActiveCardBySerialForIdentityExcludingTenant(SERIAL, identityId, tenantId))
+                .thenReturn(Optional.of(sibling));
+
+        MfaStepResult result = handlerCrossMembership().verify(session(userId), user, Map.of("nfcData", SERIAL));
+
+        assertThat(result.valid()).isTrue();
+        verify(nfcCardRepository)
+                .findActiveCardBySerialForIdentityExcludingTenant(eq(SERIAL), eq(identityId), eq(tenantId));
+    }
+
+    @Test
+    void crossMembershipOn_failsWhenNoSiblingMembershipMatch() {
+        UUID userId = UUID.randomUUID();
+        UUID identityId = UUID.randomUUID();
+        UUID tenantId = UUID.randomUUID();
+        User user = userMock(userId);
+
+        when(nfcCardRepository.findByCardSerialAndUserIdAndIsActiveTrue(SERIAL, userId))
+                .thenReturn(Optional.empty());
+        when(userRepository.findIdentityIdById(userId)).thenReturn(Optional.of(identityId));
+        when(userRepository.findTenantIdById(userId)).thenReturn(Optional.of(tenantId));
+        when(nfcCardRepository.findActiveCardBySerialForIdentityExcludingTenant(SERIAL, identityId, tenantId))
+                .thenReturn(Optional.empty());
+
+        MfaStepResult result = handlerCrossMembership().verify(session(userId), user, Map.of("nfcData", SERIAL));
+
+        assertThat(result.valid()).isFalse();
+    }
+
+    @Test
+    void crossMembershipOn_failsWhenUserHasNoIdentity() {
+        UUID userId = UUID.randomUUID();
+        User user = userMock(userId);
+
+        when(nfcCardRepository.findByCardSerialAndUserIdAndIsActiveTrue(SERIAL, userId))
+                .thenReturn(Optional.empty());
+        when(userRepository.findIdentityIdById(userId)).thenReturn(Optional.empty());
+        lenient().when(userRepository.findTenantIdById(userId)).thenReturn(Optional.of(UUID.randomUUID()));
+
+        MfaStepResult result = handlerCrossMembership().verify(session(userId), user, Map.of("nfcData", SERIAL));
+
+        assertThat(result.valid()).isFalse();
+        verify(nfcCardRepository, never())
+                .findActiveCardBySerialForIdentityExcludingTenant(any(), any(), any());
+    }
+
+    @Test
+    void crossMembershipOn_activeRowMatchShortCircuits_noSiblingLookup() {
+        UUID userId = UUID.randomUUID();
+        User user = userMock(userId);
+        when(nfcCardRepository.findByCardSerialAndUserIdAndIsActiveTrue(SERIAL, userId))
+                .thenReturn(Optional.of(activeCard(userId)));
+
+        MfaStepResult result = handlerCrossMembership().verify(session(userId), user, Map.of("nfcData", SERIAL));
+
+        assertThat(result.valid()).isTrue();
+        verify(nfcCardRepository, never())
+                .findActiveCardBySerialForIdentityExcludingTenant(any(), any(), any());
+        verify(userRepository, never()).findIdentityIdById(any());
     }
 
     // ============== Helpers ==============

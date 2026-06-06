@@ -2,6 +2,7 @@ package com.fivucsas.identity.application.service;
 
 import com.fivucsas.identity.application.port.output.AuthFlowRepositoryPort;
 import com.fivucsas.identity.application.port.output.TokenGenerationPort;
+import com.fivucsas.identity.application.port.output.UserEnrollmentRepositoryPort;
 import com.fivucsas.identity.domain.model.auth.AuthMethodType;
 import com.fivucsas.identity.domain.model.auth.OperationType;
 import com.fivucsas.identity.entity.AuthFlow;
@@ -10,6 +11,7 @@ import com.fivucsas.identity.entity.AuthMethod;
 import com.fivucsas.identity.entity.MfaSession;
 import com.fivucsas.identity.entity.RefreshToken;
 import com.fivucsas.identity.entity.User;
+import com.fivucsas.identity.entity.UserEnrollment;
 import com.fivucsas.identity.repository.MfaSessionRepository;
 import com.fivucsas.identity.service.RefreshTokenService;
 import lombok.RequiredArgsConstructor;
@@ -52,6 +54,7 @@ public class UsernamelessLoginFlowService {
     private final TokenGenerationPort tokenGenerator;
     private final RefreshTokenService refreshTokenService;
     private final ConfigDrivenLoginPolicy configDrivenLoginPolicy;
+    private final UserEnrollmentRepositoryPort userEnrollmentRepository;
 
     private static final Duration MFA_SESSION_TTL = Duration.ofMinutes(10);
 
@@ -73,14 +76,27 @@ public class UsernamelessLoginFlowService {
             int totalSteps,
             String accessToken,
             String refreshToken,
-            long expiresIn) {
+            long expiresIn,
+            List<String> availableMethods) {
 
-        public static FlowOutcome pending(String token, int currentStep, int totalSteps) {
-            return new FlowOutcome(true, token, currentStep, totalSteps, null, null, 0L);
+        /**
+         * @param availableMethods the selectable {@link AuthMethodType} NAME strings
+         *        the caller may present for the FIRST remaining step (the next step
+         *        after the proven Layer-1 factor). For a SEQUENTIAL step this is the
+         *        single primary method; for a CHOICE step it is every alternative.
+         *        Lets the polling web client render the method picker without a
+         *        second round-trip (task #16 B / issue #2/#6). Always non-null
+         *        (empty list when nothing could be resolved); older callers/clients
+         *        simply ignore it.
+         */
+        public static FlowOutcome pending(String token, int currentStep, int totalSteps,
+                                          List<String> availableMethods) {
+            return new FlowOutcome(true, token, currentStep, totalSteps, null, null, 0L,
+                    availableMethods != null ? List.copyOf(availableMethods) : List.of());
         }
 
         public static FlowOutcome minted(String accessToken, String refreshToken, long expiresIn) {
-            return new FlowOutcome(false, null, 0, 0, accessToken, refreshToken, expiresIn);
+            return new FlowOutcome(false, null, 0, 0, accessToken, refreshToken, expiresIn, List.of());
         }
     }
 
@@ -112,6 +128,15 @@ public class UsernamelessLoginFlowService {
     @Transactional
     public FlowOutcome continueAfterLayer1(User user, AuthMethodType layer1Method, String amr,
                                            String ip, String userAgent, String clientId) {
+        // Issue #3: APPROVE_LOGIN / PASSKEY are device-implicit factors — there is
+        // no separate "enroll" ceremony, so proving one (signing in from the mobile
+        // app / a usernameless Layer-1 path) is itself the enrollment. Ensure an
+        // ENROLLED APPROVE_LOGIN user_enrollments row exists for this user so the
+        // web Enrollments page stops reporting "not enrolled". Idempotent + additive
+        // + best-effort (never fails the login). Reversible: the row can be revoked
+        // via the existing enrollment-revoke path with no behavior change.
+        ensureApproveLoginEnrollment(user);
+
         // The flow handoff (MFA_PENDING) only applies when the engine is enabled
         // (global flag or per-tenant canary). When OFF we mint directly — for
         // passkey this matches its legacy single-factor behavior exactly.
@@ -153,10 +178,23 @@ public class UsernamelessLoginFlowService {
                         .build();
                 mfaSessionRepository.save(mfaSession);
 
-                log.info("AUDIT: usernameless Layer-1 {} → MFA required — userId={}, remainingSteps={}, ip={}",
-                        layer1Method, user.getId(), remainingSteps.size(), ip);
+                // The web method-picker needs the NEXT step's selectable methods to
+                // render (issue #2/#6: "approved on phone but web can't continue").
+                // Derive them from the FIRST remaining step: its primary method for a
+                // SEQUENTIAL step, or every alternative for a CHOICE step
+                // (AuthFlowStep.getAvailableMethods() already encodes that rule).
+                List<String> availableMethods = remainingSteps.get(0).getAvailableMethods().stream()
+                        .filter(Objects::nonNull)
+                        .map(AuthMethod::getType)
+                        .filter(Objects::nonNull)
+                        .map(AuthMethodType::name)
+                        .distinct()
+                        .toList();
 
-                return FlowOutcome.pending(sessionToken, 2, flow.getStepCount());
+                log.info("AUDIT: usernameless Layer-1 {} → MFA required — userId={}, remainingSteps={}, nextMethods={}, ip={}",
+                        layer1Method, user.getId(), remainingSteps.size(), availableMethods, ip);
+
+                return FlowOutcome.pending(sessionToken, 2, flow.getStepCount(), availableMethods);
             }
         }
 
@@ -167,6 +205,46 @@ public class UsernamelessLoginFlowService {
         log.info("AUDIT: usernameless Layer-1 {} → single-factor login — userId={}, ip={}",
                 layer1Method, user.getId(), ip);
         return FlowOutcome.minted(accessToken, refreshToken.getToken(), expiresIn);
+    }
+
+    /**
+     * Idempotently ensures the user has an ENROLLED {@link AuthMethodType#APPROVE_LOGIN}
+     * enrollment record (issue #3). APPROVE_LOGIN is device-implicit: there is no
+     * upload/secret to bind (it is the cross-device number-matching approval the
+     * user's registered device performs), so a successful usernameless login is the
+     * enrollment event. This mirrors the lazy session-bound upsert pattern used for
+     * EMAIL_OTP / QR_CODE in {@code ManageEnrollmentService.ensureAutoBoundEnrollment}.
+     *
+     * <p>Idempotent: if any APPROVE_LOGIN row already exists (including REVOKED — a
+     * user who explicitly removed it stays removed) we leave it alone. Best-effort:
+     * a missing tenant or a unique-constraint race is swallowed so login is never
+     * failed by this bookkeeping. The row's tenant is the owning user's tenant, so
+     * the Hibernate {@code tenantFilter} insert stays consistent (P0-1).
+     */
+    private void ensureApproveLoginEnrollment(User user) {
+        try {
+            if (user == null || user.getTenant() == null) {
+                return;
+            }
+            if (userEnrollmentRepository
+                    .findByUserIdAndAuthMethodType(user.getId(), AuthMethodType.APPROVE_LOGIN)
+                    .isPresent()) {
+                return;
+            }
+            UserEnrollment enrollment = UserEnrollment.builder()
+                    .user(user)
+                    .tenant(user.getTenant())
+                    .authMethodType(AuthMethodType.APPROVE_LOGIN)
+                    .build();
+            enrollment.completeEnrollment("{}");
+            userEnrollmentRepository.save(enrollment);
+            log.info("AUDIT: APPROVE_LOGIN enrollment auto-created on usernameless login — userId={}", user.getId());
+        } catch (Exception e) {
+            // Includes a concurrent writer winning the (user_id, auth_method_type)
+            // unique constraint — the row exists either way, which is the goal.
+            log.debug("APPROVE_LOGIN auto-enrollment skipped for user {}: {}",
+                    user != null ? user.getId() : null, e.getMessage());
+        }
     }
 
     private boolean stepHasEnrollment(AuthFlowStep step, Map<AuthMethodType, Boolean> healthStatus) {

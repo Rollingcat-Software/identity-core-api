@@ -123,10 +123,16 @@ public class WebAuthnCredentialService {
     private void autoCompleteWebAuthnEnrollment(UUID userId, String transports) {
         AuthMethodType methodType = resolveWebAuthnMethodType(transports);
         try {
-            manageEnrollmentUseCase.completeEnrollment(userId, methodType, "{}");
-            log.info("Auto-completed {} enrollment for user {}", methodType, userId);
+            // autoBindEnrollment is upsert (create-if-missing) and runs in its OWN
+            // transaction, so a first-time enrollment (no prior PENDING row) no
+            // longer throws "Enrollment not found" into THIS @Transactional method
+            // and poisons the credential-save commit (UnexpectedRollbackException →
+            // "Beklenmeyen bir hata" on first fingerprint enrollment). Was
+            // completeEnrollment(), which only completes a pre-existing row.
+            manageEnrollmentUseCase.autoBindEnrollment(userId, methodType);
+            log.info("Auto-bound {} enrollment for user {}", methodType, userId);
         } catch (Exception e) {
-            log.warn("Failed to auto-complete {} enrollment for user {} after WebAuthn registration: {}",
+            log.warn("Failed to auto-bind {} enrollment for user {} after WebAuthn registration: {}",
                     methodType, userId, e.getMessage());
         }
     }

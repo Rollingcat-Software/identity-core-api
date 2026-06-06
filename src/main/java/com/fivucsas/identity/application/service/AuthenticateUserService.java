@@ -60,6 +60,9 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
     private final com.fivucsas.identity.application.service.mfa.AvailableMethodsResolver availableMethodsResolver;
     private final TenantAuthMethodPolicy tenantAuthMethodPolicy;
     private final LoginAccountStateGuard loginAccountStateGuard;
+    // #15 — best-effort login-device upsert so a successful login surfaces in the
+    // dashboard Devices view (the input port, kept hexagonal).
+    private final com.fivucsas.identity.application.port.input.ManageDeviceUseCase manageDeviceUseCase;
 
     private static final int MAX_FAILED_ATTEMPTS = 5;
     private static final Duration LOCKOUT_DURATION = Duration.ofMinutes(15);
@@ -408,6 +411,11 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
         RefreshToken refreshToken = refreshTokenService.createRefreshToken(
             user, command.getIpAddress(), command.getUserAgent()
         );
+
+        // #15 — single-factor login completed: UPSERT a UserDevice row so the
+        // user surfaces in the dashboard Devices view. Best-effort (the impl
+        // swallows all errors) so device tracking can never fail the login.
+        manageDeviceUseCase.recordLoginDevice(user.getId(), command.getUserAgent());
 
         return AuthenticationResponse.of(accessToken, refreshToken.getToken(), tokenGenerator.getExpirationMillis(), userResponse);
     }

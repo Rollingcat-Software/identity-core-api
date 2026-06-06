@@ -95,8 +95,16 @@ public class NfcController {
         // any non-"true" value keeps the safe default (false).
         boolean reauthorize = "true".equalsIgnoreCase(trimToNull(request.get("reauthorize")));
 
+        // OPTIONAL stable eID/passport DG1 document number (e.g. "A28883159"), read
+        // during a BAC chip read. When present the service keys the card identity on
+        // the document number instead of the random NFC UID, so a re-read of the same
+        // eID (a DIFFERENT random UID per tap) reactivates/updates the existing row
+        // rather than inserting a duplicate. Omitted for plain MIFARE UID cards →
+        // unchanged legacy UID-based de-dup (backward compatible).
+        String documentNumber = trimToNull(request.get("documentNumber"));
+
         EnrollResult result = manageNfcCardService.enrollCard(
-                requestedUserId, cardSerial, cardType, label, reauthorize);
+                requestedUserId, cardSerial, cardType, label, reauthorize, documentNumber);
 
         return switch (result.status()) {
             case CONFLICT -> ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of(
@@ -117,7 +125,14 @@ public class NfcController {
                     "message", "User not found"));
             case OK -> ResponseEntity.status(HttpStatus.CREATED).body(Map.of(
                     "success", true,
-                    "message", "Card enrolled successfully",
+                    // alreadyRegistered=true → the card/document already existed and was
+                    // reactivated/updated (the contract signal the mobile result screen
+                    // reads to show "Already registered" / "Card recognized"); false → a
+                    // brand-new enrollment ("Registered successfully").
+                    "alreadyRegistered", result.alreadyRegistered(),
+                    "message", result.alreadyRegistered()
+                            ? "Card already registered — reactivated"
+                            : "Card enrolled successfully",
                     "cardId", result.card().getId().toString(),
                     "cardSerial", result.card().getCardSerial(),
                     "userId", result.targetUserId().toString()));

@@ -92,6 +92,7 @@ class VerifyMfaStepServiceTest {
     @Mock private VerifyMfaStepHandler emailOtpHandler;
     @Mock private com.fivucsas.identity.application.service.TenantAuthMethodPolicy tenantAuthMethodPolicy;
     @Mock private com.fivucsas.identity.application.service.LoginAccountStateGuard loginAccountStateGuard;
+    @Mock private com.fivucsas.identity.application.port.input.ManageDeviceUseCase manageDeviceUseCase;
 
     private VerifyMfaStepService service;
 
@@ -120,7 +121,8 @@ class VerifyMfaStepServiceTest {
                 List.of(passwordHandler, totpHandler, faceHandler, hardwareKeyHandler, emailOtpHandler),
                 mfaSessionRepository, userRepository, authFlowRepository,
                 enrollmentHealthService, tokenGenerator, refreshTokenService, auditLogPort,
-                new AvailableMethodsResolver(), tenantAuthMethodPolicy, loginAccountStateGuard);
+                new AvailableMethodsResolver(), tenantAuthMethodPolicy, loginAccountStateGuard,
+                manageDeviceUseCase);
     }
 
     // ============== Handler dispatch — 4 representative methods ==============

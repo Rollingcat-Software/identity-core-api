@@ -90,6 +90,16 @@ app:
     # proven at link time). Flip to true to require a fresh caller password on
     # every /auth/switch-membership before a token is minted.
     require-stepup-on-switch: ${APP_IDENTITY_REQUIRE_STEPUP_ON_SWITCH:false}
+    # Cross-membership NFC_DOCUMENT enrollment resolution. Ships DARK in prod:
+    # default OFF so factor-enrollment + NFC verify read ONLY the active
+    # membership's cards (byte-identical to today — the demo is unaffected). When
+    # true, a card enrolled under ANY of the person's (identity_id) linked
+    # memberships counts as enrolled + is accepted at verify, even when the active
+    # tenant (e.g. Marmara reached via verify.fivucsas) holds no card. NFC
+    # possession is identity-level → EXEMPT from biometric consent (product
+    # decision); every cross-identity match is audit-logged. NFC-only. Flip with
+    # FIVUCSAS_CROSS_MEMBERSHIP_ENROLLMENT_RESOLUTION=true (no redeploy); revert = unset.
+    cross-membership-enrollment-resolution: ${FIVUCSAS_CROSS_MEMBERSHIP_ENROLLMENT_RESOLUTION:false}
   # Config-driven login engine (task #16). Ships DARK in prod: default OFF so the
   # whole login path is byte-identical to today (hard password gate; usernameless
   # entry points mint directly). KILL-SWITCH / CANARY — no redeploy to flip:

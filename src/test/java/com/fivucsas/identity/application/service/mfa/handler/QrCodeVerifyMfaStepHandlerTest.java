@@ -4,6 +4,7 @@ import com.fivucsas.identity.application.service.mfa.MfaStepResult;
 import com.fivucsas.identity.entity.MfaSession;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.infrastructure.qrcode.QrCodeService;
+import com.fivucsas.identity.infrastructure.qrcode.QrSessionService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -68,8 +69,11 @@ class QrCodeVerifyMfaStepHandlerTest {
                 .thenAnswer(inv -> store.remove(inv.getArgument(0)) != null);
 
         // Real QrCodeService over the in-memory Redis fake; the handler wraps it.
+        // QrSessionService is only used on the cross-device session-approval path
+        // (action:challenge / qrSessionId); these tests drive the legacy token
+        // path (flag default false, no qrSessionId), so a bare mock suffices.
         qrCodeService = new QrCodeService(redisTemplate);
-        handler = new QrCodeVerifyMfaStepHandler(qrCodeService);
+        handler = new QrCodeVerifyMfaStepHandler(qrCodeService, mock(QrSessionService.class));
     }
 
     @Test

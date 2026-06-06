@@ -28,5 +28,25 @@ public interface ManageDeviceUseCase {
      */
     DeviceResponse updatePushToken(UUID userId, String token, String platform);
 
+    /**
+     * #15 — Best-effort, idempotent UPSERT of a {@link com.fivucsas.identity.entity.UserDevice}
+     * row on a SUCCESSFUL login completion, so a user who authenticated (web or
+     * mobile) surfaces in the dashboard Devices view. Previously a UserDevice row
+     * was only ever created on the approve-login push-token path, so plain
+     * password/MFA logins left {@code user_devices} empty.
+     *
+     * <p>The fingerprint is DETERMINISTIC ({@code login:<userId>:<platform>}) so
+     * repeated logins from the same platform UPDATE the same row rather than
+     * accumulating duplicates. The device is bound to the user's OWN tenant;
+     * platform + name are derived from the User-Agent when available.
+     *
+     * <p>This call MUST never fail the login — implementations swallow all
+     * exceptions and return {@code null} on any error. Additive + reversible.
+     *
+     * @param userId    the just-authenticated user
+     * @param userAgent the login request's User-Agent (may be null/blank)
+     */
+    void recordLoginDevice(UUID userId, String userAgent);
+
     void removeDevice(UUID deviceId);
 }

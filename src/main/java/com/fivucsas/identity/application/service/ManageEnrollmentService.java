@@ -21,6 +21,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
@@ -82,13 +83,16 @@ public class ManageEnrollmentService implements ManageEnrollmentUseCase {
         ensureAutoBoundEnrollment(userId, AuthMethodType.QR_CODE);
         // #21 — device-implicit methods. APPROVE_LOGIN and PASSKEY are seeded
         // requires_enrollment=true, but they have no biometric "enrollment" flow:
-        // APPROVE_LOGIN works once the user has a device with a push token (now
-        // created on mobile login, see ManageDeviceService #15); PASSKEY works
-        // once the user has a discoverable WebAuthn credential. Without a row they
-        // were reported as a blocking "not enrolled" in the auth-methods UI. Bind
-        // them ENROLLED — but ONLY when the backing data actually exists, so an
-        // unprovisioned account still correctly shows them as not-yet-usable.
-        if (hasPushTokenDevice(userId)) {
+        // APPROVE_LOGIN works once the user has ANY registered device (the approver
+        // POLLS /auth/approve-login/pending — no FCM push token is involved, so we
+        // must NOT gate on a push token the poll-based mobile app never sets;
+        // devices are created on mobile login, see ManageDeviceService #15);
+        // PASSKEY works once the user has a discoverable WebAuthn credential.
+        // Without a row they were reported as a blocking "not enrolled" in the
+        // auth-methods UI. Bind them ENROLLED — but ONLY when the backing data
+        // actually exists, so an unprovisioned account still correctly shows them
+        // as not-yet-usable.
+        if (hasApproverDevice(userId)) {
             ensureAutoBoundEnrollment(userId, AuthMethodType.APPROVE_LOGIN);
         }
         if (hasDiscoverablePasskey(userId)) {
@@ -96,11 +100,14 @@ public class ManageEnrollmentService implements ManageEnrollmentUseCase {
         }
     }
 
-    /** APPROVE_LOGIN is device-implicit: usable once a device has a push token. */
-    private boolean hasPushTokenDevice(UUID userId) {
+    /**
+     * APPROVE_LOGIN is device-implicit: usable once the user has ANY registered
+     * device. The approver polls for pending requests, so no FCM push token is
+     * required (gating on push token left it permanently un-enrollable).
+     */
+    private boolean hasApproverDevice(UUID userId) {
         try {
-            return userDeviceRepository.findAllByUserId(userId).stream()
-                    .anyMatch(d -> d.getPushToken() != null && !d.getPushToken().isBlank());
+            return !userDeviceRepository.findAllByUserId(userId).isEmpty();
         } catch (Exception e) {
             log.debug("APPROVE_LOGIN device check skipped for user {}: {}", userId, e.getMessage());
             return false;
@@ -116,6 +123,15 @@ public class ManageEnrollmentService implements ManageEnrollmentUseCase {
             log.debug("PASSKEY credential check skipped for user {}: {}", userId, e.getMessage());
             return false;
         }
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void autoBindEnrollment(UUID userId, AuthMethodType methodType) {
+        // Runs in a SEPARATE transaction (see interface javadoc): even if the
+        // create/save below fails (e.g. a unique-constraint race), only THIS tx
+        // rolls back — the caller's WebAuthn credential save still commits.
+        ensureAutoBoundEnrollment(userId, methodType);
     }
 
     private void ensureAutoBoundEnrollment(UUID userId, AuthMethodType methodType) {
@@ -204,7 +220,23 @@ public class ManageEnrollmentService implements ManageEnrollmentUseCase {
                                                  BigDecimal livenessScore) {
         UserEnrollment enrollment = userEnrollmentRepository
                 .findByUserIdAndAuthMethodType(userId, methodType)
-                .orElseThrow(() -> new EntityNotFoundException("Enrollment not found for user: " + userId + " method: " + methodType));
+                .orElseGet(() -> {
+                    // Upsert: a first-time / out-of-band completion (no prior PENDING
+                    // row from startEnrollment) CREATES the row instead of throwing
+                    // EntityNotFoundException — which, inside a caller's transaction,
+                    // would mark it rollback-only and 500 the commit (the WebAuthn
+                    // fingerprint bug class). Mirrors startEnrollment's create path.
+                    User user = userRepository.findById(userId)
+                            .orElseThrow(() -> new EntityNotFoundException("User not found: " + userId));
+                    if (user.getTenant() == null) {
+                        throw new EntityNotFoundException("User has no tenant: " + userId);
+                    }
+                    return UserEnrollment.builder()
+                            .user(user)
+                            .tenant(user.getTenant())
+                            .authMethodType(methodType)
+                            .build();
+                });
 
         enrollment.completeEnrollment(enrollmentData, qualityScore, livenessScore);
         return EnrollmentResponse.from(userEnrollmentRepository.save(enrollment));
@@ -234,7 +266,7 @@ public class ManageEnrollmentService implements ManageEnrollmentUseCase {
      * mirrors {@link #startEnrollment}'s race handling.
      */
     @Override
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void recordBiometricScores(UUID userId,
                                        AuthMethodType methodType,
                                        BigDecimal qualityScore,

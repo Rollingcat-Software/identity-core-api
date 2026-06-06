@@ -13,8 +13,10 @@ import com.fivucsas.identity.entity.UserDevice;
 import com.fivucsas.identity.repository.JpaTenantRepository;
 import jakarta.persistence.EntityNotFoundException;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Comparator;
@@ -23,6 +25,7 @@ import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 @Transactional(readOnly = true)
 public class ManageDeviceService implements ManageDeviceUseCase {
 
@@ -197,6 +200,93 @@ public class ManageDeviceService implements ManageDeviceUseCase {
         device.updatePushToken(token);
         device.updateLastUsed();
         return DeviceResponse.from(userDeviceRepository.save(device));
+    }
+
+    /**
+     * #15 — Best-effort, idempotent login-device upsert. See
+     * {@link ManageDeviceUseCase#recordLoginDevice(UUID, String)}. NEVER throws:
+     * any failure is logged and swallowed so a device-tracking hiccup can't break
+     * the login it is observing.
+     */
+    @Override
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void recordLoginDevice(UUID userId, String userAgent) {
+        try {
+            User user = userRepository.findById(userId).orElse(null);
+            if (user == null) {
+                return;
+            }
+            Tenant tenant = user.getTenant();
+            if (tenant == null) {
+                // No tenant → nowhere safe to scope the device. Skip (don't fail login).
+                return;
+            }
+
+            DevicePlatform platform = platformFromUserAgent(userAgent);
+            // Deterministic fingerprint → idempotent upsert (no duplicate rows on
+            // repeated logins from the same platform).
+            String fingerprint = "login:" + userId + ":" + platform.name();
+            String deviceName = deviceNameFor(userAgent, platform);
+
+            final DevicePlatform platformForBuild = platform;
+            UserDevice device = userDeviceRepository
+                    .findByUserIdAndDeviceFingerprint(userId, fingerprint)
+                    .orElseGet(() -> UserDevice.builder()
+                            .user(user)
+                            .tenant(tenant)
+                            .deviceName(deviceName)
+                            .deviceFingerprint(fingerprint)
+                            .platform(platformForBuild)
+                            .capabilities(List.of())
+                            .build());
+
+            // Refresh the name on each login (UA may change) and stamp last-used.
+            device.updateName(deviceName);
+            device.updateLastUsed();
+            userDeviceRepository.save(device);
+        } catch (RuntimeException e) {
+            // Best-effort: a device-tracking failure must NEVER fail the login.
+            log.warn("recordLoginDevice failed for user {} (login continues): {}",
+                    userId, e.getMessage());
+        }
+    }
+
+    /**
+     * Maps a browser/app User-Agent to a {@link DevicePlatform}. Mobile UAs win
+     * over the desktop-OS substring (Android/iOS UAs also contain "Linux"/"Mac OS"),
+     * so the order matters. Unknown/blank → WEB (the dashboard surface is the only
+     * caller that has no explicit platform).
+     */
+    private static DevicePlatform platformFromUserAgent(String userAgent) {
+        if (userAgent == null || userAgent.isBlank()) {
+            return DevicePlatform.WEB;
+        }
+        String ua = userAgent.toLowerCase(java.util.Locale.ROOT);
+        if (ua.contains("android")) {
+            return DevicePlatform.ANDROID;
+        }
+        if (ua.contains("iphone") || ua.contains("ipad") || ua.contains("ios")) {
+            return DevicePlatform.IOS;
+        }
+        // A native desktop client identifies itself explicitly; everything else
+        // (Chrome/Firefox/Safari/Edge on Win/Mac/Linux) is the WEB surface.
+        if (ua.contains("electron") || ua.contains("desktop-app")) {
+            return DevicePlatform.DESKTOP;
+        }
+        return DevicePlatform.WEB;
+    }
+
+    /**
+     * Human-readable device name. Reuses the existing User-Agent parser used for
+     * the sessions list ("Chrome on Windows"); falls back to the platform name
+     * when the UA is absent.
+     */
+    private static String deviceNameFor(String userAgent, DevicePlatform platform) {
+        if (userAgent != null && !userAgent.isBlank()) {
+            return com.fivucsas.identity.application.dto.response.SessionResponse
+                    .extractDeviceInfo(userAgent);
+        }
+        return platform.name() + " device";
     }
 
     private static DevicePlatform parsePlatform(String platform) {

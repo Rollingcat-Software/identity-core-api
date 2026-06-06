@@ -6,12 +6,16 @@ import com.fivucsas.identity.application.service.mfa.VerifyMfaStepHandler;
 import com.fivucsas.identity.domain.model.NfcSerial;
 import com.fivucsas.identity.domain.model.auth.AuthMethodType;
 import com.fivucsas.identity.entity.MfaSession;
+import com.fivucsas.identity.entity.NfcCard;
 import com.fivucsas.identity.entity.User;
+import com.fivucsas.identity.repository.UserRepository;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.util.Map;
+import java.util.Optional;
+import java.util.UUID;
 
 /**
  * MFA step handler for the {@code NFC_DOCUMENT} auth method.
@@ -45,6 +49,7 @@ import java.util.Map;
 public class NfcDocumentVerifyMfaStepHandler implements VerifyMfaStepHandler {
 
     private final NfcCardRepositoryPort nfcCardRepository;
+    private final UserRepository userRepository;
 
     /**
      * When {@code false} (default), serial-only NFC verification is fail-closed
@@ -53,11 +58,27 @@ public class NfcDocumentVerifyMfaStepHandler implements VerifyMfaStepHandler {
      */
     private final boolean serialOnlyAuthEnabled;
 
+    /**
+     * Cross-membership NFC enrollment resolution (NFC only). When false (default),
+     * the serial is matched ONLY against the active membership row's cards —
+     * byte-identical to legacy behavior. When true, a serial that misses the active
+     * row is matched across the person's (identity) other linked memberships, so a
+     * card enrolled under tenant A satisfies a tap during a login into tenant B.
+     * NFC possession is identity-level → EXEMPT from biometric consent (product
+     * decision); every cross-identity match is audit-logged.
+     */
+    private final boolean crossMembershipNfcEnabled;
+
     public NfcDocumentVerifyMfaStepHandler(
             NfcCardRepositoryPort nfcCardRepository,
-            @Value("${fivucsas.nfc.serial-only-auth-enabled:false}") boolean serialOnlyAuthEnabled) {
+            UserRepository userRepository,
+            @Value("${fivucsas.nfc.serial-only-auth-enabled:false}") boolean serialOnlyAuthEnabled,
+            @Value("${app.identity.cross-membership-enrollment-resolution:false}")
+            boolean crossMembershipNfcEnabled) {
         this.nfcCardRepository = nfcCardRepository;
+        this.userRepository = userRepository;
         this.serialOnlyAuthEnabled = serialOnlyAuthEnabled;
+        this.crossMembershipNfcEnabled = crossMembershipNfcEnabled;
     }
 
     @Override
@@ -90,6 +111,45 @@ public class NfcDocumentVerifyMfaStepHandler implements VerifyMfaStepHandler {
         boolean ok = nfcCardRepository
                 .findByCardSerialAndUserIdAndIsActiveTrue(cardSerial, user.getId())
                 .isPresent();
-        return ok ? MfaStepResult.ok() : MfaStepResult.fail();
+        if (ok) {
+            return MfaStepResult.ok();
+        }
+
+        // Cross-membership fallback (flag-gated, NFC only): the active membership
+        // (e.g. a tenant reached via hosted login) may hold no card, but the person
+        // enrolled the same physical card under another of their linked
+        // memberships. Match the serial across the identity's sibling memberships
+        // so the tap succeeds. NFC possession is identity-level → no consent check
+        // (product decision); the match is audit-logged with the sibling user id.
+        if (crossMembershipNfcEnabled && resolveCrossMembershipSerialMatch(cardSerial, user)) {
+            return MfaStepResult.ok();
+        }
+        return MfaStepResult.fail();
+    }
+
+    /**
+     * Resolves whether {@code cardSerial} matches an active card under one of the
+     * person's linked memberships OTHER than the active one. Uses the controlled
+     * native-bypass read (the {@code nfc_cards → users} join is not scoped by the
+     * Hibernate tenant filter). Returns false (logging nothing) when the user has
+     * no identity, no requesting tenant, or no sibling match.
+     */
+    private boolean resolveCrossMembershipSerialMatch(String cardSerial, User user) {
+        UUID userId = user.getId();
+        UUID identityId = userRepository.findIdentityIdById(userId).orElse(null);
+        UUID requestingTenantId = userRepository.findTenantIdById(userId).orElse(null);
+        if (identityId == null || requestingTenantId == null) {
+            return false;
+        }
+        Optional<NfcCard> sibling = nfcCardRepository
+                .findActiveCardBySerialForIdentityExcludingTenant(cardSerial, identityId, requestingTenantId);
+        if (sibling.isPresent()) {
+            UUID siblingUserId = sibling.get().getUser() != null ? sibling.get().getUser().getId() : null;
+            log.info("AUDIT: cross-identity NFC verify match — user {} (tenant {}) authenticated NFC_DOCUMENT "
+                    + "via a card enrolled under sibling membership {} of identity {}",
+                    userId, requestingTenantId, siblingUserId, identityId);
+            return true;
+        }
+        return false;
     }
 }

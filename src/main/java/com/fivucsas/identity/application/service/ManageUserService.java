@@ -336,6 +336,12 @@ public class ManageUserService implements ManageUserUseCase {
             user.updateAddress(address);
         }
 
+        // Account status (ACTIVE/INACTIVE/SUSPENDED/...). null = leave unchanged.
+        // The entity's @PreUpdate keeps is_active in sync on save.
+        if (command.getStatus() != null) {
+            user.setStatus(command.getStatus());
+        }
+
         // Platform-tier (user_type) change — ROOT-caller-only, fail-closed.
         applyUserType(user, command.getUserType());
 

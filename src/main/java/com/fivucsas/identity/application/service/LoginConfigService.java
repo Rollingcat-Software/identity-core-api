@@ -150,10 +150,21 @@ public class LoginConfigService {
      * exactly when the engine is globally enabled and reverts with the flag.
      */
     public LoginConfigResponse getPlatformLoginConfig() {
-        return passwordFirstConfig(
-                UUID.fromString("00000000-0000-0000-0000-000000000000"),
-                "platform",
-                configDrivenLoginPolicy.isGloballyEnabled());
+        // PASSWORD-first, PLUS a usernameless PASSKEY so the dashboard's own login
+        // surface offers the passkey one-tap shortcut (parity with verify.fivucsas,
+        // whose per-tenant configs declare PASSKEY). This config drives only what the
+        // dashboard RENDERS at Layer-1 — discoverable-passkey auth is cross-tenant and
+        // enforcement stays per the user's tenant flow, so adding it is an affordance,
+        // not a policy change. Kept separate from passwordFirstConfig() (shared by the
+        // tenant flag-OFF fallback) so this does NOT leak passkey onto every tenant.
+        LoginConfigResponse.Method password =
+                new LoginConfigResponse.Method("PASSWORD", false, true);
+        LoginConfigResponse.Method passkey =
+                new LoginConfigResponse.Method("PASSKEY", true, true);
+        return new LoginConfigResponse(
+                "00000000-0000-0000-0000-000000000000", "platform",
+                new LoginConfigResponse.Layer1(List.of(password, passkey), true),
+                1, List.of(), configDrivenLoginPolicy.isGloballyEnabled());
     }
 
     private LoginConfigResponse passwordFirstConfig(UUID tenantId, String tenantName, boolean engineActive) {
