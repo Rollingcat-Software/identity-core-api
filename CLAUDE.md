@@ -432,8 +432,7 @@ UI redesign reverts with the env flag and no web redeploy.
   only PATH-scoped list** — the filter intersects to EMPTY when path tenant ≠ active
   X-Tenant-ID; fixed in web-app #126 (`AuthFlowsPage` uses the active tenant for the
   path, also fixing a latent switcher-ignored bug). `CrossTenantIsolationIT` exists
-  (RUN_INTEGRATION-gated → P1-1 makes it a CI gate). Staging env (P1-2) at
-  127.0.0.1:18080 — see `docs/RUNBOOK_STAGING.md`.
+  (RUN_INTEGRATION-gated → P1-1 makes it a CI gate).
 - **Rebuilt 2026-05-29 12:25 UTC** (image `7109c30f`, healthy, boot 24s) — shipped
   PR #115 (two admin 500 fixes) + the merged 2026-05-29 delta (#99 V61, #114 dead
   card-detect proxy removal). **V61 applied** (audit_logs.tenant_id → NOT NULL;

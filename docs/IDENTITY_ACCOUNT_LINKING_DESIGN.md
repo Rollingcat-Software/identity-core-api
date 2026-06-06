@@ -177,8 +177,7 @@ already own (proven at link time).
 ## Migration order (Flyway)
 V65 identities → V66 identity_emails → V67 users.identity_id (+backfill) →
 V68 identity_tenant_biometric_consent. (Phase 4 needs no schema; flag only.)
-Each migration must apply cleanly from the current prod schema; verify on the staging DB
-(127.0.0.1:18080, see RUNBOOK_STAGING.md) before prod.
+Each migration must apply cleanly from the current prod schema before prod.
 
 ## Rollout / validation
 - Phase 1: deploy, confirm zero behavior change (existing logins/enrol/admin all unchanged;
