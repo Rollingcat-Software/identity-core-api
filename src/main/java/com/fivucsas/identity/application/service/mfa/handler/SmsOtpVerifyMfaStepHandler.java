@@ -1,5 +1,6 @@
 package com.fivucsas.identity.application.service.mfa.handler;
 
+import com.fivucsas.identity.application.port.output.MarkPhoneVerifiedPort;
 import com.fivucsas.identity.application.service.mfa.MfaStepResult;
 import com.fivucsas.identity.application.service.mfa.VerifyMfaStepHandler;
 import com.fivucsas.identity.domain.model.auth.AuthMethodType;
@@ -19,6 +20,11 @@ public class SmsOtpVerifyMfaStepHandler implements VerifyMfaStepHandler {
 
     private final SmsService smsService;
     private final OtpService otpService;
+    // F2 (2026-06-06): a verified SMS_OTP step proves phone ownership, so mark
+    // phone_number_verified (keyed by userId → adapter owns the entity.User write,
+    // keeping this handler off the entity.User boundary). Phone stays OPTIONAL —
+    // this only corrects the claim WHEN the user authenticates by SMS_OTP.
+    private final MarkPhoneVerifiedPort markPhoneVerifiedPort;
 
     @Override
     public AuthMethodType supports() {
@@ -39,9 +45,16 @@ public class SmsOtpVerifyMfaStepHandler implements VerifyMfaStepHandler {
             if (phone == null || phone.isBlank()) {
                 return MfaStepResult.fail();
             }
-            return verifiable.verifyCode(phone, code) ? MfaStepResult.ok() : MfaStepResult.fail();
+            if (verifiable.verifyCode(phone, code)) {
+                markPhoneVerifiedPort.markPhoneVerified(session.getUserId());
+                return MfaStepResult.ok();
+            }
+            return MfaStepResult.fail();
         }
         boolean ok = otpService.validate("2fa-sms:" + user.getId(), code);
+        if (ok) {
+            markPhoneVerifiedPort.markPhoneVerified(session.getUserId());
+        }
         return ok ? MfaStepResult.ok() : MfaStepResult.fail();
     }
 }

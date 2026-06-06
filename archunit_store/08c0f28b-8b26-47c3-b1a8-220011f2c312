@@ -602,3 +602,4 @@ Method <com.fivucsas.identity.service.RefreshTokenService.verifyExpiration(com.f
 Method <com.fivucsas.identity.service.RefreshTokenService.verifyExpiration(com.fivucsas.identity.entity.RefreshToken)> calls method <com.fivucsas.identity.entity.User.getId()> in (RefreshTokenService.java:129)
 Method <com.fivucsas.identity.application.service.ManageDeviceService.upsertPushTokenDevice(java.util.UUID, java.lang.String, java.lang.String)> calls method <com.fivucsas.identity.entity.User.getTenant()> in (ManageDeviceService.java:172)
 Method <com.fivucsas.identity.controller.UserController.listMyReceivedInvitations()> calls method <com.fivucsas.identity.entity.User.getEmail()> in (UserController.java:400)
+Method <com.fivucsas.identity.application.service.handler.SmsOtpAuthHandler.markPhoneVerifiedForSessionUser(com.fivucsas.identity.entity.AuthSession)> calls method <com.fivucsas.identity.entity.User.getId()> in (SmsOtpAuthHandler.java:94)
