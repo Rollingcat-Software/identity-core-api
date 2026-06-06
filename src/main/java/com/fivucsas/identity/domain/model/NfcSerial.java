@@ -1,5 +1,7 @@
 package com.fivucsas.identity.domain.model;
 
+import java.util.Locale;
+
 /**
  * Canonical NFC card serial normalization at the API ingest boundary.
  *
@@ -65,14 +67,17 @@ public final class NfcSerial {
 
         if (isHex(stripped)) {
             // Canonical: contiguous UPPERHEX. Mobile already matches this;
-            // web's "04:a2:..:" collapses onto it.
-            return stripped.toUpperCase();
+            // web's "04:a2:..:" collapses onto it. Locale.ROOT — a bare
+            // toUpperCase() under tr_TR maps 'i'→'İ' / 'I'→'ı', corrupting
+            // serials (e.g. "SERIAL-2" → "SERİAL-2") and breaking lookups.
+            return stripped.toUpperCase(Locale.ROOT);
         }
 
         // Opaque / non-hex serial — don't mangle it by stripping characters
         // that may be significant. Upper-case + trim keeps comparison
-        // case-insensitive while preserving the token verbatim.
-        return trimmed.toUpperCase();
+        // case-insensitive while preserving the token verbatim. Locale.ROOT for
+        // the same Turkish 'i'/'I' reason as the hex branch above.
+        return trimmed.toUpperCase(Locale.ROOT);
     }
 
     private static boolean isHex(String s) {

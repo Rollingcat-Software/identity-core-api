@@ -46,6 +46,12 @@ class OAuth2ServiceTest {
     @Mock private PasswordEncoder passwordEncoder;
     @Mock private MfaSessionRepository mfaSessionRepository;
     @Mock private com.fivucsas.identity.service.RefreshTokenService refreshTokenService;
+    // Token-mint moved into the infrastructure adapter behind this port
+    // (UserDomainBoundaryTest — the application service must not touch
+    // entity.User). The token-shape assertions now live in
+    // OAuth2TokenMintAdapterTest; here we just verify exchangeCode/refresh
+    // delegate to the port and surface its response.
+    @Mock private com.fivucsas.identity.application.port.output.OAuth2TokenMintPort tokenMintPort;
 
     // Phase 4: inject a REAL resolver with the pairwise flag OFF so these legacy
     // tests keep asserting sub == user.id (the default, zero-behaviour-change
@@ -59,17 +65,22 @@ class OAuth2ServiceTest {
     private OAuth2Service service;
 
     /**
-     * Stub the RFC 6749 §6 refresh-token mint that exchangeCode now performs on
-     * the success path. Returns a token whose transient wire value + expiry are
-     * read into the response body (refresh_token / refresh_expires_in).
+     * Stub the token-mint port the success path of exchangeCode now delegates
+     * to. Returns the RFC 6749 §5.1 body the infrastructure adapter would build
+     * (its construction is covered by OAuth2TokenMintAdapterTest); here we assert
+     * exchangeCode passes the resolved userEmail + client through and returns it.
      */
-    private void stubRefreshTokenMint() {
-        com.fivucsas.identity.entity.RefreshToken minted =
-                mock(com.fivucsas.identity.entity.RefreshToken.class);
-        when(minted.getToken()).thenReturn("refresh-wire-token");
-        when(minted.getExpiryDate())
-                .thenReturn(java.time.Instant.now().plus(java.time.Duration.ofDays(7)));
-        when(refreshTokenService.createRefreshToken(any(), any(), any())).thenReturn(minted);
+    private void stubTokenMintForAuthorizationCode() {
+        java.util.Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("access_token", "access-jwt");
+        body.put("token_type", "Bearer");
+        body.put("expires_in", 3600L);
+        body.put("id_token", "id-jwt");
+        body.put("refresh_token", "refresh-wire-token");
+        body.put("refresh_expires_in", 604800L);
+        when(tokenMintPort.mintForAuthorizationCode(
+                anyString(), any(), any(), any(), any(), any()))
+                .thenReturn(body);
     }
 
     @Test
@@ -190,29 +201,15 @@ class OAuth2ServiceTest {
         when(clientRepository.findByClientIdAndActiveTrue("client-1")).thenReturn(Optional.of(client));
         when(passwordEncoder.matches("secret", "hashed-secret")).thenReturn(true);
 
-        User user = mock(User.class);
-        Tenant tenant = mock(Tenant.class);
-        UUID tenantId = UUID.randomUUID();
-        UUID userId = UUID.randomUUID();
-        when(tenant.getId()).thenReturn(tenantId);
-        when(user.getId()).thenReturn(userId);
-        when(user.getEmail()).thenReturn("user@test.com");
-        when(user.getFullName()).thenReturn("Test User");
-        when(user.getFirstName()).thenReturn("Test");
-        when(user.getLastName()).thenReturn("User");
-        when(user.isEmailVerified()).thenReturn(true);
-        when(user.getTenant()).thenReturn(tenant);
-        when(userRepository.findByEmail("user@test.com")).thenReturn(Optional.of(user));
-
-        when(jwtService.generateToken(anyMap(), eq("user@test.com"))).thenReturn("access-jwt");
-        when(jwtService.generateIdToken(anyMap(), eq("user@test.com"))).thenReturn("id-jwt");
-        when(jwtService.getExpirationMillis()).thenReturn(3600000L);
-        stubRefreshTokenMint();
+        stubTokenMintForAuthorizationCode();
 
         // when
         Map<String, Object> result = service.exchangeCode("test-code", "client-1", "https://cb.com", "secret");
 
-        // then
+        // then — exchangeCode validates the code/PKCE/secret then delegates the
+        // token build to the port; the response is surfaced unchanged. The token
+        // shape (id_token aud/azp, refresh wiring) is asserted in
+        // OAuth2TokenMintAdapterTest.
         assertThat(result).containsEntry("access_token", "access-jwt");
         assertThat(result).containsEntry("token_type", "Bearer");
         assertThat(result).containsEntry("id_token", "id-jwt");
@@ -222,17 +219,11 @@ class OAuth2ServiceTest {
         assertThat(result).containsKey("refresh_expires_in");
         verify(redisTemplate).delete("oauth2:code:test-code");
 
-        // P1-5 (2026-06-02): the ID token is minted via generateIdToken (NOT
-        // generateToken, which appends the API audience), and its aud/azp are
-        // the RP client_id only. The access token still goes through
-        // generateToken (keeps aud=fivucsas-api).
-        ArgumentCaptor<Map<String, Object>> idClaims = ArgumentCaptor.forClass(Map.class);
-        verify(jwtService).generateIdToken(idClaims.capture(), eq("user@test.com"));
-        assertThat(idClaims.getValue()).containsEntry("aud", "client-1");
-        assertThat(idClaims.getValue()).containsEntry("azp", "client-1");
-        assertThat(idClaims.getValue()).containsEntry("type", "id_token");
-        // The access-token path is the only generateToken() caller.
-        verify(jwtService).generateToken(anyMap(), eq("user@test.com"));
+        // Delegation: the resolved userEmail + the validated client + the stored
+        // scope/nonce are handed to the mint port.
+        verify(tokenMintPort).mintForAuthorizationCode(
+                eq("user@test.com"), eq(client), eq("openid profile email"),
+                eq(""), any(), any());
     }
 
     @Test
@@ -294,23 +285,7 @@ class OAuth2ServiceTest {
         OAuth2Client client = mock(OAuth2Client.class);
         when(clientRepository.findByClientIdAndActiveTrue("client-1")).thenReturn(Optional.of(client));
 
-        User user = mock(User.class);
-        Tenant tenant = mock(Tenant.class);
-        UUID userId = UUID.randomUUID();
-        when(tenant.getId()).thenReturn(UUID.randomUUID());
-        when(user.getId()).thenReturn(userId);
-        when(user.getEmail()).thenReturn("user@test.com");
-        when(user.getFullName()).thenReturn("Test User");
-        when(user.getFirstName()).thenReturn("Test");
-        when(user.getLastName()).thenReturn("User");
-        when(user.isEmailVerified()).thenReturn(true);
-        when(user.getTenant()).thenReturn(tenant);
-        when(userRepository.findByEmail("user@test.com")).thenReturn(Optional.of(user));
-
-        when(jwtService.generateToken(anyMap(), eq("user@test.com"))).thenReturn("access-jwt");
-        when(jwtService.generateIdToken(anyMap(), eq("user@test.com"))).thenReturn("id-jwt");
-        when(jwtService.getExpirationMillis()).thenReturn(3600000L);
-        stubRefreshTokenMint();
+        stubTokenMintForAuthorizationCode();
 
         // when
         Map<String, Object> result = service.exchangeCode(
@@ -320,6 +295,9 @@ class OAuth2ServiceTest {
         assertThat(result).containsEntry("access_token", "access-jwt");
         assertThat(result).containsEntry("refresh_token", "refresh-wire-token");
         verify(redisTemplate).delete("oauth2:code:pkce-code");
+        verify(tokenMintPort).mintForAuthorizationCode(
+                eq("user@test.com"), eq(client), eq("openid profile email"),
+                eq(""), any(), any());
     }
 
     @Test
@@ -437,23 +415,7 @@ class OAuth2ServiceTest {
         when(clientRepository.findByClientIdAndActiveTrue("client-1")).thenReturn(Optional.of(client));
         when(passwordEncoder.matches("right-secret", "hashed-secret")).thenReturn(true);
 
-        User user = mock(User.class);
-        Tenant tenant = mock(Tenant.class);
-        UUID userId = UUID.randomUUID();
-        when(tenant.getId()).thenReturn(UUID.randomUUID());
-        when(user.getId()).thenReturn(userId);
-        when(user.getEmail()).thenReturn("user@test.com");
-        when(user.getFullName()).thenReturn("Test User");
-        when(user.getFirstName()).thenReturn("Test");
-        when(user.getLastName()).thenReturn("User");
-        when(user.isEmailVerified()).thenReturn(true);
-        when(user.getTenant()).thenReturn(tenant);
-        when(userRepository.findByEmail("user@test.com")).thenReturn(Optional.of(user));
-
-        when(jwtService.generateToken(anyMap(), eq("user@test.com"))).thenReturn("access-jwt");
-        when(jwtService.generateIdToken(anyMap(), eq("user@test.com"))).thenReturn("id-jwt");
-        when(jwtService.getExpirationMillis()).thenReturn(3600000L);
-        stubRefreshTokenMint();
+        stubTokenMintForAuthorizationCode();
 
         // when
         Map<String, Object> result = service.exchangeCode(
@@ -463,6 +425,9 @@ class OAuth2ServiceTest {
         assertThat(result).containsEntry("access_token", "access-jwt");
         assertThat(result).containsEntry("refresh_token", "refresh-wire-token");
         verify(redisTemplate).delete("oauth2:code:conf-code-ok");
+        verify(tokenMintPort).mintForAuthorizationCode(
+                eq("user@test.com"), eq(client), eq("openid profile email"),
+                eq(""), any(), any());
     }
 
     /**
