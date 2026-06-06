@@ -1,6 +1,6 @@
 # Runbook — Flyway repair after the V29/V40/V41 DR-safety edits
 
-**Status:** REQUIRED before the next prod (and staging) boot that ships this change.
+**Status:** REQUIRED before the next prod boot that ships this change.
 **Owner action.** Do NOT skip — `spring.flyway.validate-on-migrate=true` in prod
 (`application-prod.yml`, enforced since 2026-05-11) will otherwise crash-loop the
 app on boot with a checksum-mismatch on V29, V40, and V41.
@@ -100,14 +100,6 @@ docker compose -f docker-compose.prod.yml --env-file .env.prod up -d identity-co
 # App boots; Flyway validate passes (checksums match); migrate is a no-op (already at head).
 curl -s http://127.0.0.1:8080/actuator/health
 ```
-
-## Staging
-
-The staging DB is cloned from prod (see `RUNBOOK_STAGING.md`), so its
-`flyway_schema_history` carries the **same** pre-edit V29/V40/V41 checksums and needs
-the identical `repair` (point the same command at `identity_core_staging`) before
-the staging container runs the new image. Going forward, once this DR fix is in,
-staging *could* be migrated from scratch instead of cloned — see the verification note.
 
 ## Verification performed (2026-05-30)
 
