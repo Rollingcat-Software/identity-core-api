@@ -149,3 +149,9 @@ package-lock.json
 
 # Claude Code workspace (worktrees, local state) — never commit
 .claude/
+
+# Leaked-secret hardening (2026-06-06) — never commit any env file; keep example
+.env.hetzner
+.env.*
+*.env
+!.env.example
