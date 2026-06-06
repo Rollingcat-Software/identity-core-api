@@ -44,17 +44,36 @@ public class RefreshTokenService implements com.fivucsas.identity.application.po
 
     @Transactional
     public RefreshToken createRefreshToken(User user, String ipAddress, String userAgent) {
+        // Legacy / client-unbound mint (non-OAuth paths: /auth/login, register,
+        // MFA-step, membership-switch, usernameless). No issuing OAuth2 client →
+        // clientId stays null → grace-window accepted on the refresh grant (API-2).
+        return createRefreshToken(user, ipAddress, userAgent, null);
+    }
+
+    /**
+     * Mint a refresh token bound to the issuing OAuth2 client (API-2, V84).
+     *
+     * <p>The OAuth2 {@code authorization_code} exchange threads the client's wire
+     * {@code client_id} here so the token records WHICH relying party it was
+     * issued to. On the {@code refresh_token} grant the bound value is compared to
+     * the requesting client and a mismatch is rejected (when client-binding
+     * enforcement is on). Pass {@code null} for non-OAuth / legacy mints — those
+     * stay client-unbound and refresh under the grace window.</p>
+     */
+    @Transactional
+    public RefreshToken createRefreshToken(User user, String ipAddress, String userAgent, String clientId) {
         // Initial login mints a fresh family — no parent to inherit from.
-        return createRefreshTokenInFamily(user, UUID.randomUUID(), ipAddress, userAgent);
+        return createRefreshTokenInFamily(user, UUID.randomUUID(), ipAddress, userAgent, clientId);
     }
 
     /**
      * Internal helper: mint a refresh token attached to a specific rotation
      * family. Used by both initial login (fresh family) and rotation
-     * (parent family inherited).
+     * (parent family inherited). {@code clientId} carries the API-2 issuing-client
+     * binding (V84) and is propagated unchanged across rotations.
      */
     private RefreshToken createRefreshTokenInFamily(User user, UUID familyId,
-                                                    String ipAddress, String userAgent) {
+                                                    String ipAddress, String userAgent, String clientId) {
         log.info("Creating refresh token for user: {} (family={})", user.getEmail(), familyId);
 
         // BE-M5 (2026-04-19): do NOT revoke all existing tokens here. Previously
@@ -89,6 +108,8 @@ public class RefreshTokenService implements com.fivucsas.identity.application.po
                 .user(user)
                 .tokenSecretHash(secretHash)
                 .familyId(familyId)
+                // API-2 (V84): record the issuing OAuth2 client (null = unbound).
+                .clientId(clientId)
                 .expiryDate(Instant.now().plusMillis(refreshTokenDurationMs))
                 .ipAddress(ipAddress)
                 .userAgent(userAgent)
@@ -229,8 +250,11 @@ public class RefreshTokenService implements com.fivucsas.identity.application.po
         // so reuse-detection can revoke them all at once (Sec-P2 #6).
         oldToken.revoke();
         refreshTokenRepository.save(oldToken);
+        // API-2 (V84): the rotated successor inherits the same issuing-client
+        // binding (null stays null) so a client-bound token stays bound across
+        // its whole rotation lineage and an unbound one stays unbound.
         return createRefreshTokenInFamily(oldToken.getUser(), oldToken.getFamilyId(),
-                ipAddress, userAgent);
+                ipAddress, userAgent, oldToken.getClientId());
     }
 
     @Transactional

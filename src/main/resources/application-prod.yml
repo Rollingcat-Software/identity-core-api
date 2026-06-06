@@ -113,6 +113,15 @@ app:
     # APP_AUTH_ENFORCE_TENANT_AUTH_METHODS=false disables login-time enforcement
     # instantly with no redeploy if the gate ever misbehaves in prod.
     enforce-tenant-auth-methods: ${APP_AUTH_ENFORCE_TENANT_AUTH_METHODS:true}
+  # OAuth2 / OIDC authorization-server behaviour.
+  oauth2:
+    refresh-token:
+      # API-2 (V84): bind a refresh token to its issuing OAuth2 client. Default ON
+      # (the refresh_token grant rejects a cross-client replay with invalid_grant;
+      # legacy null-client tokens are accepted). KILL-SWITCH: set
+      # APP_OAUTH2_REFRESH_TOKEN_CLIENT_BINDING_ENFORCED=false in .env.prod to
+      # revert to legacy wire-value-only behaviour with no redeploy.
+      client-binding-enforced: ${APP_OAUTH2_REFRESH_TOKEN_CLIENT_BINDING_ENFORCED:true}
   # GDPR Art. 17 / KVKK right-to-erasure — daily hard-purge of users
   # soft-deleted more than 30 days ago. Default flipped to true in the prod
   # profile (T2-E, INVESTIGATION_MASTER_2026-05-07 P1): the controlling

@@ -13,6 +13,16 @@ public interface RefreshTokenPort {
 
     RefreshToken createRefreshToken(User user, String ipAddress, String userAgent);
 
+    /**
+     * Mint a refresh token bound to the issuing OAuth2 {@code clientId} (API-2,
+     * V84). Pass {@code null} for non-OAuth / legacy mints (client-unbound). The
+     * default delegates to the unbound 3-arg form so existing implementations and
+     * test doubles stay source-compatible.
+     */
+    default RefreshToken createRefreshToken(User user, String ipAddress, String userAgent, String clientId) {
+        return createRefreshToken(user, ipAddress, userAgent);
+    }
+
     RefreshToken findByToken(String token);
 
     RefreshToken verifyExpiration(RefreshToken token);

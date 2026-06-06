@@ -98,6 +98,18 @@ app:
     # toggles are cosmetic). The write-side no-lock-out guards (flow builder /
     # method-disable 409/422) are unaffected; this only governs login-time gating.
     enforce-tenant-auth-methods: ${APP_AUTH_ENFORCE_TENANT_AUTH_METHODS:true}
+  # OAuth2 / OIDC authorization-server behaviour.
+  oauth2:
+    refresh-token:
+      # API-2 (V84): bind a refresh token to its issuing OAuth2 client. When true
+      # (default = ENFORCE) the refresh_token grant rejects (invalid_grant) a token
+      # whose recorded client_id is non-null and differs from the requesting
+      # client — so a refresh token minted for app A is NOT replayable by app B.
+      # Legacy null-client tokens (non-OAuth /auth/login + /auth/refresh, or
+      # pre-V84 rows) are always accepted (grace window). KILL-SWITCH: set
+      # APP_OAUTH2_REFRESH_TOKEN_CLIENT_BINDING_ENFORCED=false to revert to the
+      # legacy wire-value-only behaviour with NO redeploy.
+      client-binding-enforced: ${APP_OAUTH2_REFRESH_TOKEN_CLIENT_BINDING_ENFORCED:true}
   # Public self-service tenant onboarding (POST /api/v1/onboarding/register).
   onboarding:
     # Master switch for the public endpoint. When false the endpoint returns 400.

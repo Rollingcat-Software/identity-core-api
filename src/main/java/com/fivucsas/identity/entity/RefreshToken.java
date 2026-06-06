@@ -140,6 +140,23 @@ public class RefreshToken implements Persistable<UUID> {
     @Column(name = "family_id", nullable = false)
     private UUID familyId;
 
+    /**
+     * OAuth2 client this token was issued to (API-2, 2026-06-06, V84).
+     *
+     * <p>The wire {@code client_id} string (matches {@code oauth2_clients.client_id})
+     * of the relying party that minted this token through the OAuth2
+     * {@code authorization_code} exchange. {@code NULL} = legacy / client-unbound —
+     * minted by a non-OAuth path ({@code /auth/login}, register, MFA-step,
+     * membership-switch, usernameless) which is not tied to a single RP, OR minted
+     * before V84. On the {@code refresh_token} grant a non-null value must equal the
+     * requesting client (else {@code invalid_grant}) so a refresh token issued to
+     * app A is not replayable by app B; a {@code NULL} value is accepted (grace
+     * window). The rotated successor inherits this binding via
+     * {@code RefreshTokenService.rotateRefreshToken}. Nullable column, no backfill.</p>
+     */
+    @Column(name = "client_id", length = 128)
+    private String clientId;
+
     @Column(nullable = false)
     private Instant expiryDate;
 

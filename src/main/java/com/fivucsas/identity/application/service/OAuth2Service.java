@@ -71,6 +71,18 @@ public class OAuth2Service {
     @Value("${app.base-url:https://api.fivucsas.com}")
     private String issuer;
 
+    /**
+     * API-2 kill-switch (V84): when true (default), the {@code refresh_token} grant
+     * REJECTS a presented refresh token whose recorded issuing {@code client_id} is
+     * non-null AND differs from the requesting client — so a token issued to app A
+     * cannot be replayed by app B and reissued scoped to B. Legacy null-client
+     * tokens are always accepted (grace window). Flip to {@code false} via
+     * {@code APP_OAUTH2_REFRESH_TOKEN_CLIENT_BINDING_ENFORCED=false} to instantly
+     * restore the legacy wire-value-only behavior with no redeploy.
+     */
+    @Value("${app.oauth2.refresh-token.client-binding-enforced:true}")
+    private boolean refreshTokenClientBindingEnforced;
+
     private static final String AUTH_CODE_PREFIX = "oauth2:code:";
     // RFC 6749 Section 4.1.2: authorization code MUST expire shortly, max 10 minutes recommended
     private static final Duration AUTH_CODE_TTL = Duration.ofMinutes(10);
@@ -494,7 +506,12 @@ public class OAuth2Service {
             // RFC 6749 §6: issue a refresh token. createRefreshToken returns an
             // entity whose @Transient `token` field carries the raw wire value
             // (<id>.<secret>) exactly once — read it here, never persist it.
-            RefreshToken refreshToken = refreshTokenService.createRefreshToken(user, ipAddress, userAgent);
+            // API-2 (V84): bind the token to THIS client's wire client_id so the
+            // refresh grant can reject a cross-client replay. Both the
+            // authorization_code exchange and the refresh-token rotation flow
+            // through here, so the rotated successor re-binds to the same client.
+            RefreshToken refreshToken = refreshTokenService.createRefreshToken(
+                    user, ipAddress, userAgent, client.getClientId());
             response.put("refresh_token", refreshToken.getToken());
             long refreshExpiresIn =
                     Duration.between(Instant.now(), refreshToken.getExpiryDate()).getSeconds();
@@ -538,6 +555,24 @@ public class OAuth2Service {
         // (TokenRevokedException, after family-wide revoke per RFC 6749 §10.4).
         RefreshToken existing = refreshTokenService.findByToken(presentedRefreshToken);
         refreshTokenService.verifyExpiration(existing);
+
+        // API-2 (V84): refuse a cross-client replay. A refresh token minted for
+        // app A's client (existing.clientId == A) presented by app B's client
+        // (clientId == B) is reissued scoped to B unless we reject it here. We
+        // only reject when the token CARRIES a binding (non-null) and it differs
+        // from the requesting client — legacy null-client tokens (the non-OAuth
+        // /auth/login + /auth/refresh path, or pre-V84 rows) are accepted so the
+        // existing login/refresh flow keeps working (grace window). Gated by the
+        // client-binding-enforced kill-switch so it reverts via env with no
+        // redeploy. The controller maps invalid_grant from this exception.
+        if (refreshTokenClientBindingEnforced
+                && existing.getClientId() != null
+                && !existing.getClientId().equals(clientId)) {
+            log.warn("OAuth2 refresh refused — client mismatch: token bound to client={}, presented by client={}",
+                    existing.getClientId(), clientId);
+            throw new com.fivucsas.identity.domain.exception.TokenRevokedException(
+                    "Refresh token was not issued to this client");
+        }
 
         User user = existing.getUser();
 
