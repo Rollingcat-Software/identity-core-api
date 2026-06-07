@@ -7,6 +7,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Collections;
 import java.util.HashSet;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
@@ -379,12 +380,15 @@ public class User {
     }
 
     public boolean hasAnyRole(String... roleNames) {
+        // Locale.ROOT: role names are ASCII security identifiers — under the
+        // Turkish locale a bare toUpperCase() maps i→İ, silently breaking the
+        // case-insensitive membership check (authorization bypass/denial).
         Set<String> userRoleNames = getActiveRoles().stream()
                 .map(Role::getName)
-                .map(String::toUpperCase)
+                .map(name -> name.toUpperCase(Locale.ROOT))
                 .collect(Collectors.toSet());
         for (String roleName : roleNames) {
-            if (userRoleNames.contains(roleName.toUpperCase())) {
+            if (userRoleNames.contains(roleName.toUpperCase(Locale.ROOT))) {
                 return true;
             }
         }

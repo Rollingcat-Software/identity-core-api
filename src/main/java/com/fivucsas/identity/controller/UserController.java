@@ -27,6 +27,7 @@ import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.entity.UserSettings;
 import com.fivucsas.identity.exception.ResourceNotFoundException;
 import com.fivucsas.identity.repository.JpaTenantRepository;
+import com.fivucsas.identity.repository.UserRepository;
 import com.fivucsas.identity.security.RbacAuthorizationService;
 import com.fivucsas.identity.security.TenantScopeResolver;
 import io.swagger.v3.oas.annotations.Operation;
@@ -86,6 +87,7 @@ public class UserController {
     private final RbacAuthorizationService rbacService;
     private final TenantScopeResolver tenantScopeResolver;
     private final JpaTenantRepository tenantRepository;
+    private final UserRepository userRepository;
 
     // --- User CRUD endpoints ---
 
@@ -221,6 +223,7 @@ public class UserController {
     public ResponseEntity<Map<String, Object>> getUserSettings(@PathVariable String userId) {
         log.info("GET /api/v1/users/{}/settings", userId);
 
+        assertCanAccessUserSettings(userId);
         UUID uuid = UUID.fromString(userId);
         return userSettingsRepository.findByUserId(uuid)
                 .map(settings -> ResponseEntity.ok(settings.getSettings()))
@@ -235,10 +238,14 @@ public class UserController {
             @RequestBody Map<String, Object> newSettings) {
         log.info("PUT /api/v1/users/{}/settings", userId);
 
+        assertCanAccessUserSettings(userId);
         UUID uuid = UUID.fromString(userId);
         UserSettings settings = userSettingsRepository.findByUserId(uuid)
                 .orElseGet(() -> UserSettings.builder()
                         .userId(uuid)
+                        // Populate tenant_id (V84) so the @Filter(tenantFilter)
+                        // backstop is effective for newly-created settings rows.
+                        .tenantId(userRepository.findTenantIdById(uuid).orElse(null))
                         .settings(new HashMap<>(DEFAULT_SETTINGS))
                         .build());
 
@@ -547,7 +554,51 @@ public class UserController {
 
     // --- Private helpers ---
 
+    /**
+     * SECURITY (authz cross-tenant IDOR fix, 2026-06-07): the user-settings
+     * endpoints are gated by
+     * {@code hasPermission(#userId, 'user_settings', 'read'|'write') or isCurrentUser(#userId)}.
+     * The {@code hasPermission(...)} SpEL routes through {@link RbacPermissionEvaluator},
+     * which IGNORES the {@code #userId} target — it only asks "does the caller hold
+     * {@code user_settings:read}?". A TENANT_ADMIN holds every tenant-scoped
+     * permission implicitly, so a TENANT_ADMIN of tenant A could read/write the
+     * settings — including the {@code security} section — of ANY user in ANY
+     * tenant. {@code UserSettings} carries no {@code @Filter(tenantFilter)} (it has
+     * no tenant column pre-V84), so there is no DB backstop either.
+     *
+     * <p>This guard closes the hole at the object level: the caller is allowed iff
+     * they are the target user themselves, OR the target user's tenant is within a
+     * tenant the caller may manage ({@link TenantScopeResolver#canAccessTenant} —
+     * ROOT may act cross-tenant; a tenant-bound admin only within their own tenant).
+     * A missing/foreign-tenant target is refused with 403. We resolve the target's
+     * tenant with the lightweight {@code findTenantIdById} (no aggregate / proxy
+     * init).</p>
+     */
+    private void assertCanAccessUserSettings(String userId) {
+        UUID targetUserId;
+        try {
+            targetUserId = UUID.fromString(userId);
+        } catch (IllegalArgumentException e) {
+            throw new UnauthorizedException("Invalid user id");
+        }
+
+        UUID callerId = rbacService.getCurrentUserId().orElse(null);
+        if (callerId != null && callerId.equals(targetUserId)) {
+            // Self-access is always allowed (matches the isCurrentUser SpEL branch).
+            return;
+        }
+
+        UUID targetTenantId = userRepository.findTenantIdById(targetUserId).orElse(null);
+        if (targetTenantId == null || !tenantScopeResolver.canAccessTenant(targetTenantId)) {
+            log.warn("AUDIT: user-settings access refused — caller {} may not manage "
+                    + "target {} (targetTenant={})", callerId, targetUserId, targetTenantId);
+            throw new UnauthorizedException(
+                    "You may only access user settings for users within a tenant you administer");
+        }
+    }
+
     private ResponseEntity<Object> getSettingsSection(String userId, String section) {
+        assertCanAccessUserSettings(userId);
         UUID uuid = UUID.fromString(userId);
         Map<String, Object> allSettings = userSettingsRepository.findByUserId(uuid)
                 .map(UserSettings::getSettings)
@@ -559,10 +610,14 @@ public class UserController {
 
     @SuppressWarnings("unchecked")
     private ResponseEntity<Object> updateSettingsSection(String userId, String section, Map<String, Object> sectionSettings) {
+        assertCanAccessUserSettings(userId);
         UUID uuid = UUID.fromString(userId);
         UserSettings settings = userSettingsRepository.findByUserId(uuid)
                 .orElseGet(() -> UserSettings.builder()
                         .userId(uuid)
+                        // Populate tenant_id (V84) so the @Filter(tenantFilter)
+                        // backstop is effective for newly-created settings rows.
+                        .tenantId(userRepository.findTenantIdById(uuid).orElse(null))
                         .settings(new HashMap<>(DEFAULT_SETTINGS))
                         .build());
 

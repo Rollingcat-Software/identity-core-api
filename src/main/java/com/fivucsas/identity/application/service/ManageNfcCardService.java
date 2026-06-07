@@ -40,11 +40,49 @@ import java.util.UUID;
 @Slf4j
 public class ManageNfcCardService {
 
+    /**
+     * Admin permission gating NFC operations on behalf of another user. An NFC
+     * card is a physical credential/device, so it reuses the existing
+     * {@code device:create} admin permission (the same family as the
+     * {@code device:read} gate already on {@code /search/{serial}}). Holding it
+     * lets a tenant admin enroll/remove cards for users they manage; without it
+     * a caller may only act on their OWN cards.
+     */
+    private static final String NFC_ADMIN_PERMISSION = "device:create";
+
+    /**
+     * Read permission gating NFC PII reads on behalf of another user (the same
+     * {@code device:read} gate already on {@code /search/{serial}}).
+     */
+    private static final String NFC_READ_PERMISSION = "device:read";
+
     private final NfcCardRepositoryPort nfcCardRepository;
     private final UserRepository userRepository;
     private final RbacAuthorizationService rbacService;
     private final TenantScopeResolver tenantScopeResolver;
     private final ManageEnrollmentUseCase manageEnrollmentUseCase;
+
+    /**
+     * Verifies that the {@code targetUserId} resolves to a user whose tenant the
+     * caller is allowed to manage. Mirrors the {@code TenantScopeResolver}
+     * pattern used by the listing endpoints: ROOT may act cross-tenant; a
+     * tenant-bound admin may act only inside their own tenant scope. A target
+     * with no resolvable tenant, or in a tenant outside the caller's scope, is
+     * refused with 403 (we deliberately do NOT distinguish "no such user" from
+     * "other tenant" to avoid a cross-tenant user-enumeration oracle).
+     */
+    private void assertTargetWithinManageableTenant(UUID targetUserId, User caller) {
+        UUID targetTenantId = userRepository.findById(targetUserId)
+                .map(User::getTenant)
+                .map(Tenant::getId)
+                .orElse(null);
+        if (targetTenantId == null || !tenantScopeResolver.canAccessTenant(targetTenantId)) {
+            log.warn("AUDIT: NFC admin action refused — caller {} may not manage target {} (targetTenant={})",
+                    caller.getId(), targetUserId, targetTenantId);
+            throw new UnauthorizedException(
+                    "You may only manage NFC cards for users within a tenant you administer");
+        }
+    }
 
     /**
      * Outcome of an enroll attempt. {@link Status#OK} carries the saved card;
@@ -109,6 +147,38 @@ public class ManageNfcCardService {
         User currentUser = rbacService.getCurrentUser()
                 .orElseThrow(UnauthorizedException::new);
         Tenant tenant = currentUser.getTenant();
+
+        // SECURITY (authz IDOR fix, 2026-06-07): the enroll endpoint is
+        // isAuthenticated()-only and takes the target userId from the request
+        // body. Without a guard, any authenticated user could enroll (or, via
+        // reauthorize, REASSIGN/REACTIVATE) a card for ANY user in ANY tenant —
+        // a critical IDOR. Enforce, in the service (the @PreAuthorize SpEL layer
+        // cannot do object-level authz here):
+        //   * self-enroll is always allowed (target == caller); OR
+        //   * an admin holding device:create may enroll on behalf of another
+        //     user, but only WITHIN a tenant the caller may manage; AND
+        //   * the privileged reauthorize path (reactivate-revoked / reassign-
+        //     owner) ALWAYS requires the device:create admin permission — it can
+        //     never be driven by the body flag alone.
+        UUID requestedTargetUserId = requestedUserId != null ? requestedUserId : currentUser.getId();
+        boolean selfEnroll = requestedTargetUserId.equals(currentUser.getId());
+        boolean hasDeviceAdmin = rbacService.hasPermission(NFC_ADMIN_PERMISSION);
+
+        if (reauthorize && !hasDeviceAdmin) {
+            log.warn("AUDIT: NFC enroll re-authorization refused — caller {} lacks {} (target={})",
+                    currentUser.getId(), NFC_ADMIN_PERMISSION, requestedTargetUserId);
+            throw new UnauthorizedException(
+                    "Reactivating a revoked card or reassigning ownership requires an admin permission");
+        }
+        if (!selfEnroll) {
+            if (!hasDeviceAdmin) {
+                log.warn("AUDIT: NFC enroll refused — non-owner caller {} lacks {} for target {}",
+                        currentUser.getId(), NFC_ADMIN_PERMISSION, requestedTargetUserId);
+                throw new UnauthorizedException(
+                        "You may only enroll an NFC card for yourself unless you are an administrator");
+            }
+            assertTargetWithinManageableTenant(requestedTargetUserId, currentUser);
+        }
 
         // De-dup key selection (NFC eID random-UID fix):
         //   * documentNumber PRESENT (eID/passport BAC read) → the document number
@@ -204,9 +274,18 @@ public class ManageNfcCardService {
 
     @Transactional(readOnly = true)
     public Optional<NfcCard> verifyCard(String rawCardSerial) {
-        // Same canonicalization as enroll so cross-client (web ↔ mobile) serial
-        // shapes resolve to the same stored value.
-        return nfcCardRepository.findByCardSerialAndIsActiveTrue(NfcSerial.canonicalize(rawCardSerial));
+        // SECURITY (authz PII-leak fix, 2026-06-07): /verify returns the owner's
+        // name + email. The controller now gates on device:read (mirroring
+        // /search/{serial}); here we additionally tenant-scope the result so a
+        // tenant-bound admin cannot resolve a card enrolled in another tenant.
+        // ROOT (unrestricted) keeps the global view used by platform operators.
+        String serial = NfcSerial.canonicalize(rawCardSerial);
+        if (tenantScopeResolver.isUnrestricted()) {
+            return nfcCardRepository.findByCardSerialAndIsActiveTrue(serial);
+        }
+        return nfcCardRepository.findByCardSerialAndIsActiveTrue(serial)
+                .filter(card -> card.getTenant() != null
+                        && tenantScopeResolver.currentScope().equals(card.getTenant().getId()));
     }
 
     /**
@@ -249,6 +328,21 @@ public class ManageNfcCardService {
         User currentUser = rbacService.getCurrentUser()
                 .orElseThrow(UnauthorizedException::new);
 
+        // SECURITY (authz IDOR fix, 2026-06-07): DELETE /api/v1/nfc/{userId} was
+        // isAuthenticated()-only with no ownership/tenant check, so any user
+        // could mass-deactivate ANOTHER user's NFC cards (a self-service DoS /
+        // account-takeover lever). Restrict to self, or an admin acting within a
+        // tenant they manage — mirrors the enroll guard above.
+        if (!userId.equals(currentUser.getId())) {
+            if (!rbacService.hasPermission(NFC_ADMIN_PERMISSION)) {
+                log.warn("AUDIT: NFC removal refused — non-owner caller {} lacks {} for target {}",
+                        currentUser.getId(), NFC_ADMIN_PERMISSION, userId);
+                throw new UnauthorizedException(
+                        "You may only remove your own NFC cards unless you are an administrator");
+            }
+            assertTargetWithinManageableTenant(userId, currentUser);
+        }
+
         List<NfcCard> cards = nfcCardRepository.findByUserId(userId);
         if (cards.isEmpty()) {
             return 0;
@@ -263,6 +357,22 @@ public class ManageNfcCardService {
 
     @Transactional(readOnly = true)
     public List<NfcCard> listUserCards(UUID userId) {
+        // SECURITY (authz PII-leak fix, 2026-06-07): GET /api/v1/nfc/user/{userId}
+        // returns the full card list for a user. Restrict to self, or an admin
+        // (device:read) acting within a tenant they manage — same treatment as
+        // /search/{serial}. The controller no longer accepts isAuthenticated()
+        // alone for cross-user reads.
+        User currentUser = rbacService.getCurrentUser()
+                .orElseThrow(UnauthorizedException::new);
+        if (!userId.equals(currentUser.getId())) {
+            if (!rbacService.hasPermission(NFC_READ_PERMISSION)) {
+                log.warn("AUDIT: NFC card list refused — non-owner caller {} lacks {} for target {}",
+                        currentUser.getId(), NFC_READ_PERMISSION, userId);
+                throw new UnauthorizedException(
+                        "You may only list your own NFC cards unless you are an administrator");
+            }
+            assertTargetWithinManageableTenant(userId, currentUser);
+        }
         return nfcCardRepository.findByUserId(userId);
     }
 

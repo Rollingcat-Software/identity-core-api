@@ -45,6 +45,10 @@ public class NfcController {
 
     @PostMapping("/enroll")
     @Operation(summary = "Enroll an NFC card for a user")
+    // Object-level authz (self-enroll, or admin device:create within a managed
+    // tenant; reauthorize requires device:create) is enforced in
+    // ManageNfcCardService.enrollCard — the body-supplied userId can no longer
+    // target an arbitrary cross-tenant user (authz IDOR fix, 2026-06-07).
     @PreAuthorize("isAuthenticated()")
     public ResponseEntity<Map<String, Object>> enrollCard(@RequestBody Map<String, String> request) {
         String userIdStr = request.get("userId");
@@ -141,7 +145,12 @@ public class NfcController {
 
     @PostMapping("/verify")
     @Operation(summary = "Verify an NFC card — returns user info if enrolled")
-    @PreAuthorize("isAuthenticated()")
+    // SECURITY (authz PII-leak fix, 2026-06-07): this returns the card owner's
+    // name + email. Previously isAuthenticated()-only, so any logged-in user
+    // could resolve a serial to its owner's PII across every tenant. Require the
+    // device:read admin permission (same gate as /search/{serial}); the service
+    // additionally tenant-scopes the lookup.
+    @PreAuthorize("@rbac.hasPermission('device:read')")
     public ResponseEntity<Map<String, Object>> verifyCard(@RequestBody Map<String, String> request) {
         String cardSerial = request.get("cardSerial");
 
@@ -217,6 +226,9 @@ public class NfcController {
 
     @DeleteMapping("/{userId}")
     @Operation(summary = "Remove NFC enrollment for a user")
+    // Object-level authz (self, or admin device:create within a managed tenant)
+    // is enforced in ManageNfcCardService.removeAllUserEnrollments — a caller can
+    // no longer mass-deactivate another user's cards (authz IDOR fix, 2026-06-07).
     @PreAuthorize("isAuthenticated()")
     public ResponseEntity<Map<String, Object>> removeEnrollment(@PathVariable UUID userId) {
         int deactivated = manageNfcCardService.removeAllUserEnrollments(userId);
@@ -235,6 +247,9 @@ public class NfcController {
 
     @GetMapping("/user/{userId}")
     @Operation(summary = "List all NFC cards for a user (active and inactive)")
+    // Object-level authz (self, or admin device:read within a managed tenant) is
+    // enforced in ManageNfcCardService.listUserCards — a caller can no longer
+    // read another user's card list / PII (authz PII-leak fix, 2026-06-07).
     @PreAuthorize("isAuthenticated()")
     public ResponseEntity<Map<String, Object>> listUserCards(@PathVariable UUID userId) {
         List<NfcCard> cards = manageNfcCardService.listUserCards(userId);

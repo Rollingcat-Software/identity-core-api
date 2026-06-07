@@ -2,6 +2,7 @@ package com.fivucsas.identity.application.service;
 
 import com.fivucsas.identity.application.port.input.ManageEnrollmentUseCase;
 import com.fivucsas.identity.application.port.output.NfcCardRepositoryPort;
+import com.fivucsas.identity.domain.exception.UnauthorizedException;
 import com.fivucsas.identity.domain.model.auth.AuthMethodType;
 import com.fivucsas.identity.domain.repository.UserRepository;
 import com.fivucsas.identity.entity.NfcCard;
@@ -24,6 +25,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -96,9 +98,24 @@ class ManageNfcCardServiceTest {
     @DisplayName("enrollCard → USER_NOT_FOUND when the requested target user does not exist")
     void enrollCard_WhenTargetUserMissing_ShouldReturnUserNotFound() {
         UUID targetUserId = UUID.randomUUID();
+        // Admin enrolling on behalf of another user (authz IDOR fix): the caller
+        // must hold device:create and the target must be within a managed tenant.
+        // Here the target user does not exist at all → the authz guard treats the
+        // unresolvable tenant as 403 (no cross-tenant enumeration oracle), so we
+        // give the target a resolvable in-tenant user for the missing-card branch.
+        User targetUser = mock(User.class);
+        Tenant targetTenant = mock(Tenant.class);
+        when(targetTenant.getId()).thenReturn(tenantId);
+        when(targetUser.getTenant()).thenReturn(targetTenant);
+        when(rbacService.hasPermission("device:create")).thenReturn(true);
+        when(tenantScopeResolver.canAccessTenant(tenantId)).thenReturn(true);
         when(nfcCardRepository.existsByCardSerialAndTenantIdAndIsActiveTrue("CCDD", tenantId))
                 .thenReturn(false);
-        when(userRepository.findById(targetUserId)).thenReturn(Optional.empty());
+        // First lookup (authz guard) resolves the tenant; the enroll body lookup
+        // then returns empty to drive USER_NOT_FOUND.
+        when(userRepository.findById(targetUserId))
+                .thenReturn(Optional.of(targetUser))
+                .thenReturn(Optional.empty());
 
         ManageNfcCardService.EnrollResult result =
                 service.enrollCard(targetUserId, "CCDD", "MIFARE", null);
@@ -110,13 +127,15 @@ class ManageNfcCardServiceTest {
     @Test
     @DisplayName("enrollCard → OK auto-completes the NFC_DOCUMENT enrollment record (auto-complete side-effect parity)")
     void enrollCard_WhenSuccessful_ShouldCallStartEnrollmentForNfcDocument() {
-        UUID targetUserId = UUID.randomUUID();
-        User targetUser = mock(User.class);
+        // Self-enroll: the success path needs no admin permission (the authz IDOR
+        // fix allows a caller to enroll a card for THEMSELVES). The auto-complete
+        // side-effect is independent of the self-vs-admin distinction.
+        UUID targetUserId = currentUserId;
         when(nfcCardRepository.existsByCardSerialAndTenantIdAndIsActiveTrue("EEFF", tenantId))
                 .thenReturn(false);
         when(nfcCardRepository.findByCardSerialAndTenantId("EEFF", tenantId))
                 .thenReturn(Optional.empty());
-        when(userRepository.findById(targetUserId)).thenReturn(Optional.of(targetUser));
+        when(userRepository.findById(targetUserId)).thenReturn(Optional.of(currentUser));
         // builder() / save() roundtrip — return a stub card with the saved state.
         when(nfcCardRepository.save(any(NfcCard.class))).thenAnswer(invocation -> {
             NfcCard incoming = invocation.getArgument(0);
@@ -166,7 +185,7 @@ class ManageNfcCardServiceTest {
     }
 
     @Test
-    @DisplayName("enrollCard → reactivates a revoked card when reauthorize=true")
+    @DisplayName("enrollCard → reactivates a revoked card when reauthorize=true (requires device:create admin)")
     void enrollCard_WhenExistingCardRevoked_AndReauthorized_ShouldReactivate() {
         UUID targetUserId = currentUserId;
         NfcCard revoked = mock(NfcCard.class);
@@ -174,6 +193,9 @@ class ManageNfcCardServiceTest {
         when(revoked.getRevokedAt()).thenReturn(java.time.Instant.now());
         when(revoked.getUser()).thenReturn(currentUser);
 
+        // authz fix: the privileged reauthorize path now requires the admin
+        // permission, never just the body flag.
+        when(rbacService.hasPermission("device:create")).thenReturn(true);
         when(nfcCardRepository.existsByCardSerialAndTenantIdAndIsActiveTrue("AABB", tenantId))
                 .thenReturn(false);
         when(userRepository.findById(targetUserId)).thenReturn(Optional.of(currentUser));
@@ -202,6 +224,15 @@ class ManageNfcCardServiceTest {
         User otherOwner = mock(User.class);
         when(otherOwner.getId()).thenReturn(otherOwnerId);
         User targetUser = mock(User.class);
+        Tenant targetTenant = mock(Tenant.class);
+        when(targetTenant.getId()).thenReturn(tenantId);
+        when(targetUser.getTenant()).thenReturn(targetTenant);
+
+        // Admin enrolling for another in-tenant user (authz IDOR fix): has the
+        // admin permission + tenant access, so the request reaches the P1-8
+        // OWNED_BY_ANOTHER_USER branch (which still refuses without reauthorize).
+        when(rbacService.hasPermission("device:create")).thenReturn(true);
+        when(tenantScopeResolver.canAccessTenant(tenantId)).thenReturn(true);
 
         // An ACTIVE card currently belongs to otherOwner; a new enroll targets targetUser.
         NfcCard existing = mock(NfcCard.class);
@@ -251,9 +282,11 @@ class ManageNfcCardServiceTest {
     }
 
     @Test
-    @DisplayName("removeAllUserEnrollments → returns 0 when the user has no NFC cards (parity with previous controller body)")
+    @DisplayName("removeAllUserEnrollments → returns 0 when the user has no NFC cards (self-removal, parity with previous controller body)")
     void removeAllUserEnrollments_WhenUserHasNoCards_ShouldReturnZero() {
-        UUID userId = UUID.randomUUID();
+        // Self-removal: the authz guard (authz IDOR fix) allows acting on your own
+        // cards without an admin permission.
+        UUID userId = currentUserId;
         when(nfcCardRepository.findByUserId(userId)).thenReturn(List.of());
 
         int deactivated = service.removeAllUserEnrollments(userId);
@@ -306,5 +339,146 @@ class ManageNfcCardServiceTest {
         assertThat(results).containsExactly(anyCard);
         verify(nfcCardRepository, times(1)).findByCardSerial("SERIAL-2");
         verify(nfcCardRepository, never()).findAllByCardSerialAndTenantId(any(), any());
+    }
+
+    // ------------------------------------------------------------------
+    // Authz IDOR fixes (2026-06-07): enroll / remove / list must reject a
+    // non-owner without an admin permission, and the privileged reauthorize
+    // path must require the admin permission even for self.
+    // ------------------------------------------------------------------
+
+    @Test
+    @DisplayName("enrollCard → 403 when a non-owner without device:create enrolls for another user (NFC enroll IDOR)")
+    void enrollCard_WhenNonOwnerWithoutAdminPermission_ShouldThrowUnauthorized() {
+        UUID otherUserId = UUID.randomUUID();
+        when(rbacService.hasPermission("device:create")).thenReturn(false);
+
+        assertThatExceptionOfType(UnauthorizedException.class)
+                .isThrownBy(() -> service.enrollCard(otherUserId, "AABB", "MIFARE", "x"));
+
+        verify(nfcCardRepository, never()).save(any(NfcCard.class));
+        verify(userRepository, never()).findById(otherUserId);
+    }
+
+    @Test
+    @DisplayName("enrollCard → 403 when reauthorize=true is requested without device:create (body flag is not enough)")
+    void enrollCard_WhenReauthorizeWithoutAdminPermission_ShouldThrowUnauthorized() {
+        // Self-enroll, but the privileged reauthorize transition still requires
+        // the admin permission — it must never be driven by the body flag alone.
+        when(rbacService.hasPermission("device:create")).thenReturn(false);
+
+        assertThatExceptionOfType(UnauthorizedException.class)
+                .isThrownBy(() -> service.enrollCard(null, "AABB", "MIFARE", "x", true));
+
+        verify(nfcCardRepository, never()).save(any(NfcCard.class));
+    }
+
+    @Test
+    @DisplayName("enrollCard → 403 when admin targets a user in a tenant they cannot manage (cross-tenant)")
+    void enrollCard_WhenAdminTargetsForeignTenant_ShouldThrowUnauthorized() {
+        UUID foreignUserId = UUID.randomUUID();
+        UUID foreignTenantId = UUID.randomUUID();
+        User foreignUser = mock(User.class);
+        Tenant foreignTenant = mock(Tenant.class);
+        when(foreignTenant.getId()).thenReturn(foreignTenantId);
+        when(foreignUser.getTenant()).thenReturn(foreignTenant);
+
+        when(rbacService.hasPermission("device:create")).thenReturn(true);
+        when(userRepository.findById(foreignUserId)).thenReturn(Optional.of(foreignUser));
+        when(tenantScopeResolver.canAccessTenant(foreignTenantId)).thenReturn(false);
+
+        assertThatExceptionOfType(UnauthorizedException.class)
+                .isThrownBy(() -> service.enrollCard(foreignUserId, "AABB", "MIFARE", "x"));
+
+        verify(nfcCardRepository, never()).save(any(NfcCard.class));
+    }
+
+    @Test
+    @DisplayName("removeAllUserEnrollments → 403 when a non-owner without device:create removes another user's cards (NFC removal IDOR)")
+    void removeAllUserEnrollments_WhenNonOwnerWithoutAdminPermission_ShouldThrowUnauthorized() {
+        UUID otherUserId = UUID.randomUUID();
+        when(rbacService.hasPermission("device:create")).thenReturn(false);
+
+        assertThatExceptionOfType(UnauthorizedException.class)
+                .isThrownBy(() -> service.removeAllUserEnrollments(otherUserId));
+
+        verify(nfcCardRepository, never()).findByUserId(otherUserId);
+        verify(nfcCardRepository, never()).saveAll(any());
+    }
+
+    @Test
+    @DisplayName("removeAllUserEnrollments → admin within the target's tenant may remove another user's cards")
+    void removeAllUserEnrollments_WhenAdminInTenant_ShouldDeactivate() {
+        UUID otherUserId = UUID.randomUUID();
+        User otherUser = mock(User.class);
+        Tenant otherTenant = mock(Tenant.class);
+        when(otherTenant.getId()).thenReturn(tenantId);
+        when(otherUser.getTenant()).thenReturn(otherTenant);
+        when(rbacService.hasPermission("device:create")).thenReturn(true);
+        when(userRepository.findById(otherUserId)).thenReturn(Optional.of(otherUser));
+        when(tenantScopeResolver.canAccessTenant(tenantId)).thenReturn(true);
+
+        NfcCard card = mock(NfcCard.class);
+        when(nfcCardRepository.findByUserId(otherUserId)).thenReturn(List.of(card));
+
+        int deactivated = service.removeAllUserEnrollments(otherUserId);
+
+        assertThat(deactivated).isEqualTo(1);
+        verify(card).deactivate();
+        verify(nfcCardRepository).saveAll(any());
+    }
+
+    @Test
+    @DisplayName("listUserCards → 403 when a non-owner without device:read lists another user's cards (NFC PII leak)")
+    void listUserCards_WhenNonOwnerWithoutReadPermission_ShouldThrowUnauthorized() {
+        UUID otherUserId = UUID.randomUUID();
+        when(rbacService.hasPermission("device:read")).thenReturn(false);
+
+        assertThatExceptionOfType(UnauthorizedException.class)
+                .isThrownBy(() -> service.listUserCards(otherUserId));
+
+        verify(nfcCardRepository, never()).findByUserId(otherUserId);
+    }
+
+    @Test
+    @DisplayName("listUserCards → owner may list their own cards without any admin permission")
+    void listUserCards_WhenOwner_ShouldReturnCards() {
+        NfcCard card = mock(NfcCard.class);
+        when(nfcCardRepository.findByUserId(currentUserId)).thenReturn(List.of(card));
+
+        List<NfcCard> results = service.listUserCards(currentUserId);
+
+        assertThat(results).containsExactly(card);
+    }
+
+    @Test
+    @DisplayName("verifyCard → filters out a card whose tenant the caller cannot access (cross-tenant PII)")
+    void verifyCard_WhenCardInForeignTenant_ShouldReturnEmpty() {
+        UUID foreignTenantId = UUID.randomUUID();
+        Tenant foreignTenant = mock(Tenant.class);
+        when(foreignTenant.getId()).thenReturn(foreignTenantId);
+        NfcCard foreignCard = mock(NfcCard.class);
+        when(foreignCard.getTenant()).thenReturn(foreignTenant);
+        when(nfcCardRepository.findByCardSerialAndIsActiveTrue("AABB"))
+                .thenReturn(Optional.of(foreignCard));
+
+        Optional<NfcCard> result = service.verifyCard("AABB");
+
+        assertThat(result).isEmpty();
+    }
+
+    @Test
+    @DisplayName("verifyCard → returns the card when it belongs to the caller's tenant")
+    void verifyCard_WhenCardInOwnTenant_ShouldReturnCard() {
+        Tenant ownTenant = mock(Tenant.class);
+        when(ownTenant.getId()).thenReturn(tenantId);
+        NfcCard ownCard = mock(NfcCard.class);
+        when(ownCard.getTenant()).thenReturn(ownTenant);
+        when(nfcCardRepository.findByCardSerialAndIsActiveTrue("AABB"))
+                .thenReturn(Optional.of(ownCard));
+
+        Optional<NfcCard> result = service.verifyCard("AABB");
+
+        assertThat(result).containsSame(ownCard);
     }
 }

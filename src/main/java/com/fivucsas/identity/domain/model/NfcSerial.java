@@ -1,5 +1,7 @@
 package com.fivucsas.identity.domain.model;
 
+import java.util.Locale;
+
 /**
  * Canonical NFC card serial normalization at the API ingest boundary.
  *
@@ -66,13 +68,24 @@ public final class NfcSerial {
         if (isHex(stripped)) {
             // Canonical: contiguous UPPERHEX. Mobile already matches this;
             // web's "04:a2:..:" collapses onto it.
-            return stripped.toUpperCase();
+            // Locale.ROOT: the canonical NFC serial is a security-relevant
+            // identifier looked up during authentication. A bare toUpperCase()
+            // under the Turkish locale maps i→İ / I→ı, so the SAME serial would
+            // canonicalize differently depending on the server's default locale —
+            // a stored card would never match a verify (auth denial) and the
+            // dedup key would diverge across locales. (Hex is i-free today, but
+            // ROOT keeps it deterministic and matches the opaque branch below.)
+            return stripped.toUpperCase(Locale.ROOT);
         }
 
         // Opaque / non-hex serial — don't mangle it by stripping characters
         // that may be significant. Upper-case + trim keeps comparison
         // case-insensitive while preserving the token verbatim.
-        return trimmed.toUpperCase();
+        // Locale.ROOT (see above): opaque campus/student serials DO contain
+        // i/I (e.g. "VALIDSERIAL"), so the Turkish-locale casing bug is live
+        // here — without ROOT, "VALIDSERIAL" → "VALİDSERİAL" and the card fails
+        // to resolve on a tr-TR JVM.
+        return trimmed.toUpperCase(Locale.ROOT);
     }
 
     private static boolean isHex(String s) {

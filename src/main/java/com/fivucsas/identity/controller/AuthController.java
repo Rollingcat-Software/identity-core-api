@@ -471,6 +471,9 @@ public class AuthController {
             return ResponseEntity.ok(Map.of("message", "Phone number is already verified"));
         }
 
+        // OTP-send throttle (2026-06-07): tight per-identifier cap on top of the
+        // generic per-IP bucket so a single victim phone cannot be SMS-bombed.
+        otpService.acquireSendSlot(PHONE_VERIFY_OTP_PREFIX + user.getId());
         String code = otpService.generate(PHONE_VERIFY_OTP_PREFIX + user.getId());
         smsService.sendOtp(user.getPhoneNumber(), code);
         log.info("Phone verification code sent to user: {}", user.getId());
@@ -521,6 +524,8 @@ public class AuthController {
         User user = userRepository.findByEmail(authentication.getName())
                 .orElseThrow(() -> new UserNotFoundException(authentication.getName()));
 
+        // OTP-send throttle (2026-06-07): per-identifier cap (see OtpService).
+        otpService.acquireSendSlot(TWO_FA_OTP_PREFIX + user.getId());
         String code = otpService.generate(TWO_FA_OTP_PREFIX + user.getId());
         emailService.sendOtp(user.getEmail(), code);
         log.info("2FA login code sent to: {}", user.getEmail());
@@ -1105,11 +1110,15 @@ public class AuthController {
             if (phone == null || phone.isBlank()) {
                 return ResponseEntity.badRequest().body(Map.of("message", "No phone number on file"));
             }
+            // OTP-send throttle (2026-06-07): per-identifier cap (see OtpService).
+            otpService.acquireSendSlot(SMS_2FA_OTP_PREFIX + user.getId());
             String code = otpService.generate(SMS_2FA_OTP_PREFIX + user.getId());
             smsService.sendOtp(phone, code);
             String maskedPhone = phone.length() > 4 ? "***" + phone.substring(phone.length() - 4) : "***";
             return ResponseEntity.ok(Map.of("message", "SMS code sent", "phone", maskedPhone));
         } else {
+            // OTP-send throttle (2026-06-07): per-identifier cap (see OtpService).
+            otpService.acquireSendSlot(TWO_FA_OTP_PREFIX + user.getId());
             String code = otpService.generate(TWO_FA_OTP_PREFIX + user.getId());
             emailService.sendOtp(user.getEmail(), code);
             String email = user.getEmail();
@@ -1124,11 +1133,13 @@ public class AuthController {
         User user = userRepository.findByEmail(authentication.getName())
                 .orElseThrow(() -> new UserNotFoundException(authentication.getName()));
 
-        String code = otpService.generate(SMS_2FA_OTP_PREFIX + user.getId());
         String phone = user.getPhoneNumber();
         if (phone == null || phone.isBlank()) {
             return ResponseEntity.badRequest().body(Map.of("message", "No phone number on file"));
         }
+        // OTP-send throttle (2026-06-07): per-identifier cap (see OtpService).
+        otpService.acquireSendSlot(SMS_2FA_OTP_PREFIX + user.getId());
+        String code = otpService.generate(SMS_2FA_OTP_PREFIX + user.getId());
         smsService.sendOtp(phone, code);
         log.info("2FA SMS code sent to user: {}", user.getId());
 
