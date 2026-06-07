@@ -17,7 +17,6 @@ import com.fivucsas.identity.service.RefreshTokenService;
 import io.jsonwebtoken.Claims;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -67,9 +66,11 @@ public class OAuth2Service {
     // userinfo. With app.identity.oidc-subject-identity=false this returns the
     // legacy user.id; with it on, a pairwise pseudonym per relying party.
     private final com.fivucsas.identity.infrastructure.oauth2.PairwiseSubjectResolver pairwiseSubjectResolver;
-
-    @Value("${app.base-url:https://api.fivucsas.com}")
-    private String issuer;
+    // Mints the token-endpoint response body (access_token + id_token + refresh).
+    // The infrastructure adapter behind this port is the ONLY place the
+    // authorization_code / refresh_token grants touch entity.User, keeping this
+    // application service clean of the UserDomainBoundaryTest-fenced JPA type.
+    private final com.fivucsas.identity.application.port.output.OAuth2TokenMintPort tokenMintPort;
 
     private static final String AUTH_CODE_PREFIX = "oauth2:code:";
     // RFC 6749 Section 4.1.2: authorization code MUST expire shortly, max 10 minutes recommended
@@ -362,10 +363,6 @@ public class OAuth2Service {
             }
         }
 
-        // Find user
-        User user = userRepository.findByEmail(userEmail)
-                .orElseThrow(() -> new IllegalArgumentException("User not found"));
-
         // INVESTIGATION_MASTER_2026-05-07 §"developer/tenant constraints":
         // per-tenant /oauth2/token success-path rate limit. Charged AFTER
         // PKCE + secret validation succeeds so only legitimate mints count.
@@ -387,123 +384,13 @@ public class OAuth2Service {
         // RFC 6749 §5.1 success body. Refresh token issuance (§6) is mirrored from
         // the legacy /auth/login + /auth/refresh path (RefreshTokenService) so the
         // hashed wire-format, rotation family, and reuse-detection are identical.
-        Map<String, Object> response = buildTokenResponse(
-                user, client, storedScope, storedNonce, true, ipAddress, userAgent);
+        // The resource owner is resolved + the response built inside the
+        // infrastructure adapter (the only place entity.User is touched), keeping
+        // this service boundary-clean (UserDomainBoundaryTest).
+        Map<String, Object> response = tokenMintPort.mintForAuthorizationCode(
+                userEmail, client, storedScope, storedNonce, ipAddress, userAgent);
 
         log.info("OAuth2 tokens issued for user: {} client: {}", userEmail, clientId);
-        return response;
-    }
-
-    /**
-     * Builds the RFC 6749 §5.1 token-endpoint success body: {@code access_token},
-     * {@code token_type}, {@code expires_in}, {@code id_token}, optional
-     * {@code scope}, and — when {@code mintRefreshToken} is true — a
-     * {@code refresh_token} (RFC 6749 §6) plus {@code refresh_expires_in}.
-     *
-     * <p>Shared by the {@code authorization_code} exchange and the
-     * {@code refresh_token} grant so both grants emit a byte-identical token shape.
-     * The refresh token is minted through {@link RefreshTokenService#createRefreshToken}
-     * — the SAME hashed/family/reuse-detection infra the legacy {@code /auth/refresh}
-     * path uses; the raw wire value is read once from the transient
-     * {@link RefreshToken#getToken()} and never persisted.</p>
-     *
-     * @param user             the authenticated resource owner
-     * @param client           the OAuth2 client (relying party) the tokens are for
-     * @param scope            space-delimited granted scopes (drives OIDC claims)
-     * @param nonce            OIDC nonce to echo into the id_token (nullable/empty)
-     * @param mintRefreshToken whether to mint + include a refresh_token
-     * @param ipAddress        caller IP recorded on the refresh token (audit)
-     * @param userAgent        caller User-Agent recorded on the refresh token (audit)
-     */
-    private Map<String, Object> buildTokenResponse(
-            User user, OAuth2Client client, String scope, String nonce,
-            boolean mintRefreshToken, String ipAddress, String userAgent) {
-
-        String userEmail = user.getEmail();
-        String clientId = client.getClientId();
-        String safeScope = scope == null ? "" : scope;
-        String safeNonce = nonce == null ? "" : nonce;
-
-        // Generate access token
-        Map<String, Object> claims = new HashMap<>();
-        claims.put("tenant_id", user.getTenant().getId().toString());
-        claims.put("type", "oauth2");
-        claims.put("scope", safeScope);
-        // Phase 4: stamp the relying party so /userinfo can reproduce the SAME
-        // pairwise `sub` as the id_token (the userinfo subject MUST equal the
-        // id_token subject — OIDC Core §5.3.2). Harmless when the flag is off.
-        claims.put("client_id", clientId);
-
-        String accessToken = jwtService.generateToken(claims, userEmail);
-        long expiresIn = jwtService.getExpirationMillis() / 1000;
-
-        // Generate ID token with required OIDC claims (OpenID Connect Core Section 2)
-        Map<String, Object> idTokenClaims = new HashMap<>();
-        idTokenClaims.put("iss", issuer);
-        // Phase 4: subject is identity-pairwise per RP when the flag is on; legacy
-        // user.id otherwise (default). The resolver owns the entity.User access.
-        idTokenClaims.put("sub", pairwiseSubjectResolver.resolveSubject(user, client));
-        // P1-5 (2026-06-02): the ID token audience is the RP client_id ONLY.
-        // Previously generateToken() also appended the API audience
-        // (fivucsas-api), so the id_token shipped aud=[clientId, fivucsas-api];
-        // a strict OIDC RP that asserts aud == its own client_id rejects a
-        // multi-audience token unless an azp is present. We now (a) mint via
-        // generateIdToken() which does NOT inject the API audience, and (b)
-        // stamp azp=clientId (OIDC Core §2: REQUIRED when aud has a single
-        // entry that is the RP, RECOMMENDED otherwise — always-present is safe
-        // and what RPs expect).
-        idTokenClaims.put("aud", clientId);
-        idTokenClaims.put("azp", clientId);
-        idTokenClaims.put("iat", Instant.now().getEpochSecond());
-        idTokenClaims.put("exp", Instant.now().plusMillis(jwtService.getExpirationMillis()).getEpochSecond());
-        idTokenClaims.put("auth_time", Instant.now().getEpochSecond());
-        idTokenClaims.put("type", "id_token");
-
-        // Include nonce if provided (OIDC Core Section 3.1.2.1)
-        if (!safeNonce.isEmpty()) {
-            idTokenClaims.put("nonce", safeNonce);
-        }
-
-        // Standard OIDC claims based on requested scopes
-        if (safeScope.contains("email")) {
-            idTokenClaims.put("email", user.getEmail());
-            idTokenClaims.put("email_verified", user.isEmailVerified());
-        }
-        if (safeScope.contains("profile")) {
-            idTokenClaims.put("name", user.getFullName());
-            idTokenClaims.put("given_name", user.getFirstName());
-            idTokenClaims.put("family_name", user.getLastName());
-        }
-        if (safeScope.contains("phone") && user.getPhoneNumber() != null) {
-            idTokenClaims.put("phone_number", user.getPhoneNumber());
-            idTokenClaims.put("phone_number_verified", user.isPhoneVerified());
-        }
-
-        // P1-5: generateIdToken skips the access-token (fivucsas-api) audience
-        // so the RP-only aud set above survives as the sole audience.
-        String idToken = jwtService.generateIdToken(idTokenClaims, userEmail);
-
-        // Build response (RFC 6749 Section 5.1)
-        Map<String, Object> response = new LinkedHashMap<>();
-        response.put("access_token", accessToken);
-        response.put("token_type", "Bearer");
-        response.put("expires_in", expiresIn);
-        response.put("id_token", idToken);
-
-        if (mintRefreshToken) {
-            // RFC 6749 §6: issue a refresh token. createRefreshToken returns an
-            // entity whose @Transient `token` field carries the raw wire value
-            // (<id>.<secret>) exactly once — read it here, never persist it.
-            RefreshToken refreshToken = refreshTokenService.createRefreshToken(user, ipAddress, userAgent);
-            response.put("refresh_token", refreshToken.getToken());
-            long refreshExpiresIn =
-                    Duration.between(Instant.now(), refreshToken.getExpiryDate()).getSeconds();
-            response.put("refresh_expires_in", refreshExpiresIn);
-        }
-
-        if (!safeScope.isEmpty()) {
-            response.put("scope", safeScope);
-        }
         return response;
     }
 
@@ -539,37 +426,27 @@ public class OAuth2Service {
         RefreshToken existing = refreshTokenService.findByToken(presentedRefreshToken);
         refreshTokenService.verifyExpiration(existing);
 
-        User user = existing.getUser();
-
-        // Parity with RefreshAccessTokenService (P0-#8): refuse to mint a fresh
-        // access token when the user's tenant is no longer ACTIVE — otherwise a
-        // session active at suspension time could be kept alive indefinitely by
-        // refreshing. The controller maps the suspension to invalid_grant.
-        if (user.getTenant() != null
-                && user.getTenant().getStatus() != com.fivucsas.identity.entity.TenantStatus.ACTIVE) {
-            log.warn("OAuth2 refresh refused — tenant not active, userEmail={}, tenantId={}, tenantStatus={}",
-                    user.getEmail(), user.getTenant().getId(), user.getTenant().getStatus());
-            throw new com.fivucsas.identity.domain.exception.TenantSuspendedException(
-                    user.getTenant().getStatus());
-        }
-
-        // Rotate: revoke the presented token and mint a successor in the same family.
-        RefreshToken rotated = refreshTokenService.rotateRefreshToken(existing, ipAddress, userAgent);
-
         // Re-issue access + id tokens. The granted scope is the client's full
         // allowed scope set (RFC 6749 §6 permits a narrower scope, but never
-        // broader; we re-grant what the client is registered for). The rotated
-        // token's raw wire value is injected into the response below.
+        // broader; we re-grant what the client is registered for). Resolving the
+        // resource owner, the tenant-active guard (parity with the legacy
+        // /auth/refresh path — a suspended tenant cannot keep a session alive by
+        // refreshing) and building the body all happen inside the infrastructure
+        // adapter (the only place entity.User is touched), keeping this service
+        // boundary-clean (UserDomainBoundaryTest).
         String grantedScope = client.getAllowedScopes() == null ? "" : client.getAllowedScopes();
         Map<String, Object> response =
-                buildTokenResponse(user, client, grantedScope, null, false, ipAddress, userAgent);
+                tokenMintPort.mintForRefreshGrant(existing, client, grantedScope, ipAddress, userAgent);
+
+        // Rotate AFTER the tenant guard passed: revoke the presented token and
+        // mint a successor in the same family, then inject its raw wire value.
+        RefreshToken rotated = refreshTokenService.rotateRefreshToken(existing, ipAddress, userAgent);
         response.put("refresh_token", rotated.getToken());
         long refreshExpiresIn =
                 Duration.between(Instant.now(), rotated.getExpiryDate()).getSeconds();
         response.put("refresh_expires_in", refreshExpiresIn);
 
-        log.info("OAuth2 refresh_token grant — rotated token for user: {} client: {}",
-                user.getEmail(), clientId);
+        log.info("OAuth2 refresh_token grant — rotated token for client: {}", clientId);
         return response;
     }
 

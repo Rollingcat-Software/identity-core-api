@@ -537,7 +537,7 @@ public class NfcController {
     private static Map<String, String> extractDataGroups(Map<String, String> request) {
         Map<String, String> dataGroups = new LinkedHashMap<>();
         for (Map.Entry<String, String> e : request.entrySet()) {
-            String key = e.getKey() == null ? "" : e.getKey().toLowerCase().trim();
+            String key = e.getKey() == null ? "" : e.getKey().toLowerCase(java.util.Locale.ROOT).trim();
             if (e.getValue() == null || e.getValue().isBlank()) {
                 continue;
             }

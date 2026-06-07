@@ -120,7 +120,7 @@ public class NfcDocumentAuthHandler implements AuthMethodHandler {
     private static Map<String, String> extractDataGroups(Map<String, Object> data) {
         Map<String, String> dgs = new LinkedHashMap<>();
         for (Map.Entry<String, Object> e : data.entrySet()) {
-            String key = e.getKey() == null ? "" : e.getKey().toLowerCase().trim();
+            String key = e.getKey() == null ? "" : e.getKey().toLowerCase(java.util.Locale.ROOT).trim();
             String value = trimToNull(e.getValue());
             if (value == null) {
                 continue;

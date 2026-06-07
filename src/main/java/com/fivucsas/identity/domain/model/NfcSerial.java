@@ -67,24 +67,16 @@ public final class NfcSerial {
 
         if (isHex(stripped)) {
             // Canonical: contiguous UPPERHEX. Mobile already matches this;
-            // web's "04:a2:..:" collapses onto it.
-            // Locale.ROOT: the canonical NFC serial is a security-relevant
-            // identifier looked up during authentication. A bare toUpperCase()
-            // under the Turkish locale maps i→İ / I→ı, so the SAME serial would
-            // canonicalize differently depending on the server's default locale —
-            // a stored card would never match a verify (auth denial) and the
-            // dedup key would diverge across locales. (Hex is i-free today, but
-            // ROOT keeps it deterministic and matches the opaque branch below.)
+            // web's "04:a2:..:" collapses onto it. Locale.ROOT — a bare
+            // toUpperCase() under tr_TR maps 'i'→'İ' / 'I'→'ı', corrupting
+            // serials (e.g. "SERIAL-2" → "SERİAL-2") and breaking lookups.
             return stripped.toUpperCase(Locale.ROOT);
         }
 
         // Opaque / non-hex serial — don't mangle it by stripping characters
         // that may be significant. Upper-case + trim keeps comparison
-        // case-insensitive while preserving the token verbatim.
-        // Locale.ROOT (see above): opaque campus/student serials DO contain
-        // i/I (e.g. "VALIDSERIAL"), so the Turkish-locale casing bug is live
-        // here — without ROOT, "VALIDSERIAL" → "VALİDSERİAL" and the card fails
-        // to resolve on a tr-TR JVM.
+        // case-insensitive while preserving the token verbatim. Locale.ROOT for
+        // the same Turkish 'i'/'I' reason as the hex branch above.
         return trimmed.toUpperCase(Locale.ROOT);
     }
 
