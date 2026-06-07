@@ -1,5 +1,6 @@
 package com.fivucsas.identity.domain.model.permission;
 
+import java.util.Locale;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -39,8 +40,11 @@ public final class Permission {
      * Creates a new permission from resource and action.
      */
     public static Permission create(String resource, String action, String description) {
-        String name = resource.toUpperCase() + ":" + action.toUpperCase();
-        return new Permission(null, name, description, resource.toUpperCase(), action.toUpperCase());
+        // Locale.ROOT: ASCII security identifiers — see entity.Permission.of for
+        // the Turkish-locale i↔İ / I↔ı casing pitfall this avoids.
+        String name = resource.toUpperCase(Locale.ROOT) + ":" + action.toUpperCase(Locale.ROOT);
+        return new Permission(null, name, description,
+                resource.toUpperCase(Locale.ROOT), action.toUpperCase(Locale.ROOT));
     }
 
     /**
@@ -64,7 +68,7 @@ public final class Permission {
      * Returns the authority name in Spring Security format (lowercase).
      */
     public String getAuthorityName() {
-        return resource.toLowerCase() + ":" + action.toLowerCase();
+        return resource.toLowerCase(Locale.ROOT) + ":" + action.toLowerCase(Locale.ROOT);
     }
 
     // ========== Getters ==========

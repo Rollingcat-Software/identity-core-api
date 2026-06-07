@@ -3,6 +3,7 @@ package com.fivucsas.identity.entity;
 import jakarta.persistence.*;
 import lombok.*;
 
+import java.util.Locale;
 import java.util.UUID;
 
 /**
@@ -39,11 +40,14 @@ public class Permission {
      * Creates a permission from resource and action.
      */
     public static Permission of(String resource, String action, String description) {
+        // Locale.ROOT: permission/resource/action are ASCII security identifiers.
+        // A bare toUpperCase()/toLowerCase() under the Turkish locale maps i↔İ /
+        // I↔ı, which would mint a permission name that no security check can match.
         return Permission.builder()
-            .name(resource.toUpperCase() + ":" + action.toUpperCase())
+            .name(resource.toUpperCase(Locale.ROOT) + ":" + action.toUpperCase(Locale.ROOT))
             .description(description)
-            .resource(resource.toUpperCase())
-            .action(action.toUpperCase())
+            .resource(resource.toUpperCase(Locale.ROOT))
+            .action(action.toUpperCase(Locale.ROOT))
             .build();
     }
 
@@ -60,7 +64,7 @@ public class Permission {
      * Alias for getPermissionString() for Spring Security compatibility.
      */
     public String getAuthorityName() {
-        return resource.toLowerCase() + ":" + action.toLowerCase();
+        return resource.toLowerCase(Locale.ROOT) + ":" + action.toLowerCase(Locale.ROOT);
     }
 
     @Override

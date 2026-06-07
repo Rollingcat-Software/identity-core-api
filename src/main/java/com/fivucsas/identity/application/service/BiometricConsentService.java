@@ -17,6 +17,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -85,8 +86,12 @@ public class BiometricConsentService
                                                BiometricConsentRequest request) {
         UUID tenantId = request.tenantId();
         // Normalize empty/blank method to null (= all methods).
+        // Locale.ROOT: the method name is an AuthMethodType identifier (e.g. FACE,
+        // VOICE) compared against the enum/DB. A bare toUpperCase() under the
+        // Turkish locale maps i→İ, so a method containing 'i' would no longer
+        // match the canonical enum name — silently corrupting consent routing.
         String method = (request.method() == null || request.method().isBlank())
-                ? null : request.method().trim().toUpperCase();
+                ? null : request.method().trim().toUpperCase(Locale.ROOT);
         boolean grant = Boolean.TRUE.equals(request.granted());
 
         // Guard: the caller may only manage consent for a tenant where THEIR
@@ -127,7 +132,7 @@ public class BiometricConsentService
     @Transactional(readOnly = true)
     public Optional<CanonicalTarget> resolveConsentedCanonicalTarget(UUID requestingUserId,
                                                                      String method) {
-        String normMethod = method == null ? null : method.trim().toUpperCase();
+        String normMethod = method == null ? null : method.trim().toUpperCase(Locale.ROOT);
 
         // 0) The requesting tenant = the user's own membership tenant.
         Optional<UUID> requestingTenantOpt = userRepository.findTenantIdById(requestingUserId);

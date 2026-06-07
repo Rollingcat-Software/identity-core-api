@@ -2,12 +2,87 @@
 
 ## [Unreleased]
 
-### 2026-06-07 — Test-suite green-up + Turkish-locale & boundary hardening
+### 2026-06-07 — Authorization IDOR / PII-leak / abuse-throttle hardening + test-suite green-up
 
-Behavior-preserving test + boundary fixes. **No production runtime behavior changes;
-no DB migration; no security/crypto semantics altered.** Full offline unit/slice +
-ArchUnit suite green: `mvn -o test` → **1648 run, 0 failures, 0 errors, 67 skipped**
-(the 67 skipped are Testcontainers/DB integration tests, not runnable with Docker off).
+Two merged work-streams landed on this date:
+1. **Authorization hardening (#211).** Closes a set of object-level authorization
+   gaps where endpoints trusted a body/path-supplied `userId` or relied on
+   permission-only SpEL that ignored the target, plus Turkish-locale casing bugs on
+   security identifiers and an OTP-send abuse vector. Full write-up:
+   `docs/findings/2026-06-07-authz-idor-fixes.md`.
+2. **Test-suite green-up + boundary hardening (#210).** Behavior-preserving test +
+   boundary fixes. **No production runtime behavior changes; no DB migration; no
+   security/crypto semantics altered** beyond the locale fixes called out below.
+   Full offline unit/slice + ArchUnit suite green: `mvn -o test` → **1648 run,
+   0 failures, 0 errors, 67 skipped** (the 67 skipped are Testcontainers/DB
+   integration tests, not runnable with Docker off).
+
+#### Authorization hardening (#211)
+
+- **[CRITICAL] NFC enroll IDOR** (`POST /api/v1/nfc/enroll`,
+  `ManageNfcCardService.enrollCard`). The endpoint was `isAuthenticated()`-only and
+  took the target `userId` from the body, so any authenticated user could enroll —
+  or, via `reauthorize`, reactivate/reassign — a card for ANY user in ANY tenant.
+  Now: self-enroll is always allowed; enrolling for another user requires the
+  `device:create` admin permission AND the target's tenant must be within the
+  caller's manageable scope (`TenantScopeResolver`); the privileged `reauthorize`
+  transition ALWAYS requires `device:create` (never the body flag alone).
+- **[HIGH] NFC removal IDOR** (`DELETE /api/v1/nfc/{userId}` →
+  `removeAllUserEnrollments`). Was `isAuthenticated()`-only with no ownership check
+  (mass-deactivation of another user's cards). Now restricted to self, or
+  `device:create` admin within the target's tenant.
+- **[HIGH] user_settings cross-tenant IDOR** (`/api/v1/users/{userId}/settings`
+  and the notifications/security/appearance sub-resources). The
+  `hasPermission(#userId, 'user_settings', ...)` SpEL routes through
+  `RbacPermissionEvaluator`, which IGNORES `#userId` — a TENANT_ADMIN of tenant A
+  could read/write (incl. the `security` section) any user's settings in any
+  tenant. Added `UserController.assertCanAccessUserSettings` (self, or target
+  tenant within caller scope) + a defense-in-depth `tenant_id` column (Flyway
+  **V84**) and `@Filter(tenantFilter)` on `UserSettings`; write paths populate
+  `tenant_id` from the owning user.
+- **[HIGH] enrollment retry/delete tenant bypass** (`POST .../{id}/retry`,
+  `DELETE .../{id}`). `findById`/`existsById`/`deleteById` are PK ops that bypass
+  the Hibernate `@Filter(tenantFilter)`, so a TENANT_ADMIN of tenant A could
+  retry/delete tenant B's enrollment. Both paths now re-check the loaded
+  enrollment's tenant against the caller's scope (404 for a foreign row, mirroring
+  `getEnrollmentById`).
+- **[MED] push-token IDOR** (`POST /api/v1/devices/push-token`). The endpoint
+  trusted a body `userId`, letting any user redirect the approve-login push
+  channel for another user's device. Now bound to the authenticated principal;
+  the body `userId` is ignored.
+- **[MED] NFC PII leak** (`POST /api/v1/nfc/verify`, `GET /api/v1/nfc/user/{userId}`).
+  Both returned owner name/email and were `isAuthenticated()`-only. Now gated on
+  `device:read` + tenant-scoped (mirroring `/search/{serial}`); `verify` filters a
+  card whose tenant the caller cannot access (ROOT keeps the global view).
+- **[MED] Turkish-locale security casing.** Replaced bare `toUpperCase()`/
+  `toLowerCase()` with `Locale.ROOT` on `RbacPermissionEvaluator`, both
+  `Permission` classes (entity + domain), `entity.User`/`domain.User.hasAnyRole`,
+  `BiometricConsentService`, `AuthSessionController`, and **`NfcSerial.canonicalize`**
+  (a security-relevant identifier normalizer — additionally found during this task;
+  on a tr-TR JVM `"VALIDSERIAL"` canonicalized to `"VALİDSERİAL"`, so a stored card
+  never matched a verify).
+- **[MED] OTP-send throttle.** Added a dedicated per-identifier (per-victim) send
+  bucket `OtpService.acquireSendSlot` (3 sends/min, Redis `INCR`, fails open),
+  applied at the start of `/auth/mfa/send-otp`, `/auth/2fa/send`,
+  `/auth/2fa/send-sms`, and `/auth/send-phone-verification` so a single phone/email
+  cannot be SMS-bombed/flooded regardless of source IP (the generic per-IP limiter
+  is too loose and NAT-shared).
+- **ArchUnit `entity.User` boundary baseline** (`archunit_store/...`) was refrozen.
+  The `FreezingArchRule` store matches by exact line number and had drifted stale
+  against `main` (e.g. `OAuth2Service.exchangeCode` → `buildTokenResponse`/
+  `refreshAccessToken`, plus other untouched classes), so it reported 63 spurious
+  "new" violations. The refrozen baseline's only net-new boundary crossings caused
+  by this change are the justified NFC-authz guards in `ManageNfcCardService` and
+  `DeviceController.updatePushToken`; no new unjustified violation was hidden.
+- **Tests:** focused service/slice/Mockito tests per guard (Docker-off):
+  `ManageNfcCardServiceTest` (enroll/remove/list/verify authz), `UserSettingsAuthzTest`,
+  `EnrollmentControllerTest` (cross-tenant retry/delete → 404), `OtpServiceTest`
+  (send-throttle), `TurkishLocalePermissionCasingTest`.
+- **Deferred (NOT done here):** Postgres `FORCE ROW LEVEL SECURITY` / DB-role change
+  (shared superuser across ~6 apps — infra task); making `RbacPermissionEvaluator`
+  honor the `#userId` target generically. See the findings doc.
+
+#### Test-suite green-up + Turkish-locale & boundary hardening (#210)
 
 - **NFC serial — Turkish-locale casing fix.** `domain.model.NfcSerial` canonicalize
   now upper-cases with `Locale.ROOT` instead of the JVM default locale. Under the

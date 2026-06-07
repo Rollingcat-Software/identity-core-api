@@ -7,6 +7,7 @@ import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Component;
 
 import java.io.Serializable;
+import java.util.Locale;
 
 /**
  * Custom Spring Security PermissionEvaluator that integrates with the RBAC system.
@@ -62,7 +63,12 @@ public class RbacPermissionEvaluator implements PermissionEvaluator {
                                   String targetType, Object permission) {
         if (authentication == null || targetType == null || permission == null) return false;
 
-        String permissionStr = targetType.toLowerCase() + ":" + permission.toString().toLowerCase();
+        // Locale.ROOT: permission names are ASCII identifiers; under the Turkish
+        // locale a bare toLowerCase() maps I→ı / İ→i, so "DEVICE:READ" could be
+        // cased to a string that no longer matches the seeded "device:read"
+        // authority — silently denying (or, depending on data, granting) access.
+        String permissionStr = targetType.toLowerCase(Locale.ROOT)
+                + ":" + permission.toString().toLowerCase(Locale.ROOT);
         log.debug("Evaluating permission '{}' for user '{}'", permissionStr, authentication.getName());
 
         return rbacService.hasPermission(permissionStr);

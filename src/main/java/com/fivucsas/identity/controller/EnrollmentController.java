@@ -92,6 +92,11 @@ public class EnrollmentController {
         log.info("POST /api/v1/enrollments/{}/retry", id);
         UserEnrollment enrollment = enrollmentRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Enrollment not found"));
+        // SECURITY (authz tenant-bypass fix, 2026-06-07): findById is a PK lookup
+        // that BYPASSES the Hibernate @Filter(tenantFilter), so a TENANT_ADMIN of
+        // tenant A could retry an enrollment in tenant B. Re-check the loaded
+        // enrollment's tenant against the caller's scope — mirrors getEnrollmentById.
+        assertEnrollmentWithinScope(enrollment, id);
         if (!"FAILED".equals(enrollment.getStatus().name())) {
             throw new DomainStateConflictException("Only failed enrollments can be retried");
         }
@@ -105,8 +110,36 @@ public class EnrollmentController {
     @PreAuthorize("hasPermission(null, 'enrollment', 'delete')")
     public ResponseEntity<Void> deleteEnrollment(@PathVariable String id) {
         log.info("DELETE /api/v1/enrollments/{}", id);
-        enrollmentQueryService.deleteEnrollment(UUID.fromString(id));
+        UUID enrollmentId = UUID.fromString(id);
+        // SECURITY (authz tenant-bypass fix, 2026-06-07): the service delete path
+        // uses existsById/deleteById, both PK ops that BYPASS @Filter(tenantFilter),
+        // so a TENANT_ADMIN of tenant A could delete tenant B's enrollment. Verify
+        // the enrollment's tenant is within the caller's scope before deleting.
+        UserEnrollment enrollment = enrollmentRepository.findById(enrollmentId)
+                .orElseThrow(() -> new ResourceNotFoundException("Enrollment not found: " + id));
+        assertEnrollmentWithinScope(enrollment, enrollmentId);
+        enrollmentQueryService.deleteEnrollment(enrollmentId);
         return ResponseEntity.noContent().build();
+    }
+
+    /**
+     * Re-checks a PK-loaded enrollment's tenant against the caller's scope. PK
+     * lookups ({@code findById}/{@code existsById}/{@code deleteById}) bypass the
+     * Hibernate {@code @Filter(tenantFilter)}, so cross-tenant access must be
+     * blocked here. ROOT (scope == null) may act on any tenant; a tenant-bound
+     * caller may only act within their own scope. We surface a 404 (not 403) for
+     * a foreign-tenant row to avoid leaking that the id exists — same shape as
+     * {@code getEnrollmentById}.
+     */
+    private void assertEnrollmentWithinScope(UserEnrollment enrollment, UUID id) {
+        UUID scopeTenantId = tenantScopeResolver.currentScope();
+        UUID enrollmentTenantId = enrollment.getTenant() != null
+                ? enrollment.getTenant().getId() : null;
+        if (scopeTenantId != null && !scopeTenantId.equals(enrollmentTenantId)) {
+            log.warn("AUDIT: enrollment {} access refused — scope={} enrollmentTenant={}",
+                    id, scopeTenantId, enrollmentTenantId);
+            throw new ResourceNotFoundException("Enrollment not found: " + id);
+        }
     }
 
     // --- /api/v1/users/{userId}/enrollments endpoints (from EnrollmentManagementController) ---

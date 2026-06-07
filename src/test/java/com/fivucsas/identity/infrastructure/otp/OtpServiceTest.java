@@ -10,6 +10,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
+import com.fivucsas.identity.exception.RateLimitExceededException;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
 
@@ -18,6 +19,8 @@ import java.util.HashMap;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -166,6 +169,46 @@ class OtpServiceTest {
             // a user who burned 4 attempts on a previous code, then asked for
             // a new one, would inherit only 1 attempt against the fresh code.
             verify(redisTemplate).delete(eq(KEY + ":attempts"));
+        }
+    }
+
+    @Nested
+    @DisplayName("Per-identifier OTP-send throttle (acquireSendSlot)")
+    class SendThrottle {
+
+        private static final String SEND_KEY = "2fa-sms:user-1";
+        private static final String SEND_COUNTER = SEND_KEY + ":sends";
+
+        @Test
+        @DisplayName("acquireSendSlot allows up to MAX_SENDS and throttles the next (per-identifier)")
+        void acquireSendSlot_WhenOverCap_ShouldThrowRateLimitExceeded() {
+            // First MAX_SENDS sends are allowed (counter 1..3 ≤ 3).
+            for (int i = 1; i <= OtpService.MAX_SENDS; i++) {
+                final int n = i;
+                assertThatCode(() -> otpService.acquireSendSlot(SEND_KEY))
+                        .as("send #%d of MAX_SENDS=%d must be allowed", n, OtpService.MAX_SENDS)
+                        .doesNotThrowAnyException();
+            }
+            // The (MAX_SENDS+1)th send trips the throttle → 429.
+            assertThatExceptionOfType(RateLimitExceededException.class)
+                    .isThrownBy(() -> otpService.acquireSendSlot(SEND_KEY));
+        }
+
+        @Test
+        @DisplayName("acquireSendSlot sets a TTL on the send counter on the first send so it self-expires")
+        void acquireSendSlot_OnFirstSend_ShouldSetTtl() {
+            otpService.acquireSendSlot(SEND_KEY);
+            verify(redisTemplate).expire(eq(SEND_COUNTER), any(Duration.class));
+        }
+
+        @Test
+        @DisplayName("acquireSendSlot fails OPEN when Redis is unavailable (never blocks a legitimate send)")
+        void acquireSendSlot_WhenRedisDown_ShouldNotThrow() {
+            when(valueOperations.increment(eq(SEND_COUNTER)))
+                    .thenThrow(new RuntimeException("redis down"));
+
+            assertThatCode(() -> otpService.acquireSendSlot(SEND_KEY))
+                    .doesNotThrowAnyException();
         }
     }
 

@@ -120,9 +120,67 @@ class EnrollmentControllerTest {
     @DisplayName("DELETE /api/v1/enrollments/{id} - Success (204)")
     void deleteEnrollment_ShouldReturnNoContent() throws Exception {
         UUID id = UUID.randomUUID();
+        UUID tenantId = UUID.randomUUID();
+        // authz tenant-bypass fix: the controller now loads the enrollment to
+        // verify its tenant against the caller's scope before deleting.
+        UserEnrollment enrollment = enrollmentInTenant(tenantId);
+        when(enrollmentRepository.findById(id)).thenReturn(java.util.Optional.of(enrollment));
+        when(tenantScopeResolver.currentScope()).thenReturn(tenantId);
 
         mockMvc.perform(delete("/api/v1/enrollments/" + id))
                 .andExpect(status().isNoContent());
+
+        org.mockito.Mockito.verify(enrollmentQueryService).deleteEnrollment(id);
+    }
+
+    @Test
+    @DisplayName("DELETE /api/v1/enrollments/{id} - cross-tenant caller gets 404, no delete (authz tenant-bypass fix)")
+    void deleteEnrollment_WhenCrossTenantCaller_ShouldReturnNotFoundAndNotDelete() throws Exception {
+        UUID id = UUID.randomUUID();
+        UUID enrollmentTenant = UUID.randomUUID();
+        UUID callerScope = UUID.randomUUID(); // different tenant
+        UserEnrollment enrollment = enrollmentInTenant(enrollmentTenant);
+        when(enrollmentRepository.findById(id)).thenReturn(java.util.Optional.of(enrollment));
+        when(tenantScopeResolver.currentScope()).thenReturn(callerScope);
+
+        mockMvc.perform(delete("/api/v1/enrollments/" + id))
+                .andExpect(status().isNotFound());
+
+        org.mockito.Mockito.verify(enrollmentQueryService, org.mockito.Mockito.never())
+                .deleteEnrollment(any());
+    }
+
+    @Test
+    @DisplayName("POST /api/v1/enrollments/{id}/retry - cross-tenant caller gets 404, no save (authz tenant-bypass fix)")
+    void retryEnrollment_WhenCrossTenantCaller_ShouldReturnNotFoundAndNotSave() throws Exception {
+        UUID id = UUID.randomUUID();
+        UUID enrollmentTenant = UUID.randomUUID();
+        UUID callerScope = UUID.randomUUID(); // different tenant
+        UserEnrollment enrollment = enrollmentInTenant(enrollmentTenant);
+        when(enrollmentRepository.findById(id)).thenReturn(java.util.Optional.of(enrollment));
+        when(tenantScopeResolver.currentScope()).thenReturn(callerScope);
+
+        mockMvc.perform(post("/api/v1/enrollments/" + id + "/retry"))
+                .andExpect(status().isNotFound());
+
+        org.mockito.Mockito.verify(enrollmentRepository, org.mockito.Mockito.never())
+                .save(any());
+    }
+
+    /**
+     * Builds a real {@link UserEnrollment} whose {@code tenant.id} is {@code tenantId}
+     * (FAILED status so a retry can proceed when in-scope). Uses the entity builder
+     * so {@code getTenant().getId()} and {@code getStatus()} return real values.
+     */
+    private static UserEnrollment enrollmentInTenant(UUID tenantId) {
+        com.fivucsas.identity.entity.Tenant tenant =
+                org.mockito.Mockito.mock(com.fivucsas.identity.entity.Tenant.class);
+        when(tenant.getId()).thenReturn(tenantId);
+        UserEnrollment enrollment = org.mockito.Mockito.mock(UserEnrollment.class);
+        when(enrollment.getTenant()).thenReturn(tenant);
+        when(enrollment.getId()).thenReturn(UUID.randomUUID());
+        when(enrollment.getStatus()).thenReturn(EnrollmentStatus.FAILED);
+        return enrollment;
     }
 
     @Test
