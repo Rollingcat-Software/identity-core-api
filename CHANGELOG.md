@@ -2,6 +2,39 @@
 
 ## [Unreleased]
 
+### 2026-06-07 — Test-suite green-up + Turkish-locale & boundary hardening
+
+Behavior-preserving test + boundary fixes. **No production runtime behavior changes;
+no DB migration; no security/crypto semantics altered.** Full offline unit/slice +
+ArchUnit suite green: `mvn -o test` → **1648 run, 0 failures, 0 errors, 67 skipped**
+(the 67 skipped are Testcontainers/DB integration tests, not runnable with Docker off).
+
+- **NFC serial — Turkish-locale casing fix.** `domain.model.NfcSerial` canonicalize
+  now upper-cases with `Locale.ROOT` instead of the JVM default locale. Under the
+  `tr_TR` locale (the build/runtime default here), bare `toUpperCase()` maps `i → İ`
+  and would corrupt a hex serial / break `matches`/`valueOf`-style comparisons. The
+  canonical stored form (UPPER-hex, no separators) is now locale-independent so a
+  mobile-enrolled card still matches a web verify regardless of server locale.
+- **OAuth2 token mint routed off `entity.User` (ArchUnit boundary).** OAuth2 token
+  minting no longer imports the `entity.User` JPA type directly; it goes through a new
+  `OAuth2TokenMintPort` (application input port) implemented by
+  `infrastructure/oauth2/OAuth2TokenMintAdapter`. This satisfies the
+  `UserDomainImportBoundaryTest` / `UserDomainBoundaryTest` ArchUnit rules (no
+  `entity.User` imports outside `infrastructure/`/`repository/`/`entity/`) and keeps the
+  dual-User-model anti-pattern from drifting back. No change to minted token contents.
+- **WebAuthn test fix — `completeEnrollment` → `autoBindEnrollment` rename
+  reconciliation.** `WebAuthnCredentialService.autoCompleteWebAuthnEnrollment` was
+  migrated to call the idempotent, own-transaction `ManageEnrollmentUseCase.autoBindEnrollment(userId, methodType)`
+  (the create-if-missing upsert that fixed the first-time-fingerprint
+  `UnexpectedRollbackException` / "Beklenmeyen bir hata"), but `WebAuthnCredentialServiceTest`
+  still verified/stubbed the removed 3-arg `completeEnrollment(userId, methodType, "{}")`.
+  Three tests were red (2 "Wanted but not invoked" + 1 `UnnecessaryStubbingException`):
+  `platformTransportTriggersFingerprintEnrollment`, `roamingTransportTriggersHardwareKeyEnrollment`,
+  `swallowsEnrollmentFailure`. Fixed the **test** to assert the current production API
+  (`autoBindEnrollment(userId, methodType)`); production code left unchanged. The
+  separate `ManageEnrollmentUseCase.completeEnrollment(...)` overloads remain in use by
+  the start→complete enrollment flow and are unaffected.
+
 ### 2026-06-03 — Face-enrollment flag-consistency (fixes the "enrolled-but-412" class)
 
 Several enroll paths persisted a FACE embedding in the biometric-processor store

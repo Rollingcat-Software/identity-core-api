@@ -5,6 +5,26 @@
 Java 21 / Spring Boot 3.4.7 backend API for FIVUCSAS biometric identity platform.
 Hexagonal Architecture with Ports and Adapters. Production URL: https://api.fivucsas.com
 
+## Current test state (2026-06-07)
+
+`mvn -o test` (JDK 21 — the default `java` on PATH is JDK 8 and will fail) is **GREEN:
+1648 run, 0 failures, 0 errors, 67 skipped**. The 67 skipped are Testcontainers/DB
+integration tests (`*IntegrationTest`, `*MigrationTest`, `TenantRlsRegressionTest`,
+`SoftDeletePurgeJobConcurrencyTest`, DB-gated `AuthControllerTest` cases) — **not
+runnable without Docker**; verify them in CI (self-hosted runner), not on a Docker-off
+box. ArchUnit boundary tests run as ordinary unit tests (no DB) and are green.
+- **Locale**: this build/runtime defaults to `tr_TR`. Any `toUpperCase`/`toLowerCase`
+  MUST pass `Locale.ROOT` (`i → İ` corruption). `domain.model.NfcSerial` is now compliant.
+- **Known fixed (2026-06-07)**: the 3 WebAuthn test failures from the
+  `completeEnrollment` → `autoBindEnrollment` rename are resolved (test updated to the
+  current production API; production unchanged). See `CHANGELOG.md` 2026-06-07 +
+  `docs/findings/2026-06-07-tests-and-security.md`.
+- **Security note**: the git-tracked `.env.hetzner` leak (`f9f0f2d` on `origin/main`)
+  holds STALE GCP-era creds (verified by SHA-256 fingerprint), NOT live secrets — live
+  secrets are in the never-committed `.env.prod`. Emergency rotation was NOT required;
+  the 2026-06-06 rotation runbook stands as the procedure for any future *live* leak.
+  Hygiene (untrack + gitignore) on branch `claude/untrack-env-hetzner-secret`.
+
 ## Build & Deploy
 
 ```bash
