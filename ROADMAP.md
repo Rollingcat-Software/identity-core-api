@@ -1,9 +1,30 @@
 # Identity Core API — Roadmap
 
-> **Historical snapshot — superseded by parent ROADMAP.md**
-> This file reflects the state as of 2026-03-15. Most items listed as "remaining"
-> have since shipped. For current status, see the parent repo's ROADMAP_MASTER.md
-> and this repo's CHANGELOG.md.
+> **Historical snapshot below (2026-03-15) — superseded by parent ROADMAP.md.**
+> Most items listed there as "remaining" have since shipped. For current status,
+> see the parent repo's ROADMAP_MASTER.md and this repo's CHANGELOG.md.
+> The **Near-term** section immediately below reflects the live 2026-06-07 priorities.
+
+## Near-term (2026-06-07)
+
+1. **[P0] Restore the Testcontainers integration CI lane.** The
+   `Integration tests (Testcontainers)` job is one of the two required checks on
+   `main` and is broadly red (`AuthenticationFlowIntegrationTest`,
+   `UserApiIntegrationTest`, `CrossTenantIsolationIT`). Failure is
+   pre-existing/environmental (test-DB / biometric-processor / migration setup),
+   not the application logic of #209/#210/#211. Until restored, the integration
+   safety-net is down and merges rely on admin-override. See `TODO.md` [P0].
+2. **RLS enforcement (infra).** Add Postgres `FORCE ROW LEVEL SECURITY` behind a
+   dedicated non-superuser DB role (today's connection is a shared superuser across
+   ~6 apps, which RLS does not constrain) — defense-in-depth under the Hibernate
+   `@Filter(tenantFilter)`.
+3. **`RbacPermissionEvaluator` hardening.** Make `hasPermission(#id, …)` honor the
+   target id generically so object-level (IDOR) checks are automatic, replacing the
+   per-endpoint scope assertions added in #211.
+
+---
+
+## Historical snapshot
 
 > Last updated: 2026-03-15
 

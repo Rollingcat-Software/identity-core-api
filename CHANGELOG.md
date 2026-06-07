@@ -4,7 +4,7 @@
 
 ### 2026-06-07 — Authorization IDOR / PII-leak / abuse-throttle hardening + test-suite green-up
 
-Two merged work-streams landed on this date:
+Three PRs merged to `main` on this date (HEAD ~`3aafc69`):
 1. **Authorization hardening (#211).** Closes a set of object-level authorization
    gaps where endpoints trusted a body/path-supplied `userId` or relied on
    permission-only SpEL that ignored the target, plus Turkish-locale casing bugs on
@@ -13,9 +13,25 @@ Two merged work-streams landed on this date:
 2. **Test-suite green-up + boundary hardening (#210).** Behavior-preserving test +
    boundary fixes. **No production runtime behavior changes; no DB migration; no
    security/crypto semantics altered** beyond the locale fixes called out below.
-   Full offline unit/slice + ArchUnit suite green: `mvn -o test` → **1648 run,
-   0 failures, 0 errors, 67 skipped** (the 67 skipped are Testcontainers/DB
-   integration tests, not runnable with Docker off).
+3. **`.env.hetzner` hygiene (#209).** Untracked the stale git-tracked `.env.hetzner`
+   (`git rm --cached`) + hardened `.gitignore`. The leaked blob (`f9f0f2d`) holds
+   STALE GCP-era creds (verified by SHA-256 fingerprint), NOT live secrets — live
+   secrets are in the never-committed `.env.prod`. Emergency rotation was NOT
+   required; the 2026-06-06 runbook stands for any future *live* leak.
+
+**Post-merge unit suite is GREEN: `mvn -o test` → 1670 run / 0 failures / 0 errors /
+67 skipped** (the #210 session reported 1648 before #211's tests landed; the 67 skipped
+are Testcontainers/DB integration tests, not runnable with Docker off). The ArchUnit
+`entity.User` boundary baseline was legitimately refrozen during the #211 merge
+(18 stale lines removed, 0 grandfathered).
+
+> **CI gap (P0 — see `TODO.md`).** The other required check on `main`,
+> `Integration tests (Testcontainers)`, is broadly red in CI
+> (`AuthenticationFlowIntegrationTest`, `UserApiIntegrationTest`,
+> `CrossTenantIsolationIT`) and the failure PRE-DATES these PRs (environmental:
+> test-DB / biometric-processor / migration setup). With `enforce_admins=false`,
+> these PRs were admin-merged (`--admin`); the integration safety-net stays down
+> until that lane is restored.
 
 #### Authorization hardening (#211)
 
