@@ -77,8 +77,8 @@ permissions.
 - UI labels + i18n: render the top tier as **"Root"** (was "SUPER ADMIN"); update
   `PLATFORM_OWNER_ROLES`/`ADMIN_ROLES`/role-label maps + en.json/tr.json.
 
-## Validation (staging → prod)
-- Migration applies cleanly from current prod schema (head V68) on `identity_core_staging`.
+## Validation
+- Migration applies cleanly from current prod schema (head V68).
 - A user with the ROOT role → `user_type=ROOT`; cross-tenant `/tenants` returns all; switcher
   populates. A TENANT_ADMIN-by-role with lower user_type → elevated to TENANT_ADMIN; admin
   endpoints stop 403'ing.
