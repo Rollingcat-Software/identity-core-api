@@ -691,4 +691,127 @@ class OAuth2ServiceTest {
         verify(ops).set(startsWith("oauth2:code:"), payloadCaptor.capture(), any(Duration.class));
         assertThat(payloadCaptor.getValue()).contains("\"scope\":\"openid profile email\"");
     }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // API-2 (V85) — refresh tokens bound to their issuing OAuth2 client.
+    // refreshAccessToken must reject a token presented by a DIFFERENT client than
+    // the one it was issued to, while still accepting legacy null-client tokens
+    // and same-client refreshes. Gated by the client-binding-enforced kill-switch.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /** Flip the API-2 kill-switch on the @Value field (Mockito @InjectMocks leaves it default-false). */
+    private void setClientBindingEnforced(boolean enforced) {
+        org.springframework.test.util.ReflectionTestUtils.setField(
+                service, "refreshTokenClientBindingEnforced", enforced);
+    }
+
+    /**
+     * A presented refresh token bound to {@code boundClientId} (null = legacy/unbound).
+     * Both stubs are lenient: the kill-switch-OFF path short-circuits the binding check
+     * before reading {@code getClientId()}, and {@code getUser()} is consumed inside the
+     * (mocked) token-mint port rather than by {@code OAuth2Service} directly.
+     */
+    private com.fivucsas.identity.entity.RefreshToken presentedTokenBoundTo(String boundClientId, User owner) {
+        com.fivucsas.identity.entity.RefreshToken existing =
+                mock(com.fivucsas.identity.entity.RefreshToken.class);
+        lenient().when(existing.getClientId()).thenReturn(boundClientId);
+        lenient().when(existing.getUser()).thenReturn(owner);
+        return existing;
+    }
+
+    /**
+     * Stub the token-mint + rotation so a refresh that PASSES the binding check
+     * completes. Post-#210 {@code refreshAccessToken} delegates the access/id-token
+     * body (and the tenant-active guard) to {@code OAuth2TokenMintPort.mintForRefreshGrant}
+     * — the infrastructure adapter that owns {@code entity.User} — then rotates the
+     * presented token and injects the rotated {@code refresh_token}. So this service-level
+     * test stubs the PORT (not jwtService/entity.User, which now live behind the adapter).
+     * The returned body is a MUTABLE map because the service does {@code response.put(...)}.
+     */
+    private void stubRefreshHappyPath(OAuth2Client client, User user, String requestingClientId) {
+        when(clientRepository.findByClientIdAndActiveTrue(requestingClientId)).thenReturn(Optional.of(client));
+        when(client.getAllowedScopes()).thenReturn("openid profile email");
+        java.util.Map<String, Object> mintedBody = new java.util.LinkedHashMap<>();
+        mintedBody.put("access_token", "access-jwt");
+        mintedBody.put("token_type", "Bearer");
+        mintedBody.put("id_token", "id-jwt");
+        when(tokenMintPort.mintForRefreshGrant(any(), eq(client), anyString(), any(), any()))
+                .thenReturn(mintedBody);
+        // rotateRefreshToken returns the successor whose wire value lands in the response.
+        com.fivucsas.identity.entity.RefreshToken rotated =
+                mock(com.fivucsas.identity.entity.RefreshToken.class);
+        when(rotated.getToken()).thenReturn("rotated-wire-token");
+        when(rotated.getExpiryDate())
+                .thenReturn(java.time.Instant.now().plus(java.time.Duration.ofDays(7)));
+        when(refreshTokenService.rotateRefreshToken(any(), any(), any())).thenReturn(rotated);
+    }
+
+    @Test
+    void refreshAccessToken_WhenTokenIssuedToOtherClient_ShouldRejectInvalidGrant() {
+        // (a) token issued to client A, presented by client B → invalid_grant.
+        setClientBindingEnforced(true);
+        OAuth2Client clientB = mock(OAuth2Client.class);
+        when(clientRepository.findByClientIdAndActiveTrue("client-B")).thenReturn(Optional.of(clientB));
+        User user = mock(User.class);
+        com.fivucsas.identity.entity.RefreshToken boundToA = presentedTokenBoundTo("client-A", user);
+        when(refreshTokenService.findByToken("wire")).thenReturn(boundToA);
+
+        assertThatThrownBy(() -> service.refreshAccessToken("wire", "client-B", "1.2.3.4", "JUnit"))
+                // controller maps TokenRevokedException → 400 invalid_grant
+                .isInstanceOf(com.fivucsas.identity.domain.exception.TokenRevokedException.class);
+
+        // Must reject BEFORE rotating / reissuing — no token is minted for client B.
+        verify(refreshTokenService, never()).rotateRefreshToken(any(), any(), any());
+    }
+
+    @Test
+    void refreshAccessToken_WhenLegacyNullClientToken_ShouldStillRefresh() {
+        // (b) legacy null-client token → accepted (grace window) and refreshes.
+        setClientBindingEnforced(true);
+        OAuth2Client client = mock(OAuth2Client.class);
+        User user = mock(User.class);
+        stubRefreshHappyPath(client, user, "client-X");
+        com.fivucsas.identity.entity.RefreshToken legacy = presentedTokenBoundTo(null, user);
+        when(refreshTokenService.findByToken("wire")).thenReturn(legacy);
+
+        Map<String, Object> result = service.refreshAccessToken("wire", "client-X", "1.2.3.4", "JUnit");
+
+        assertThat(result).containsEntry("access_token", "access-jwt");
+        assertThat(result).containsEntry("refresh_token", "rotated-wire-token");
+        verify(refreshTokenService).rotateRefreshToken(any(), any(), any());
+    }
+
+    @Test
+    void refreshAccessToken_WhenSameClient_ShouldRefresh() {
+        // (c) normal same-client refresh works.
+        setClientBindingEnforced(true);
+        OAuth2Client client = mock(OAuth2Client.class);
+        User user = mock(User.class);
+        stubRefreshHappyPath(client, user, "client-A");
+        com.fivucsas.identity.entity.RefreshToken boundToA = presentedTokenBoundTo("client-A", user);
+        when(refreshTokenService.findByToken("wire")).thenReturn(boundToA);
+
+        Map<String, Object> result = service.refreshAccessToken("wire", "client-A", "1.2.3.4", "JUnit");
+
+        assertThat(result).containsEntry("access_token", "access-jwt");
+        assertThat(result).containsEntry("refresh_token", "rotated-wire-token");
+        verify(refreshTokenService).rotateRefreshToken(any(), any(), any());
+    }
+
+    @Test
+    void refreshAccessToken_WhenKillSwitchOff_ShouldAllowCrossClientReplay() {
+        // (d) kill-switch off → mismatch is ALLOWED (legacy wire-value-only behavior).
+        setClientBindingEnforced(false);
+        OAuth2Client clientB = mock(OAuth2Client.class);
+        User user = mock(User.class);
+        stubRefreshHappyPath(clientB, user, "client-B");
+        com.fivucsas.identity.entity.RefreshToken boundToA = presentedTokenBoundTo("client-A", user);
+        when(refreshTokenService.findByToken("wire")).thenReturn(boundToA);
+
+        Map<String, Object> result = service.refreshAccessToken("wire", "client-B", "1.2.3.4", "JUnit");
+
+        // With enforcement OFF the A-bound token refreshes under B (the bug, kept reversible).
+        assertThat(result).containsEntry("refresh_token", "rotated-wire-token");
+        verify(refreshTokenService).rotateRefreshToken(any(), any(), any());
+    }
 }

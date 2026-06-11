@@ -1,5 +1,6 @@
 package com.fivucsas.identity.application.service.handler;
 
+import com.fivucsas.identity.application.port.output.MarkPhoneVerifiedPort;
 import com.fivucsas.identity.domain.exception.OtpAttemptsExhaustedException;
 import com.fivucsas.identity.domain.model.auth.AuthMethodType;
 import com.fivucsas.identity.entity.AuthFlowStep;
@@ -21,6 +22,10 @@ public class SmsOtpAuthHandler implements AuthMethodHandler {
 
     private final OtpService otpService;
     private final SmsService smsService;
+    // F2 (2026-06-06): a verified SMS_OTP login step proves phone ownership, so
+    // mark phone_number_verified (keyed by userId → adapter owns the entity.User
+    // write). Phone stays OPTIONAL — only corrects the claim on SMS_OTP login.
+    private final MarkPhoneVerifiedPort markPhoneVerifiedPort;
 
     @Override
     public AuthMethodType getMethodType() {
@@ -52,6 +57,8 @@ public class SmsOtpAuthHandler implements AuthMethodHandler {
                 return StepResult.failure("Invalid or expired SMS OTP code");
             }
             log.info("Twilio Verify check succeeded for session: {}", session.getId());
+            // F2: verified SMS_OTP → phone is proven, set phone_number_verified.
+            markPhoneVerifiedForSessionUser(session);
             return StepResult.success();
         }
 
@@ -72,7 +79,20 @@ public class SmsOtpAuthHandler implements AuthMethodHandler {
         }
 
         log.info("SMS OTP validation successful for session: {}", session.getId());
+        // F2: verified SMS_OTP → phone is proven, set phone_number_verified.
+        markPhoneVerifiedForSessionUser(session);
         return StepResult.success();
+    }
+
+    /**
+     * F2: flip phone_number_verified for the session's user after a verified
+     * SMS_OTP step. Null-safe (a missing user is a no-op) so it can never NPE a
+     * successful login; the adapter additionally no-ops on a null/unknown id.
+     */
+    private void markPhoneVerifiedForSessionUser(AuthSession session) {
+        if (session.getUser() != null) {
+            markPhoneVerifiedPort.markPhoneVerified(session.getUser().getId());
+        }
     }
 
     @Override

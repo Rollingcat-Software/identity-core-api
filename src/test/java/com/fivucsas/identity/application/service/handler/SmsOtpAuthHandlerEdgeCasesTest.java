@@ -28,9 +28,18 @@ class SmsOtpAuthHandlerEdgeCasesTest {
     @Mock private SmsService smsService;
     @Mock private AuthSession session;
     @Mock private AuthFlowStep step;
+    // F2: SMS_OTP login success flips phone_number_verified via this port.
+    @Mock private com.fivucsas.identity.application.port.output.MarkPhoneVerifiedPort markPhoneVerifiedPort;
 
     @InjectMocks
     private SmsOtpAuthHandler handler;
+
+    /** A code-validation SUCCESS now calls session.getUser().getId() (F2) — give it a user. */
+    private void stubSessionUser() {
+        User user = mock(User.class);
+        lenient().when(user.getId()).thenReturn(UUID.randomUUID());
+        when(session.getUser()).thenReturn(user);
+    }
 
     // ── Both "send" and "send_otp" actions accepted (B1 fix) ────────────
 
@@ -112,6 +121,7 @@ class SmsOtpAuthHandlerEdgeCasesTest {
     void validate_WhenCodeHasLeadingZeros_ShouldValidateExactString() {
         UUID sessionId = UUID.randomUUID();
         when(session.getId()).thenReturn(sessionId);
+        stubSessionUser();
         when(step.getStepOrder()).thenReturn(2);
         when(otpService.validateWithResult("otp:" + sessionId + ":2:SMS_OTP", "007890"))
                 .thenReturn(OtpService.ValidationResult.valid());
@@ -125,6 +135,7 @@ class SmsOtpAuthHandlerEdgeCasesTest {
     void validate_WhenCodeIsAllZeros_ShouldValidateExactString() {
         UUID sessionId = UUID.randomUUID();
         when(session.getId()).thenReturn(sessionId);
+        stubSessionUser();
         when(step.getStepOrder()).thenReturn(2);
         when(otpService.validateWithResult("otp:" + sessionId + ":2:SMS_OTP", "000000"))
                 .thenReturn(OtpService.ValidationResult.valid());
@@ -213,6 +224,7 @@ class SmsOtpAuthHandlerEdgeCasesTest {
     void validate_WhenDifferentStepOrders_ShouldUseDifferentOtpKeys() {
         UUID sessionId = UUID.randomUUID();
         when(session.getId()).thenReturn(sessionId);
+        stubSessionUser(); // step-3 path validates successfully → F2 marks phone verified
 
         // Step order 1
         when(step.getStepOrder()).thenReturn(1);
@@ -236,6 +248,7 @@ class SmsOtpAuthHandlerEdgeCasesTest {
     void validate_WhenUnknownAction_ShouldTreatAsCodeValidation() {
         UUID sessionId = UUID.randomUUID();
         when(session.getId()).thenReturn(sessionId);
+        stubSessionUser();
         when(step.getStepOrder()).thenReturn(1);
         when(otpService.validateWithResult(anyString(), eq("123456")))
                 .thenReturn(OtpService.ValidationResult.valid());

@@ -191,7 +191,13 @@ public class OAuth2TokenMintAdapter implements OAuth2TokenMintPort {
             // RFC 6749 §6: issue a refresh token. createRefreshToken returns an
             // entity whose @Transient `token` field carries the raw wire value
             // (<id>.<secret>) exactly once — read it here, never persist it.
-            RefreshToken refreshToken = refreshTokenService.createRefreshToken(user, ipAddress, userAgent);
+            // API-2 (V85): bind the token to THIS client's wire client_id so the
+            // refresh grant can reject a cross-client replay. Only the
+            // authorization_code exchange mints here (mintRefreshToken=true); the
+            // refresh-token rotation re-binds via RefreshTokenService.rotateRefreshToken,
+            // so a bound token stays bound across its whole rotation lineage.
+            RefreshToken refreshToken =
+                    refreshTokenService.createRefreshToken(user, ipAddress, userAgent, client.getClientId());
             response.put("refresh_token", refreshToken.getToken());
             long refreshExpiresIn =
                     Duration.between(Instant.now(), refreshToken.getExpiryDate()).getSeconds();

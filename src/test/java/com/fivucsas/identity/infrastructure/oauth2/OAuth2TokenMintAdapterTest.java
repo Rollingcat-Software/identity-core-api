@@ -65,7 +65,9 @@ class OAuth2TokenMintAdapterTest {
         RefreshToken minted = mock(RefreshToken.class);
         when(minted.getToken()).thenReturn("refresh-wire-token");
         when(minted.getExpiryDate()).thenReturn(Instant.now().plus(Duration.ofDays(7)));
-        when(refreshTokenService.createRefreshToken(any(), any(), any())).thenReturn(minted);
+        // API-2 (V85): the authorization_code mint binds the issuing client, so the
+        // adapter calls the 4-arg createRefreshToken(user, ip, ua, clientId) overload.
+        when(refreshTokenService.createRefreshToken(any(), any(), any(), any())).thenReturn(minted);
     }
 
     private User mockUser(String email, Tenant tenant) {
@@ -115,6 +117,10 @@ class OAuth2TokenMintAdapterTest {
         assertThat(idClaims.getValue()).containsEntry("type", "id_token");
         // The access-token path is the only generateToken() caller.
         verify(jwtService).generateToken(anyMap(), eq("user@test.com"));
+        // API-2 (V85): the minted refresh token is bound to THIS client's wire id
+        // so the refresh grant can later reject a cross-client replay.
+        verify(refreshTokenService).createRefreshToken(
+                any(), eq("1.2.3.4"), eq("agent"), eq("client-1"));
     }
 
     @Test
@@ -151,7 +157,10 @@ class OAuth2TokenMintAdapterTest {
         assertThat(result).containsEntry("access_token", "access-jwt");
         assertThat(result).containsEntry("id_token", "id-jwt");
         assertThat(result).doesNotContainKey("refresh_token");
+        // The refresh-grant adapter mints no refresh token (the caller rotates it),
+        // so neither createRefreshToken overload is invoked here (API-2 4-arg incl.).
         verify(refreshTokenService, never()).createRefreshToken(any(), any(), any());
+        verify(refreshTokenService, never()).createRefreshToken(any(), any(), any(), any());
     }
 
     @Test

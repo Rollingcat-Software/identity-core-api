@@ -17,6 +17,7 @@ import com.fivucsas.identity.service.RefreshTokenService;
 import io.jsonwebtoken.Claims;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -71,6 +72,18 @@ public class OAuth2Service {
     // authorization_code / refresh_token grants touch entity.User, keeping this
     // application service clean of the UserDomainBoundaryTest-fenced JPA type.
     private final com.fivucsas.identity.application.port.output.OAuth2TokenMintPort tokenMintPort;
+
+    /**
+     * API-2 kill-switch (V85): when true (default), the {@code refresh_token} grant
+     * REJECTS a presented refresh token whose recorded issuing {@code client_id} is
+     * non-null AND differs from the requesting client — so a token issued to app A
+     * cannot be replayed by app B and reissued scoped to B. Legacy null-client
+     * tokens are always accepted (grace window). Flip to {@code false} via
+     * {@code APP_OAUTH2_REFRESH_TOKEN_CLIENT_BINDING_ENFORCED=false} to instantly
+     * restore the legacy wire-value-only behavior with no redeploy.
+     */
+    @Value("${app.oauth2.refresh-token.client-binding-enforced:true}")
+    private boolean refreshTokenClientBindingEnforced;
 
     private static final String AUTH_CODE_PREFIX = "oauth2:code:";
     // RFC 6749 Section 4.1.2: authorization code MUST expire shortly, max 10 minutes recommended
@@ -425,6 +438,27 @@ public class OAuth2Service {
         // (TokenRevokedException, after family-wide revoke per RFC 6749 §10.4).
         RefreshToken existing = refreshTokenService.findByToken(presentedRefreshToken);
         refreshTokenService.verifyExpiration(existing);
+
+        // API-2 (V85): refuse a cross-client replay. A refresh token minted for
+        // app A's client (existing.clientId == A) presented by app B's client
+        // (clientId == B) is reissued scoped to B unless we reject it here. We
+        // only reject when the token CARRIES a binding (non-null) and it differs
+        // from the requesting client — legacy null-client tokens (the non-OAuth
+        // /auth/login + /auth/refresh path, or pre-V85 rows) are accepted so the
+        // existing login/refresh flow keeps working (grace window). Gated by the
+        // client-binding-enforced kill-switch so it reverts via env with no
+        // redeploy. The controller maps invalid_grant from this exception. Checked
+        // BEFORE the mint/rotation so a mismatched replay never reissues a token —
+        // and it reads only the token's recorded client_id (no entity.User touch),
+        // keeping this service boundary-clean (UserDomainBoundaryTest).
+        if (refreshTokenClientBindingEnforced
+                && existing.getClientId() != null
+                && !existing.getClientId().equals(clientId)) {
+            log.warn("OAuth2 refresh refused — client mismatch: token bound to client={}, presented by client={}",
+                    existing.getClientId(), clientId);
+            throw new com.fivucsas.identity.domain.exception.TokenRevokedException(
+                    "Refresh token was not issued to this client");
+        }
 
         // Re-issue access + id tokens. The granted scope is the client's full
         // allowed scope set (RFC 6749 §6 permits a narrower scope, but never

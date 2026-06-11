@@ -160,4 +160,79 @@ class RefreshTokenServiceTest {
 
         verify(refreshTokenRepository, never()).findById(any(UUID.class));
     }
+
+    @Test
+    @DisplayName("createRefreshToken(clientId): mint records the issuing OAuth2 client [API-2 / V85]")
+    void createRefreshToken_BindsClientId() {
+        User user = mock(User.class);
+        when(user.getEmail()).thenReturn("user@test.com");
+        when(refreshTokenRepository.save(any(RefreshToken.class)))
+                .thenAnswer(inv -> inv.getArgument(0));
+
+        RefreshToken minted = service.createRefreshToken(user, "1.2.3.4", "JUnit", "marmara-bys-demo");
+
+        assertThat(minted.getClientId()).isEqualTo("marmara-bys-demo");
+    }
+
+    @Test
+    @DisplayName("createRefreshToken (3-arg): legacy mints stay client-unbound (null) [API-2 / V85]")
+    void createRefreshToken_LegacyMintIsUnbound() {
+        User user = mock(User.class);
+        when(user.getEmail()).thenReturn("user@test.com");
+        when(refreshTokenRepository.save(any(RefreshToken.class)))
+                .thenAnswer(inv -> inv.getArgument(0));
+
+        RefreshToken minted = service.createRefreshToken(user, "1.2.3.4", "JUnit");
+
+        assertThat(minted.getClientId()).isNull();
+    }
+
+    @Test
+    @DisplayName("rotateRefreshToken: the rotated successor inherits the client binding [API-2 / V85]")
+    void rotateRefreshToken_SuccessorStaysClientBound() {
+        User user = mock(User.class);
+        when(user.getEmail()).thenReturn("user@test.com");
+        when(refreshTokenRepository.save(any(RefreshToken.class)))
+                .thenAnswer(inv -> inv.getArgument(0));
+
+        // The presented (old) token was minted bound to client "app-a".
+        RefreshToken old = RefreshToken.builder()
+                .id(UUID.randomUUID())
+                .user(user)
+                .familyId(UUID.randomUUID())
+                .clientId("app-a")
+                .tokenSecretHash(RefreshTokenHasher.sha256("secret"))
+                .expiryDate(Instant.now().plusSeconds(3600))
+                .build();
+
+        RefreshToken successor = service.rotateRefreshToken(old, "1.2.3.4", "JUnit");
+
+        // Binding carried through rotation; family preserved (reuse-detection).
+        assertThat(successor.getClientId()).isEqualTo("app-a");
+        assertThat(successor.getFamilyId()).isEqualTo(old.getFamilyId());
+        // Old token revoked as part of rotation.
+        assertThat(old.isRevoked()).isTrue();
+    }
+
+    @Test
+    @DisplayName("rotateRefreshToken: an unbound (legacy null-client) token stays unbound [API-2 / V85]")
+    void rotateRefreshToken_UnboundStaysUnbound() {
+        User user = mock(User.class);
+        when(user.getEmail()).thenReturn("user@test.com");
+        when(refreshTokenRepository.save(any(RefreshToken.class)))
+                .thenAnswer(inv -> inv.getArgument(0));
+
+        RefreshToken old = RefreshToken.builder()
+                .id(UUID.randomUUID())
+                .user(user)
+                .familyId(UUID.randomUUID())
+                .clientId(null)
+                .tokenSecretHash(RefreshTokenHasher.sha256("secret"))
+                .expiryDate(Instant.now().plusSeconds(3600))
+                .build();
+
+        RefreshToken successor = service.rotateRefreshToken(old, "1.2.3.4", "JUnit");
+
+        assertThat(successor.getClientId()).isNull();
+    }
 }
