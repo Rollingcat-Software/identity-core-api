@@ -216,7 +216,10 @@ public class BiometricServiceAdapter implements BiometricServicePort {
      */
     private static Map<String, Object> embeddingBody(String tenantId, UUID userId, List<Double> embedding) {
         Map<String, Object> body = new java.util.LinkedHashMap<>();
-        body.put("user_id", userId != null ? userId.toString() : null);
+        // userId is always non-null at the call sites (user.getId() /
+        // UUID.fromString of a resolved user) — fail loud rather than POST a
+        // {"user_id": null} the bio side would 422 on.
+        body.put("user_id", java.util.Objects.requireNonNull(userId, "userId").toString());
         body.put("embedding", embedding);
         if (tenantId != null && !tenantId.isBlank()) {
             body.put("tenant_id", tenantId);

@@ -39,6 +39,9 @@ public class EnrollBiometricService implements EnrollBiometricUseCase {
     private final BiometricServicePort biometricService;
     private final ManageEnrollmentUseCase manageEnrollmentUseCase;
     private final com.fivucsas.identity.application.port.output.EventPublisherPort eventPublisher;
+    // Phase 5 (sub-project A): gates the client-side-embedding enroll path.
+    // Default OFF ⇒ the legacy image enroll below is byte-identical to before.
+    private final ClientSideEmbeddingPolicy clientSideEmbeddingPolicy;
 
     @Override
     @Transactional
@@ -49,16 +52,35 @@ public class EnrollBiometricService implements EnrollBiometricUseCase {
         User user = userRepository.findById(userId)
             .orElseThrow(() -> new UserNotFoundException(command.getUserId()));
 
-        // Call external biometric service. Forward tenant_id +
-        // client_embedding(s) so pgvector queries can be tenant-scoped and
-        // D2 log-only client telemetry survives the proxy hop.
-        Map<String, Object> response = biometricService.enrollFace(
-                userId,
-                command.getFaceImage(),
-                command.getTenantId(),
-                command.getClientEmbedding(),
-                command.getClientEmbeddings(),
-                command.isOptimize());
+        // ROUTING (Phase 5, sub-project A): when the client-side-embedding path is
+        // ON for this tenant AND the command carries a precomputed embedding (the
+        // raw image never left the device), enroll via the bio /enroll-embedding
+        // endpoint. Otherwise fall through to the UNCHANGED legacy image enroll.
+        // Default OFF (policy + no embedding) ⇒ identical to the pre-Phase-5
+        // behaviour. SECURITY: the embedding carries no frame, so the bio
+        // processor cannot run liveness/anti-spoof on it — an embedding FACE
+        // factor MUST be paired with a liveness factor (puzzle/passive) in the
+        // flow (enforced by sub-projects B/C); this only routes the enroll.
+        List<Double> embedding = command.getEmbedding();
+        boolean hasEmbedding = embedding != null && !embedding.isEmpty();
+        Map<String, Object> response;
+        // Mirror FaceVerifyMfaStepHandler's predicate exactly: an embedding is
+        // routed to the new endpoint ONLY when one is present AND the policy is
+        // ON for the tenant; otherwise the legacy image enroll is used unchanged.
+        if (hasEmbedding && isEmbeddingPathEnabled(command.getTenantId())) {
+            response = biometricService.enrollEmbedding(command.getTenantId(), userId, embedding);
+        } else {
+            // Call external biometric service. Forward tenant_id +
+            // client_embedding(s) so pgvector queries can be tenant-scoped and
+            // D2 log-only client telemetry survives the proxy hop.
+            response = biometricService.enrollFace(
+                    userId,
+                    command.getFaceImage(),
+                    command.getTenantId(),
+                    command.getClientEmbedding(),
+                    command.getClientEmbeddings(),
+                    command.isOptimize());
+        }
 
         Boolean success = (Boolean) response.get("success");
         String message = (String) response.get("message");
@@ -185,6 +207,27 @@ public class EnrollBiometricService implements EnrollBiometricUseCase {
             user.enrollBiometric();
             userDomainRepository.save(user);
             log.info("Marked user {} biometric-enrolled (multi-image enroll path)", userId);
+        }
+    }
+
+    /**
+     * Whether the client-side-embedding enroll path is enabled for the (optional,
+     * String) tenant id on the command. Uses the global master switch, falling
+     * back to the per-tenant canary list when the tenant id parses to a UUID. A
+     * null / non-UUID tenant id only ever takes the embedding path under the
+     * GLOBAL switch — never via the canary list.
+     */
+    private boolean isEmbeddingPathEnabled(String tenantId) {
+        if (clientSideEmbeddingPolicy.isEnabled()) {
+            return true;
+        }
+        if (tenantId == null || tenantId.isBlank()) {
+            return false;
+        }
+        try {
+            return clientSideEmbeddingPolicy.isEnabledForTenant(UUID.fromString(tenantId.trim()));
+        } catch (IllegalArgumentException e) {
+            return false;
         }
     }
 
