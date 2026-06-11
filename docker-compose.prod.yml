@@ -40,7 +40,6 @@ services:
       # to lengthen the session for demo day. The old JWT_ACCESS_TOKEN_EXPIRATION
       # var below was read by nothing; replaced by this controlling knob.
       JWT_EXPIRATION: ${JWT_EXPIRATION:-900000}
-      JWT_REFRESH_TOKEN_EXPIRATION: 604800000
       JWT_ISSUER: rollingcat-identity-core
       JWT_AUDIENCE: rollingcat-clients
       JWT_DEFAULT_ALGO: ${JWT_DEFAULT_ALGO:-HS512}
