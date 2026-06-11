@@ -51,7 +51,7 @@ public class RefreshTokenService implements com.fivucsas.identity.application.po
     }
 
     /**
-     * Mint a refresh token bound to the issuing OAuth2 client (API-2, V84).
+     * Mint a refresh token bound to the issuing OAuth2 client (API-2, V85).
      *
      * <p>The OAuth2 {@code authorization_code} exchange threads the client's wire
      * {@code client_id} here so the token records WHICH relying party it was
@@ -70,7 +70,7 @@ public class RefreshTokenService implements com.fivucsas.identity.application.po
      * Internal helper: mint a refresh token attached to a specific rotation
      * family. Used by both initial login (fresh family) and rotation
      * (parent family inherited). {@code clientId} carries the API-2 issuing-client
-     * binding (V84) and is propagated unchanged across rotations.
+     * binding (V85) and is propagated unchanged across rotations.
      */
     private RefreshToken createRefreshTokenInFamily(User user, UUID familyId,
                                                     String ipAddress, String userAgent, String clientId) {
@@ -108,7 +108,7 @@ public class RefreshTokenService implements com.fivucsas.identity.application.po
                 .user(user)
                 .tokenSecretHash(secretHash)
                 .familyId(familyId)
-                // API-2 (V84): record the issuing OAuth2 client (null = unbound).
+                // API-2 (V85): record the issuing OAuth2 client (null = unbound).
                 .clientId(clientId)
                 .expiryDate(Instant.now().plusMillis(refreshTokenDurationMs))
                 .ipAddress(ipAddress)
@@ -250,7 +250,7 @@ public class RefreshTokenService implements com.fivucsas.identity.application.po
         // so reuse-detection can revoke them all at once (Sec-P2 #6).
         oldToken.revoke();
         refreshTokenRepository.save(oldToken);
-        // API-2 (V84): the rotated successor inherits the same issuing-client
+        // API-2 (V85): the rotated successor inherits the same issuing-client
         // binding (null stays null) so a client-bound token stays bound across
         // its whole rotation lineage and an unbound one stays unbound.
         return createRefreshTokenInFamily(oldToken.getUser(), oldToken.getFamilyId(),

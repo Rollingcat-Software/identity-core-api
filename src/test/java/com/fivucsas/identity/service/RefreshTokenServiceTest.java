@@ -162,7 +162,7 @@ class RefreshTokenServiceTest {
     }
 
     @Test
-    @DisplayName("createRefreshToken(clientId): mint records the issuing OAuth2 client [API-2 / V84]")
+    @DisplayName("createRefreshToken(clientId): mint records the issuing OAuth2 client [API-2 / V85]")
     void createRefreshToken_BindsClientId() {
         User user = mock(User.class);
         when(user.getEmail()).thenReturn("user@test.com");
@@ -175,7 +175,7 @@ class RefreshTokenServiceTest {
     }
 
     @Test
-    @DisplayName("createRefreshToken (3-arg): legacy mints stay client-unbound (null) [API-2 / V84]")
+    @DisplayName("createRefreshToken (3-arg): legacy mints stay client-unbound (null) [API-2 / V85]")
     void createRefreshToken_LegacyMintIsUnbound() {
         User user = mock(User.class);
         when(user.getEmail()).thenReturn("user@test.com");
@@ -188,7 +188,7 @@ class RefreshTokenServiceTest {
     }
 
     @Test
-    @DisplayName("rotateRefreshToken: the rotated successor inherits the client binding [API-2 / V84]")
+    @DisplayName("rotateRefreshToken: the rotated successor inherits the client binding [API-2 / V85]")
     void rotateRefreshToken_SuccessorStaysClientBound() {
         User user = mock(User.class);
         when(user.getEmail()).thenReturn("user@test.com");
@@ -215,7 +215,7 @@ class RefreshTokenServiceTest {
     }
 
     @Test
-    @DisplayName("rotateRefreshToken: an unbound (legacy null-client) token stays unbound [API-2 / V84]")
+    @DisplayName("rotateRefreshToken: an unbound (legacy null-client) token stays unbound [API-2 / V85]")
     void rotateRefreshToken_UnboundStaysUnbound() {
         User user = mock(User.class);
         when(user.getEmail()).thenReturn("user@test.com");

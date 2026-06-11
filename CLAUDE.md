@@ -5,6 +5,59 @@
 Java 21 / Spring Boot 3.4.7 backend API for FIVUCSAS biometric identity platform.
 Hexagonal Architecture with Ports and Adapters. Production URL: https://api.fivucsas.com
 
+## Current state (2026-06-07)
+
+Three PRs merged to `main` on this date (HEAD ~`3aafc69`):
+- **#209** — untrack the stale `.env.hetzner` + harden `.gitignore`.
+- **#210** — WebAuthn test reconciliation (`completeEnrollment` → `autoBindEnrollment`),
+  `NfcSerial` `Locale.ROOT` casing, OAuth2 token-mint routed off `entity.User` via the
+  `OAuth2TokenMintPort`/Adapter (ArchUnit boundary).
+- **#211** — authorization IDOR / PII-leak / abuse-throttle hardening (NFC enroll/remove,
+  user-settings + enrollment cross-tenant guards, push-token bind, NFC PII gate, locale
+  casing, OTP-send throttle).
+
+Key facts after the merge:
+- **Unit suite is GREEN: `mvn -o test` → 1670 run / 0 fail / 0 error / 67 skip.** (Run on
+  JDK 21 — the default `java` on PATH is JDK 8 and will fail. The 67 skipped are
+  Testcontainers/DB integration tests, not runnable with Docker off.)
+- **Integration lane is PRE-EXISTING BROKEN.** `Integration tests (Testcontainers)` is one
+  of the two required status checks on `main` and is broadly red in CI
+  (`AuthenticationFlowIntegrationTest`, `UserApiIntegrationTest`, `CrossTenantIsolationIT`).
+  This is environmental and predates these PRs. **`enforce_admins=false` on `main`, so
+  admin-merge (`--admin`) is the current norm** until the lane is restored — the
+  integration safety-net is effectively down. Tracked as `TODO.md` [P0].
+- **ArchUnit `entity.User` boundary baseline was refrozen** during the #211 merge
+  (18 stale lines removed, 0 grandfathered) — a legitimate refreeze of a line-number
+  baseline that had drifted against `main`, not a suppression of new violations.
+- **`.env.hetzner` is now untracked + gitignored.** The leaked blob (`f9f0f2d`) holds
+  STALE GCP-era creds (verified by SHA-256 fingerprint), NOT live secrets — live secrets
+  are in the never-committed `.env.prod`. Emergency rotation was NOT required (verified);
+  the 2026-06-06 runbook stands as the procedure for any future *live* leak.
+
+See `CHANGELOG.md` 2026-06-07 + `docs/findings/2026-06-07-tests-and-security.md` /
+`docs/findings/2026-06-07-authz-idor-fixes.md`.
+
+## Current test state (2026-06-07)
+
+`mvn -o test` (JDK 21 — the default `java` on PATH is JDK 8 and will fail) is **GREEN:
+1670 run, 0 failures, 0 errors, 67 skipped** (post-#211; the #210 session reported 1648
+before #211's tests landed). The 67 skipped are Testcontainers/DB
+integration tests (`*IntegrationTest`, `*MigrationTest`, `TenantRlsRegressionTest`,
+`SoftDeletePurgeJobConcurrencyTest`, DB-gated `AuthControllerTest` cases) — **not
+runnable without Docker**; verify them in CI (self-hosted runner), not on a Docker-off
+box. ArchUnit boundary tests run as ordinary unit tests (no DB) and are green.
+- **Locale**: this build/runtime defaults to `tr_TR`. Any `toUpperCase`/`toLowerCase`
+  MUST pass `Locale.ROOT` (`i → İ` corruption). `domain.model.NfcSerial` is now compliant.
+- **Known fixed (2026-06-07)**: the 3 WebAuthn test failures from the
+  `completeEnrollment` → `autoBindEnrollment` rename are resolved (test updated to the
+  current production API; production unchanged). See `CHANGELOG.md` 2026-06-07 +
+  `docs/findings/2026-06-07-tests-and-security.md`.
+- **Security note**: the git-tracked `.env.hetzner` leak (`f9f0f2d` on `origin/main`)
+  holds STALE GCP-era creds (verified by SHA-256 fingerprint), NOT live secrets — live
+  secrets are in the never-committed `.env.prod`. Emergency rotation was NOT required;
+  the 2026-06-06 rotation runbook stands as the procedure for any future *live* leak.
+  Hygiene (untrack + gitignore) on branch `claude/untrack-env-hetzner-secret`.
+
 ## Build & Deploy
 
 ```bash
@@ -542,4 +595,6 @@ UI redesign reverts with the env flag and no web redeploy.
 - **web-app** (React) consumes this API
 - **SMTP**: `smtp.hostinger.com:587`, sender `info@fivucsas.com`, creds in `.env.prod`
 
-See TODO.md for integration audit (49 items).
+See `TODO.md` for the active backlog (incl. the [P0] integration-CI restore + #211
+deferred follow-ups). The historical 49-item integration audit is archived at
+`docs/archive/TODO.md`.

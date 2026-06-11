@@ -141,14 +141,14 @@ public class RefreshToken implements Persistable<UUID> {
     private UUID familyId;
 
     /**
-     * OAuth2 client this token was issued to (API-2, 2026-06-06, V84).
+     * OAuth2 client this token was issued to (API-2, 2026-06-06, V85).
      *
      * <p>The wire {@code client_id} string (matches {@code oauth2_clients.client_id})
      * of the relying party that minted this token through the OAuth2
      * {@code authorization_code} exchange. {@code NULL} = legacy / client-unbound —
      * minted by a non-OAuth path ({@code /auth/login}, register, MFA-step,
      * membership-switch, usernameless) which is not tied to a single RP, OR minted
-     * before V84. On the {@code refresh_token} grant a non-null value must equal the
+     * before V85. On the {@code refresh_token} grant a non-null value must equal the
      * requesting client (else {@code invalid_grant}) so a refresh token issued to
      * app A is not replayable by app B; a {@code NULL} value is accepted (grace
      * window). The rotated successor inherits this binding via

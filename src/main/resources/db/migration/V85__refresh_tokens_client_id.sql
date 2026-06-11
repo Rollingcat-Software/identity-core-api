@@ -1,4 +1,4 @@
--- V84: Bind refresh tokens to their issuing OAuth2 client (security — API-2).
+-- V85: Bind refresh tokens to their issuing OAuth2 client (security — API-2).
 --
 -- Root cause: refresh_tokens had no client column, so a refresh token minted
 -- for app A's client_id was replayable by app B's client and got reissued
@@ -9,7 +9,7 @@
 --   * The column is NULLABLE with NO backfill. NULL = legacy / client-unbound
 --     (minted by the non-OAuth /auth/login, register, MFA-step, membership-switch,
 --     and usernameless paths). Those keep refreshing unchanged (grace window).
---   * Only the OAuth2 authorization_code exchange stamps client_id from V84 on.
+--   * Only the OAuth2 authorization_code exchange stamps client_id from V85 on.
 --   * The strict cross-client rejection is gated behind the runtime flag
 --     app.oauth2.refresh-token.client-binding-enforced (default ENFORCE), so it
 --     can be turned off via APP_OAUTH2_REFRESH_TOKEN_CLIENT_BINDING_ENFORCED=false

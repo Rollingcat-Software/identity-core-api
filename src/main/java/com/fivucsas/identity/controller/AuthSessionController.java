@@ -29,6 +29,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.Arrays;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 
@@ -127,7 +128,11 @@ public class AuthSessionController {
                 .filter(s -> !s.isEmpty())
                 .map(s -> {
                     try {
-                        return AuthSessionStatus.valueOf(s.toUpperCase());
+                        // Locale.ROOT: Enum.valueOf is case-sensitive and the
+                        // enum names are ASCII. Under the Turkish locale a bare
+                        // toUpperCase() maps i→İ (e.g. "in_progress" → "İN_PROGRESS"),
+                        // which would never match IN_PROGRESS and throw a spurious 400.
+                        return AuthSessionStatus.valueOf(s.toUpperCase(Locale.ROOT));
                     } catch (IllegalArgumentException ex) {
                         throw new IllegalArgumentException(
                                 "Unknown auth session status: '" + s + "'. " +

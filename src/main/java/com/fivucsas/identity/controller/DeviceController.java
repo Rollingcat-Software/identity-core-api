@@ -666,19 +666,27 @@ public class DeviceController {
     @Operation(summary = "Register/refresh a device push-notification token for the current user")
     @PreAuthorize("isAuthenticated()")
     public ResponseEntity<DeviceResponse> updatePushToken(@RequestBody Map<String, Object> body) {
-        Object userIdRaw = body.get("userId");
         String token = (String) body.get("token");
         String platform = (String) body.get("platform");
 
-        if (userIdRaw == null || token == null || token.isBlank()) {
+        if (token == null || token.isBlank()) {
             return ResponseEntity.badRequest().build();
         }
 
-        UUID userId;
-        try {
-            userId = UUID.fromString(userIdRaw.toString());
-        } catch (IllegalArgumentException e) {
-            return ResponseEntity.badRequest().build();
+        // SECURITY (authz IDOR fix, 2026-06-07): the endpoint previously trusted a
+        // body-supplied userId, so any authenticated user could redirect the
+        // approve-login push channel for ANOTHER user's device to a token they
+        // control. Bind the token to the AUTHENTICATED principal and ignore any
+        // body userId — a user may only register a push token for themselves.
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null || auth.getName() == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
+        UUID userId = userRepository.findByEmail(auth.getName())
+                .map(User::getId)
+                .orElse(null);
+        if (userId == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
         }
 
         DeviceResponse updated = manageDeviceUseCase.updatePushToken(userId, token, platform);

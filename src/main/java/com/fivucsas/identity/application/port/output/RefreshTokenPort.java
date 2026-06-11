@@ -15,7 +15,7 @@ public interface RefreshTokenPort {
 
     /**
      * Mint a refresh token bound to the issuing OAuth2 {@code clientId} (API-2,
-     * V84). Pass {@code null} for non-OAuth / legacy mints (client-unbound). The
+     * V85). Pass {@code null} for non-OAuth / legacy mints (client-unbound). The
      * default delegates to the unbound 3-arg form so existing implementations and
      * test doubles stay source-compatible.
      */

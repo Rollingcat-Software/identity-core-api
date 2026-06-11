@@ -403,7 +403,7 @@ public class BiometricServiceAdapter implements BiometricServicePort {
                 if (dg.getKey() == null || dg.getValue() == null || dg.getValue().isBlank()) {
                     continue;
                 }
-                String num = dg.getKey().toLowerCase().replaceFirst("^dg", "").trim();
+                String num = dg.getKey().toLowerCase(java.util.Locale.ROOT).replaceFirst("^dg", "").trim();
                 dataGroups.put(num, dg.getValue());
             }
         }

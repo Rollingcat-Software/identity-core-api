@@ -116,7 +116,7 @@ app:
   # OAuth2 / OIDC authorization-server behaviour.
   oauth2:
     refresh-token:
-      # API-2 (V84): bind a refresh token to its issuing OAuth2 client. Default ON
+      # API-2 (V85): bind a refresh token to its issuing OAuth2 client. Default ON
       # (the refresh_token grant rejects a cross-client replay with invalid_grant;
       # legacy null-client tokens are accepted). KILL-SWITCH: set
       # APP_OAUTH2_REFRESH_TOKEN_CLIENT_BINDING_ENFORCED=false in .env.prod to

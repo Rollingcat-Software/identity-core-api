@@ -61,7 +61,7 @@ class WebAuthnCredentialServiceTest {
 
             assertThat(saved).isSameAs(c);
             verify(credentialRepository).save(c);
-            verify(manageEnrollmentUseCase).completeEnrollment(userId, AuthMethodType.FINGERPRINT, "{}");
+            verify(manageEnrollmentUseCase).autoBindEnrollment(userId, AuthMethodType.FINGERPRINT);
         }
 
         @Test
@@ -74,7 +74,7 @@ class WebAuthnCredentialServiceTest {
 
             service.saveCredential(c);
 
-            verify(manageEnrollmentUseCase).completeEnrollment(userId, AuthMethodType.HARDWARE_KEY, "{}");
+            verify(manageEnrollmentUseCase).autoBindEnrollment(userId, AuthMethodType.HARDWARE_KEY);
         }
 
         @Test
@@ -86,7 +86,7 @@ class WebAuthnCredentialServiceTest {
             when(credentialRepository.save(c)).thenReturn(c);
             doThrow(new RuntimeException("downstream offline"))
                     .when(manageEnrollmentUseCase)
-                    .completeEnrollment(any(), any(), any());
+                    .autoBindEnrollment(any(), any());
 
             // Must not propagate — credential save already committed.
             WebAuthnCredential saved = service.saveCredential(c);

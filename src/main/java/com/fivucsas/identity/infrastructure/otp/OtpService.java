@@ -1,5 +1,6 @@
 package com.fivucsas.identity.infrastructure.otp;
 
+import com.fivucsas.identity.exception.RateLimitExceededException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -48,6 +49,59 @@ public class OtpService {
     static final int MAX_ATTEMPTS = 5;
 
     private static final String ATTEMPTS_SUFFIX = ":attempts";
+
+    /**
+     * Per-identifier OTP-SEND throttle (authz/abuse fix, 2026-06-07).
+     *
+     * <p>The generic {@code RateLimitFilter} only caps ~100 req/min/IP, which is
+     * far too loose for OTP SENDS: an attacker (or buggy client) could trigger
+     * dozens of SMS/email OTPs to a single victim phone/email per minute (toll
+     * fraud / SMS-bombing / inbox flooding), and a single NAT'd IP serves many
+     * legitimate users. This bucket is keyed by the OTP IDENTIFIER (the same
+     * Redis key the code is stored under, which embeds the target user id —
+     * e.g. {@code 2fa-sms:<userId>}), so it throttles PER VICTIM regardless of
+     * source IP, mirroring the dedicated login/onboarding buckets.</p>
+     */
+    static final int MAX_SENDS = 3;
+    static final Duration SEND_WINDOW = Duration.ofMinutes(1);
+    private static final String SEND_SUFFIX = ":sends";
+
+    /**
+     * Reserve a send slot for {@code otpKey} before issuing a fresh OTP.
+     * Increments a per-identifier counter (window {@link #SEND_WINDOW}) and throws
+     * {@link RateLimitExceededException} (→ HTTP 429 via the global handler) once
+     * more than {@link #MAX_SENDS} sends occur in the window. Call this at the
+     * START of every OTP-send endpoint, BEFORE {@link #generate(String)}.
+     *
+     * <p>Uses {@code INCR} so concurrent sends cannot race past the cap; the TTL
+     * is set on the first increment so the counter self-expires (no housekeeping).
+     * Fails OPEN on a Redis error — the generic per-IP limiter + the per-code
+     * 5-strike attempt counter remain as backstops, and we never want a Redis
+     * blip to lock a legitimate user out of receiving any OTP.</p>
+     */
+    public void acquireSendSlot(String otpKey) {
+        String sendKey = otpKey + SEND_SUFFIX;
+        try {
+            Long sends = redisTemplate.opsForValue().increment(sendKey);
+            if (sends != null && sends == 1L) {
+                redisTemplate.expire(sendKey, SEND_WINDOW);
+            }
+            long sendsNow = sends == null ? 1L : sends;
+            if (sendsNow > MAX_SENDS) {
+                log.warn("OTP send throttled for key: {} (sends={}, max={})",
+                        otpKey, sendsNow, MAX_SENDS);
+                throw new RateLimitExceededException(
+                        "Too many verification codes requested. Please wait before requesting another.",
+                        SEND_WINDOW.getSeconds());
+            }
+        } catch (RateLimitExceededException e) {
+            throw e;
+        } catch (Exception e) {
+            // Redis unavailable — fail open (do NOT block legitimate OTP sends).
+            log.error("Redis unavailable for OTP send throttle on key {}: {}",
+                    otpKey, e.getMessage());
+        }
+    }
 
     public String generate(String key) {
         String code = generateCode();
