@@ -162,6 +162,69 @@ public class BiometricServiceAdapter implements BiometricServicePort {
     }
 
     @Override
+    public Map<String, Object> verifyEmbedding(String tenantId, UUID userId, List<Double> embedding) {
+        log.info("Calling biometric service to verify embedding for user: {} (tenant: {})", userId, tenantId);
+        try {
+            Map<String, Object> response = postJsonObject("/verify-embedding",
+                    embeddingBody(tenantId, userId, embedding));
+            log.info("Biometric embedding verification response received for user: {}", userId);
+            return response;
+        } catch (HttpClientErrorException e) {
+            log.warn("Biometric service client error for embedding verification: {} {}", e.getStatusCode(), e.getMessage());
+            return errorResponse("Verification rejected: " + e.getResponseBodyAsString());
+        } catch (HttpServerErrorException e) {
+            log.error("Biometric service server error for embedding verification: {} {}", e.getStatusCode(), e.getMessage());
+            return errorResponse("Biometric service error, please retry");
+        } catch (ResourceAccessException e) {
+            log.error("Biometric service unreachable for embedding verification: {}", e.getMessage());
+            return errorResponse("Biometric service unavailable");
+        } catch (RestClientException e) {
+            log.error("Biometric service communication error for embedding verification: {}", e.getMessage());
+            return errorResponse("Biometric service communication error");
+        }
+    }
+
+    @Override
+    public Map<String, Object> enrollEmbedding(String tenantId, UUID userId, List<Double> embedding) {
+        log.info("Calling biometric service to enroll embedding for user: {} (tenant: {})", userId, tenantId);
+        try {
+            Map<String, Object> response = postJsonObject("/enroll-embedding",
+                    embeddingBody(tenantId, userId, embedding));
+            log.info("Biometric embedding enrollment response received for user: {}", userId);
+            return response;
+        } catch (HttpClientErrorException e) {
+            log.warn("Biometric service client error for embedding enrollment: {} {}", e.getStatusCode(), e.getMessage());
+            return errorResponse("Enrollment rejected: " + e.getResponseBodyAsString());
+        } catch (HttpServerErrorException e) {
+            log.error("Biometric service server error for embedding enrollment: {} {}", e.getStatusCode(), e.getMessage());
+            return errorResponse("Biometric service error, please retry");
+        } catch (ResourceAccessException e) {
+            log.error("Biometric service unreachable for embedding enrollment: {}", e.getMessage());
+            return errorResponse("Biometric service unavailable");
+        } catch (RestClientException e) {
+            log.error("Biometric service communication error for embedding enrollment: {}", e.getMessage());
+            return errorResponse("Biometric service communication error");
+        }
+    }
+
+    /**
+     * Builds the JSON body for the embedding enroll/verify endpoints:
+     * {@code {user_id, embedding:[...], tenant_id?}}. The {@code tenant_id} part
+     * is forwarded only when present (pgvector tenant scoping), mirroring the
+     * multipart {@code addOptionalTenantAndEmbeddingParts} contract for the image
+     * endpoints.
+     */
+    private static Map<String, Object> embeddingBody(String tenantId, UUID userId, List<Double> embedding) {
+        Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("user_id", userId != null ? userId.toString() : null);
+        body.put("embedding", embedding);
+        if (tenantId != null && !tenantId.isBlank()) {
+            body.put("tenant_id", tenantId);
+        }
+        return body;
+    }
+
+    @Override
     public Map<String, Object> enrollVoice(UUID userId, String voiceData, boolean optimize) {
         log.info("Calling biometric service to enroll voice for user: {} (optimize: {})", userId, optimize);
         try {
