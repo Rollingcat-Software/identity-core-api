@@ -40,6 +40,8 @@ services:
       # to lengthen the session for demo day. The old JWT_ACCESS_TOKEN_EXPIRATION
       # var below was read by nothing; replaced by this controlling knob.
       JWT_EXPIRATION: ${JWT_EXPIRATION:-900000}
+      # Refresh-token TTL is controlled by jwt.refresh-expiration
+      # (env JWT_REFRESH_EXPIRATION, default 86400000 = 24 h in application-prod.yml).
       JWT_ISSUER: rollingcat-identity-core
       JWT_AUDIENCE: rollingcat-clients
       JWT_DEFAULT_ALGO: ${JWT_DEFAULT_ALGO:-HS512}
