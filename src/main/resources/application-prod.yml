@@ -109,6 +109,14 @@ app:
   auth:
     config-driven-login: ${APP_AUTH_CONFIG_DRIVEN_LOGIN:false}
     config-driven-login-tenants: ${APP_AUTH_CONFIG_DRIVEN_LOGIN_TENANTS:}
+    # Client-side-embedding face path (sub-project A, Phase 5). Default OFF =
+    # legacy image path (/verify, /enroll). KILL-SWITCH / CANARY — no redeploy:
+    #   APP_AUTH_CLIENT_SIDE_EMBEDDING=true            → embedding path, ALL tenants
+    #   APP_AUTH_CLIENT_SIDE_EMBEDDING_TENANTS=<uuid>  → canary specific tenant(s)
+    # Embedding-only FACE carries no image (no server-side liveness on a frame),
+    # so it MUST be paired with a liveness factor (puzzle/passive) in the flow.
+    client-side-embedding: ${APP_AUTH_CLIENT_SIDE_EMBEDDING:false}
+    client-side-embedding-tenants: ${APP_AUTH_CLIENT_SIDE_EMBEDDING_TENANTS:}
     # Tenant Auth-Methods true-gate kill-switch. Default ON (the gate enforces).
     # APP_AUTH_ENFORCE_TENANT_AUTH_METHODS=false disables login-time enforcement
     # instantly with no redeploy if the gate ever misbehaves in prod.

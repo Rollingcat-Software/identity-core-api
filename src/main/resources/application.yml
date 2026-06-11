@@ -90,6 +90,19 @@ app:
     # production before the global flip. Invalid UUIDs are skipped with a warn
     # (never widens the rollout / crashes startup).
     config-driven-login-tenants: ${APP_AUTH_CONFIG_DRIVEN_LOGIN_TENANTS:}
+    # CLIENT-SIDE-EMBEDDING face path (sub-project A, Phase 5). When true, a FACE
+    # step/enroll payload carrying a precomputed `embedding` (512 floats) is
+    # matched via the biometric-processor's /verify-embedding and /enroll-embedding
+    # endpoints (the raw image never leaves the device). Default false = legacy
+    # image path (/verify, /enroll), byte-identical to before. Revert = unset.
+    # SECURITY: the embedding path has no image → no server-side liveness on a
+    # frame, so an embedding FACE factor MUST be paired with a liveness factor
+    # (puzzle/passive) in the auth flow (enforced by sub-projects B/C).
+    client-side-embedding: ${APP_AUTH_CLIENT_SIDE_EMBEDDING:false}
+    # Per-tenant CANARY for the embedding path: comma-separated tenant UUIDs that
+    # get the embedding path even while the master switch above is false. Invalid
+    # UUIDs are skipped with a warn (never widens the rollout / crashes startup).
+    client-side-embedding-tenants: ${APP_AUTH_CLIENT_SIDE_EMBEDDING_TENANTS:}
     # KILL-SWITCH for the tenant Auth-Methods true-gate. When true (default) an
     # explicitly-disabled login method (tenant_auth_methods row is_enabled=false)
     # is rejected at login time (TenantAuthMethodPolicy enforces). Flip to false
