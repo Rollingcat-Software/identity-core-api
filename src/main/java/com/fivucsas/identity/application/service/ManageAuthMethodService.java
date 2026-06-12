@@ -45,6 +45,11 @@ public class ManageAuthMethodService implements ManageAuthMethodUseCase {
         // FACE liveness sub-component (no handler) and is likewise excluded.
         // PUZZLE is additionally gated by PuzzleLayerPolicy — when the flag is
         // OFF it is suppressed from the catalog even though isLoginMethod()=true.
+        // DELIBERATE ASYMMETRY: this GLOBAL catalog uses isGloballyEnabled() (it
+        // has no tenant context), whereas the per-tenant view (listTenantMethods)
+        // uses isEnabledFor(tenantId) so a canary tenant sees PUZZLE while the
+        // master switch is still off. Do NOT "align" this to isEnabledFor here —
+        // that would widen the global catalog to every non-canary tenant.
         return authMethodRepository.findAllByIsActiveTrue().stream()
                 .filter(m -> m.getType() != null && m.getType().isLoginMethod())
                 .filter(m -> m.getType() != AuthMethodType.PUZZLE || puzzleLayerPolicy.isGloballyEnabled())
@@ -54,6 +59,17 @@ public class ManageAuthMethodService implements ManageAuthMethodUseCase {
 
     @Override
     public AuthMethodResponse getMethodByType(AuthMethodType type) {
+        // Flag-gate the by-type probe symmetrically with the list endpoints: a
+        // flag-OFF lookup of PUZZLE must NOT surface the row (otherwise a direct
+        // GET /auth-methods/PUZZLE would leak a method the catalog hides). PUZZLE
+        // is global-only here (this endpoint has no tenant context), so it follows
+        // isGloballyEnabled() — matching listAllMethods(); the per-tenant view
+        // gates via listTenantMethods()/isEnabledFor(tenantId). When suppressed we
+        // return the SAME not-found result the API gives for a genuinely absent
+        // method, so a flag-OFF probe is indistinguishable from "no such method".
+        if (type == AuthMethodType.PUZZLE && !puzzleLayerPolicy.isGloballyEnabled()) {
+            throw new EntityNotFoundException("Auth method not found: " + type);
+        }
         AuthMethod method = authMethodRepository.findByType(type)
                 .orElseThrow(() -> new EntityNotFoundException("Auth method not found: " + type));
         return AuthMethodResponse.from(method);

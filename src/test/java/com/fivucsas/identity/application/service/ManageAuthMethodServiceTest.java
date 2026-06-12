@@ -15,6 +15,7 @@ import com.fivucsas.identity.entity.AuthFlowStep;
 import com.fivucsas.identity.entity.AuthMethod;
 import com.fivucsas.identity.entity.TenantAuthMethod;
 import com.fivucsas.identity.repository.JpaTenantRepository;
+import jakarta.persistence.EntityNotFoundException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -238,6 +239,42 @@ class ManageAuthMethodServiceTest {
         assertThat(result).hasSize(2);
         assertThat(result).extracting(r -> r.authMethod().type())
                 .containsExactlyInAnyOrder(AuthMethodType.TOTP, AuthMethodType.PUZZLE);
+    }
+
+    @Test
+    void getMethodByType_puzzle_throwsNotFound_whenPolicyOff() {
+        // policy mock returns false for isGloballyEnabled() by default.
+        // The row may exist in the DB, but a flag-OFF probe must not surface it,
+        // so the repository is never even consulted.
+        assertThatThrownBy(() -> service.getMethodByType(AuthMethodType.PUZZLE))
+                .isInstanceOf(EntityNotFoundException.class);
+
+        verify(authMethodRepository, never()).findByType(AuthMethodType.PUZZLE);
+    }
+
+    @Test
+    void getMethodByType_puzzle_returnsRow_whenPolicyOn() {
+        when(puzzleLayerPolicy.isGloballyEnabled()).thenReturn(true);
+        AuthMethod puzzle = method(AuthMethodType.PUZZLE);
+        when(authMethodRepository.findByType(AuthMethodType.PUZZLE))
+                .thenReturn(Optional.of(puzzle));
+
+        AuthMethodResponse result = service.getMethodByType(AuthMethodType.PUZZLE);
+
+        assertThat(result.type()).isEqualTo(AuthMethodType.PUZZLE);
+    }
+
+    @Test
+    void getMethodByType_nonPuzzle_isUnaffectedByFlag() {
+        // A non-PUZZLE lookup never consults the policy and behaves as before.
+        AuthMethod password = method(AuthMethodType.PASSWORD);
+        when(authMethodRepository.findByType(AuthMethodType.PASSWORD))
+                .thenReturn(Optional.of(password));
+
+        AuthMethodResponse result = service.getMethodByType(AuthMethodType.PASSWORD);
+
+        assertThat(result.type()).isEqualTo(AuthMethodType.PASSWORD);
+        verifyNoInteractions(puzzleLayerPolicy);
     }
 
     @Test
