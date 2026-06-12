@@ -35,21 +35,38 @@ public record LoginConfigResponse(
         boolean engineActive
 ) {
     /**
-     * @param methods          the methods offered at step 1 (one for SEQUENTIAL,
-     *                         several for a CHOICE step)
+     * @param methods            the methods offered at step 1 (one for SEQUENTIAL,
+     *                           several for a CHOICE step)
      * @param identifierRequired true when the surface must collect an identifier
-     *                         (email/username) up front — i.e. NOT every Layer-1
-     *                         method is usernameless. False only when EVERY
-     *                         Layer-1 method is usernameless (the user can be
-     *                         resolved from the factor alone).
+     *                           (email/username) up front — i.e. NOT every Layer-1
+     *                           method is usernameless. False only when EVERY
+     *                           Layer-1 method is usernameless (the user can be
+     *                           resolved from the factor alone).
+     * @param stepConfig         raw JSON blob from {@code auth_flow_steps.config};
+     *                           null when the step carries no extra configuration.
+     *                           The runtime/frontend parses this to read
+     *                           {@code puzzleConfig} (PUZZLE steps) or
+     *                           {@code requireActivePuzzleLiveness} (FACE steps).
      */
-    public record Layer1(List<Method> methods, boolean identifierRequired) {}
+    public record Layer1(List<Method> methods, boolean identifierRequired, String stepConfig) {
+        /** Backward-compatible 2-arg constructor: stepConfig defaults to null. */
+        public Layer1(List<Method> methods, boolean identifierRequired) {
+            this(methods, identifierRequired, null);
+        }
+    }
 
     /**
-     * @param order   the step order (>=2)
-     * @param methods the methods offered at that step
+     * @param order      the step order (>=2)
+     * @param methods    the methods offered at that step
+     * @param stepConfig raw JSON blob from {@code auth_flow_steps.config};
+     *                   null when the step carries no extra configuration.
      */
-    public record LaterStep(int order, List<Method> methods) {}
+    public record LaterStep(int order, List<Method> methods, String stepConfig) {
+        /** Backward-compatible 2-arg constructor: stepConfig defaults to null. */
+        public LaterStep(int order, List<Method> methods) {
+            this(order, methods, null);
+        }
+    }
 
     /**
      * @param type               the {@code AuthMethodType} name (e.g. PASSWORD,
