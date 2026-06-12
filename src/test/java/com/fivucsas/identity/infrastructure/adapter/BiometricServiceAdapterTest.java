@@ -448,6 +448,26 @@ class BiometricServiceAdapterTest {
     }
 
     @Test
+    @DisplayName("enrollEmbedding omits a blank tenant_id from the JSON body")
+    void enrollEmbedding_blankTenant_isOmitted() {
+        // Mirrors verifyEmbedding_blankTenant_isOmitted: a blank/whitespace
+        // tenant must NOT be serialized (the adapter's embeddingBody drops it),
+        // so the bio /enroll-embedding store derives tenant scope from elsewhere
+        // rather than persisting an empty "tenant_id".
+        mockServer.expect(requestTo(BIO_URL + "/enroll-embedding"))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(req -> {
+                    String body = bodyAsString(req);
+                    assertThat(body).contains("\"embedding\"");
+                    assertThat(body).doesNotContain("\"tenant_id\"");
+                })
+                .andRespond(withSuccess("{\"success\":true}", MediaType.APPLICATION_JSON));
+
+        adapter.enrollEmbedding("  ", USER_ID, EMBEDDING);
+        mockServer.verify();
+    }
+
+    @Test
     @DisplayName("enrollEmbedding maps bio unreachable to a fail-closed error map")
     void enrollEmbedding_unreachable_failsClosed() {
         mockServer.expect(requestTo(BIO_URL + "/enroll-embedding"))
