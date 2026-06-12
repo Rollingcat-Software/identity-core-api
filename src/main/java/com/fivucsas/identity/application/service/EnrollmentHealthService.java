@@ -91,6 +91,17 @@ public class EnrollmentHealthService {
      */
     private final boolean crossMembershipNfcEnabled;
 
+    /**
+     * KILL-SWITCH for the real biometric enrollment-probe (login triage
+     * F2/F7/F9). When true (default = the fix), {@link #hasBiometricData} asks the
+     * biometric-processor whether a FACE/VOICE template REALLY exists. When false,
+     * it falls back to the legacy "trust the enrollment row if the bio service is
+     * reachable" behaviour (so prod can revert instantly without a redeploy if the
+     * probe ever misbehaves). Flag: {@code app.auth.enrollment-probe.enabled}
+     * ({@code APP_AUTH_ENROLLMENT_PROBE_ENABLED}).
+     */
+    private final boolean enrollmentProbeEnabled;
+
     public EnrollmentHealthService(
             UserEnrollmentRepositoryPort userEnrollmentRepository,
             UserRepository userRepository,
@@ -101,7 +112,9 @@ public class EnrollmentHealthService {
             BiometricServicePort biometricServicePort,
             com.fivucsas.identity.repository.UserRepository userJpaRepository,
             @Value("${app.identity.cross-membership-enrollment-resolution:false}")
-            boolean crossMembershipNfcEnabled) {
+            boolean crossMembershipNfcEnabled,
+            @Value("${app.auth.enrollment-probe.enabled:true}")
+            boolean enrollmentProbeEnabled) {
         this.userEnrollmentRepository = userEnrollmentRepository;
         this.userRepository = userRepository;
         this.webAuthnCredentialRepository = webAuthnCredentialRepository;
@@ -111,6 +124,7 @@ public class EnrollmentHealthService {
         this.biometricServicePort = biometricServicePort;
         this.userJpaRepository = userJpaRepository;
         this.crossMembershipNfcEnabled = crossMembershipNfcEnabled;
+        this.enrollmentProbeEnabled = enrollmentProbeEnabled;
     }
 
     /**
@@ -263,21 +277,85 @@ public class EnrollmentHealthService {
     }
 
     /**
-     * Checks whether biometric data (face/voice) exists for the user.
-     * Biometric embeddings live in biometric_db (separate database managed by biometric-processor),
-     * NOT in the enrollment_data field of user_enrollments (which is always "{}").
-     * We trust the enrollment status if the biometric service is healthy.
-     * If the service is down, fail open (don't revoke).
+     * Checks whether biometric data (face/voice) really exists for the user.
+     *
+     * <p>Biometric embeddings live in biometric_db (a SEPARATE database managed by
+     * the biometric-processor), NOT in the {@code enrollment_data} field of
+     * {@code user_enrollments} (which is always "{}"). identity-core-api cannot
+     * query biometric_db directly.</p>
+     *
+     * <p><b>Login triage F2/F7/F9 fix.</b> Previously this method only checked
+     * that the bio service was REACHABLE and then {@code return true} — FAKING
+     * FACE/VOICE as always-enrolled. {@link AvailableMethodsResolver} then
+     * computed {@code enrolled = health || !requiresEnrollment = always true},
+     * routing un-enrolled users into a VOICE step whose verify found no centroid
+     * ("No voice enrollment found" → generic "Doğrulama başarısız"). FACE was
+     * masked only because most users did enroll a face.</p>
+     *
+     * <p>Now (when {@code app.auth.enrollment-probe.enabled} is true, the default)
+     * it asks the bio service whether a template REALLY exists via the dedicated
+     * existence endpoints ({@code GET /face|/voice/{userId}/exists}). The probe is
+     * <b>tri-state</b>:</p>
+     * <ul>
+     *   <li>definitive {@code TRUE}  → enrolled (offer the method)</li>
+     *   <li>definitive {@code FALSE} → NOT enrolled → method reports
+     *       {@code enrolled=false} and the stale row is auto-revoked by the caller
+     *       — so it is no longer offered/auto-picked</li>
+     *   <li>{@code null} (UNKNOWN, bio OUTAGE: transport/5xx) → <b>fail-OPEN</b>:
+     *       return true so a bio outage doesn't lock everyone out (byte-identical
+     *       to the legacy trust-if-reachable behaviour for the outage case)</li>
+     * </ul>
+     *
+     * <p>When the kill-switch is OFF, behaviour reverts to the legacy
+     * trust-if-reachable check (no probe), so prod can disable the new behaviour
+     * instantly without a redeploy.</p>
      */
     private boolean hasBiometricData(UUID userId, AuthMethodType biometricType) {
+        if (!enrollmentProbeEnabled) {
+            return legacyTrustIfReachable(userId, biometricType);
+        }
+
+        Boolean exists;
+        if (biometricType == AuthMethodType.FACE) {
+            // Face verify is tenant-scoped; resolve the user's tenant so the probe
+            // queries the same partition the verify path would (null → bio default).
+            String tenantId = userJpaRepository.findTenantIdById(userId)
+                    .map(UUID::toString).orElse(null);
+            exists = biometricServicePort.faceEnrollmentExists(userId, tenantId);
+        } else {
+            // Voice verify is not tenant-scoped (probe by userId only).
+            exists = biometricServicePort.voiceEnrollmentExists(userId);
+        }
+
+        if (exists == null) {
+            // UNKNOWN — the bio service could not give a definitive answer
+            // (transport/5xx outage). Fail OPEN so a bio outage never revokes a
+            // real enrollment or locks everyone out.
+            log.warn("Biometric {} existence UNKNOWN for user {} (bio outage) — failing open",
+                    biometricType, userId);
+            return true;
+        }
+        if (!exists) {
+            log.info("Biometric {} probe: user {} has NO real enrollment — reporting not-enrolled",
+                    biometricType, userId);
+        }
+        return exists;
+    }
+
+    /**
+     * Legacy behaviour (kill-switch OFF): trust the enrollment row whenever the
+     * bio service is reachable. Cannot query biometric_db, so a reachable service
+     * yields {@code true}; an unreachable one fails open ({@code true}) too. This
+     * is the exact pre-fix behaviour, retained behind
+     * {@code app.auth.enrollment-probe.enabled=false} for instant revert.
+     */
+    private boolean legacyTrustIfReachable(UUID userId, AuthMethodType biometricType) {
         try {
             Map<String, Object> health = biometricServicePort.checkHealth();
             String status = health != null ? String.valueOf(health.getOrDefault("status", "")) : "";
             if (!"ok".equalsIgnoreCase(status) && !"healthy".equalsIgnoreCase(status)) {
                 log.warn("Biometric service unhealthy during {} health check for user {}", biometricType, userId);
             }
-            // Biometric data is in biometric_db (face_embeddings/voice_enrollments tables).
-            // We cannot query it from identity-core-api. Trust the enrollment if service is reachable.
             return true;
         } catch (Exception e) {
             log.warn("Biometric service unreachable during {} health check for user {}: {}",

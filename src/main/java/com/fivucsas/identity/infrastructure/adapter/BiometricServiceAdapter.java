@@ -380,6 +380,73 @@ public class BiometricServiceAdapter implements BiometricServicePort {
     }
 
     @Override
+    public Boolean voiceEnrollmentExists(UUID userId) {
+        if (userId == null) {
+            return Boolean.FALSE;
+        }
+        // bio GET /voice/{userId}/exists → {user_id, exists}. Tri-state:
+        // definitive 200 → TRUE/FALSE; outage (transport / 5xx / malformed) →
+        // null so the caller can fail-OPEN on a bio outage (login triage F2/F7).
+        return enrollmentExistsProbe("/voice/" + userId + "/exists", "voice", userId);
+    }
+
+    @Override
+    public Boolean faceEnrollmentExists(UUID userId, String tenantId) {
+        if (userId == null) {
+            return Boolean.FALSE;
+        }
+        // bio GET /face/{userId}/exists?tenant_id=... → {user_id, exists}.
+        // Same tri-state contract as the voice probe (login triage F9).
+        String path = (tenantId != null && !tenantId.isBlank())
+                ? "/face/" + userId + "/exists?tenant_id="
+                        + java.net.URLEncoder.encode(tenantId, java.nio.charset.StandardCharsets.UTF_8)
+                : "/face/" + userId + "/exists";
+        return enrollmentExistsProbe(path, "face", userId);
+    }
+
+    /**
+     * Shared GET probe for the {@code /voice|/face/{userId}/exists} endpoints.
+     * Returns the {@code exists} boolean from a definitive 200, or {@code null}
+     * (UNKNOWN) on any failure that means the bio service could not give a
+     * definitive answer (unreachable, 5xx, or malformed/missing field) — letting
+     * the caller fail-OPEN on a bio outage rather than lock users out. A 4xx is
+     * treated as UNKNOWN too (the service is up but rejected the probe — a
+     * contract anomaly, not a confirmation of absence), logged loudly.
+     */
+    private Boolean enrollmentExistsProbe(String path, String modality, UUID userId) {
+        try {
+            Map<String, Object> response = restClient.get()
+                    .uri(path)
+                    .retrieve()
+                    .body(MAP_TYPE);
+            if (response == null || !(response.get("exists") instanceof Boolean exists)) {
+                log.warn("Bio {} existence probe for user {} returned no usable 'exists' field — treating as UNKNOWN",
+                        modality, userId);
+                return null;
+            }
+            return exists;
+        } catch (HttpServerErrorException e) {
+            log.warn("Bio {} existence probe 5xx for user {} — failing open (UNKNOWN): {} {}",
+                    modality, userId, e.getStatusCode(), e.getMessage());
+            return null;
+        } catch (ResourceAccessException e) {
+            log.warn("Bio {} existence probe unreachable for user {} — failing open (UNKNOWN): {}",
+                    modality, userId, e.getMessage());
+            return null;
+        } catch (HttpClientErrorException e) {
+            // Service is up but rejected our probe (e.g. 400 on a malformed id).
+            // Not an outage and not a confirmation of absence — UNKNOWN, logged.
+            log.warn("Bio {} existence probe rejected (4xx) for user {} — treating as UNKNOWN: {} {}",
+                    modality, userId, e.getStatusCode(), e.getMessage());
+            return null;
+        } catch (RestClientException e) {
+            log.warn("Bio {} existence probe communication error for user {} — failing open (UNKNOWN): {}",
+                    modality, userId, e.getMessage());
+            return null;
+        }
+    }
+
+    @Override
     public boolean hasEnrollment(UUID userId, String tenantId) {
         if (userId == null) {
             return false;
