@@ -84,6 +84,17 @@ app:
     jwt:
       allow-hs512: true
       issuer: ""
+  # Self-registration catch-all for the integration suite. RegisterUserService
+  # resolves a registrant's tenant by (1) TenantContext, (2) verified email-domain
+  # match, (3) legacy tenants.domain, then (4) the `app.default-tenant-slug`
+  # catch-all tenant. The integration tests register `@fivucsas.com` accounts with
+  # NO tenant context and NO seeded email-domain row, so they previously fell
+  # through every branch and got HTTP 422 EmailDomainNotAllowed. Point the catch-all
+  # at the V1-seeded `system` tenant (slug `system`, enforce_domain_matching=false
+  # by default) so those registrations land gracefully — exactly the production
+  # default-tenant mechanism, with NO change to production validation. The `system`
+  # tenant has max_users=999999, so the suite never trips the quota gate.
+  default-tenant-slug: system
 
 # Disable Redis event bus (no Redis container in integration tests)
 redis:

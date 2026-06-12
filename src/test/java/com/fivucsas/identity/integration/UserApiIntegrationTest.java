@@ -5,6 +5,7 @@ import com.fivucsas.identity.dto.LoginRequest;
 import com.fivucsas.identity.dto.RegisterRequest;
 import com.fivucsas.identity.repository.RefreshTokenRepository;
 import com.fivucsas.identity.repository.UserRepository;
+import com.fivucsas.identity.security.RateLimitService;
 import com.fivucsas.identity.service.RefreshTokenService;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
@@ -83,6 +84,16 @@ class UserApiIntegrationTest {
     @Autowired
     private RefreshTokenService refreshTokenService;
 
+    @Autowired
+    private RateLimitService rateLimitService;
+
+    /**
+     * Loopback IP that {@link org.springframework.mock.web.MockHttpServletRequest}
+     * reports for every MockMvc call (no {@code X-Forwarded-For} is sent), so it is
+     * the bucket key {@code RateLimitInterceptor} throttles against.
+     */
+    private static final String MOCK_MVC_CLIENT_IP = "127.0.0.1";
+
     private static final String API_EMAIL    = "apitest@fivucsas.com";
     private static final String API_PASSWORD = "ApiTest123!";
     private static final String FIRST_NAME   = "Api";
@@ -105,6 +116,17 @@ class UserApiIntegrationTest {
             refreshTokenService.revokeAllUserTokens(user);
             userRepository.delete(user);
         });
+        // Test isolation for the IP-keyed rate limiter. Every test in this class
+        // hits /auth/register and/or /auth/login from the SAME MockMvc loopback IP,
+        // and the production buckets are tiny (registration = 5/hour, login = 10/5min
+        // per IP) and span the whole class run. Without a reset the shared
+        // registerViaApi helper trips REGISTRATION after the 5th test and the rest
+        // cascade into HTTP 429 — a test-isolation artifact, NOT a product bug. Drop
+        // the per-IP buckets before each test so each starts with a full allowance.
+        // This only clears the in-memory test buckets; it does NOT weaken production
+        // rate-limiting (the limits themselves are unchanged).
+        rateLimitService.resetRateLimit(MOCK_MVC_CLIENT_IP, RateLimitService.RateLimitType.REGISTRATION);
+        rateLimitService.resetRateLimit(MOCK_MVC_CLIENT_IP, RateLimitService.RateLimitType.LOGIN);
         // Reset shared state
         registeredUserId = null;
         accessToken = null;
