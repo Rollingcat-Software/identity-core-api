@@ -61,6 +61,7 @@ class BiometricControllerTest {
     @MockBean private com.fivucsas.identity.application.port.input.ManageEnrollmentUseCase manageEnrollmentUseCase;
     @MockBean private RbacAuthorizationService rbacService;
     @MockBean private com.fivucsas.identity.application.service.ClientSideEmbeddingPolicy clientSideEmbeddingPolicy;
+    @MockBean private com.fivucsas.identity.application.service.ClientSideVoiceEmbeddingPolicy clientSideVoiceEmbeddingPolicy;
 
     // Security and infrastructure beans
     @MockBean private TenantRepository tenantRepository;

@@ -103,6 +103,18 @@ app:
     # get the embedding path even while the master switch above is false. Invalid
     # UUIDs are skipped with a warn (never widens the rollout / crashes startup).
     client-side-embedding-tenants: ${APP_AUTH_CLIENT_SIDE_EMBEDDING_TENANTS:}
+    # CLIENT-SIDE VOICE embedding (audit H3, GPU-less). VOICE twin of the face flag
+    # above. When true, a VOICE step / enroll payload carrying a precomputed 256-d
+    # Resemblyzer speaker embedding is matched via the biometric-processor's
+    # /voice/verify-embedding and /voice/enroll-embedding endpoints (the raw audio
+    # never leaves the device). Default false = legacy audio path (/voice/verify,
+    # /voice/enroll), byte-identical to before. SECURITY: no audio → no server-side
+    # replay/liveness check, so an embedding VOICE factor MUST be paired with a
+    # liveness factor in the flow. Separate from the face flag = independent
+    # kill-switches.
+    client-side-voice-embedding: ${APP_AUTH_CLIENT_SIDE_VOICE_EMBEDDING:false}
+    # Per-tenant CANARY for the voice embedding path (comma-separated tenant UUIDs).
+    client-side-voice-embedding-tenants: ${APP_AUTH_CLIENT_SIDE_VOICE_EMBEDDING_TENANTS:}
     # PUZZLE liveness layer (sub-project B, Phase 1). When true, PUZZLE is
     # surfaced as a selectable login method in the auth-methods catalog and
     # may be placed in an auth flow as a liveness step. Default false = PUZZLE
