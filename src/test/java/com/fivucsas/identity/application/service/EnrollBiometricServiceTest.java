@@ -434,7 +434,7 @@ class EnrollBiometricServiceTest {
                 .embedding(embedding)
                 .build();
             when(userRepository.findById(userId)).thenReturn(Optional.of(existingUser));
-            when(clientSideEmbeddingPolicy.isEnabled()).thenReturn(true);
+            when(clientSideEmbeddingPolicy.isEnabledForTenant("t-marmara")).thenReturn(true);
             when(biometricService.enrollEmbedding(eq("t-marmara"), eq(userId), eq(embedding)))
                 .thenReturn(Map.of("success", true, "message", "Embedding enrolled"));
             when(userRepository.save(any(User.class))).thenReturn(existingUser);
@@ -457,7 +457,7 @@ class EnrollBiometricServiceTest {
                 .embedding(embedding)
                 .build();
             when(userRepository.findById(userId)).thenReturn(Optional.of(existingUser));
-            when(clientSideEmbeddingPolicy.isEnabled()).thenReturn(false);
+            when(clientSideEmbeddingPolicy.isEnabledForTenant((String) null)).thenReturn(false);
             when(biometricService.enrollFace(eq(userId), eq(faceImage), eq(null), eq(null), eq(null), eq(false)))
                 .thenReturn(Map.of("success", true));
             when(userRepository.save(any(User.class))).thenReturn(existingUser);
@@ -498,7 +498,7 @@ class EnrollBiometricServiceTest {
                 .embedding(embedding)
                 .build();
             when(userRepository.findById(userId)).thenReturn(Optional.of(existingUser));
-            when(clientSideEmbeddingPolicy.isEnabled()).thenReturn(true);
+            when(clientSideEmbeddingPolicy.isEnabledForTenant((String) null)).thenReturn(true);
             when(biometricService.enrollEmbedding(eq(null), eq(userId), eq(embedding)))
                 .thenReturn(Map.of("success", false, "message", "Bad embedding"));
 

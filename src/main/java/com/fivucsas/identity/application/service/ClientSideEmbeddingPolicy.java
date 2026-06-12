@@ -82,6 +82,32 @@ public class ClientSideEmbeddingPolicy {
         return tenantId != null && canaryTenantIds.contains(tenantId);
     }
 
+    /**
+     * String-tenant overload for call sites that hold the (optional, possibly
+     * null/non-UUID) tenant id as a {@code String} — the enroll/verify command
+     * shape. Uses the GLOBAL master switch, falling back to the per-tenant canary
+     * list only when the id parses to a UUID. A null / blank / non-UUID tenant id
+     * is enabled ONLY under the global switch, never via the canary list (a
+     * malformed id cannot match a canary entry, and must not silently widen the
+     * rollout). This is the single source of truth for the enroll routing gate —
+     * {@code EnrollBiometricService} and {@code BiometricController} both delegate
+     * here so the controller's fail-closed reject and the service's routing
+     * decision can never disagree.
+     */
+    public boolean isEnabledForTenant(String tenantId) {
+        if (globallyEnabled) {
+            return true;
+        }
+        if (tenantId == null || tenantId.isBlank()) {
+            return false;
+        }
+        try {
+            return isEnabledForTenant(UUID.fromString(tenantId.trim()));
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
+    }
+
     private static Set<UUID> parseTenantIds(String csv) {
         Set<UUID> ids = new LinkedHashSet<>();
         if (csv == null || csv.isBlank()) {

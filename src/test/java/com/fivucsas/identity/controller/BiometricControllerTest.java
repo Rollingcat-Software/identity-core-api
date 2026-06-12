@@ -60,6 +60,7 @@ class BiometricControllerTest {
     @MockBean private StepUpAuthUseCase stepUpAuthUseCase;
     @MockBean private com.fivucsas.identity.application.port.input.ManageEnrollmentUseCase manageEnrollmentUseCase;
     @MockBean private RbacAuthorizationService rbacService;
+    @MockBean private com.fivucsas.identity.application.service.ClientSideEmbeddingPolicy clientSideEmbeddingPolicy;
 
     // Security and infrastructure beans
     @MockBean private TenantRepository tenantRepository;
@@ -187,5 +188,125 @@ class BiometricControllerTest {
         // Verify the downstream port was invoked with the principal's tenant,
         // NOT the client-supplied form value.
         verify(biometricServicePort).searchFace(any(), eq(tenantUuid.toString()), any(), any());
+    }
+
+    // --- Phase 6: JSON client-side-embedding enroll endpoint ---
+    // POST /api/v1/biometric/enroll-embedding/{userId} { embedding: number[512], tenant_id? }
+    // (NOTE: this controller slice runs with addFilters=false, so @PreAuthorize is
+    // NOT enforced here — the authorization gate is pinned separately + deterministically
+    // by BiometricControllerSecurityTest. These tests cover routing/validation/flag-gating.)
+
+    private static String embeddingJson(int length, String tenantId) {
+        StringBuilder sb = new StringBuilder("{\"embedding\":[");
+        for (int i = 0; i < length; i++) {
+            if (i > 0) sb.append(',');
+            sb.append("0.01");
+        }
+        sb.append(']');
+        if (tenantId != null) {
+            sb.append(",\"tenant_id\":\"").append(tenantId).append('\"');
+        }
+        sb.append('}');
+        return sb.toString();
+    }
+
+    @Test
+    @DisplayName("POST enroll-embedding - flag ON + valid 512-vector → routes to use case (success)")
+    void enrollEmbedding_flagOn_validVector_succeeds() throws Exception {
+        UUID userId = UUID.randomUUID();
+        String tenantId = "11111111-1111-1111-1111-111111111111";
+
+        when(clientSideEmbeddingPolicy.isEnabledForTenant(tenantId)).thenReturn(true);
+        when(enrollBiometricUseCase.execute(any()))
+                .thenReturn(com.fivucsas.identity.application.dto.response.BiometricResponse.builder()
+                        .success(true)
+                        .message("Embedding enrolled")
+                        .userId(userId.toString())
+                        .build());
+
+        mockMvc.perform(post("/api/v1/biometric/enroll-embedding/" + userId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(embeddingJson(512, tenantId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.verified").value(true))
+                .andExpect(jsonPath("$.message").value("Embedding enrolled"));
+
+        // The command carried the embedding (not an image) and the resolved tenant.
+        org.mockito.ArgumentCaptor<com.fivucsas.identity.application.dto.command.EnrollBiometricCommand> cmd =
+                org.mockito.ArgumentCaptor.forClass(
+                        com.fivucsas.identity.application.dto.command.EnrollBiometricCommand.class);
+        verify(enrollBiometricUseCase).execute(cmd.capture());
+        org.assertj.core.api.Assertions.assertThat(cmd.getValue().getEmbedding()).hasSize(512);
+        org.assertj.core.api.Assertions.assertThat(cmd.getValue().getTenantId()).isEqualTo(tenantId);
+        org.assertj.core.api.Assertions.assertThat(cmd.getValue().getFaceImage()).isNull();
+        org.assertj.core.api.Assertions.assertThat(cmd.getValue().getUserId()).isEqualTo(userId.toString());
+    }
+
+    @Test
+    @DisplayName("POST enroll-embedding - flag ON + tenant_id omitted → tenant derived from principal")
+    void enrollEmbedding_flagOn_noTenant_derivesFromPrincipal() throws Exception {
+        UUID userId = UUID.randomUUID();
+        UUID tenantUuid = UUID.fromString("22222222-2222-2222-2222-222222222222");
+
+        when(rbacService.getCurrentUserTenantId()).thenReturn(Optional.of(tenantUuid));
+        when(clientSideEmbeddingPolicy.isEnabledForTenant(tenantUuid.toString())).thenReturn(true);
+        when(enrollBiometricUseCase.execute(any()))
+                .thenReturn(com.fivucsas.identity.application.dto.response.BiometricResponse.builder()
+                        .success(true).message("ok").userId(userId.toString()).build());
+
+        mockMvc.perform(post("/api/v1/biometric/enroll-embedding/" + userId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(embeddingJson(512, null)))
+                .andExpect(status().isOk());
+
+        org.mockito.ArgumentCaptor<com.fivucsas.identity.application.dto.command.EnrollBiometricCommand> cmd =
+                org.mockito.ArgumentCaptor.forClass(
+                        com.fivucsas.identity.application.dto.command.EnrollBiometricCommand.class);
+        verify(enrollBiometricUseCase).execute(cmd.capture());
+        org.assertj.core.api.Assertions.assertThat(cmd.getValue().getTenantId()).isEqualTo(tenantUuid.toString());
+    }
+
+    @Test
+    @DisplayName("POST enroll-embedding - flag OFF → 403, use case NEVER invoked (fail-closed)")
+    void enrollEmbedding_flagOff_rejected() throws Exception {
+        UUID userId = UUID.randomUUID();
+        String tenantId = "11111111-1111-1111-1111-111111111111";
+
+        when(clientSideEmbeddingPolicy.isEnabledForTenant(tenantId)).thenReturn(false);
+
+        mockMvc.perform(post("/api/v1/biometric/enroll-embedding/" + userId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(embeddingJson(512, tenantId)))
+                .andExpect(status().isForbidden());
+
+        // Fail-closed: nothing was enrolled — the embedding path is gated entirely.
+        verify(enrollBiometricUseCase, org.mockito.Mockito.never()).execute(any());
+    }
+
+    @Test
+    @DisplayName("POST enroll-embedding - wrong-length vector (511) → 400, use case NEVER invoked")
+    void enrollEmbedding_wrongLength_badRequest() throws Exception {
+        UUID userId = UUID.randomUUID();
+        String tenantId = "11111111-1111-1111-1111-111111111111";
+
+        mockMvc.perform(post("/api/v1/biometric/enroll-embedding/" + userId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(embeddingJson(511, tenantId)))
+                .andExpect(status().isBadRequest());
+
+        verify(enrollBiometricUseCase, org.mockito.Mockito.never()).execute(any());
+    }
+
+    @Test
+    @DisplayName("POST enroll-embedding - empty vector → 400, use case NEVER invoked")
+    void enrollEmbedding_emptyVector_badRequest() throws Exception {
+        UUID userId = UUID.randomUUID();
+
+        mockMvc.perform(post("/api/v1/biometric/enroll-embedding/" + userId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"embedding\":[]}"))
+                .andExpect(status().isBadRequest());
+
+        verify(enrollBiometricUseCase, org.mockito.Mockito.never()).execute(any());
     }
 }

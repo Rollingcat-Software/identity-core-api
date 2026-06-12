@@ -40,7 +40,7 @@ class ClientSideEmbeddingPolicyTest {
         void perTenantOff() {
             assertThat(policy.isEnabledForTenant(TENANT_A)).isFalse();
             assertThat(policy.isEnabledForTenant(TENANT_B)).isFalse();
-            assertThat(policy.isEnabledForTenant(null)).isFalse();
+            assertThat(policy.isEnabledForTenant((UUID) null)).isFalse();
         }
     }
 
@@ -83,7 +83,7 @@ class ClientSideEmbeddingPolicyTest {
         void onlyListedTenant() {
             assertThat(policy.isEnabledForTenant(TENANT_A)).isTrue();
             assertThat(policy.isEnabledForTenant(TENANT_B)).isFalse();
-            assertThat(policy.isEnabledForTenant(null)).isFalse();
+            assertThat(policy.isEnabledForTenant((UUID) null)).isFalse();
         }
     }
 
@@ -96,5 +96,50 @@ class ClientSideEmbeddingPolicyTest {
         assertThat(policy.isEnabledForTenant(TENANT_A)).isTrue();
         assertThat(policy.isEnabledForTenant(TENANT_B)).isTrue();
         assertThat(policy.isEnabled()).isFalse();
+    }
+
+    /**
+     * The String overload is the single source of truth for the enroll routing
+     * gate ({@code EnrollBiometricService} routing + the controller's fail-closed
+     * reject both delegate here). A null / blank / non-UUID tenant id must be
+     * enabled ONLY under the global switch, NEVER via the canary list — a
+     * malformed id cannot match a canary entry and must not silently widen the
+     * rollout.
+     */
+    @Nested
+    @DisplayName("String-tenant overload (enroll/verify command shape)")
+    class StringOverload {
+
+        @Test
+        @DisplayName("global ON → true for any String (valid UUID, blank, or non-UUID)")
+        void globalOnEnablesEverything() {
+            ClientSideEmbeddingPolicy policy = new ClientSideEmbeddingPolicy(true, "");
+            assertThat(policy.isEnabledForTenant(TENANT_A.toString())).isTrue();
+            assertThat(policy.isEnabledForTenant((String) null)).isTrue();
+            assertThat(policy.isEnabledForTenant("")).isTrue();
+            assertThat(policy.isEnabledForTenant("not-a-uuid")).isTrue();
+        }
+
+        @Test
+        @DisplayName("canary (master OFF) → only the listed UUID String, never null/blank/non-UUID")
+        void canaryOnlyForListedUuidString() {
+            ClientSideEmbeddingPolicy policy =
+                    new ClientSideEmbeddingPolicy(false, TENANT_A.toString());
+            assertThat(policy.isEnabledForTenant(TENANT_A.toString())).isTrue();
+            // Whitespace + casing tolerated (UUID.fromString is case-insensitive).
+            assertThat(policy.isEnabledForTenant("  " + TENANT_A.toString().toUpperCase() + " ")).isTrue();
+            assertThat(policy.isEnabledForTenant(TENANT_B.toString())).isFalse();
+            assertThat(policy.isEnabledForTenant((String) null)).isFalse();
+            assertThat(policy.isEnabledForTenant("")).isFalse();
+            assertThat(policy.isEnabledForTenant("not-a-uuid")).isFalse();
+        }
+
+        @Test
+        @DisplayName("default OFF → false for any String")
+        void defaultOffEverythingFalse() {
+            ClientSideEmbeddingPolicy policy = new ClientSideEmbeddingPolicy(false, "");
+            assertThat(policy.isEnabledForTenant(TENANT_A.toString())).isFalse();
+            assertThat(policy.isEnabledForTenant((String) null)).isFalse();
+        }
     }
 }

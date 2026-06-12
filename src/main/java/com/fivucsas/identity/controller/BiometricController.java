@@ -3,6 +3,7 @@ package com.fivucsas.identity.controller;
 import com.fivucsas.identity.application.dto.command.BiometricDeviceRequest;
 import com.fivucsas.identity.application.dto.command.BiometricVerifyRequest;
 import com.fivucsas.identity.application.dto.command.EnrollBiometricCommand;
+import com.fivucsas.identity.application.dto.command.EnrollEmbeddingRequest;
 import com.fivucsas.identity.application.dto.command.RegisterStepUpDeviceRequest;
 import com.fivucsas.identity.application.dto.command.StepUpChallengeRequest;
 import com.fivucsas.identity.application.dto.command.StepUpVerifyRequest;
@@ -16,6 +17,7 @@ import com.fivucsas.identity.application.port.input.ManageEnrollmentUseCase;
 import com.fivucsas.identity.application.port.input.StepUpAuthUseCase;
 import com.fivucsas.identity.application.port.input.VerifyBiometricUseCase;
 import com.fivucsas.identity.application.port.output.BiometricServicePort;
+import com.fivucsas.identity.application.service.ClientSideEmbeddingPolicy;
 import com.fivucsas.identity.application.service.EnrollBiometricService;
 import com.fivucsas.identity.domain.exception.UnauthorizedException;
 import com.fivucsas.identity.domain.model.auth.AuthMethodType;
@@ -60,6 +62,11 @@ public class BiometricController {
     private final StepUpAuthUseCase stepUpAuthUseCase;
     private final ManageEnrollmentUseCase manageEnrollmentUseCase;
     private final RbacAuthorizationService rbacService;
+    // Phase 6 (sub-project A): gates the JSON client-side-embedding enroll
+    // endpoint. The endpoint is fail-closed — it serves ONLY the client-embedding
+    // path, so when the policy is OFF for the tenant the request is rejected
+    // rather than silently falling through (there is no image to legacy-enroll).
+    private final ClientSideEmbeddingPolicy clientSideEmbeddingPolicy;
 
     // #11 (2026-05-21): cap inbound voice payloads. Previously the voice-enroll
     // path only null/blank-checked voiceData, so an oversized base64 blob would
@@ -107,6 +114,75 @@ public class BiometricController {
             .clientEmbedding(clientEmbedding)
             .clientEmbeddings(clientEmbeddings)
             .optimize(optimize)
+            .build();
+
+        BiometricResponse response = enrollBiometricUseCase.execute(command);
+
+        return ResponseEntity.ok(mapToVerificationResponse(response));
+    }
+
+    /**
+     * JSON enroll for the CLIENT-SIDE-EMBEDDING face path (sub-project A,
+     * Phase 6). The browser computed the 512-dim Facenet512 embedding on-device,
+     * so the raw face image never leaves the client; this endpoint carries the
+     * embedding as JSON ({@code List<Double>}) — something the multipart
+     * {@link #enrollFace} endpoint physically cannot do (a {@code MultipartFile}
+     * field can't hold a {@code List<Double>}). It is the JSON counterpart of the
+     * multipart enroll and routes to the bio {@code /enroll-embedding} store via
+     * the SAME {@link EnrollBiometricUseCase#execute} use case + the existing
+     * {@code enrollEmbedding} adapter (no duplicated bio call / storage).
+     *
+     * <p><b>Authorization (mirror of {@link #enrollFace}, NOT loosened):</b> the
+     * {@code @PreAuthorize} expression is byte-identical to the multipart enroll
+     * endpoint — {@code hasAuthority('biometric:enroll')} OR the caller is the
+     * subject {@code #userId} ({@code @userSecurityService.isCurrentUser}). A user
+     * therefore cannot enroll an embedding for ANOTHER user's id unless they hold
+     * the {@code biometric:enroll} permission, exactly as for the image enroll.
+     * Pinned by {@code BiometricControllerSecurityTest}.</p>
+     *
+     * <p><b>Flag-gated + fail-closed:</b> this endpoint serves ONLY the
+     * client-embedding path — there is no image to legacy-enroll — so when
+     * {@link ClientSideEmbeddingPolicy} is OFF for the tenant it is REJECTED with
+     * {@code 403 Forbidden} rather than silently falling through. The gate uses
+     * the SAME {@code ClientSideEmbeddingPolicy.isEnabledForTenant(String)} the
+     * {@link EnrollBiometricService} routing consults, so the controller's reject
+     * and the service's routing decision can never disagree. The 512-length is
+     * bean-validated ({@code 400} on a wrong-length / empty vector) BEFORE the
+     * flag check, so a malformed payload is rejected regardless of the flag.</p>
+     */
+    @PostMapping(value = "/api/v1/biometric/enroll-embedding/{userId}",
+            consumes = MediaType.APPLICATION_JSON_VALUE)
+    @Operation(summary = "Enroll a client-computed 512-dim face embedding (privacy: image stays on device)")
+    @PreAuthorize("hasAuthority('biometric:enroll') or @userSecurityService.isCurrentUser(#userId)")
+    public ResponseEntity<BiometricVerificationResponse> enrollFaceEmbedding(
+            @PathVariable UUID userId,
+            @Valid @RequestBody EnrollEmbeddingRequest request) {
+
+        // Tenant resolution mirrors the face-search path: trust the authenticated
+        // principal's tenant, never an arbitrary client value. An explicit
+        // tenant_id in the body is honoured only as the documented bio scoping
+        // hint (same as the multipart enroll's tenant_id request param), but when
+        // absent we derive it server-side so the bio pgvector store is correctly
+        // tenant-scoped.
+        String tenantId = (request.tenantId() != null && !request.tenantId().isBlank())
+                ? request.tenantId()
+                : resolveCurrentTenantId();
+
+        // Fail-closed: this endpoint ONLY serves the client-embedding path (no
+        // image to fall back to), so it is rejected unless the policy is ON for
+        // the tenant. Delegates to the SAME gate the service routing uses, so the
+        // controller reject and the service route can never disagree.
+        if (!clientSideEmbeddingPolicy.isEnabledForTenant(tenantId)) {
+            log.warn("Rejected client-embedding enroll for user {} (tenant {}): policy OFF", userId, tenantId);
+            throw new UnauthorizedException("Client-side-embedding enrollment is not enabled for this tenant");
+        }
+
+        log.info("Client-embedding face enrollment request for user: {} (tenant: {})", userId, tenantId);
+
+        EnrollBiometricCommand command = EnrollBiometricCommand.builder()
+            .userId(userId.toString())
+            .tenantId(tenantId)
+            .embedding(request.embedding())
             .build();
 
         BiometricResponse response = enrollBiometricUseCase.execute(command);
