@@ -359,18 +359,25 @@ class UserApiIntegrationTest {
 
     @Test
     @Order(13)
-    @DisplayName("logout_WhenValidRefreshToken_ShouldReturn200AndRevokeToken")
+    @DisplayName("logout_WhenValidRefreshToken_ShouldReturn204AndRevokeToken")
     void logout_WhenValidRefreshToken_ShouldReturn200AndRevokeToken() throws Exception {
         MvcResult loginResult = registerAndLoginMvcResult(API_EMAIL, API_PASSWORD);
         String loginBody = loginResult.getResponse().getContentAsString();
         String rt = objectMapper.readTree(loginBody).get("refreshToken").asText();
+        String at = objectMapper.readTree(loginBody).get("accessToken").asText();
 
         String logoutBody = "{\"refreshToken\":\"" + rt + "\"}";
 
+        // /auth/logout is an AUTHENTICATED endpoint (it reads authentication.getName()
+        // to scope the revocation) and returns 204 No Content
+        // (AuthController#logout -> ResponseEntity.noContent()). Send the Bearer
+        // access token and expect 204. The prior no-auth + 200 expectation was
+        // masked while the suite failed earlier with 422/429.
         mockMvc.perform(post("/api/v1/auth/logout")
+                        .header("Authorization", "Bearer " + at)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(logoutBody))
-                .andExpect(status().isOk());
+                .andExpect(status().isNoContent());
 
         // After logout the refresh token must be revoked; a refresh attempt should fail
         mockMvc.perform(post("/api/v1/auth/refresh")
