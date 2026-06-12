@@ -102,6 +102,41 @@ public interface BiometricServicePort {
                                    String clientEmbeddings);
 
     /**
+     * Verifies a user's face from a CLIENT-SIDE precomputed embedding (512-dim
+     * Facenet512 vector) instead of an image — sub-project A "world-ready" path,
+     * where the embedding is computed in the browser so the raw face image never
+     * leaves the device. Routes to the biometric-processor's
+     * {@code POST /verify-embedding} endpoint.
+     *
+     * <p>Gated by {@code ClientSideEmbeddingPolicy} at the call site; the legacy
+     * image {@link #verifyFace} path is unchanged. The embedding alone carries no
+     * frame, so server-side liveness/anti-spoof cannot run on it — an embedding
+     * FACE factor MUST be paired with a liveness factor (puzzle/passive) in the
+     * auth flow (enforced by sub-projects B/C).
+     *
+     * @param tenantId  optional tenant identifier — for pgvector tenant scoping
+     *                  on the bio side (null/blank → bio default tenant)
+     * @param userId    the user ID to verify against
+     * @param embedding the 512-dim client-side embedding (list of floats)
+     * @return Map containing verification response data (e.g. {@code verified})
+     */
+    Map<String, Object> verifyEmbedding(String tenantId, UUID userId, List<Double> embedding);
+
+    /**
+     * Enrolls a user's face from a CLIENT-SIDE precomputed embedding (512-dim
+     * Facenet512 vector) instead of an image — sub-project A path. Routes to the
+     * biometric-processor's {@code POST /enroll-embedding} endpoint. Mirrors
+     * {@link #enrollFace} but with the embedding already computed off-device.
+     *
+     * @param tenantId  optional tenant identifier — for pgvector tenant scoping
+     *                  on the bio side (null/blank → bio default tenant)
+     * @param userId    the user ID to enroll
+     * @param embedding the 512-dim client-side embedding (list of floats)
+     * @return Map containing enrollment response data (e.g. {@code success})
+     */
+    Map<String, Object> enrollEmbedding(String tenantId, UUID userId, List<Double> embedding);
+
+    /**
      * Enrolls a user's voice in the biometric system.
      *
      * @param userId the user ID

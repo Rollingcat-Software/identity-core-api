@@ -370,4 +370,95 @@ class BiometricServiceAdapterTest {
         assertThat(adapter.hasEnrollment(null, TENANT_ID)).isFalse();
         mockServer.verify(); // zero outbound calls
     }
+
+    // --- client-side embedding (sub-project A, Phase 5) ---
+
+    private static final List<Double> EMBEDDING = List.of(0.11, -0.22, 0.33);
+
+    @Test
+    @DisplayName("verifyEmbedding posts user_id + embedding + tenant_id as JSON to /verify-embedding")
+    void verifyEmbedding_postsJson() {
+        mockServer.expect(requestTo(BIO_URL + "/verify-embedding"))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(req -> {
+                    String body = bodyAsString(req);
+                    assertThat(body).contains("\"user_id\"").contains(USER_ID.toString());
+                    assertThat(body).contains("\"embedding\"")
+                            .contains("0.11").contains("-0.22").contains("0.33");
+                    assertThat(body).contains("\"tenant_id\"").contains(TENANT_ID);
+                })
+                .andRespond(withSuccess("{\"verified\":true}", MediaType.APPLICATION_JSON));
+
+        var result = adapter.verifyEmbedding(TENANT_ID, USER_ID, EMBEDDING);
+
+        assertThat(result).containsEntry("verified", true);
+        mockServer.verify();
+    }
+
+    @Test
+    @DisplayName("verifyEmbedding omits a blank tenant_id from the JSON body")
+    void verifyEmbedding_blankTenant_isOmitted() {
+        mockServer.expect(requestTo(BIO_URL + "/verify-embedding"))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(req -> {
+                    String body = bodyAsString(req);
+                    assertThat(body).contains("\"embedding\"");
+                    assertThat(body).doesNotContain("\"tenant_id\"");
+                })
+                .andRespond(withSuccess("{\"verified\":false}", MediaType.APPLICATION_JSON));
+
+        adapter.verifyEmbedding("  ", USER_ID, EMBEDDING);
+        mockServer.verify();
+    }
+
+    @Test
+    @DisplayName("verifyEmbedding maps a bio 4xx to a fail-closed error map")
+    void verifyEmbedding_4xx_failsClosed() {
+        mockServer.expect(requestTo(BIO_URL + "/verify-embedding"))
+                .andExpect(method(HttpMethod.POST))
+                .andRespond(org.springframework.test.web.client.response.MockRestResponseCreators
+                        .withStatus(org.springframework.http.HttpStatus.BAD_REQUEST)
+                        .body("{\"detail\":\"bad embedding\"}")
+                        .contentType(MediaType.APPLICATION_JSON));
+
+        var result = adapter.verifyEmbedding(TENANT_ID, USER_ID, EMBEDDING);
+
+        assertThat(result).containsEntry("success", false);
+        mockServer.verify();
+    }
+
+    @Test
+    @DisplayName("enrollEmbedding posts user_id + embedding + tenant_id as JSON to /enroll-embedding")
+    void enrollEmbedding_postsJson() {
+        mockServer.expect(requestTo(BIO_URL + "/enroll-embedding"))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(req -> {
+                    String body = bodyAsString(req);
+                    assertThat(body).contains("\"user_id\"").contains(USER_ID.toString());
+                    assertThat(body).contains("\"embedding\"")
+                            .contains("0.11").contains("-0.22").contains("0.33");
+                    assertThat(body).contains("\"tenant_id\"").contains(TENANT_ID);
+                })
+                .andRespond(withSuccess("{\"success\":true}", MediaType.APPLICATION_JSON));
+
+        var result = adapter.enrollEmbedding(TENANT_ID, USER_ID, EMBEDDING);
+
+        assertThat(result).containsEntry("success", true);
+        mockServer.verify();
+    }
+
+    @Test
+    @DisplayName("enrollEmbedding maps bio unreachable to a fail-closed error map")
+    void enrollEmbedding_unreachable_failsClosed() {
+        mockServer.expect(requestTo(BIO_URL + "/enroll-embedding"))
+                .andExpect(method(HttpMethod.POST))
+                .andRespond(req -> {
+                    throw new org.springframework.web.client.ResourceAccessException("connection refused");
+                });
+
+        var result = adapter.enrollEmbedding(TENANT_ID, USER_ID, EMBEDDING);
+
+        assertThat(result).containsEntry("success", false);
+        mockServer.verify();
+    }
 }

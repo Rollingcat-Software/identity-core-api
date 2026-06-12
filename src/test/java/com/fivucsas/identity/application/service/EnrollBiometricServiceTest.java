@@ -85,6 +85,9 @@ class EnrollBiometricServiceTest {
     @Mock
     private MultipartFile faceImage;
 
+    @Mock
+    private ClientSideEmbeddingPolicy clientSideEmbeddingPolicy;
+
     @InjectMocks
     private EnrollBiometricService enrollBiometricService;
 
@@ -413,6 +416,96 @@ class EnrollBiometricServiceTest {
                 .hasMessageContaining(missing.toString());
 
             verify(userDomainRepository, never()).save(any());
+        }
+    }
+
+    @Nested
+    @DisplayName("client-side-embedding routing (Phase 5, sub-project A)")
+    class ClientSideEmbeddingRouting {
+
+        private final java.util.List<Double> embedding = java.util.List.of(0.1, 0.2, 0.3);
+
+        @Test
+        @DisplayName("policy ON + embedding present → enrollEmbedding, NOT enrollFace (image)")
+        void policyOn_embeddingPresent_usesEmbeddingPath() {
+            EnrollBiometricCommand command = EnrollBiometricCommand.builder()
+                .userId(userId.toString())
+                .tenantId("t-marmara")
+                .embedding(embedding)
+                .build();
+            when(userRepository.findById(userId)).thenReturn(Optional.of(existingUser));
+            when(clientSideEmbeddingPolicy.isEnabled()).thenReturn(true);
+            when(biometricService.enrollEmbedding(eq("t-marmara"), eq(userId), eq(embedding)))
+                .thenReturn(Map.of("success", true, "message", "Embedding enrolled"));
+            when(userRepository.save(any(User.class))).thenReturn(existingUser);
+
+            BiometricResponse response = enrollBiometricService.execute(command);
+
+            assertThat(response.isSuccess()).isTrue();
+            verify(biometricService).enrollEmbedding("t-marmara", userId, embedding);
+            verify(biometricService, never()).enrollFace(any(), any(), any(), any(), any(), anyBoolean());
+            // The user enrolled-flag still flips on the embedding path
+            assertThat(existingUser.isBiometricEnrolled()).isTrue();
+        }
+
+        @Test
+        @DisplayName("policy OFF + embedding present → legacy enrollFace (image), embedding ignored")
+        void policyOff_embeddingPresent_usesImagePath() {
+            EnrollBiometricCommand command = EnrollBiometricCommand.builder()
+                .userId(userId.toString())
+                .faceImage(faceImage)
+                .embedding(embedding)
+                .build();
+            when(userRepository.findById(userId)).thenReturn(Optional.of(existingUser));
+            when(clientSideEmbeddingPolicy.isEnabled()).thenReturn(false);
+            when(biometricService.enrollFace(eq(userId), eq(faceImage), eq(null), eq(null), eq(null), eq(false)))
+                .thenReturn(Map.of("success", true));
+            when(userRepository.save(any(User.class))).thenReturn(existingUser);
+
+            BiometricResponse response = enrollBiometricService.execute(command);
+
+            assertThat(response.isSuccess()).isTrue();
+            verify(biometricService).enrollFace(userId, faceImage, null, null, null, false);
+            verify(biometricService, never()).enrollEmbedding(any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("policy ON but no embedding (image only) → legacy enrollFace")
+        void policyOn_imageOnly_usesImagePath() {
+            when(userRepository.findById(userId)).thenReturn(Optional.of(existingUser));
+            // No embedding in the command, so the routing short-circuits BEFORE
+            // consulting the policy — the policy is intentionally NOT stubbed here
+            // (a strict-stub error would otherwise flag an unused stub, which is
+            // itself the proof that the no-embedding path never touches the gate).
+            when(biometricService.enrollFace(eq(userId), eq(faceImage), eq(null), eq(null), eq(null), eq(false)))
+                .thenReturn(Map.of("success", true));
+            when(userRepository.save(any(User.class))).thenReturn(existingUser);
+
+            // validCommand carries faceImage and NO embedding
+            BiometricResponse response = enrollBiometricService.execute(validCommand);
+
+            assertThat(response.isSuccess()).isTrue();
+            verify(biometricService).enrollFace(userId, faceImage, null, null, null, false);
+            verify(biometricService, never()).enrollEmbedding(any(), any(), any());
+            verifyNoInteractions(clientSideEmbeddingPolicy);
+        }
+
+        @Test
+        @DisplayName("embedding path: bio returns success=false → BiometricEnrollmentException, flag not flipped")
+        void embeddingPath_bioFailure_throws() {
+            EnrollBiometricCommand command = EnrollBiometricCommand.builder()
+                .userId(userId.toString())
+                .embedding(embedding)
+                .build();
+            when(userRepository.findById(userId)).thenReturn(Optional.of(existingUser));
+            when(clientSideEmbeddingPolicy.isEnabled()).thenReturn(true);
+            when(biometricService.enrollEmbedding(eq(null), eq(userId), eq(embedding)))
+                .thenReturn(Map.of("success", false, "message", "Bad embedding"));
+
+            assertThatThrownBy(() -> enrollBiometricService.execute(command))
+                .isInstanceOf(BiometricEnrollmentException.class)
+                .hasMessageContaining("Bad embedding");
+            verify(userRepository, never()).save(any());
         }
     }
 
