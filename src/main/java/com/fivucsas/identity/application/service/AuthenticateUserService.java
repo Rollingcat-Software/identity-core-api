@@ -13,6 +13,7 @@ import com.fivucsas.identity.domain.exception.InvalidCredentialsException;
 import com.fivucsas.identity.domain.exception.NeedsEnrollmentException;
 import com.fivucsas.identity.domain.exception.TenantMismatchException;
 import com.fivucsas.identity.domain.exception.TenantSuspendedException;
+import com.fivucsas.identity.domain.model.auth.AmrMapping;
 import com.fivucsas.identity.domain.model.auth.AuthMethodType;
 import com.fivucsas.identity.domain.model.auth.OperationType;
 import com.fivucsas.identity.domain.model.auth.StepType;
@@ -563,26 +564,14 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
         }
     }
 
-    /** RFC 8176 amr values for a single-step identifier-first Layer-1 mint. */
+    /**
+     * RFC 8176 amr values for a single-step identifier-first Layer-1 mint.
+     * Delegates to the shared {@link AmrMapping} so this path and the N-step MFA
+     * completion ({@code VerifyMfaStepService}) can never diverge for the same
+     * method (they previously disagreed on SMS_OTP: "otp" here vs "sms" there).
+     */
     private List<String> amrFor(Set<AuthMethodType> methods) {
-        return methods.stream()
-                .map(AuthenticateUserService::amrValue)
-                .distinct()
-                .toList();
-    }
-
-    private static String amrValue(AuthMethodType type) {
-        return switch (type) {
-            case PASSWORD -> "pwd";
-            case EMAIL_OTP, SMS_OTP, TOTP -> "otp";
-            case FACE -> "face";
-            case VOICE -> "voice";
-            case FINGERPRINT -> "fpt";
-            case HARDWARE_KEY, PASSKEY -> "hwk";
-            case QR_CODE, APPROVE_LOGIN -> "mca";
-            case NFC_DOCUMENT -> "swk";
-            default -> type.name().toLowerCase(java.util.Locale.ROOT);
-        };
+        return AmrMapping.amrFor(methods);
     }
 
     /**

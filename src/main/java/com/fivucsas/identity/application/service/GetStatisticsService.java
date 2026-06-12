@@ -39,12 +39,22 @@ public class GetStatisticsService implements GetStatisticsUseCase {
         Long totalVerifications = userRepository.sumVerificationCount();
         long totalTenants = tenantRepository.count();
 
-        // Enrollment statistics: calculate from actual data
+        // Enrollment statistics: calculate from actual data.
         long successfulEnrollments = biometricEnrolledUsers;
         long pendingEnrollments = totalUsers - biometricEnrolledUsers;
-        long failedEnrollments = 0L; // Will be calculated from biometric verification logs when available
+        // We do NOT track a distinct failed-enrollment count yet (no source in
+        // user_enrollments / biometric logs surfaced to this query), so we
+        // report it honestly as 0 rather than inferring it. Do NOT use this as a
+        // divisor for a "success rate" — that previously made every rate 100%.
+        long failedEnrollments = 0L;
 
-        // Calculate rates from actual audit log data
+        // Success rates: derived ONLY from real audit-log success/failure counts.
+        // The audit success/failure tally is the single real outcome signal we
+        // have, and it is what backs authSuccessRate. There is no separate
+        // verification-outcome source, so verificationSuccessRate is NOT
+        // fabricated from totalVerifications/(totalVerifications + 0) (which is
+        // mathematically always 100%); it stays 0.0 ("not tracked") until a real
+        // pass/fail verification metric exists. Raw counts above remain truthful.
         double authSuccessRate = 0.0;
         double verificationSuccessRate = 0.0;
 
@@ -56,11 +66,6 @@ public class GetStatisticsService implements GetStatisticsUseCase {
             long totalOps = totalSuccess + totalFailed;
             if (totalOps > 0) {
                 authSuccessRate = Math.round((totalSuccess * 100.0) / totalOps * 10) / 10.0;
-            }
-            // Verification success rate based on actual verification count
-            if (totalVerifications != null && totalVerifications > 0) {
-                // Calculate from biometric verification logs if available
-                verificationSuccessRate = Math.round((totalVerifications * 100.0) / (totalVerifications + failedEnrollments) * 10) / 10.0;
             }
         } catch (Exception e) {
             log.debug("Could not compute rates from audit logs: {}", e.getMessage());

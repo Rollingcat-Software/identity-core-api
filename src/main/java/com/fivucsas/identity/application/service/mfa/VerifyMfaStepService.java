@@ -7,6 +7,7 @@ import com.fivucsas.identity.application.port.output.TokenGenerationPort;
 import com.fivucsas.identity.application.service.EnrollmentHealthService;
 import com.fivucsas.identity.domain.exception.OtpAttemptsExhaustedException;
 import com.fivucsas.identity.domain.exception.UserNotFoundException;
+import com.fivucsas.identity.domain.model.auth.AmrMapping;
 import com.fivucsas.identity.domain.model.auth.AuthMethodType;
 import com.fivucsas.identity.domain.repository.UserRepository;
 import com.fivucsas.identity.dto.AvailableMfaMethod;
@@ -75,28 +76,6 @@ public class VerifyMfaStepService {
      */
     private static final java.time.Duration MFA_SESSION_MAX_TTL =
             java.time.Duration.ofMinutes(30);
-
-    /** RFC 8176 Authentication Methods References mapping. */
-    private static final Map<AuthMethodType, String> AMR_VALUES;
-    static {
-        Map<AuthMethodType, String> m = new EnumMap<>(AuthMethodType.class);
-        m.put(AuthMethodType.PASSWORD, "pwd");
-        m.put(AuthMethodType.EMAIL_OTP, "otp");
-        m.put(AuthMethodType.SMS_OTP, "sms");
-        m.put(AuthMethodType.TOTP, "otp");
-        m.put(AuthMethodType.FACE, "face");
-        m.put(AuthMethodType.VOICE, "voice");
-        m.put(AuthMethodType.FINGERPRINT, "fpt");
-        m.put(AuthMethodType.HARDWARE_KEY, "hwk");
-        // PASSKEY is the discoverable mode of WebAuthn → same "hwk" amr (task #16 G).
-        m.put(AuthMethodType.PASSKEY, "hwk");
-        m.put(AuthMethodType.QR_CODE, "mca");
-        // APPROVE_LOGIN is the number-matching mode of the QR cross-device
-        // approval method → same "mca" multi-channel-authentication amr.
-        m.put(AuthMethodType.APPROVE_LOGIN, "mca");
-        m.put(AuthMethodType.NFC_DOCUMENT, "swk");
-        AMR_VALUES = Collections.unmodifiableMap(m);
-    }
 
     private final Map<AuthMethodType, VerifyMfaStepHandler> handlers;
     private final MfaSessionRepository mfaSessionRepository;
@@ -460,14 +439,13 @@ public class VerifyMfaStepService {
         session.complete();
         mfaSessionRepository.save(session);
 
+        // RFC 8176 amr: resolved through the shared AmrMapping so this N-step
+        // completion and the single-step mint (AuthenticateUserService) emit an
+        // identical amr for the same method (they previously disagreed on
+        // SMS_OTP). AmrMapping tolerates unknown/garbage names (lower-cased
+        // fallback), matching the prior getOrDefault leniency.
         List<String> amr = session.getCompletedMethods().stream()
-                .map(m -> {
-                    try {
-                        return AMR_VALUES.getOrDefault(AuthMethodType.valueOf(m), m.toLowerCase());
-                    } catch (IllegalArgumentException e) {
-                        return m.toLowerCase();
-                    }
-                })
+                .map(AmrMapping::amrValue)
                 .distinct()
                 .toList();
 

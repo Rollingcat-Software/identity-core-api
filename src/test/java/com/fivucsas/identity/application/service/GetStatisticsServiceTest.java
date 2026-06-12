@@ -145,6 +145,56 @@ class GetStatisticsServiceTest {
         }
 
         @Test
+        @DisplayName("verificationSuccessRate is NOT a fabricated 100% when verifications exist but no real failure data")
+        void verificationSuccessRateIsNotFabricated100() {
+            // Given a populated system with verifications but no real
+            // verification-failure source (failedEnrollments has none).
+            when(userRepository.count()).thenReturn(100L);
+            when(userRepository.countByStatus(UserStatus.ACTIVE)).thenReturn(100L);
+            when(userRepository.countByStatus(UserStatus.INACTIVE)).thenReturn(0L);
+            when(userRepository.countByStatus(UserStatus.SUSPENDED)).thenReturn(0L);
+            when(userRepository.countByIsBiometricEnrolled(true)).thenReturn(50L);
+            when(userRepository.sumVerificationCount()).thenReturn(1000L);
+
+            // When
+            StatisticsResponse response = getStatisticsService.execute();
+
+            // Then — the old bug computed 1000/(1000+0)=100.0 always; the honest
+            // fix reports 0.0 ("not tracked") rather than a misleading 100%.
+            assertThat(response.getVerificationSuccessRate())
+                    .as("verification success rate must not be a fake 100%")
+                    .isNotEqualTo(100.0);
+            assertThat(response.getVerificationSuccessRate()).isEqualTo(0.0);
+            // Raw counts stay truthful.
+            assertThat(response.getTotalVerifications()).isEqualTo(1000L);
+            assertThat(response.getFailedEnrollments()).isEqualTo(0L);
+            assertThat(response.getSuccessfulEnrollments()).isEqualTo(50L);
+        }
+
+        @Test
+        @DisplayName("authSuccessRate IS computed from real audit success/failure counts")
+        void authSuccessRateFromRealAuditCounts() {
+            when(userRepository.count()).thenReturn(10L);
+            when(userRepository.countByStatus(any())).thenReturn(0L);
+            when(userRepository.countByIsBiometricEnrolled(true)).thenReturn(0L);
+            when(userRepository.sumVerificationCount()).thenReturn(0L);
+
+            // 80 success, 20 failed → 80.0% (rounded to 1 dp).
+            @SuppressWarnings("unchecked")
+            Page<com.fivucsas.identity.entity.AuditLog> successPage = mock(Page.class);
+            @SuppressWarnings("unchecked")
+            Page<com.fivucsas.identity.entity.AuditLog> failedPage = mock(Page.class);
+            when(successPage.getTotalElements()).thenReturn(80L);
+            when(failedPage.getTotalElements()).thenReturn(20L);
+            when(auditLogRepository.findBySuccessOrderByCreatedAtDesc(eq(true), any())).thenReturn(successPage);
+            when(auditLogRepository.findBySuccessOrderByCreatedAtDesc(eq(false), any())).thenReturn(failedPage);
+
+            StatisticsResponse response = getStatisticsService.execute();
+
+            assertThat(response.getAuthSuccessRate()).isEqualTo(80.0);
+        }
+
+        @Test
         @DisplayName("Should handle large numbers")
         void shouldHandleLargeNumbers() {
             // Given
