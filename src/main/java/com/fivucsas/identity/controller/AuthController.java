@@ -109,6 +109,9 @@ public class AuthController {
     private final com.fivucsas.identity.application.service.mfa.VerifyMfaStepService verifyMfaStepService;
     private final com.fivucsas.identity.application.service.LoginConfigService loginConfigService;
     private final com.fivucsas.identity.application.service.mfa.AvailableMethodsResolver availableMethodsResolver;
+    private final com.fivucsas.identity.application.service.PuzzleLayerPolicy puzzleLayerPolicy;
+    private final com.fasterxml.jackson.databind.ObjectMapper puzzleObjectMapper =
+            new com.fasterxml.jackson.databind.ObjectMapper();
 
     private static final String EMAIL_VERIFY_OTP_PREFIX = "email-verify:";
     private static final String PHONE_VERIFY_OTP_PREFIX = "phone-verify:";
@@ -1125,6 +1128,227 @@ public class AuthController {
             String maskedEmail = email.substring(0, Math.min(3, email.indexOf('@'))) + "***" + email.substring(email.indexOf('@'));
             return ResponseEntity.ok(Map.of("message", "Email code sent", "email", maskedEmail));
         }
+    }
+
+    // ------------------------------------------------------------------------
+    // PUZZLE-as-login session proxy (CV-2 of the puzzle-as-login convergence,
+    // canonical contract: docs/superpowers/plans/2026-06-12-puzzle-session-convergence.md)
+    //
+    // The biometric-processor has NO public route, so the browser cannot reach
+    // it directly. During the PUZZLE MFA step the browser drives the server-issued
+    // single-use session THROUGH these two proxy endpoints, authorized by the
+    // in-progress MFA session token (NOT a JWT) — mirroring /mfa/qr-generate and
+    // /mfa/send-otp. The auth GATE is still POST /auth/mfa/step (PUZZLE) →
+    // PuzzleVerifyMfaStepHandler → bio /verdict; these two are CREATE + per-challenge
+    // SUBMIT only.
+    //
+    // CRITICAL: CREATE stamps user_id + tenant_id from the SERVER-side MFA session
+    // (never client-supplied), so the issued session is owner-bound to the
+    // authenticating user. SUBMIT just proxies the body to bio for that session_id.
+    //
+    // Reachable only when PuzzleLayerPolicy is on for the session's tenant; else 404
+    // (the feature is hidden, no information leak about an off feature).
+    // ------------------------------------------------------------------------
+
+    /**
+     * CREATE a server-issued puzzle session for the in-progress MFA step.
+     *
+     * <p>Request body: {@code {"sessionToken":"<mfa session token>"}}. Any
+     * {@code user_id}/{@code tenant_id}/{@code allowedChallengeTypes} in the body
+     * are IGNORED — the owner identity and the allowed-challenge policy are taken
+     * from the SERVER-side MFA session + its flow step.
+     *
+     * <p>Response (bio's CREATE response, forwarded verbatim):
+     * {@code {"session_id":"<opaque>","challenges":[{"action":"blink","params":null}, ...]}}.
+     */
+    @PostMapping("/mfa/puzzle/session")
+    @Operation(summary = "Create a server-issued puzzle session during MFA (public — no JWT, uses session token)")
+    public ResponseEntity<Map<String, Object>> createMfaPuzzleSession(
+            @RequestBody Map<String, Object> request) {
+        String sessionToken = asString(request.get("sessionToken"));
+        if (sessionToken == null || sessionToken.isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("message", "sessionToken is required"));
+        }
+
+        Optional<MfaSession> sessionOpt = mfaSessionRepository.findBySessionToken(sessionToken);
+        if (sessionOpt.isEmpty() || sessionOpt.get().isExpired() || sessionOpt.get().isCompleted()) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(Map.of("message", "Invalid or expired MFA session"));
+        }
+        MfaSession mfaSession = sessionOpt.get();
+
+        // Feature gate: PUZZLE must be enabled for this tenant; otherwise the
+        // session proxy does not exist as far as the caller is concerned.
+        if (!puzzleLayerPolicy.isEnabledFor(mfaSession.getTenantId())) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(Map.of("message", "Not found"));
+        }
+
+        // SERVER-stamped owner identity (never client-supplied).
+        UUID userId = mfaSession.getUserId();
+        UUID tenantId = mfaSession.getTenantId();
+        if (tenantId == null) {
+            log.warn("AUDIT: PUZZLE session create rejected — MFA session has no tenant, userId={}", userId);
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(Map.of("message", "Invalid or expired MFA session"));
+        }
+
+        // Resolve the allowed-challenge policy (types + count + difficulty) from the
+        // current flow step's config blob — the same blob the login-config response
+        // surfaces. Fail-closed (no usable policy → 422) so we never issue a session
+        // bio cannot satisfy.
+        PuzzleStepPolicy policy = resolvePuzzleStepPolicy(mfaSession);
+        if (policy == null) {
+            log.warn("AUDIT: PUZZLE session create rejected — step puzzleConfig unresolvable, userId={}", userId);
+            return ResponseEntity.unprocessableEntity()
+                    .body(Map.of("message", "Puzzle step is not configured"));
+        }
+
+        Map<String, Object> bioResponse = biometricService.createPuzzleSession(
+                tenantId, userId, policy.allowedChallengeTypes(), policy.count(), policy.difficulty());
+
+        // Fail-closed: a session without an opaque session_id is an error map.
+        Object sessionId = bioResponse != null ? bioResponse.get("session_id") : null;
+        if (sessionId == null) {
+            log.warn("AUDIT: PUZZLE session create failed at bio — userId={}, response={}",
+                    userId, bioResponse != null ? bioResponse.keySet() : null);
+            return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                    .body(Map.of("message", "Could not create puzzle session"));
+        }
+        log.info("AUDIT: PUZZLE session created — userId={}, tenantId={}, count={}", userId, tenantId, policy.count());
+        return ResponseEntity.ok(bioResponse);
+    }
+
+    /**
+     * SUBMIT one challenge's traces to an in-progress puzzle session (per-challenge
+     * UX feedback — NOT the auth gate). Authorized by the MFA session token; the
+     * body is proxied to bio for {@code sessionId} unchanged.
+     *
+     * <p>Request body: {@code {"sessionToken":"<mfa session token>",
+     * "action":"blink","metrics":{...},"start_timestamp_ms":...,
+     * "end_timestamp_ms":...,"confidence":...}}. The {@code sessionToken} key is
+     * stripped before forwarding; everything else is the bio challenge submission.
+     *
+     * <p>Response (bio's per-challenge verdict, forwarded verbatim):
+     * {@code {"verified":true,"action":"blink","reason_code":null}}. A bio 404
+     * (unknown/expired/consumed session) surfaces as an upstream-failure status.
+     */
+    @PostMapping("/mfa/puzzle/session/{sessionId}/challenge")
+    @Operation(summary = "Submit a puzzle challenge during MFA (public — no JWT, uses session token)")
+    public ResponseEntity<Map<String, Object>> submitMfaPuzzleChallenge(
+            @PathVariable String sessionId,
+            @RequestBody Map<String, Object> request) {
+        String sessionToken = asString(request.get("sessionToken"));
+        if (sessionToken == null || sessionToken.isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("message", "sessionToken is required"));
+        }
+        if (sessionId == null || sessionId.isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("message", "sessionId is required"));
+        }
+
+        Optional<MfaSession> sessionOpt = mfaSessionRepository.findBySessionToken(sessionToken);
+        if (sessionOpt.isEmpty() || sessionOpt.get().isExpired() || sessionOpt.get().isCompleted()) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(Map.of("message", "Invalid or expired MFA session"));
+        }
+        MfaSession mfaSession = sessionOpt.get();
+
+        if (!puzzleLayerPolicy.isEnabledFor(mfaSession.getTenantId())) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(Map.of("message", "Not found"));
+        }
+
+        // Forward the challenge body verbatim minus the transport-only sessionToken.
+        // The owner binding is enforced by bio at /verdict against the session it
+        // created; SUBMIT is per-challenge UX scoring, not the gate.
+        Map<String, Object> bioBody = new HashMap<>(request);
+        bioBody.remove("sessionToken");
+
+        Map<String, Object> bioResponse = biometricService.submitPuzzleChallenge(sessionId, bioBody);
+
+        // bio's per-challenge verdict carries `verified`; the adapter's fail-closed
+        // error map (404/non-2xx/transport) carries success=false and NO `verified`.
+        if (bioResponse == null
+                || (!bioResponse.containsKey("verified") && Boolean.FALSE.equals(bioResponse.get("success")))) {
+            log.warn("AUDIT: PUZZLE challenge submit failed at bio — userId={}, sessionPresent=true",
+                    mfaSession.getUserId());
+            return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                    .body(bioResponse != null ? bioResponse : Map.of("message", "Puzzle challenge submit failed"));
+        }
+        return ResponseEntity.ok(bioResponse);
+    }
+
+    /**
+     * Parsed allowed-challenge policy for a PUZZLE step: the challenge types bio
+     * may choose from, how many to issue, and an optional difficulty hint.
+     */
+    private record PuzzleStepPolicy(List<String> allowedChallengeTypes, int count, String difficulty) {
+    }
+
+    /**
+     * Resolves the {@link PuzzleStepPolicy} from the CURRENT step's persisted
+     * {@code config} JSONB blob ({@code {"puzzleConfig":{"count":N,
+     * "allowedChallengeTypes":[...],"difficulty":"..."}}}). Returns null when the
+     * flow/step/blob cannot be resolved or carries no usable allow-list, so the
+     * caller fails closed instead of issuing a session bio cannot satisfy.
+     */
+    private PuzzleStepPolicy resolvePuzzleStepPolicy(MfaSession mfaSession) {
+        AuthFlow flow = authFlowRepository.findById(mfaSession.getFlowId()).orElse(null);
+        if (flow == null || flow.getSteps() == null) {
+            return null;
+        }
+        int currentStepOrder = mfaSession.getCurrentStep();
+        AuthFlowStep step = flow.getSteps().stream()
+                .filter(s -> s != null && s.getStepOrder() == currentStepOrder)
+                .findFirst()
+                .orElse(null);
+        if (step == null) {
+            return null;
+        }
+        String configJson = step.getConfig();
+        if (configJson == null || configJson.isBlank()) {
+            return null;
+        }
+        try {
+            com.fasterxml.jackson.databind.JsonNode root = puzzleObjectMapper.readTree(configJson);
+            com.fasterxml.jackson.databind.JsonNode puzzle = root.get("puzzleConfig");
+            if (puzzle == null || !puzzle.isObject()) {
+                return null;
+            }
+            List<String> allowed = new ArrayList<>();
+            com.fasterxml.jackson.databind.JsonNode typesNode = puzzle.get("allowedChallengeTypes");
+            if (typesNode != null && typesNode.isArray()) {
+                for (com.fasterxml.jackson.databind.JsonNode t : typesNode) {
+                    String v = t.asText(null);
+                    if (v != null && !v.isBlank()) {
+                        allowed.add(v.trim().toLowerCase(Locale.ROOT));
+                    }
+                }
+            }
+            if (allowed.isEmpty()) {
+                return null;
+            }
+            com.fasterxml.jackson.databind.JsonNode countNode = puzzle.get("count");
+            int count = (countNode != null && countNode.isInt()) ? countNode.asInt() : 1;
+            if (count < 1) {
+                count = 1;
+            }
+            if (count > allowed.size()) {
+                // Cannot issue more distinct challenges than the allow-list holds;
+                // clamp so bio's count<=len(allowed) constraint is satisfied.
+                count = allowed.size();
+            }
+            com.fasterxml.jackson.databind.JsonNode diffNode = puzzle.get("difficulty");
+            String difficulty = (diffNode != null && diffNode.isTextual()) ? diffNode.asText() : null;
+            return new PuzzleStepPolicy(allowed, count, difficulty);
+        } catch (Exception e) {
+            log.warn("PUZZLE step config unparseable as JSON — failing closed: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    private static String asString(Object o) {
+        return o == null ? null : String.valueOf(o);
     }
 
     @PostMapping("/2fa/send-sms")

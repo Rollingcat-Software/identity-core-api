@@ -117,6 +117,12 @@ app:
     # so it MUST be paired with a liveness factor (puzzle/passive) in the flow.
     client-side-embedding: ${APP_AUTH_CLIENT_SIDE_EMBEDDING:false}
     client-side-embedding-tenants: ${APP_AUTH_CLIENT_SIDE_EMBEDDING_TENANTS:}
+    # Puzzle layer (sub-project B). Default OFF = PUZZLE absent from catalog.
+    # KILL-SWITCH / CANARY — no redeploy to flip:
+    #   APP_AUTH_PUZZLE_LAYER=true            → surface PUZZLE for ALL tenants
+    #   APP_AUTH_PUZZLE_LAYER_TENANTS=<uuid>  → canary specific tenant(s)
+    puzzle-layer: ${APP_AUTH_PUZZLE_LAYER:false}
+    puzzle-layer-tenants: ${APP_AUTH_PUZZLE_LAYER_TENANTS:}
     # Tenant Auth-Methods true-gate kill-switch. Default ON (the gate enforces).
     # APP_AUTH_ENFORCE_TENANT_AUTH_METHODS=false disables login-time enforcement
     # instantly with no redeploy if the gate ever misbehaves in prod.

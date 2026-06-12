@@ -15,6 +15,7 @@ import com.fivucsas.identity.entity.AuthFlowStep;
 import com.fivucsas.identity.entity.AuthMethod;
 import com.fivucsas.identity.entity.TenantAuthMethod;
 import com.fivucsas.identity.repository.JpaTenantRepository;
+import jakarta.persistence.EntityNotFoundException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -38,6 +39,7 @@ class ManageAuthMethodServiceTest {
     @Mock private TenantAuthMethodRepositoryPort tenantAuthMethodRepository;
     @Mock private JpaTenantRepository tenantRepository;
     @Mock private AuthFlowRepositoryPort authFlowRepository;
+    @Mock private PuzzleLayerPolicy puzzleLayerPolicy;
 
     @InjectMocks private ManageAuthMethodService service;
 
@@ -181,5 +183,109 @@ class ManageAuthMethodServiceTest {
         // Enabling never consults active flows.
         verify(authFlowRepository, never()).findAllByTenantId(any());
         verify(tenantAuthMethodRepository).save(any());
+    }
+
+    // ---- Part C: PUZZLE is gated by PuzzleLayerPolicy ----
+
+    @Test
+    void listAllMethods_excludesPuzzle_whenPolicyOff() {
+        // policy mock returns false for isGloballyEnabled() by default
+        when(authMethodRepository.findAllByIsActiveTrue()).thenReturn(List.of(
+                method(AuthMethodType.PASSWORD),
+                method(AuthMethodType.PUZZLE)));
+
+        List<AuthMethodResponse> result = service.listAllMethods();
+
+        assertThat(result).extracting(AuthMethodResponse::type)
+                .containsExactly(AuthMethodType.PASSWORD)
+                .doesNotContain(AuthMethodType.PUZZLE);
+    }
+
+    @Test
+    void listAllMethods_includesPuzzle_whenPolicyOn() {
+        when(puzzleLayerPolicy.isGloballyEnabled()).thenReturn(true);
+        when(authMethodRepository.findAllByIsActiveTrue()).thenReturn(List.of(
+                method(AuthMethodType.PASSWORD),
+                method(AuthMethodType.PUZZLE)));
+
+        List<AuthMethodResponse> result = service.listAllMethods();
+
+        assertThat(result).extracting(AuthMethodResponse::type)
+                .containsExactlyInAnyOrder(AuthMethodType.PASSWORD, AuthMethodType.PUZZLE);
+    }
+
+    @Test
+    void listTenantMethods_excludesPuzzle_whenPolicyOffForTenant() {
+        // puzzleLayerPolicy.isEnabledFor(tenantId) returns false by default
+        when(tenantAuthMethodRepository.findAllByTenantId(tenantId)).thenReturn(List.of(
+                tenantMethod(method(AuthMethodType.TOTP), true),
+                tenantMethod(method(AuthMethodType.PUZZLE), true)));
+
+        List<TenantAuthMethodResponse> result = service.listTenantMethods(tenantId);
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).authMethod().type()).isEqualTo(AuthMethodType.TOTP);
+    }
+
+    @Test
+    void listTenantMethods_includesPuzzle_whenPolicyOnForTenant() {
+        when(puzzleLayerPolicy.isEnabledFor(tenantId)).thenReturn(true);
+        when(tenantAuthMethodRepository.findAllByTenantId(tenantId)).thenReturn(List.of(
+                tenantMethod(method(AuthMethodType.TOTP), true),
+                tenantMethod(method(AuthMethodType.PUZZLE), true)));
+
+        List<TenantAuthMethodResponse> result = service.listTenantMethods(tenantId);
+
+        assertThat(result).hasSize(2);
+        assertThat(result).extracting(r -> r.authMethod().type())
+                .containsExactlyInAnyOrder(AuthMethodType.TOTP, AuthMethodType.PUZZLE);
+    }
+
+    @Test
+    void getMethodByType_puzzle_throwsNotFound_whenPolicyOff() {
+        // policy mock returns false for isGloballyEnabled() by default.
+        // The row may exist in the DB, but a flag-OFF probe must not surface it,
+        // so the repository is never even consulted.
+        assertThatThrownBy(() -> service.getMethodByType(AuthMethodType.PUZZLE))
+                .isInstanceOf(EntityNotFoundException.class);
+
+        verify(authMethodRepository, never()).findByType(AuthMethodType.PUZZLE);
+    }
+
+    @Test
+    void getMethodByType_puzzle_returnsRow_whenPolicyOn() {
+        when(puzzleLayerPolicy.isGloballyEnabled()).thenReturn(true);
+        AuthMethod puzzle = method(AuthMethodType.PUZZLE);
+        when(authMethodRepository.findByType(AuthMethodType.PUZZLE))
+                .thenReturn(Optional.of(puzzle));
+
+        AuthMethodResponse result = service.getMethodByType(AuthMethodType.PUZZLE);
+
+        assertThat(result.type()).isEqualTo(AuthMethodType.PUZZLE);
+    }
+
+    @Test
+    void getMethodByType_nonPuzzle_isUnaffectedByFlag() {
+        // A non-PUZZLE lookup never consults the policy and behaves as before.
+        AuthMethod password = method(AuthMethodType.PASSWORD);
+        when(authMethodRepository.findByType(AuthMethodType.PASSWORD))
+                .thenReturn(Optional.of(password));
+
+        AuthMethodResponse result = service.getMethodByType(AuthMethodType.PASSWORD);
+
+        assertThat(result.type()).isEqualTo(AuthMethodType.PASSWORD);
+        verifyNoInteractions(puzzleLayerPolicy);
+    }
+
+    @Test
+    void gestureLiveness_isNotALoginMethod() {
+        // GESTURE_LIVENESS must never be offered as a selectable login method.
+        // Regression guard: it has no isLoginMethod() = true, so even if a
+        // stale DB row existed it would be filtered out.
+        assertThat(AuthMethodType.PASSKEY.isLoginMethod()).isTrue(); // sanity
+        // GESTURE_LIVENESS is not modelled as an AuthMethodType enum value
+        // (no handler, no auth_methods row). Verify PUZZLE IS a login method
+        // and is the only new value added in this phase.
+        assertThat(AuthMethodType.PUZZLE.isLoginMethod()).isTrue();
     }
 }

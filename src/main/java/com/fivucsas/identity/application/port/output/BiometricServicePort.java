@@ -330,4 +330,90 @@ public interface BiometricServicePort {
      *         reason_code, message)
      */
     Map<String, Object> verifyPuzzleChallenge(Map<String, Object> request);
+
+    /**
+     * Creates a server-issued, single-use, anti-replay PUZZLE SESSION on the
+     * biometric-processor (CV-2 of the puzzle-as-login convergence — canonical
+     * contract in {@code docs/superpowers/plans/2026-06-12-puzzle-session-convergence.md}).
+     *
+     * <p>Thin proxy to bio {@code POST /api/v1/liveness/puzzle-session} with body
+     * {@code {tenant_id, user_id, allowed_challenge_types:[...], count, difficulty?}}.
+     * bio randomly selects {@code count} challenges from
+     * {@code allowedChallengeTypes} (server-randomized per attempt), stores the
+     * session state (owner-bound to {@code user_id}+{@code tenant_id}, short TTL,
+     * single-use) and returns {@code {session_id, challenges:[{action, params?}]}}.
+     *
+     * <p><b>Owner binding is SERVER-stamped.</b> The MFA-flow proxy MUST pass the
+     * {@code userId}/{@code tenantId} it resolved from the in-progress MFA session
+     * (never a client-supplied identity), so the issued session can only ever be
+     * verdicted for the authenticating user.
+     *
+     * <p><b>Fail-closed:</b> any transport error / non-2xx returns an
+     * {@code {success=false, message}} error map (no {@code session_id}) — the
+     * caller surfaces this as a failure, never a silent pass.
+     *
+     * @param tenantId  owning tenant (server-resolved from the MFA session)
+     * @param userId    owning user (server-resolved from the MFA session)
+     * @param allowedChallengeTypes the challenge types bio may choose from (face
+     *                  and/or hand); must be non-empty
+     * @param count     how many challenges to issue (1..10)
+     * @param difficulty optional difficulty hint (easy|standard|hard), or null
+     * @return the bio response map ({@code session_id} + {@code challenges}), or a
+     *         fail-closed error map on failure
+     */
+    Map<String, Object> createPuzzleSession(UUID tenantId,
+                                            UUID userId,
+                                            List<String> allowedChallengeTypes,
+                                            int count,
+                                            String difficulty);
+
+    /**
+     * Submits one completed challenge's traces to an existing puzzle session for
+     * per-challenge scoring (UX feedback — NOT the auth gate; that is
+     * {@link #getPuzzleVerdict}).
+     *
+     * <p>Thin proxy to bio
+     * {@code POST /api/v1/liveness/puzzle-session/{session_id}/challenge} with the
+     * caller's body {@code {action, metrics:{...}, start_timestamp_ms,
+     * end_timestamp_ms, confidence}} forwarded as-is. bio scores the traces
+     * against the ISSUED challenge (metric REQUIRED on this path), marks it
+     * complete, and returns {@code {verified, action, reason_code?}}. An unknown,
+     * expired, or consumed session yields a bio 404.
+     *
+     * <p><b>Fail-closed:</b> a 404 / other 4xx / 5xx / transport error returns an
+     * {@code {success=false, message}} error map (never a {@code verified:true}).
+     *
+     * @param sessionId the opaque server-issued session id (path)
+     * @param body the per-challenge submission (snake_case keys per the contract)
+     * @return the bio per-challenge verdict map, or a fail-closed error map
+     */
+    Map<String, Object> submitPuzzleChallenge(String sessionId, Map<String, Object> body);
+
+    /**
+     * Requests the AUTHORITATIVE verdict for a puzzle session — the auth gate —
+     * and CONSUMES the session (single-use).
+     *
+     * <p>Thin proxy to bio
+     * {@code POST /api/v1/liveness/puzzle-session/{session_id}/verdict} with body
+     * {@code {user_id, tenant_id}}. bio returns {@code {verified:bool}} =
+     * (all issued challenges server-validated) AND (session owner ==
+     * {@code user_id}+{@code tenant_id}) AND (not expired) AND (not already
+     * consumed); the session is consumed on this call, so a replay of a captured
+     * trace cannot pass (a second verdict returns false / 404).
+     *
+     * <p><b>Owner binding is SERVER-stamped.</b> {@code userId}/{@code tenantId}
+     * MUST be the values resolved from the in-progress MFA session, never a
+     * client-supplied identity — a session issued for A can never verdict B.
+     *
+     * <p><b>Fail-closed:</b> a 404 (unknown/expired) / other non-2xx / transport
+     * error returns an {@code {success=false, message}} error map (no
+     * {@code verified} key), which the handler treats as a hard fail.
+     *
+     * @param sessionId the opaque server-issued session id (path)
+     * @param userId    requesting user (server-resolved; must match session owner)
+     * @param tenantId  requesting tenant (server-resolved; must match session owner)
+     * @return the bio verdict map ({@code {verified:bool}}), or a fail-closed
+     *         error map on failure
+     */
+    Map<String, Object> getPuzzleVerdict(String sessionId, UUID userId, UUID tenantId);
 }

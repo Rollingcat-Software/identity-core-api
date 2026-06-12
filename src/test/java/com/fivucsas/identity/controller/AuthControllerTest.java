@@ -196,6 +196,9 @@ class AuthControllerTest {
     @MockBean
     private com.fivucsas.identity.application.service.LoginConfigService loginConfigService;
 
+    @MockBean
+    private com.fivucsas.identity.application.service.PuzzleLayerPolicy puzzleLayerPolicy;
+
     // Test Data
     private static final String TEST_EMAIL = "test@fivucsas.com";
     private static final String TEST_PASSWORD = "SecurePassword123!";

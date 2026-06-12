@@ -19,7 +19,16 @@ public enum AuthMethodType {
     // number-matching mode of the QR cross-device-approval method (task #16 G).
     PASSKEY,
     APPROVE_LOGIN,
-    // Verification pipeline step types
+    // PUZZLE liveness layer (sub-project B). A PUZZLE step proves liveness by
+    // re-scoring randomised challenge traces server-side; identity is provided
+    // by an embedding match (sub-project C). PUZZLE is a selectable LOGIN factor
+    // (unlike GESTURE_LIVENESS, which is a FACE sub-component and is never
+    // selectable). It is surfaced ONLY when PuzzleLayerPolicy is enabled —
+    // the ManageAuthMethodService filters it out of the catalog when the policy
+    // is OFF, so this enum value is present but invisible by default.
+    PUZZLE,
+    // Verification pipeline step types — NOT login factors. These must never
+    // appear in the /auth-methods catalog or the auth-flow builder.
     DOCUMENT_SCAN,
     NFC_CHIP_READ,
     DATA_EXTRACT,
@@ -40,8 +49,15 @@ public enum AuthMethodType {
      * liveness sub-component, never a standalone login factor), and must never be
      * offered as a selectable login method.
      *
+     * <p>PUZZLE is included here (it IS a login factor, not a pipeline step), but
+     * it is additionally gated by {@code PuzzleLayerPolicy}: when that policy is
+     * OFF the service layer filters PUZZLE out of every catalog response, so the
+     * set membership here is a necessary but not sufficient condition for a type
+     * to appear in the API. GESTURE_LIVENESS is deliberately absent from this set
+     * and has no auth_methods row — it is an active-liveness sub-component of FACE.
+     *
      * <p>Keep this list in lockstep with the documented login methods
-     * (api CLAUDE.md V73-V75) and the web {@code LOGIN_METHOD_TYPES} allow-list.
+     * (api CLAUDE.md V73-V75, V86) and the web {@code LOGIN_METHOD_TYPES} allow-list.
      */
     private static final Set<AuthMethodType> LOGIN_METHODS = EnumSet.of(
             PASSWORD,
@@ -55,13 +71,18 @@ public enum AuthMethodType {
             HARDWARE_KEY,
             QR_CODE,
             PASSKEY,
-            APPROVE_LOGIN
+            APPROVE_LOGIN,
+            PUZZLE
     );
 
     /**
      * True when this type is a login method (a factor usable to authenticate),
      * as opposed to a verification-pipeline step type. Drives the tenant
      * Auth-Methods list filter and the login-time enforcement gate.
+     *
+     * <p>Note: {@code PUZZLE} returns true here but is additionally gated by
+     * {@code PuzzleLayerPolicy}. When that policy is OFF the service layer
+     * suppresses PUZZLE from every catalog response.
      */
     public boolean isLoginMethod() {
         return LOGIN_METHODS.contains(this);

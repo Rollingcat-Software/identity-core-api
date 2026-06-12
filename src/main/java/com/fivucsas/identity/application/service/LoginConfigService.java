@@ -123,14 +123,20 @@ public class LoginConfigService {
         boolean identifierRequired = layer1Methods.isEmpty()
                 || !layer1Methods.stream().allMatch(LoginConfigResponse.Method::usernameless);
 
+        // Surface the raw step-level config blob so the runtime/frontend can
+        // read puzzleConfig (PUZZLE steps) and requireActivePuzzleLiveness
+        // (FACE steps) without the api having to parse the JSON shape.
+        String layer1Config = step1 != null ? emptyToNull(step1.getConfig()) : null;
+
         List<LoginConfigResponse.LaterStep> laterSteps = steps.stream()
                 .filter(s -> s.getStepOrder() > 1)
-                .map(s -> new LoginConfigResponse.LaterStep(s.getStepOrder(), toMethods(s)))
+                .map(s -> new LoginConfigResponse.LaterStep(
+                        s.getStepOrder(), toMethods(s), emptyToNull(s.getConfig())))
                 .toList();
 
         return new LoginConfigResponse(
                 tenantId.toString(), tenantName,
-                new LoginConfigResponse.Layer1(layer1Methods, identifierRequired),
+                new LoginConfigResponse.Layer1(layer1Methods, identifierRequired, layer1Config),
                 flow.getStepCount(),
                 laterSteps,
                 true);
@@ -188,5 +194,16 @@ public class LoginConfigService {
                 m.getType().name(),
                 m.isSupportsUsernameless(),
                 m.isRequiresEnrollment());
+    }
+
+    /**
+     * Returns {@code null} for a blank or empty-object step config so the
+     * login-config response does not clutter every step with an empty
+     * {@code "{}"} string when no config was set.
+     */
+    private static String emptyToNull(String config) {
+        if (config == null) return null;
+        String trimmed = config.trim();
+        return (trimmed.isEmpty() || "{}".equals(trimmed)) ? null : trimmed;
     }
 }

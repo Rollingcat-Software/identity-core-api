@@ -599,6 +599,105 @@ public class BiometricServiceAdapter implements BiometricServicePort {
         }
     }
 
+    @Override
+    public Map<String, Object> createPuzzleSession(UUID tenantId,
+                                                   UUID userId,
+                                                   List<String> allowedChallengeTypes,
+                                                   int count,
+                                                   String difficulty) {
+        log.info("Calling biometric service to create puzzle session for user: {} (tenant: {}, count: {})",
+                userId, tenantId, count);
+        // CV-2 canonical contract: bio POST /api/v1/liveness/puzzle-session
+        //   { tenant_id, user_id, allowed_challenge_types:[...], count, difficulty? }
+        // The path is relative to the configured base URL, which already carries
+        // the /api/v1 prefix at runtime (mirrors verifyPuzzleChallenge → /liveness/...).
+        // user_id + tenant_id are SERVER-stamped by the MFA-flow proxy — fail loud
+        // rather than POST a null owner the bio side would 422 on / leave unbound.
+        Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("tenant_id", java.util.Objects.requireNonNull(tenantId, "tenantId").toString());
+        body.put("user_id", java.util.Objects.requireNonNull(userId, "userId").toString());
+        body.put("allowed_challenge_types",
+                allowedChallengeTypes != null ? allowedChallengeTypes : java.util.List.of());
+        body.put("count", count);
+        if (difficulty != null && !difficulty.isBlank()) {
+            body.put("difficulty", difficulty);
+        }
+        try {
+            return postJsonObject("/liveness/puzzle-session", body);
+        } catch (HttpClientErrorException e) {
+            // Bio rejected the request (empty allowed types / bad count → 400/422).
+            // Fail-closed: no session_id, so the proxy returns a failure.
+            log.warn("Puzzle session create rejected by biometric service: {} {}",
+                    e.getStatusCode(), e.getMessage());
+            return errorResponse("Puzzle session create rejected: " + e.getResponseBodyAsString());
+        } catch (ResourceAccessException e) {
+            log.error("Biometric service unreachable for puzzle session create: {}", e.getMessage());
+            return errorResponse("Puzzle session service unavailable");
+        } catch (RestClientException e) {
+            log.error("Biometric service error for puzzle session create: {}", e.getMessage());
+            return errorResponse("Puzzle session service error");
+        }
+    }
+
+    @Override
+    public Map<String, Object> submitPuzzleChallenge(String sessionId, Map<String, Object> body) {
+        Object action = body != null ? body.get("action") : null;
+        log.debug("Calling biometric service to submit puzzle challenge: sessionId={}, action={}",
+                sessionId, action);
+        // CV-2 canonical contract: bio
+        //   POST /api/v1/liveness/puzzle-session/{session_id}/challenge
+        //   { action, metrics:{...}, start_timestamp_ms, end_timestamp_ms, confidence }
+        // The body is the client's submission forwarded as-is (per-challenge UX,
+        // not the auth gate). 404 = unknown/expired/consumed session.
+        try {
+            return postJsonObject(
+                    "/liveness/puzzle-session/" + sessionId + "/challenge",
+                    body != null ? body : Map.of());
+        } catch (HttpClientErrorException e) {
+            // 404 (unknown/expired/consumed) or other 4xx (malformed) — fail-closed:
+            // never synthesize a verified verdict for a rejected submission.
+            log.warn("Puzzle challenge submit rejected by biometric service: {} {}",
+                    e.getStatusCode(), e.getMessage());
+            return errorResponse("Puzzle challenge submit rejected: " + e.getResponseBodyAsString());
+        } catch (ResourceAccessException e) {
+            log.error("Biometric service unreachable for puzzle challenge submit: {}", e.getMessage());
+            return errorResponse("Puzzle session service unavailable");
+        } catch (RestClientException e) {
+            log.error("Biometric service error for puzzle challenge submit: {}", e.getMessage());
+            return errorResponse("Puzzle session service error");
+        }
+    }
+
+    @Override
+    public Map<String, Object> getPuzzleVerdict(String sessionId, UUID userId, UUID tenantId) {
+        log.info("Calling biometric service for puzzle session verdict: sessionId={}, user: {} (tenant: {})",
+                sessionId, userId, tenantId);
+        // CV-2 canonical contract (the AUTH GATE): bio
+        //   POST /api/v1/liveness/puzzle-session/{session_id}/verdict
+        //   { user_id, tenant_id }  → { verified: bool }; CONSUMES the session.
+        // user_id + tenant_id are SERVER-stamped (resolved from the MFA session by
+        // the PuzzleVerifyMfaStepHandler) — never client-supplied. Fail loud on a
+        // null owner rather than POST an unbound verdict request.
+        Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("user_id", java.util.Objects.requireNonNull(userId, "userId").toString());
+        body.put("tenant_id", java.util.Objects.requireNonNull(tenantId, "tenantId").toString());
+        try {
+            return postJsonObject("/liveness/puzzle-session/" + sessionId + "/verdict", body);
+        } catch (HttpClientErrorException e) {
+            // 404 = unknown/expired session (also single-use already-consumed) —
+            // fail-closed: the handler treats the absence of verified:true as a fail.
+            log.warn("Puzzle session verdict rejected by biometric service: {} {}",
+                    e.getStatusCode(), e.getMessage());
+            return errorResponse("Puzzle session verdict rejected: " + e.getResponseBodyAsString());
+        } catch (ResourceAccessException e) {
+            log.error("Biometric service unreachable for puzzle session verdict: {}", e.getMessage());
+            return errorResponse("Puzzle session service unavailable");
+        } catch (RestClientException e) {
+            log.error("Biometric service error for puzzle session verdict: {}", e.getMessage());
+            return errorResponse("Puzzle session service error");
+        }
+    }
+
     /** Builds a {@code VerifyChallengeResponse}-shaped verdict map for the puzzle proxy. */
     private Map<String, Object> puzzleVerdict(boolean verified, Object action,
                                               String reasonCode, String message) {
