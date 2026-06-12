@@ -67,11 +67,13 @@ public class EnrollBiometricService implements EnrollBiometricUseCase {
         // Mirror FaceVerifyMfaStepHandler's predicate exactly: an embedding is
         // routed to the new endpoint ONLY when one is present AND the policy is
         // ON for the tenant; otherwise the legacy image enroll is used unchanged.
-        // TODO Phase 6: this branch is unreachable until a JSON enroll endpoint
-        //  populates command.embedding (the multipart enroll controller cannot
-        //  carry a List<Double>). Until that endpoint exists, hasEmbedding is
-        //  always false so the legacy image path below runs unconditionally.
-        if (hasEmbedding && isEmbeddingPathEnabled(command.getTenantId())) {
+        // Phase 6: this branch is now reachable — the JSON enroll endpoint
+        // (POST /api/v1/biometric/enroll-embedding/{userId}) populates
+        // command.embedding (the multipart enroll controller cannot carry a
+        // List<Double>). The controller already fail-closes when the policy is
+        // OFF for the tenant, so a JSON request with the flag off never reaches
+        // here with an embedding; the policy re-check below is defense-in-depth.
+        if (hasEmbedding && clientSideEmbeddingPolicy.isEnabledForTenant(command.getTenantId())) {
             response = biometricService.enrollEmbedding(command.getTenantId(), userId, embedding);
         } else {
             // Call external biometric service. Forward tenant_id +
@@ -211,27 +213,6 @@ public class EnrollBiometricService implements EnrollBiometricUseCase {
             user.enrollBiometric();
             userDomainRepository.save(user);
             log.info("Marked user {} biometric-enrolled (multi-image enroll path)", userId);
-        }
-    }
-
-    /**
-     * Whether the client-side-embedding enroll path is enabled for the (optional,
-     * String) tenant id on the command. Uses the global master switch, falling
-     * back to the per-tenant canary list when the tenant id parses to a UUID. A
-     * null / non-UUID tenant id only ever takes the embedding path under the
-     * GLOBAL switch — never via the canary list.
-     */
-    private boolean isEmbeddingPathEnabled(String tenantId) {
-        if (clientSideEmbeddingPolicy.isEnabled()) {
-            return true;
-        }
-        if (tenantId == null || tenantId.isBlank()) {
-            return false;
-        }
-        try {
-            return clientSideEmbeddingPolicy.isEnabledForTenant(UUID.fromString(tenantId.trim()));
-        } catch (IllegalArgumentException e) {
-            return false;
         }
     }
 
