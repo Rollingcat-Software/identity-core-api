@@ -71,6 +71,19 @@ services:
       # → canary one tenant (set _TENANTS to its UUID) → global (_LOGIN=true).
       APP_AUTH_CONFIG_DRIVEN_LOGIN: ${APP_AUTH_CONFIG_DRIVEN_LOGIN:-false}
       APP_AUTH_CONFIG_DRIVEN_LOGIN_TENANTS: ${APP_AUTH_CONFIG_DRIVEN_LOGIN_TENANTS:-}
+      # Client-side face embedding (SP-A go-live). MUST be listed here — explicit
+      # environment: block, NOT env_file:, so a var only in .env.prod is NOT passed
+      # into the container. THIS GAP made the flag dead: the server logged
+      # `missing_face_image` on every face login because the handler's embedding
+      # path never engaged (app.auth.client-side-embedding fell back to its default
+      # false), even though .env.prod set it true. When ON, the browser computes the
+      # Facenet512 vector and the server does ONLY a pgvector cosine compare (GPU-less,
+      # scales) — the raw image never leaves the device. Default OFF = legacy
+      # server-side MTCNN+Facenet512 image path. Reversible via .env.prod + `up -d`
+      # recreate (no rebuild). Canary one tenant via _TENANTS=<uuid>. Pair ordering:
+      # this (identity) flag ON before web VITE_CLIENT_SIDE_EMBEDDING.
+      APP_AUTH_CLIENT_SIDE_EMBEDDING: ${APP_AUTH_CLIENT_SIDE_EMBEDDING:-false}
+      APP_AUTH_CLIENT_SIDE_EMBEDDING_TENANTS: ${APP_AUTH_CLIENT_SIDE_EMBEDDING_TENANTS:-}
       # NFC serial-only login (2026-06-01). MUST be listed here — the service uses an
       # explicit `environment:` block, NOT `env_file:`, so a var only in .env.prod is
       # NOT passed into the container (this exact gap left the flag dead after the
