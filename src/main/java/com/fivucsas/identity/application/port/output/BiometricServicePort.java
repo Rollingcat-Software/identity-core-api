@@ -260,6 +260,52 @@ public interface BiometricServicePort {
     boolean hasEnrollment(UUID userId, String tenantId);
 
     /**
+     * Probes whether the bio VOICE store actually holds a voiceprint for the
+     * given user — the authoritative existence check used by
+     * {@code EnrollmentHealthService} to stop FAKING VOICE/FACE as always-enrolled
+     * (login triage F2/F7). Routes to bio {@code GET /voice/{userId}/exists},
+     * which returns {@code {user_id, exists}} via a cheap {@code SELECT EXISTS(...)}
+     * — no inference, no vector decrypt.
+     *
+     * <p><b>Tri-state by design.</b> A definitive 200 verdict returns
+     * {@code TRUE}/{@code FALSE}. A transport error / unreachable service / 5xx /
+     * malformed response returns {@code null} (= UNKNOWN), so the caller can
+     * fail-OPEN on a bio OUTAGE (don't lock everyone out) while still honouring a
+     * definitive {@code exists:false}. Voice verify is not tenant-scoped, so this
+     * probe is by {@code userId} only.</p>
+     *
+     * @param userId the user to probe
+     * @return {@code TRUE} if a voiceprint is confirmed present, {@code FALSE} if
+     *         confirmed absent, {@code null} if the bio service could not give a
+     *         definitive answer (outage/error)
+     */
+    Boolean voiceEnrollmentExists(UUID userId);
+
+    /**
+     * Probes whether the bio FACE store actually holds an embedding for the given
+     * user under the given tenant — the authoritative existence check used by
+     * {@code EnrollmentHealthService} (login triage F9 "fake-enrolled" trap).
+     * Routes to bio {@code GET /face/{userId}/exists} (optional {@code ?tenant_id=}
+     * for verify-path parity), which returns {@code {user_id, exists}} via a cheap
+     * {@code SELECT EXISTS(...)}.
+     *
+     * <p><b>Tri-state by design</b> — same contract as
+     * {@link #voiceEnrollmentExists}: {@code TRUE}/{@code FALSE} on a definitive
+     * 200; {@code null} (UNKNOWN) on transport/5xx so the caller can fail-OPEN on
+     * a bio outage. Distinct from {@link #hasEnrollment} (which is a fail-CLOSED
+     * 1:N {@code /embeddings/export} listing for the flag reconciler); this is a
+     * direct, fail-open-on-outage 1:1 existence probe for live login routing.</p>
+     *
+     * @param userId   the user to probe
+     * @param tenantId the tenant the embedding is scoped to (null/blank → bio
+     *                 default tenant)
+     * @return {@code TRUE} if a face embedding is confirmed present, {@code FALSE}
+     *         if confirmed absent, {@code null} if the bio service could not give a
+     *         definitive answer (outage/error)
+     */
+    Boolean faceEnrollmentExists(UUID userId, String tenantId);
+
+    /**
      * Verifies the passive-authentication (chip-authenticity) of an eMRTD
      * (electronic passport / TR e-ID) by validating the {@code EF.SOD} →
      * Document Signer → CSCA certificate chain and that the supplied Data Group
