@@ -45,22 +45,33 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * Adversarial cross-tenant ISOLATION integration tests for the tenant-scoped
- * admin <b>list</b> endpoints that do NOT yet carry a Hibernate {@code @Filter}
- * and rely SOLELY on controller-level {@link TenantScopeResolver#currentScope()}
- * scoping: audit-logs, auth-sessions, devices, enrollments, verification
- * sessions and verification flows.
+ * admin <b>list</b> endpoints: audit-logs, auth-sessions, devices, enrollments,
+ * verification sessions and verification flows.
  *
- * <p><b>Why this exists (P0-1 STEP 1 — TEST-FIRST).</b> A later task will add the
- * Hibernate {@code tenantFilter} to {@code AuditLog}, {@code AuthSession},
+ * <p><b>History &amp; current design (READ THIS before "fixing" a failure here).</b>
+ * This suite was first written (PR #132) when these six entities relied SOLELY on
+ * controller-level {@link TenantScopeResolver#currentScope()} scoping and did NOT
+ * carry a Hibernate {@code @Filter} — at which point a header-less ROOT
+ * ({@code currentScope()==null}) genuinely saw EVERY tenant's rows. That changed
+ * with <b>PR #134 (P0-1 tenant-isolation defense-in-depth)</b>, which added the
+ * Hibernate {@code @Filter(tenantFilter)} to {@code AuditLog}, {@code AuthSession},
  * {@code MfaSession}, {@code UserEnrollment}, {@code VerificationSession},
- * {@code OAuth2Client}, {@code UserDevice} and {@code AuthFlow} (today only
- * {@code User} + {@code Role} carry it). These tests capture the CURRENT
- * cross-tenant behaviour BEFORE that change so the @Filter rollout can be proven
- * not to regress isolation — and so we can document which entities are already
- * safe via controller-scoping vs which truly NEED the filter.</p>
+ * {@code OAuth2Client}, {@code UserDevice} and {@code AuthFlow} (joining
+ * {@code User} + {@code Role}). The filter is enabled by {@code TenantHibernateAspect}
+ * whenever {@code TenantContext} holds a tenant — for EVERY caller, ROOT included —
+ * so these list queries are now scoped to the active tenant at the persistence
+ * layer regardless of the controller's {@code currentScope()} verdict.</p>
  *
- * <p><b>What each endpoint is checked against</b> (the four scenarios from the
- * hardening roadmap):
+ * <p><b>Behaviour change shipped by #134 (the documented intent):</b> a header-less
+ * ROOT now scopes these reads to their HOME tenant (the system tenant their row
+ * lives in), exactly like {@code /users}. TRUE platform-wide / cross-tenant access
+ * is no longer automatic — it requires either an explicit {@code X-Tenant-ID}
+ * switch (scenario 3 below) or an explicit
+ * {@code TenantFilterBypass.runWithoutTenantFilter(...)} under a foreign-tenant
+ * scope. The web dashboard ALWAYS sends {@code X-Tenant-ID} (defaulting to home),
+ * so the UI is unaffected.</p>
+ *
+ * <p><b>What each endpoint is checked against:</b>
  * <ol>
  *   <li>TENANT_ADMIN of A, no header → sees ONLY A's rows.</li>
  *   <li>TENANT_ADMIN of A + foreign {@code X-Tenant-ID: B} → STILL sees ONLY A's
@@ -68,7 +79,11 @@ import static org.assertj.core.api.Assertions.assertThat;
  *       for a non-ROOT. Assertions here are written to the SECURE
  *       expectation; a failure is a genuine LEAK finding, not a test bug.</li>
  *   <li>ROOT + {@code X-Tenant-ID: B} → sees B's rows (switch works).</li>
- *   <li>ROOT + no header → cross-tenant / platform-wide per current code.</li>
+ *   <li>ROOT + no header → scopes to the ROOT's HOME (system) tenant via the
+ *       {@code tenantFilter}; it does NOT auto-show A and B. This pins the
+ *       post-#134 contract (was platform-wide before #134). True cross-tenant
+ *       enumeration is asserted separately via an explicit {@code TenantFilterBypass}
+ *       — see {@code superAdminBypassFilter_seesAllTenants} on each endpoint.</li>
  * </ol></p>
  *
  * <p>This drives the REAL controllers as Spring beans (so the same
@@ -109,6 +124,10 @@ class CrossTenantIsolationIT {
     @Autowired private DeviceController deviceController;
     @Autowired private EnrollmentController enrollmentController;
     @Autowired private VerificationController verificationController;
+    // The documented all-tenant mechanism post-#134: an explicit bypass of the
+    // Hibernate tenantFilter. Scenario (4) uses it to prove TRUE cross-tenant
+    // enumeration still works for a ROOT (vs the home-scoped default).
+    @Autowired private com.fivucsas.identity.infrastructure.multitenancy.TenantFilterBypass tenantFilterBypass;
 
     private UUID systemTenant;   // where ROOT lives
     private UUID tenantA;        // tenant-admin's home
@@ -210,10 +229,21 @@ class CrossTenantIsolationIT {
         }
 
         @Test @Transactional
-        @DisplayName("(4) ROOT + no header → cross-tenant (sees both A and B)")
+        @DisplayName("(4) ROOT + no header → home-scoped via tenantFilter (NOT A/B); explicit bypass sees both (#134)")
         void superAdminNoHeader_crossTenant() {
+            // Post-#134: a header-less ROOT pins TenantContext to its HOME (system)
+            // tenant, so the Hibernate tenantFilter scopes audit-logs to the system
+            // tenant — which has none of A's/B's rows. Header-less ROOT is NO LONGER
+            // platform-wide for @Filter entities (was, pre-#134).
             asSuperAdmin(null);
             assertThat(auditLogTenantIds())
+                    .as("header-less ROOT is home-scoped by the tenantFilter (#134), not cross-tenant")
+                    .doesNotContain(tenantA.toString(), tenantB.toString());
+            // TRUE cross-tenant access is still available — via the documented
+            // explicit TenantFilterBypass (the same mechanism platform-wide reads use).
+            List<String> allTenants = tenantFilterBypass.runWithoutTenantFilter(this::auditLogTenantIds);
+            assertThat(allTenants)
+                    .as("explicit TenantFilterBypass yields true cross-tenant enumeration")
                     .contains(tenantA.toString(), tenantB.toString());
         }
 
@@ -259,10 +289,18 @@ class CrossTenantIsolationIT {
         }
 
         @Test @Transactional
-        @DisplayName("(4) ROOT + no header → platform-wide (sees both A and B)")
+        @DisplayName("(4) ROOT + no header → home-scoped via tenantFilter (NOT A/B); explicit bypass sees both (#134)")
         void superAdminNoHeader_crossTenant() {
+            // Post-#134: header-less ROOT is scoped to HOME by the tenantFilter (see
+            // class Javadoc), so it sees neither A's nor B's auth sessions.
             asSuperAdmin(null);
-            assertThat(sessionTenantIds()).contains(tenantA, tenantB);
+            assertThat(sessionTenantIds())
+                    .as("header-less ROOT is home-scoped by the tenantFilter (#134), not cross-tenant")
+                    .doesNotContain(tenantA, tenantB);
+            List<UUID> allTenants = tenantFilterBypass.runWithoutTenantFilter(this::sessionTenantIds);
+            assertThat(allTenants)
+                    .as("explicit TenantFilterBypass yields true cross-tenant enumeration")
+                    .contains(tenantA, tenantB);
         }
 
         @SuppressWarnings("unchecked")
@@ -312,10 +350,18 @@ class CrossTenantIsolationIT {
         }
 
         @Test @Transactional
-        @DisplayName("(4) ROOT + no header → all devices (sees both A and B)")
+        @DisplayName("(4) ROOT + no header → home-scoped via tenantFilter (NOT A/B); explicit bypass sees both (#134)")
         void superAdminNoHeader_crossTenant() {
+            // Post-#134: header-less ROOT is scoped to HOME by the tenantFilter (see
+            // class Javadoc), so it sees neither A's nor B's devices.
             asSuperAdmin(null);
-            assertThat(deviceNames()).contains("device-A", "device-B");
+            assertThat(deviceNames())
+                    .as("header-less ROOT is home-scoped by the tenantFilter (#134), not cross-tenant")
+                    .doesNotContain("device-A", "device-B");
+            List<String> allDevices = tenantFilterBypass.runWithoutTenantFilter(this::deviceNames);
+            assertThat(allDevices)
+                    .as("explicit TenantFilterBypass yields true cross-tenant enumeration")
+                    .contains("device-A", "device-B");
         }
 
         private List<String> deviceNames() {
@@ -357,10 +403,18 @@ class CrossTenantIsolationIT {
         }
 
         @Test @Transactional
-        @DisplayName("(4) ROOT + no header → cross-tenant (sees both A and B)")
+        @DisplayName("(4) ROOT + no header → home-scoped via tenantFilter (NOT A/B); explicit bypass sees both (#134)")
         void superAdminNoHeader_crossTenant() {
+            // Post-#134: header-less ROOT is scoped to HOME by the tenantFilter (see
+            // class Javadoc), so it sees neither A's nor B's enrollments.
             asSuperAdmin(null);
-            assertThat(enrollmentTenantIds()).contains(tenantA.toString(), tenantB.toString());
+            assertThat(enrollmentTenantIds())
+                    .as("header-less ROOT is home-scoped by the tenantFilter (#134), not cross-tenant")
+                    .doesNotContain(tenantA.toString(), tenantB.toString());
+            List<String> allTenants = tenantFilterBypass.runWithoutTenantFilter(this::enrollmentTenantIds);
+            assertThat(allTenants)
+                    .as("explicit TenantFilterBypass yields true cross-tenant enumeration")
+                    .contains(tenantA.toString(), tenantB.toString());
         }
 
         private List<String> enrollmentTenantIds() {
@@ -402,10 +456,18 @@ class CrossTenantIsolationIT {
         }
 
         @Test @Transactional
-        @DisplayName("(4) ROOT + no header → platform-wide (sees both A and B)")
+        @DisplayName("(4) ROOT + no header → home-scoped via tenantFilter (NOT A/B); explicit bypass sees both (#134)")
         void superAdminNoHeader_crossTenant() {
+            // Post-#134: header-less ROOT is scoped to HOME by the tenantFilter (see
+            // class Javadoc), so it sees neither A's nor B's verification sessions.
             asSuperAdmin(null);
-            assertThat(verifSessionTenantIds()).contains(tenantA, tenantB);
+            assertThat(verifSessionTenantIds())
+                    .as("header-less ROOT is home-scoped by the tenantFilter (#134), not cross-tenant")
+                    .doesNotContain(tenantA, tenantB);
+            List<UUID> allTenants = tenantFilterBypass.runWithoutTenantFilter(this::verifSessionTenantIds);
+            assertThat(allTenants)
+                    .as("explicit TenantFilterBypass yields true cross-tenant enumeration")
+                    .contains(tenantA, tenantB);
         }
 
         private List<UUID> verifSessionTenantIds() {
@@ -448,10 +510,21 @@ class CrossTenantIsolationIT {
         }
 
         @Test @Transactional
-        @DisplayName("(4) ROOT + no header → platform-wide (sees both A and B verification flows)")
+        @DisplayName("(4) ROOT + no header → home-scoped via tenantFilter (NOT A/B); explicit bypass sees both (#134)")
         void superAdminNoHeader_crossTenant() {
+            // Post-#134: header-less ROOT is scoped to HOME by the tenantFilter (see
+            // class Javadoc), so it sees neither A's nor B's verification flows.
+            // NOTE: verification flows are additionally PATH-scoped by the controller
+            // to the active X-Tenant-ID; with no header the active tenant is the
+            // ROOT's home (system) tenant, which owns none of A's/B's flows.
             asSuperAdmin(null);
-            assertThat(flowTenantIds()).contains(tenantA, tenantB);
+            assertThat(flowTenantIds())
+                    .as("header-less ROOT is home-scoped by the tenantFilter (#134), not cross-tenant")
+                    .doesNotContain(tenantA, tenantB);
+            List<UUID> allTenants = tenantFilterBypass.runWithoutTenantFilter(this::flowTenantIds);
+            assertThat(allTenants)
+                    .as("explicit TenantFilterBypass yields true cross-tenant enumeration")
+                    .contains(tenantA, tenantB);
         }
 
         private List<UUID> flowTenantIds() {

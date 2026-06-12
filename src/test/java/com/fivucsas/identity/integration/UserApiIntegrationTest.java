@@ -5,6 +5,7 @@ import com.fivucsas.identity.dto.LoginRequest;
 import com.fivucsas.identity.dto.RegisterRequest;
 import com.fivucsas.identity.repository.RefreshTokenRepository;
 import com.fivucsas.identity.repository.UserRepository;
+import com.fivucsas.identity.security.RateLimitService;
 import com.fivucsas.identity.service.RefreshTokenService;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
@@ -83,6 +84,16 @@ class UserApiIntegrationTest {
     @Autowired
     private RefreshTokenService refreshTokenService;
 
+    @Autowired
+    private RateLimitService rateLimitService;
+
+    /**
+     * Loopback IP that {@link org.springframework.mock.web.MockHttpServletRequest}
+     * reports for every MockMvc call (no {@code X-Forwarded-For} is sent), so it is
+     * the bucket key {@code RateLimitInterceptor} throttles against.
+     */
+    private static final String MOCK_MVC_CLIENT_IP = "127.0.0.1";
+
     private static final String API_EMAIL    = "apitest@fivucsas.com";
     private static final String API_PASSWORD = "ApiTest123!";
     private static final String FIRST_NAME   = "Api";
@@ -105,6 +116,17 @@ class UserApiIntegrationTest {
             refreshTokenService.revokeAllUserTokens(user);
             userRepository.delete(user);
         });
+        // Test isolation for the IP-keyed rate limiter. Every test in this class
+        // hits /auth/register and/or /auth/login from the SAME MockMvc loopback IP,
+        // and the production buckets are tiny (registration = 5/hour, login = 10/5min
+        // per IP) and span the whole class run. Without a reset the shared
+        // registerViaApi helper trips REGISTRATION after the 5th test and the rest
+        // cascade into HTTP 429 — a test-isolation artifact, NOT a product bug. Drop
+        // the per-IP buckets before each test so each starts with a full allowance.
+        // This only clears the in-memory test buckets; it does NOT weaken production
+        // rate-limiting (the limits themselves are unchanged).
+        rateLimitService.resetRateLimit(MOCK_MVC_CLIENT_IP, RateLimitService.RateLimitType.REGISTRATION);
+        rateLimitService.resetRateLimit(MOCK_MVC_CLIENT_IP, RateLimitService.RateLimitType.LOGIN);
         // Reset shared state
         registeredUserId = null;
         accessToken = null;
@@ -117,15 +139,18 @@ class UserApiIntegrationTest {
 
     @Test
     @Order(1)
-    @DisplayName("register_WhenValidRequest_ShouldReturn200WithTokens")
+    @DisplayName("register_WhenValidRequest_ShouldReturn201WithTokens")
     void register_WhenValidRequest_ShouldReturn200WithTokens() throws Exception {
         RegisterRequest request = buildRegisterRequest(API_EMAIL, API_PASSWORD, FIRST_NAME, LAST_NAME);
 
+        // POST /auth/register returns 201 Created (AuthController#register ->
+        // ResponseEntity.status(HttpStatus.CREATED)), not 200. The prior 200
+        // expectation was masked while the suite failed earlier with 422/429.
         mockMvc.perform(post("/api/v1/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
                 .andDo(print())
-                .andExpect(status().isOk())
+                .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.accessToken").isNotEmpty())
                 .andExpect(jsonPath("$.refreshToken").isNotEmpty())
                 .andExpect(jsonPath("$.tokenType").value("Bearer"))
@@ -142,11 +167,11 @@ class UserApiIntegrationTest {
     void register_WhenDuplicateEmail_ShouldReturn409() throws Exception {
         RegisterRequest request = buildRegisterRequest(API_EMAIL, API_PASSWORD, FIRST_NAME, LAST_NAME);
 
-        // First registration
+        // First registration — 201 Created (see register_WhenValidRequest note).
         mockMvc.perform(post("/api/v1/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
-                .andExpect(status().isOk());
+                .andExpect(status().isCreated());
 
         // Duplicate registration with the same email
         mockMvc.perform(post("/api/v1/auth/register")
@@ -334,18 +359,25 @@ class UserApiIntegrationTest {
 
     @Test
     @Order(13)
-    @DisplayName("logout_WhenValidRefreshToken_ShouldReturn200AndRevokeToken")
+    @DisplayName("logout_WhenValidRefreshToken_ShouldReturn204AndRevokeToken")
     void logout_WhenValidRefreshToken_ShouldReturn200AndRevokeToken() throws Exception {
         MvcResult loginResult = registerAndLoginMvcResult(API_EMAIL, API_PASSWORD);
         String loginBody = loginResult.getResponse().getContentAsString();
         String rt = objectMapper.readTree(loginBody).get("refreshToken").asText();
+        String at = objectMapper.readTree(loginBody).get("accessToken").asText();
 
         String logoutBody = "{\"refreshToken\":\"" + rt + "\"}";
 
+        // /auth/logout is an AUTHENTICATED endpoint (it reads authentication.getName()
+        // to scope the revocation) and returns 204 No Content
+        // (AuthController#logout -> ResponseEntity.noContent()). Send the Bearer
+        // access token and expect 204. The prior no-auth + 200 expectation was
+        // masked while the suite failed earlier with 422/429.
         mockMvc.perform(post("/api/v1/auth/logout")
+                        .header("Authorization", "Bearer " + at)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(logoutBody))
-                .andExpect(status().isOk());
+                .andExpect(status().isNoContent());
 
         // After logout the refresh token must be revoked; a refresh attempt should fail
         mockMvc.perform(post("/api/v1/auth/refresh")
@@ -456,13 +488,14 @@ class UserApiIntegrationTest {
 
     /**
      * Register a user via the REST API and discard the response body.
+     * {@code POST /auth/register} returns 201 Created.
      */
     private void registerViaApi(String email, String password) throws Exception {
         RegisterRequest request = buildRegisterRequest(email, password, FIRST_NAME, LAST_NAME);
         mockMvc.perform(post("/api/v1/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
-                .andExpect(status().isOk());
+                .andExpect(status().isCreated());
     }
 
     /**
