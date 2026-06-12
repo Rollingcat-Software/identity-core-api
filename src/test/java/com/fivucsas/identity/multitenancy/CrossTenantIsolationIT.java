@@ -589,6 +589,8 @@ class CrossTenantIsolationIT {
                 "INSERT INTO verification_sessions (id, user_id, tenant_id, flow_id, status, " +
                 "current_step_number, started_at, created_at, updated_at) " +
                 "VALUES (?, ?, ?, ?, 'PENDING', 0, ?, NOW(), NOW())",
-                UUID.randomUUID(), userId, tenantId, flowId, Instant.now());
+                // PG JDBC can't infer the SQL type for a raw java.time.Instant; bind a
+                // JDBC-friendly java.sql.Timestamp (same idiom as SoftDeletePurgeJobConcurrencyTest).
+                UUID.randomUUID(), userId, tenantId, flowId, java.sql.Timestamp.from(Instant.now()));
     }
 }
