@@ -32,6 +32,7 @@ public class ManageAuthMethodService implements ManageAuthMethodUseCase {
     private final TenantAuthMethodRepositoryPort tenantAuthMethodRepository;
     private final JpaTenantRepository tenantRepository;
     private final AuthFlowRepositoryPort authFlowRepository;
+    private final PuzzleLayerPolicy puzzleLayerPolicy;
 
     @Override
     public List<AuthMethodResponse> listAllMethods() {
@@ -42,8 +43,11 @@ public class ManageAuthMethodService implements ManageAuthMethodUseCase {
         // surface (VerificationRepository / VerificationFlowBuilderPage) and
         // must never appear as a selectable LOGIN method. GESTURE_LIVENESS is a
         // FACE liveness sub-component (no handler) and is likewise excluded.
+        // PUZZLE is additionally gated by PuzzleLayerPolicy — when the flag is
+        // OFF it is suppressed from the catalog even though isLoginMethod()=true.
         return authMethodRepository.findAllByIsActiveTrue().stream()
                 .filter(m -> m.getType() != null && m.getType().isLoginMethod())
+                .filter(m -> m.getType() != AuthMethodType.PUZZLE || puzzleLayerPolicy.isGloballyEnabled())
                 .map(AuthMethodResponse::from)
                 .toList();
     }
@@ -60,11 +64,14 @@ public class ManageAuthMethodService implements ManageAuthMethodUseCase {
         // LOGIN methods only — symmetric with listAllMethods(): the tenant
         // Auth-Methods toggle view never shows verification-pipeline step types
         // (so a stale tenant_auth_methods row for a non-login type can't leak
-        // into the toggle list).
+        // into the toggle list). PUZZLE is additionally suppressed when the
+        // PuzzleLayerPolicy is not enabled for this tenant.
         return tenantAuthMethodRepository.findAllByTenantId(tenantId).stream()
                 .filter(tm -> tm.getAuthMethod() != null
                         && tm.getAuthMethod().getType() != null
                         && tm.getAuthMethod().getType().isLoginMethod())
+                .filter(tm -> tm.getAuthMethod().getType() != AuthMethodType.PUZZLE
+                        || puzzleLayerPolicy.isEnabledFor(tenantId))
                 .map(TenantAuthMethodResponse::from)
                 .toList();
     }
