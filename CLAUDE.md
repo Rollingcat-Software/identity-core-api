@@ -20,12 +20,21 @@ Key facts after the merge:
 - **Unit suite is GREEN: `mvn -o test` → 1670 run / 0 fail / 0 error / 67 skip.** (Run on
   JDK 21 — the default `java` on PATH is JDK 8 and will fail. The 67 skipped are
   Testcontainers/DB integration tests, not runnable with Docker off.)
-- **Integration lane is PRE-EXISTING BROKEN.** `Integration tests (Testcontainers)` is one
-  of the two required status checks on `main` and is broadly red in CI
-  (`AuthenticationFlowIntegrationTest`, `UserApiIntegrationTest`, `CrossTenantIsolationIT`).
-  This is environmental and predates these PRs. **`enforce_admins=false` on `main`, so
-  admin-merge (`--admin`) is the current norm** until the lane is restored — the
-  integration safety-net is effectively down. Tracked as `TODO.md` [P0].
+- **Integration lane RESTORED — GREEN (2026-06-12, PR #221).** `Integration tests
+  (Testcontainers)` now passes **94 run / 0 fail / 0 error / 0 skip**, so BOTH required
+  checks on `main` (`Maven test (unit)` + `Integration tests (Testcontainers)`) are green
+  and **`--admin` is no longer needed for api merges.** The red was NOT environmental —
+  it was test-only staleness + a latent CI-guard bug (see `TODO.md` → Resolved). Fixes
+  (all test/CI-only, NO production change): (1) #220 Instant→Timestamp fixture; (2) stale
+  `CrossTenantIsolationIT.superAdminNoHeader_crossTenant` ×6 — they predate PR #134's
+  `@Filter(tenantFilter)` rollout, so a header-less ROOT now scopes to HOME (NOT a leak),
+  test updated + true cross-tenant proven via explicit `TenantFilterBypass`; (3) register
+  ITs got `EmailDomainNotAllowed` → `app.default-tenant-slug` points at a test-only
+  `default` catch-all tenant (`db/test-fixtures/V86_5__…`, single-step PASSWORD flow);
+  (4) 429 cascade → reset per-IP rate-limit buckets `@BeforeEach`; (5) register expects
+  201 (not 200), logout is authenticated + 204 (not anon 200); (6) the CI guard now sums
+  JUnit `@Nested` surefire shards. **Do NOT use the `system` tenant as the IT catch-all**
+  — V29 gives it a 2-step PASSWORD+EMAIL_OTP flow, so login returns an MFA challenge.
 - **ArchUnit `entity.User` boundary baseline was refrozen** during the #211 merge
   (18 stale lines removed, 0 grandfathered) — a legitimate refreeze of a line-number
   baseline that had drifted against `main`, not a suppression of new violations.
@@ -348,16 +357,18 @@ UI redesign reverts with the env flag and no web redeploy.
   right after a trigger-populated insert no longer flushes `identity_id=NULL` (V70 is NOT NULL).
   Nothing persists the association (account-linking = native query; seeds = raw JDBC), so it is
   safe. Pattern: never let a JPA association OWN a column a DB trigger/native query owns.
-- **Integration-test gate — one-time exception + being genuinely greened.** The
+- **Integration-test gate — NOW GREEN (2026-06-12, PR #221); historical context below.**
+  → See the **"Integration lane RESTORED"** bullet at the top of this file. The gate is
+  green (94/0/0) and `--admin` is no longer needed. The history: the
   `Integration tests (Testcontainers)` gate is REQUIRED (P1-1, #155) but was NEVER green
   (deep pre-existing test-infra rot). The operator authorized a **ONE-TIME admin-merge
   exception** for the four orthogonal auth PRs (#159/#160/#161 + web #137), with manual
   cross-tenant staging smoke; the gate stays REQUIRED for everyone else. PR #160 began
   genuinely greening it (RSA ephemeral in the integration profile, IT NOT-NULL slug, dup
   tenant slug, JWT secret length, Redis service, `identity_id` seeding, `User.identity`
-  entity fix + teardown soft-deletes). Remaining causes tracked: `java.time.Instant` JDBC
-  bind in seeds, `unique_tenant_email` seed collisions, CI not running bio `:8001` / Redis
-  `:6379`. **Do NOT treat the gate as trustworthy until that task closes.** This Hetzner box
+  entity fix + teardown soft-deletes); #220 fixed the Instant→Timestamp fixture; **#221
+  finished it** (stale cross-tenant expectations, default-tenant catch-all, rate-limit
+  isolation, 201/204 status fixes, `@Nested` surefire-guard fix). This Hetzner box
   cannot run Testcontainers ITs (no Docker socket for TC in the sandboxed shell) — verify
   ITs via CI.
 - **Identity & account-linking Phases 1-5 ALL DEPLOYED + ROOT role/user_type

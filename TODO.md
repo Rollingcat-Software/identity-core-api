@@ -5,26 +5,40 @@
 > checkbox format of `web-app/TODO.md`.
 
 **Current branch:** `main`
-**Last updated:** 2026-06-07
+**Last updated:** 2026-06-12
 
 ---
 
+## Resolved — 2026-06-12
+
+### [P0 — CI HEALTH] Restore the Testcontainers integration test lane ✅ DONE (PR #221)
+
+- [x] **Restored the Testcontainers integration test lane (required check on `main`).**
+  `Integration tests (Testcontainers)` is GREEN: **94 run / 0 fail / 0 error / 0 skip**.
+  The red was NOT environmental — it was test-only staleness + a latent CI-guard bug,
+  fixed in PR #221 (#220 first cut errors 29→5 with the Instant→Timestamp fixture fix):
+  - `CrossTenantIsolationIT.superAdminNoHeader_crossTenant` (×6): STALE expectation. The
+    suite (PR #132) predates PR #134, which added the Hibernate `@Filter(tenantFilter)` to
+    these six entities. Post-#134 a header-less ROOT scopes to its HOME tenant (the
+    documented #134 behaviour change), so it no longer auto-sees all tenants. Updated the
+    test to assert the current contract + prove true cross-tenant via the explicit
+    `TenantFilterBypass`. **Not a product bug** — the production isolation is correct.
+  - `AuthenticationFlowIntegrationTest` (5) + `UserApiIntegrationTest` register 422s:
+    `EmailDomainNotAllowed`. The ITs self-register `@fivucsas.com` with no tenant context;
+    pointed `app.default-tenant-slug` at a test-only `default` catch-all tenant
+    (`db/test-fixtures/V86_5__…`, single-step PASSWORD flow → mints tokens). Test-config
+    only; production validation unchanged.
+  - `UserApiIntegrationTest` 429 cascade: shared-IP rate-limiter; reset the per-IP
+    REGISTRATION/LOGIN buckets `@BeforeEach`. Test-only.
+  - Stale status expectations: register is 201 Created (not 200); logout is an
+    authenticated endpoint returning 204 (not anon 200). Updated assertions.
+  - CI guard `Assert tenant-isolation ITs actually executed`: summed JUnit `@Nested`
+    surefire shards (CrossTenantIsolationIT writes per-nested-class reports; the parent
+    report reads `tests=0`).
+  - **`--admin` is no longer needed for api merges** — both required checks
+    (`Maven test (unit)` + `Integration tests (Testcontainers)`) are green.
+
 ## Open — 2026-06-07
-
-### [P0 — CI HEALTH] Restore the Testcontainers integration test lane (required check on main)
-
-- [ ] **Restore the Testcontainers integration test lane (required check on `main`).**
-  Failing broadly in CI: `AuthenticationFlowIntegrationTest`, `UserApiIntegrationTest`,
-  `CrossTenantIsolationIT`. Pre-existing/environmental; investigate
-  test-DB/biometric-processor/migration setup. Until fixed, the integration safety-net
-  is down and merges need `--admin`.
-  - It is ONE of the two required status checks on `main`
-    (`Maven test (unit)` — currently green — and `Integration tests (Testcontainers)`).
-  - Failure predates PRs #209/#210/#211 (likely environmental: Testcontainers setup,
-    the biometric-processor `:8001` dependency, Redis `:6379`, or a migration), NOT the
-    application logic of those PRs.
-  - `enforce_admins=false` on `main`, so an admin-merge can override the red gate; this
-    is the current norm and must be treated as a temporary exception, not a clean state.
 
 ### Deferred follow-ups from #211 (authz hardening)
 
