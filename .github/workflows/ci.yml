@@ -150,20 +150,30 @@ jobs:
           )
           fail=0
           for it in "${required[@]}"; do
-            f="$reports/TEST-com.fivucsas.identity."*".$it.xml"
-            # shellcheck disable=SC2086
-            match=$(ls $f 2>/dev/null | head -1 || true)
-            if [ -z "$match" ]; then
+            # A class that uses JUnit 5 @Nested writes its tests to PER-NESTED-CLASS
+            # surefire reports (TEST-...$it$Inner.xml) and leaves the top-level
+            # TEST-...$it.xml report with tests="0". CrossTenantIsolationIT is such a
+            # class, so we must SUM the test counts across the top-level report AND
+            # every "$it$..." nested-class report, not just read the first match.
+            # shellcheck disable=SC2206
+            matches=( $(ls "$reports/TEST-com.fivucsas.identity."*".$it.xml" \
+                           "$reports/TEST-com.fivucsas.identity."*".$it"'$'*".xml" \
+                        2>/dev/null || true) )
+            if [ "${#matches[@]}" -eq 0 ]; then
               echo "::error::$it produced no surefire report — it did NOT run (RUN_INTEGRATION gating or -Dtest filter broke)"
               fail=1
               continue
             fi
-            tests=$(grep -oP 'testsuite[^>]*\btests="\K[0-9]+' "$match" | head -1 || echo 0)
+            tests=0
+            for m in "${matches[@]}"; do
+              n=$(grep -oP 'testsuite[^>]*\btests="\K[0-9]+' "$m" | head -1 || echo 0)
+              tests=$((tests + ${n:-0}))
+            done
             if [ "${tests:-0}" -lt 1 ]; then
-              echo "::error::$it ran 0 tests (report: $match)"
+              echo "::error::$it ran 0 tests (reports: ${matches[*]})"
               fail=1
             else
-              echo "OK: $it executed ($tests test(s))"
+              echo "OK: $it executed ($tests test(s) across ${#matches[@]} report(s))"
             fi
           done
           exit $fail
