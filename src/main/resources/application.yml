@@ -103,6 +103,16 @@ app:
     # get the embedding path even while the master switch above is false. Invalid
     # UUIDs are skipped with a warn (never widens the rollout / crashes startup).
     client-side-embedding-tenants: ${APP_AUTH_CLIENT_SIDE_EMBEDDING_TENANTS:}
+    # PUZZLE liveness layer (sub-project B, Phase 1). When true, PUZZLE is
+    # surfaced as a selectable login method in the auth-methods catalog and
+    # may be placed in an auth flow as a liveness step. Default false = PUZZLE
+    # is absent from the catalog and from every login-config response, so
+    # behaviour is byte-identical to before. Revert = unset the env var.
+    puzzle-layer: ${APP_AUTH_PUZZLE_LAYER:false}
+    # Per-tenant CANARY for the puzzle layer: comma-separated tenant UUIDs that
+    # get PUZZLE surfaced even while the master switch above is false. Invalid
+    # UUIDs are skipped with a warn (never widens the rollout / crashes startup).
+    puzzle-layer-tenants: ${APP_AUTH_PUZZLE_LAYER_TENANTS:}
     # KILL-SWITCH for the tenant Auth-Methods true-gate. When true (default) an
     # explicitly-disabled login method (tenant_auth_methods row is_enabled=false)
     # is rejected at login time (TenantAuthMethodPolicy enforces). Flip to false
