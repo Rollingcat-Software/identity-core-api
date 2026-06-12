@@ -290,6 +290,39 @@ signal the web login UI reads to switch on the **identifier-first** experience
 `engineActive=false` keeps the legacy single-screen email+password form, so the
 UI redesign reverts with the env flag and no web redeploy.
 
+### Client-side embedding kill-switches — FACE + VOICE (default OFF)
+
+Two independent gates route a precomputed client-computed embedding to the
+biometric-processor's embedding endpoints instead of uploading the raw
+image/audio (privacy + GPU-less; the raw media never leaves the device). Both
+default OFF (legacy server-side path, byte-identical), flip WITHOUT a redeploy,
+and support per-tenant canary. **Both MUST be passed via the compose
+`environment:` block** (the service uses an explicit block, NOT `env_file:` — a
+var only in `.env.prod` is silently dropped; this exact gap once broke the face
+flag).
+
+- **FACE** — `ClientSideEmbeddingPolicy` (`app.auth.client-side-embedding`):
+  `FaceVerifyMfaStepHandler` + `BiometricController.enrollFaceEmbedding` route a
+  512-d Facenet512 vector to bio `/verify-embedding` / `/enroll-embedding`.
+  Env: `APP_AUTH_CLIENT_SIDE_EMBEDDING(_TENANTS)`.
+- **VOICE (audit H3, GPU-less)** — `ClientSideVoiceEmbeddingPolicy`
+  (`app.auth.client-side-voice-embedding`): `VoiceVerifyMfaStepHandler` (reads
+  the `embedding` key off the MFA `data` map when ON, else the legacy `voiceData`)
+  + `BiometricController.enrollVoiceEmbedding`
+  (`POST /api/v1/biometric/voice/enroll-embedding/{userId}`,
+  `VoiceEnrollEmbeddingRequest`, 256-length-validated, fail-closed when OFF) route
+  a 256-d Resemblyzer speaker vector to bio `/voice/verify-embedding` /
+  `/voice/enroll-embedding`. Env:
+  `APP_AUTH_CLIENT_SIDE_VOICE_EMBEDDING(_TENANTS)`.
+
+SECURITY: an embedding carries no media, so the bio side cannot run
+liveness/replay on it — an embedding FACE/VOICE factor MUST be paired with a
+liveness factor in the auth flow. **Rollout ordering:** flip this (identity) flag
+ON BEFORE the web `VITE_CLIENT_SIDE_*_EMBEDDING` flag (web-ON + identity-OFF
+breaks the factor). The VOICE web preprocessing port is still a documented
+scaffold (browser mel+VAD not yet parity-validated — see biometric-processor
+`docs/design/VOICE_CLIENT_EMBEDDING_SPEC.md`); keep the voice flag OFF until it is.
+
 ### Operator reality — 2026-05-30 stabilize-&-harden backlog (P1-1 + P1-5, DEPLOYED)
 
 - **P1-1 — cross-tenant isolation ITs are now a CI gate (PR #155/#156).** The

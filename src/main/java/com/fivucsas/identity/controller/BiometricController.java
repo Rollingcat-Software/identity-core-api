@@ -8,6 +8,7 @@ import com.fivucsas.identity.application.dto.command.RegisterStepUpDeviceRequest
 import com.fivucsas.identity.application.dto.command.StepUpChallengeRequest;
 import com.fivucsas.identity.application.dto.command.StepUpVerifyRequest;
 import com.fivucsas.identity.application.dto.command.VerifyBiometricCommand;
+import com.fivucsas.identity.application.dto.command.VoiceEnrollEmbeddingRequest;
 import com.fivucsas.identity.application.dto.response.BiometricResponse;
 import com.fivucsas.identity.application.dto.response.DeviceResponse;
 import com.fivucsas.identity.application.dto.response.StepUpChallengeResponse;
@@ -18,6 +19,7 @@ import com.fivucsas.identity.application.port.input.StepUpAuthUseCase;
 import com.fivucsas.identity.application.port.input.VerifyBiometricUseCase;
 import com.fivucsas.identity.application.port.output.BiometricServicePort;
 import com.fivucsas.identity.application.service.ClientSideEmbeddingPolicy;
+import com.fivucsas.identity.application.service.ClientSideVoiceEmbeddingPolicy;
 import com.fivucsas.identity.application.service.EnrollBiometricService;
 import com.fivucsas.identity.domain.exception.UnauthorizedException;
 import com.fivucsas.identity.domain.model.auth.AuthMethodType;
@@ -67,6 +69,10 @@ public class BiometricController {
     // path, so when the policy is OFF for the tenant the request is rejected
     // rather than silently falling through (there is no image to legacy-enroll).
     private final ClientSideEmbeddingPolicy clientSideEmbeddingPolicy;
+    // Audit H3 (GPU-less voice): gates the JSON client-side-voice-embedding enroll
+    // endpoint, same fail-closed contract as the face policy above (no audio to
+    // legacy-enroll). Separate policy ⇒ independent voice/face kill-switches.
+    private final ClientSideVoiceEmbeddingPolicy clientSideVoiceEmbeddingPolicy;
 
     // #11 (2026-05-21): cap inbound voice payloads. Previously the voice-enroll
     // path only null/blank-checked voiceData, so an oversized base64 blob would
@@ -297,6 +303,69 @@ public class BiometricController {
         boolean optimize = Boolean.parseBoolean(request.getOrDefault("optimize", "false"));
 
         Map<String, Object> result = biometricServicePort.enrollVoice(userId, voiceData, optimize);
+        boolean success = Boolean.TRUE.equals(result.get("success"))
+                || "true".equalsIgnoreCase(String.valueOf(result.get("success")));
+
+        if (success) {
+            recordEnrollmentScores(userId, AuthMethodType.VOICE, result);
+        }
+
+        return ResponseEntity.ok(BiometricVerificationResponse.builder()
+            .verified(success)
+            .confidence(success ? 1.0 : 0.0)
+            .message(success ? "Voice enrolled successfully" : String.valueOf(result.get("message")))
+            .build());
+    }
+
+    /**
+     * CLIENT-SIDE-EMBEDDING voice enroll (audit H3, GPU-less). Stores the
+     * browser-computed 256-d Resemblyzer speaker embedding so the raw audio never
+     * leaves the device; routes to bio {@code POST /voice/enroll-embedding}.
+     *
+     * <p>Fail-closed (same contract as the face {@code /enroll-embedding}): this
+     * endpoint serves ONLY the embedding path (no audio to fall back to), so it is
+     * rejected unless {@link ClientSideVoiceEmbeddingPolicy} is ON for the tenant.
+     * The 256-length validation happens at the DTO (400) before the flag check, so
+     * a malformed payload is rejected regardless of the flag.</p>
+     */
+    @PostMapping(value = "/api/v1/biometric/voice/enroll-embedding/{userId}",
+            consumes = MediaType.APPLICATION_JSON_VALUE)
+    @Operation(summary = "Enroll a client-computed 256-dim voice embedding (privacy: audio stays on device)")
+    @PreAuthorize("hasAuthority('biometric:enroll') or @userSecurityService.isCurrentUser(#userId)")
+    public ResponseEntity<BiometricVerificationResponse> enrollVoiceEmbedding(
+            @PathVariable UUID userId,
+            @Valid @RequestBody VoiceEnrollEmbeddingRequest request) {
+
+        // Tenant resolution mirrors the face enroll-embedding path: trust the
+        // authenticated principal's tenant, honour an explicit body tenant_id only
+        // as the bio scoping hint.
+        String tenantId = (request.tenantId() != null && !request.tenantId().isBlank())
+                ? request.tenantId()
+                : resolveCurrentTenantId();
+
+        // Fail-closed: rejected unless the voice policy is ON for the tenant.
+        if (!clientSideVoiceEmbeddingPolicy.isEnabledForTenant(tenantId)) {
+            log.warn("Rejected client-embedding voice enroll for user {} (tenant {}): policy OFF", userId, tenantId);
+            throw new UnauthorizedException("Client-side-voice-embedding enrollment is not enabled for this tenant");
+        }
+
+        // Per-user voice-enrollment count cap (same as the audio enroll path).
+        long existingVoiceEnrollments = manageEnrollmentUseCase.getUserEnrollments(userId).stream()
+                .filter(e -> e.authMethodType() == AuthMethodType.VOICE)
+                .count();
+        if (existingVoiceEnrollments >= maxVoiceEnrollmentsPerUser) {
+            log.warn("Voice embedding enrollment rejected for user {} — {} enrollments at/over cap {}",
+                    userId, existingVoiceEnrollments, maxVoiceEnrollmentsPerUser);
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(
+                BiometricVerificationResponse.builder()
+                    .verified(false).confidence(0.0)
+                    .message("Maximum number of voice enrollments reached").build());
+        }
+
+        log.info("Client-embedding voice enrollment request for user: {} (tenant: {})", userId, tenantId);
+
+        Map<String, Object> result = biometricServicePort.enrollVoiceEmbedding(
+                tenantId, userId, request.embedding(), request.optimizeOrDefault());
         boolean success = Boolean.TRUE.equals(result.get("success"))
                 || "true".equalsIgnoreCase(String.valueOf(result.get("success")));
 

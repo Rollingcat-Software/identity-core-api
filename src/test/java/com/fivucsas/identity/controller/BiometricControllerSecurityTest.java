@@ -61,6 +61,33 @@ class BiometricControllerSecurityTest {
                 .contains(" or ");
     }
 
+    @Test
+    @DisplayName("enrollVoiceEmbedding (JSON) must carry the SAME @PreAuthorize as the audio enrollVoice")
+    void jsonVoiceEnroll_isGuardedIdenticallyToAudioEnroll() {
+        Method json = findMethod("enrollVoiceEmbedding");
+        Method audio = findMethod("enrollVoice");
+
+        PreAuthorize jsonAnn = json.getAnnotation(PreAuthorize.class);
+        PreAuthorize audioAnn = audio.getAnnotation(PreAuthorize.class);
+
+        assertThat(jsonAnn)
+                .as("enrollVoiceEmbedding must carry @PreAuthorize")
+                .isNotNull();
+        assertThat(audioAnn)
+                .as("enrollVoice must carry @PreAuthorize (baseline)")
+                .isNotNull();
+
+        // The client-embedding voice enroll is NEITHER stricter nor looser than the
+        // audio enroll — same biometric:enroll permission OR subject-user ownership.
+        assertThat(jsonAnn.value())
+                .as("JSON voice enroll @PreAuthorize must equal the audio enroll's, never loosened")
+                .isEqualTo(audioAnn.value());
+        assertThat(jsonAnn.value())
+                .contains("hasAuthority('biometric:enroll')")
+                .contains("@userSecurityService.isCurrentUser(#userId)")
+                .contains(" or ");
+    }
+
     private static Method findMethod(String name) {
         for (Method m : BiometricController.class.getDeclaredMethods()) {
             if (m.getName().equals(name) && m.isAnnotationPresent(PostMapping.class)) {

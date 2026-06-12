@@ -84,6 +84,19 @@ services:
       # this (identity) flag ON before web VITE_CLIENT_SIDE_EMBEDDING.
       APP_AUTH_CLIENT_SIDE_EMBEDDING: ${APP_AUTH_CLIENT_SIDE_EMBEDDING:-false}
       APP_AUTH_CLIENT_SIDE_EMBEDDING_TENANTS: ${APP_AUTH_CLIENT_SIDE_EMBEDDING_TENANTS:-}
+      # Client-side VOICE embedding (audit H3, GPU-less). MUST be listed here for
+      # the SAME reason as the face flag above (explicit environment: block, not
+      # env_file:). When ON, the browser computes the 256-d Resemblyzer speaker
+      # vector and the server does ONLY a pgvector cosine compare — the raw audio
+      # never leaves the device. Default OFF = legacy server-side Resemblyzer
+      # forward pass on uploaded audio. Reversible via .env.prod + `up -d` recreate
+      # (no rebuild). Canary one tenant via _TENANTS=<uuid>. Pair ordering: this
+      # (identity) flag ON before web VITE_CLIENT_SIDE_VOICE_EMBEDDING. NOTE: the
+      # browser preprocessing port is a documented scaffold (not yet parity-verified
+      # — see biometric-processor docs/design/VOICE_CLIENT_EMBEDDING_SPEC.md); keep
+      # OFF until the client mel+VAD is validated.
+      APP_AUTH_CLIENT_SIDE_VOICE_EMBEDDING: ${APP_AUTH_CLIENT_SIDE_VOICE_EMBEDDING:-false}
+      APP_AUTH_CLIENT_SIDE_VOICE_EMBEDDING_TENANTS: ${APP_AUTH_CLIENT_SIDE_VOICE_EMBEDDING_TENANTS:-}
       # NFC serial-only login (2026-06-01). MUST be listed here — the service uses an
       # explicit `environment:` block, NOT `env_file:`, so a var only in .env.prod is
       # NOT passed into the container (this exact gap left the flag dead after the

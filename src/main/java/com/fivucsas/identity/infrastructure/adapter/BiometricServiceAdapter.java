@@ -267,6 +267,56 @@ public class BiometricServiceAdapter implements BiometricServicePort {
     }
 
     @Override
+    public Map<String, Object> verifyVoiceEmbedding(String tenantId, UUID userId, List<Double> embedding) {
+        log.info("Calling biometric service to verify voice embedding for user: {} (tenant: {})", userId, tenantId);
+        try {
+            Map<String, Object> response = postJsonObject("/voice/verify-embedding",
+                    embeddingBody(tenantId, userId, embedding));
+            log.info("Voice embedding verification response received for user: {}", userId);
+            return response;
+        } catch (HttpClientErrorException e) {
+            log.warn("Biometric service client error for voice embedding verification: {} {}", e.getStatusCode(), e.getMessage());
+            return errorResponse("Verification rejected: " + e.getResponseBodyAsString());
+        } catch (HttpServerErrorException e) {
+            log.error("Biometric service server error for voice embedding verification: {} {}", e.getStatusCode(), e.getMessage());
+            return errorResponse("Biometric service error, please retry");
+        } catch (ResourceAccessException e) {
+            log.error("Biometric service unreachable for voice embedding verification: {}", e.getMessage());
+            return errorResponse("Voice verification service unavailable");
+        } catch (RestClientException e) {
+            log.error("Biometric service communication error for voice embedding verification: {}", e.getMessage());
+            return errorResponse("Voice verification service error");
+        }
+    }
+
+    @Override
+    public Map<String, Object> enrollVoiceEmbedding(String tenantId, UUID userId, List<Double> embedding, boolean optimize) {
+        log.info("Calling biometric service to enroll voice embedding for user: {} (tenant: {}, optimize: {})",
+                userId, tenantId, optimize);
+        try {
+            // postJsonObject so `embedding` (array) + `optimize` (bool) serialize
+            // as real JSON types the bio VoiceEnrollEmbeddingRequest expects.
+            Map<String, Object> body = embeddingBody(tenantId, userId, embedding);
+            body.put("optimize", optimize);
+            Map<String, Object> response = postJsonObject("/voice/enroll-embedding", body);
+            log.info("Voice embedding enrollment response received for user: {}", userId);
+            return response;
+        } catch (HttpClientErrorException e) {
+            log.warn("Biometric service client error for voice embedding enrollment: {} {}", e.getStatusCode(), e.getMessage());
+            return errorResponse("Enrollment rejected: " + e.getResponseBodyAsString());
+        } catch (HttpServerErrorException e) {
+            log.error("Biometric service server error for voice embedding enrollment: {} {}", e.getStatusCode(), e.getMessage());
+            return errorResponse("Biometric service error, please retry");
+        } catch (ResourceAccessException e) {
+            log.error("Biometric service unreachable for voice embedding enrollment: {}", e.getMessage());
+            return errorResponse("Voice enrollment service unavailable");
+        } catch (RestClientException e) {
+            log.error("Biometric service communication error for voice embedding enrollment: {}", e.getMessage());
+            return errorResponse("Voice enrollment service error");
+        }
+    }
+
+    @Override
     public Map<String, Object> deleteFace(UUID userId) {
         log.info("Calling biometric service to delete face data for user: {}", userId);
         try {

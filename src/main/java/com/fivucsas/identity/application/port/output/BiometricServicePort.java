@@ -167,6 +167,43 @@ public interface BiometricServicePort {
     Map<String, Object> verifyVoice(UUID userId, String voiceData);
 
     /**
+     * Verifies a user's voice from a CLIENT-SIDE precomputed embedding (256-dim
+     * Resemblyzer speaker vector) instead of audio — audit-H3 GPU-less path,
+     * where the embedding is computed in the browser so the raw audio never
+     * leaves the device. Routes to the biometric-processor's
+     * {@code POST /voice/verify-embedding} endpoint.
+     *
+     * <p>Gated by {@code ClientSideVoiceEmbeddingPolicy} at the call site; the
+     * legacy audio {@link #verifyVoice} path is unchanged. The embedding alone
+     * carries no audio, so the server-side replay/liveness check cannot run on
+     * it — an embedding VOICE factor MUST be paired with a liveness factor in the
+     * auth flow.
+     *
+     * @param tenantId  optional tenant identifier (currently unused by the bio
+     *                  voice routes, which are user-scoped; forwarded for parity
+     *                  + forward-compat, null/blank omitted)
+     * @param userId    the user ID to verify against
+     * @param embedding the 256-dim client-side speaker embedding (list of floats)
+     * @return Map containing verification response data (e.g. {@code verified})
+     */
+    Map<String, Object> verifyVoiceEmbedding(String tenantId, UUID userId, List<Double> embedding);
+
+    /**
+     * Enrolls a user's voice from a CLIENT-SIDE precomputed embedding (256-dim
+     * Resemblyzer speaker vector) instead of audio — audit-H3 GPU-less path.
+     * Routes to the biometric-processor's {@code POST /voice/enroll-embedding}
+     * endpoint. Mirrors {@link #enrollVoice(UUID, String, boolean)} but with the
+     * embedding already computed off-device.
+     *
+     * @param tenantId  optional tenant identifier (see {@link #verifyVoiceEmbedding})
+     * @param userId    the user ID to enroll
+     * @param embedding the 256-dim client-side speaker embedding (list of floats)
+     * @param optimize  re-enroll &amp; optimize: fuse into the existing centroid
+     * @return Map containing enrollment response data (e.g. {@code success})
+     */
+    Map<String, Object> enrollVoiceEmbedding(String tenantId, UUID userId, List<Double> embedding, boolean optimize);
+
+    /**
      * Deletes a user's enrolled face biometric data.
      *
      * @param userId the user ID

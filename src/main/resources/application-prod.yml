@@ -117,6 +117,15 @@ app:
     # so it MUST be paired with a liveness factor (puzzle/passive) in the flow.
     client-side-embedding: ${APP_AUTH_CLIENT_SIDE_EMBEDDING:false}
     client-side-embedding-tenants: ${APP_AUTH_CLIENT_SIDE_EMBEDDING_TENANTS:}
+    # Client-side-embedding VOICE path (audit H3, GPU-less). Default OFF = legacy
+    # audio path (/voice/verify, /voice/enroll). KILL-SWITCH / CANARY — no redeploy:
+    #   APP_AUTH_CLIENT_SIDE_VOICE_EMBEDDING=true            → embedding, ALL tenants
+    #   APP_AUTH_CLIENT_SIDE_VOICE_EMBEDDING_TENANTS=<uuid>  → canary tenant(s)
+    # Embedding-only VOICE carries no audio (no server-side replay/liveness check),
+    # so it MUST be paired with a liveness factor in the flow. Keep OFF until the
+    # browser preprocessing port is parity-validated (bio VOICE_CLIENT_EMBEDDING_SPEC.md).
+    client-side-voice-embedding: ${APP_AUTH_CLIENT_SIDE_VOICE_EMBEDDING:false}
+    client-side-voice-embedding-tenants: ${APP_AUTH_CLIENT_SIDE_VOICE_EMBEDDING_TENANTS:}
     # Puzzle layer (sub-project B). Default OFF = PUZZLE absent from catalog.
     # KILL-SWITCH / CANARY — no redeploy to flip:
     #   APP_AUTH_PUZZLE_LAYER=true            → surface PUZZLE for ALL tenants
