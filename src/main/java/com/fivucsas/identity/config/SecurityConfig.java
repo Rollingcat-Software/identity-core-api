@@ -96,6 +96,13 @@ public class SecurityConfig {
                         // MFA session token is the authenticator).
                         .requestMatchers(HttpMethod.DELETE, "/api/v1/auth/mfa/session/*").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/mfa/switch-method").permitAll()
+                        // PUZZLE-as-login session proxy (CV-2): CREATE + per-challenge
+                        // SUBMIT run DURING the MFA step, authorized by the MFA session
+                        // token (not a JWT), exactly like /mfa/qr-generate + /mfa/send-otp.
+                        // The owner identity is server-stamped from the MFA session; the
+                        // controller 404s unless PuzzleLayerPolicy is on for the tenant.
+                        .requestMatchers(HttpMethod.POST, "/api/v1/auth/mfa/puzzle/session").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/v1/auth/mfa/puzzle/session/*/challenge").permitAll()
 
                         // OAuth 2.0 / OIDC public endpoints
                         .requestMatchers(
