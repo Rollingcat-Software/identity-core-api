@@ -67,6 +67,10 @@ public class EnrollBiometricService implements EnrollBiometricUseCase {
         // Mirror FaceVerifyMfaStepHandler's predicate exactly: an embedding is
         // routed to the new endpoint ONLY when one is present AND the policy is
         // ON for the tenant; otherwise the legacy image enroll is used unchanged.
+        // TODO Phase 6: this branch is unreachable until a JSON enroll endpoint
+        //  populates command.embedding (the multipart enroll controller cannot
+        //  carry a List<Double>). Until that endpoint exists, hasEmbedding is
+        //  always false so the legacy image path below runs unconditionally.
         if (hasEmbedding && isEmbeddingPathEnabled(command.getTenantId())) {
             response = biometricService.enrollEmbedding(command.getTenantId(), userId, embedding);
         } else {
