@@ -89,12 +89,17 @@ app:
   # match, (3) legacy tenants.domain, then (4) the `app.default-tenant-slug`
   # catch-all tenant. The integration tests register `@fivucsas.com` accounts with
   # NO tenant context and NO seeded email-domain row, so they previously fell
-  # through every branch and got HTTP 422 EmailDomainNotAllowed. Point the catch-all
-  # at the V1-seeded `system` tenant (slug `system`, enforce_domain_matching=false
-  # by default) so those registrations land gracefully — exactly the production
-  # default-tenant mechanism, with NO change to production validation. The `system`
-  # tenant has max_users=999999, so the suite never trips the quota gate.
-  default-tenant-slug: system
+  # through every branch and got HTTP 422 EmailDomainNotAllowed.
+  #
+  # The catch-all points at a test-only `default`-slug tenant seeded by the
+  # fixture migration db/test-fixtures/V86_5__seed_default_catch_all_tenant.sql
+  # (enforce_domain_matching=false, max_users=1,000,000, NO custom auth flow → login
+  # falls back to single-step PASSWORD and mints tokens directly). This is exactly
+  # production's intended default-tenant mechanism, with NO change to production
+  # validation. NOTE: the V1-seeded `system` tenant is deliberately NOT used —
+  # V29 gives it a 2-step PASSWORD+EMAIL_OTP "Default Login" flow, so a login there
+  # returns an MFA challenge instead of tokens (breaks the auth-flow ITs).
+  default-tenant-slug: default
 
 # Disable Redis event bus (no Redis container in integration tests)
 redis:

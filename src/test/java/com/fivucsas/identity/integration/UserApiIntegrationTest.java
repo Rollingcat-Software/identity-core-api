@@ -139,15 +139,18 @@ class UserApiIntegrationTest {
 
     @Test
     @Order(1)
-    @DisplayName("register_WhenValidRequest_ShouldReturn200WithTokens")
+    @DisplayName("register_WhenValidRequest_ShouldReturn201WithTokens")
     void register_WhenValidRequest_ShouldReturn200WithTokens() throws Exception {
         RegisterRequest request = buildRegisterRequest(API_EMAIL, API_PASSWORD, FIRST_NAME, LAST_NAME);
 
+        // POST /auth/register returns 201 Created (AuthController#register ->
+        // ResponseEntity.status(HttpStatus.CREATED)), not 200. The prior 200
+        // expectation was masked while the suite failed earlier with 422/429.
         mockMvc.perform(post("/api/v1/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
                 .andDo(print())
-                .andExpect(status().isOk())
+                .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.accessToken").isNotEmpty())
                 .andExpect(jsonPath("$.refreshToken").isNotEmpty())
                 .andExpect(jsonPath("$.tokenType").value("Bearer"))
@@ -164,11 +167,11 @@ class UserApiIntegrationTest {
     void register_WhenDuplicateEmail_ShouldReturn409() throws Exception {
         RegisterRequest request = buildRegisterRequest(API_EMAIL, API_PASSWORD, FIRST_NAME, LAST_NAME);
 
-        // First registration
+        // First registration — 201 Created (see register_WhenValidRequest note).
         mockMvc.perform(post("/api/v1/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
-                .andExpect(status().isOk());
+                .andExpect(status().isCreated());
 
         // Duplicate registration with the same email
         mockMvc.perform(post("/api/v1/auth/register")
@@ -478,13 +481,14 @@ class UserApiIntegrationTest {
 
     /**
      * Register a user via the REST API and discard the response body.
+     * {@code POST /auth/register} returns 201 Created.
      */
     private void registerViaApi(String email, String password) throws Exception {
         RegisterRequest request = buildRegisterRequest(email, password, FIRST_NAME, LAST_NAME);
         mockMvc.perform(post("/api/v1/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
-                .andExpect(status().isOk());
+                .andExpect(status().isCreated());
     }
 
     /**
