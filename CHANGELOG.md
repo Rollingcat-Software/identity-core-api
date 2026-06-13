@@ -8,8 +8,8 @@ Three PRs merged to `main` on this date (HEAD ~`3aafc69`):
 1. **Authorization hardening (#211).** Closes a set of object-level authorization
    gaps where endpoints trusted a body/path-supplied `userId` or relied on
    permission-only SpEL that ignored the target, plus Turkish-locale casing bugs on
-   security identifiers and an OTP-send abuse vector. Full write-up:
-   `docs/findings/2026-06-07-authz-idor-fixes.md`.
+   security identifiers and an OTP-send abuse vector. Deferred follow-ups are tracked
+   as issues #231 (FORCE-RLS) and #232 (target-aware `RbacPermissionEvaluator`).
 2. **Test-suite green-up + boundary hardening (#210).** Behavior-preserving test +
    boundary fixes. **No production runtime behavior changes; no DB migration; no
    security/crypto semantics altered** beyond the locale fixes called out below.
@@ -25,13 +25,13 @@ are Testcontainers/DB integration tests, not runnable with Docker off). The Arch
 `entity.User` boundary baseline was legitimately refrozen during the #211 merge
 (18 stale lines removed, 0 grandfathered).
 
-> **CI gap (P0 — see `TODO.md`).** The other required check on `main`,
-> `Integration tests (Testcontainers)`, is broadly red in CI
+> **CI gap (P0) — RESOLVED 2026-06-12 (PR #221).** The other required check on `main`,
+> `Integration tests (Testcontainers)`, was broadly red in CI
 > (`AuthenticationFlowIntegrationTest`, `UserApiIntegrationTest`,
-> `CrossTenantIsolationIT`) and the failure PRE-DATES these PRs (environmental:
-> test-DB / biometric-processor / migration setup). With `enforce_admins=false`,
-> these PRs were admin-merged (`--admin`); the integration safety-net stays down
-> until that lane is restored.
+> `CrossTenantIsolationIT`) so these PRs were admin-merged (`--admin`). PR #221 greened
+> the lane (test-only fixes: stale `@Filter` expectations, test catch-all tenant, rate-limit
+> bucket resets, status-code assertions, `@Nested` shard summation) — `--admin` is no
+> longer needed for api merges.
 
 #### Authorization hardening (#211)
 
