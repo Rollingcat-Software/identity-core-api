@@ -24,7 +24,7 @@ Key facts after the merge:
   (Testcontainers)` now passes **94 run / 0 fail / 0 error / 0 skip**, so BOTH required
   checks on `main` (`Maven test (unit)` + `Integration tests (Testcontainers)`) are green
   and **`--admin` is no longer needed for api merges.** The red was NOT environmental —
-  it was test-only staleness + a latent CI-guard bug (see `TODO.md` → Resolved). Fixes
+  it was test-only staleness + a latent CI-guard bug. Fixes
   (all test/CI-only, NO production change): (1) #220 Instant→Timestamp fixture; (2) stale
   `CrossTenantIsolationIT.superAdminNoHeader_crossTenant` ×6 — they predate PR #134's
   `@Filter(tenantFilter)` rollout, so a header-less ROOT now scopes to HOME (NOT a leak),
@@ -41,10 +41,10 @@ Key facts after the merge:
 - **`.env.hetzner` is now untracked + gitignored.** The leaked blob (`f9f0f2d`) holds
   STALE GCP-era creds (verified by SHA-256 fingerprint), NOT live secrets — live secrets
   are in the never-committed `.env.prod`. Emergency rotation was NOT required (verified);
-  the 2026-06-06 runbook stands as the procedure for any future *live* leak.
+  the 2026-06-06 rotation procedure stands for any future *live* leak. The history-purge
+  of the dead blobs is tracked as an owner decision in FIVUCSAS#197.
 
-See `CHANGELOG.md` 2026-06-07 + `docs/findings/2026-06-07-tests-and-security.md` /
-`docs/findings/2026-06-07-authz-idor-fixes.md`.
+See `CHANGELOG.md` 2026-06-07 for the authz-IDOR / test / security details.
 
 ## Current test state (2026-06-07)
 
@@ -59,8 +59,7 @@ box. ArchUnit boundary tests run as ordinary unit tests (no DB) and are green.
   MUST pass `Locale.ROOT` (`i → İ` corruption). `domain.model.NfcSerial` is now compliant.
 - **Known fixed (2026-06-07)**: the 3 WebAuthn test failures from the
   `completeEnrollment` → `autoBindEnrollment` rename are resolved (test updated to the
-  current production API; production unchanged). See `CHANGELOG.md` 2026-06-07 +
-  `docs/findings/2026-06-07-tests-and-security.md`.
+  current production API; production unchanged). See `CHANGELOG.md` 2026-06-07.
 - **Security note**: the git-tracked `.env.hetzner` leak (`f9f0f2d` on `origin/main`)
   holds STALE GCP-era creds (verified by SHA-256 fingerprint), NOT live secrets — live
   secrets are in the never-committed `.env.prod`. Emergency rotation was NOT required;
@@ -640,6 +639,6 @@ scaffold (browser mel+VAD not yet parity-validated — see biometric-processor
 - **web-app** (React) consumes this API
 - **SMTP**: `smtp.hostinger.com:587`, sender `info@fivucsas.com`, creds in `.env.prod`
 
-See `TODO.md` for the active backlog (incl. the [P0] integration-CI restore + #211
-deferred follow-ups). The historical 49-item integration audit is archived at
-`docs/archive/TODO.md`.
+Active backlog and follow-ups are tracked as GitHub issues on
+`Rollingcat-Software/identity-core-api` (the #211 deferred authz follow-ups are
+#231 FORCE-RLS + #232 target-aware `RbacPermissionEvaluator`).
