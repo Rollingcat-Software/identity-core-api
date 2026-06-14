@@ -293,9 +293,11 @@ UI redesign reverts with the env flag and no web redeploy.
 
 Two independent gates route a precomputed client-computed embedding to the
 biometric-processor's embedding endpoints instead of uploading the raw
-image/audio (privacy + GPU-less; the raw media never leaves the device). Both
-default OFF (legacy server-side path, byte-identical), flip WITHOUT a redeploy,
-and support per-tenant canary. **Both MUST be passed via the compose
+image/audio (privacy + GPU-less; the raw media never leaves the device). The CODE
+default for both is OFF, BUT production `.env.prod` sets `APP_AUTH_CLIENT_SIDE_EMBEDDING=true`
+→ **FACE client-side embedding IS the production default** (enroll + verify, verified
+2026-06-14); VOICE stays OFF (legacy server-side path, byte-identical). Both flip WITHOUT a
+redeploy, and support per-tenant canary. **Both MUST be passed via the compose
 `environment:` block** (the service uses an explicit block, NOT `env_file:` — a
 var only in `.env.prod` is silently dropped; this exact gap once broke the face
 flag).
