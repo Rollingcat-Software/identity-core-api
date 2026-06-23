@@ -93,7 +93,7 @@ public class OAuth2Service {
     // format is still tolerated on read for in-flight codes written before deploy,
     // then re-serialized on next write. Remove the pipe fallback after the auth
     // code TTL (10 min) has elapsed post-deploy — earliest cleanup 2026-04-19 +15m.
-    // TODO(2026-04-19 +15m / 2026-04-19 03:15Z): delete legacy pipe parser below.
+    // TODO(#271)(2026-04-19 +15m / 2026-04-19 03:15Z): delete legacy pipe parser below.
     private static final ObjectMapper AUTH_CODE_MAPPER = new ObjectMapper();
 
     /**
