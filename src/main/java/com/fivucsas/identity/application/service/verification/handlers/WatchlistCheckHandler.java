@@ -61,7 +61,7 @@ public class WatchlistCheckHandler implements VerificationStepHandler {
             return VerificationStepResult.failure("Name is required for watchlist check");
         }
 
-        // TODO: Replace with real sanctions API call
+        // TODO(#273): Replace with real sanctions API call
         log.info("Watchlist check (mock) for session {}: name={}, nationality={}, dob={}",
                 session.getId(), name, nationality, dateOfBirth);
 

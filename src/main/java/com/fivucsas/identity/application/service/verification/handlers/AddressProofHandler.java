@@ -37,7 +37,7 @@ import java.util.Map;
  *
  * <p>P1 fix: see hygiene wave 2026-05-07.
  *
- * <p>TODO: Integrate with OCR/address validation service for automated extraction.
+ * <p>TODO(#274): Integrate with OCR/address validation service for automated extraction.
  *          Add address matching against government databases. Wire actual media
  *          storage (S3/equivalent) so {@code document_stored=true} reflects
  *          reality. Remove this profile gate once a real implementation ships.

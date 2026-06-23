@@ -47,7 +47,7 @@ public class VerifyBiometricService implements VerifyBiometricUseCase {
         UUID targetUserId = userId;
         String targetTenantId = command.getTenantId();
 
-        // TODO(flag-consistency): the verify gate keys off the denormalized
+        // TODO(#272)(flag-consistency): the verify gate keys off the denormalized
         // users.is_biometric_enrolled boolean, which can drift out of sync with
         // the bio embedding store (the "enrolled-but-412" class this PR addresses
         // on the WRITE side + via the admin reconciler). The more robust long-term
