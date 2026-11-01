@@ -2,6 +2,22 @@
 
 ## [Unreleased]
 
+### 2026-11-01 — PUZZLE contract v2: forward the split-capture binding frame
+
+- `PuzzleVerifyMfaStepHandler` now resolves the identity-binding requirement
+  (`puzzleConfig.alsoMatchFaceIdentity` AND `ClientSideEmbeddingPolicy`) BEFORE the
+  liveness verdict and, when required, calls the new
+  `BiometricServicePort.getPuzzleVerdictWithBinding`, which adds
+  `require_identity_binding:true` + the client `binding_frame` (sanitized to
+  `{t, f[96 ints]}`, malformed → null) to bio's verdict body. Under biometric-processor
+  puzzle contract v2 (`PUZZLE_TRACE_V2_ENABLED`) bio then requires the embedding's
+  source frame to lie inside a verified face-challenge window of the same session;
+  bio v1 ignores the fields. Binding-off steps keep the 3-arg verdict.
+- The challenge SUBMIT proxy already forwards the body verbatim (only `sessionToken`
+  is stripped), so v2 landmark traces need no api change; bio's schema bounds them
+  (≤200 frames, fixed landmark counts).
+- Tests: +4 handler, +2 adapter. `mvn test`: 1847 run / 0 fail / 0 error / 67 skip.
+
 ### 2026-06-07 — Authorization IDOR / PII-leak / abuse-throttle hardening + test-suite green-up
 
 Three PRs merged to `main` on this date (HEAD ~`3aafc69`):
