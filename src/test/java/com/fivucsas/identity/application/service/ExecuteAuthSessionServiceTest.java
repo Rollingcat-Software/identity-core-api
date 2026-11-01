@@ -379,4 +379,106 @@ class ExecuteAuthSessionServiceTest {
         verify(authSessionRepository, never()).save(any());
         verify(authSessionStepRepository, never()).save(any());
     }
+
+    // ---- Security regressions: legacy /auth/sessions path (2026-11-01) ----
+
+    private AuthSessionStep stepMock(int order, AuthStepStatus status, AuthMethodType type) {
+        AuthFlowStep fs = mock(AuthFlowStep.class);
+        lenient().when(fs.getStepOrder()).thenReturn(order);
+        lenient().when(fs.getMaxAttempts()).thenReturn(5);
+        AuthSessionStep st = mock(AuthSessionStep.class);
+        lenient().when(st.getAuthFlowStep()).thenReturn(fs);
+        lenient().when(st.getStatus()).thenReturn(status);
+        lenient().when(st.getMethodType()).thenReturn(type);
+        return st;
+    }
+
+    private AuthSession liveSession(UUID sessionId, User user) {
+        AuthSession session = mock(AuthSession.class);
+        lenient().when(session.isExpired()).thenReturn(false);
+        lenient().when(session.isTerminal()).thenReturn(false);
+        lenient().when(session.getStatus()).thenReturn(AuthSessionStatus.IN_PROGRESS);
+        lenient().when(session.getUser()).thenReturn(user);
+        lenient().when(session.getId()).thenReturn(sessionId);
+        when(authSessionRepository.findByIdForUpdate(sessionId)).thenReturn(Optional.of(session));
+        return session;
+    }
+
+    @Test
+    void completeStep_WhenLaterStepSubmittedBeforeEarlierOnes_ShouldRejectAndNotMintTokens() {
+        UUID sessionId = UUID.randomUUID();
+        liveSession(sessionId, mock(User.class));
+        AuthSessionStep password = stepMock(1, AuthStepStatus.PENDING, AuthMethodType.PASSWORD);
+        AuthSessionStep second = stepMock(2, AuthStepStatus.PENDING, AuthMethodType.TOTP);
+        when(authSessionStepRepository.findAllBySessionId(sessionId)).thenReturn(List.of(password, second));
+
+        assertThatThrownBy(() -> service.completeStep(sessionId, 2, new CompleteAuthStepCommand(Map.of("code", "123456"))))
+                .isInstanceOf(DomainStateConflictException.class)
+                .hasMessageContaining("not the current step");
+
+        verifyNoInteractions(handlerRegistry, tokenGenerator, refreshTokenService);
+    }
+
+    @Test
+    void completeStep_WhenEarlierStepFailed_ShouldStillRequireThatStepFirst() {
+        UUID sessionId = UUID.randomUUID();
+        liveSession(sessionId, mock(User.class));
+        AuthSessionStep password = stepMock(1, AuthStepStatus.FAILED, AuthMethodType.PASSWORD);
+        AuthSessionStep second = stepMock(2, AuthStepStatus.PENDING, AuthMethodType.TOTP);
+        when(authSessionStepRepository.findAllBySessionId(sessionId)).thenReturn(List.of(password, second));
+
+        assertThatThrownBy(() -> service.completeStep(sessionId, 2, new CompleteAuthStepCommand(Map.of())))
+                .isInstanceOf(DomainStateConflictException.class);
+        verifyNoInteractions(tokenGenerator, refreshTokenService);
+    }
+
+    @Test
+    void completeStep_WhenPasswordBelongsToAnotherAccount_ShouldFailAndNotMintTokens() {
+        UUID sessionId = UUID.randomUUID();
+        UUID victimId = UUID.randomUUID();
+        User victim = mock(User.class);
+        AuthSession session = liveSession(sessionId, victim);
+        when(session.isBoundToUserId(any())).thenAnswer(inv -> victimId.toString().equals(String.valueOf((Object) inv.getArgument(0))));
+        AuthSessionStep password = stepMock(1, AuthStepStatus.PENDING, AuthMethodType.PASSWORD);
+        when(authSessionStepRepository.findAllBySessionId(sessionId)).thenReturn(List.of(password));
+        AuthMethodHandler handler = mock(AuthMethodHandler.class);
+        when(handlerRegistry.getHandler(AuthMethodType.PASSWORD)).thenReturn(handler);
+        when(handler.validate(any(), any(), any())).thenReturn(StepResult.success(
+                Map.of("userId", UUID.randomUUID().toString(), "email", "attacker@example.com")));
+
+        service.completeStep(sessionId, 1,
+                new CompleteAuthStepCommand(Map.of("email", "attacker@example.com", "password", "attacker-pw")));
+
+        verify(password).fail(any());
+        verify(password, never()).complete(any());
+        verifyNoInteractions(tokenGenerator, refreshTokenService);
+    }
+
+    @Test
+    void completeStep_WhenPasswordBelongsToSessionUser_ShouldCompleteAndMintTokens() {
+        UUID sessionId = UUID.randomUUID();
+        UUID userId = UUID.randomUUID();
+        User user = mock(User.class);
+        when(user.getEmail()).thenReturn("user@example.com");
+        lenient().when(user.getId()).thenReturn(userId);
+        AuthSession session = liveSession(sessionId, user);
+        when(session.isBoundToUserId(any())).thenAnswer(inv -> userId.toString().equals(String.valueOf((Object) inv.getArgument(0))));
+        AuthSessionStep password = stepMock(1, AuthStepStatus.PENDING, AuthMethodType.PASSWORD);
+        when(authSessionStepRepository.findAllBySessionId(sessionId)).thenReturn(List.of(password));
+        AuthMethodHandler handler = mock(AuthMethodHandler.class);
+        when(handlerRegistry.getHandler(AuthMethodType.PASSWORD)).thenReturn(handler);
+        when(handler.validate(any(), any(), any())).thenReturn(StepResult.success(
+                Map.of("userId", userId.toString(), "email", "user@example.com")));
+        when(tokenGenerator.generateAccessToken("user@example.com")).thenReturn("access");
+        RefreshToken rt = mock(RefreshToken.class);
+        when(rt.getToken()).thenReturn("refresh");
+        when(refreshTokenService.createRefreshToken(any(), any(), any())).thenReturn(rt);
+
+        StepResultResponse response = service.completeStep(sessionId, 1,
+                new CompleteAuthStepCommand(Map.of("email", "user@example.com", "password", "pw")));
+
+        verify(password).complete(any());
+        verify(tokenGenerator).generateAccessToken("user@example.com");
+        assertThat(response).isNotNull();
+    }
 }
