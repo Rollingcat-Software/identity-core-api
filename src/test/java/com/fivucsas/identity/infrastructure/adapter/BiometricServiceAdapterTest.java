@@ -752,4 +752,41 @@ class BiometricServiceAdapterTest {
         assertThat(result).containsEntry("success", false);
         mockServer.verify();
     }
+
+    @Test
+    @DisplayName("getPuzzleVerdictWithBinding adds require_identity_binding + binding_frame to the verdict body")
+    void getPuzzleVerdictWithBinding_postsBindingFrame() {
+        mockServer.expect(requestTo(BIO_URL + "/liveness/puzzle-session/" + PUZZLE_SESSION_ID + "/verdict"))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(req -> {
+                    String body = bodyAsString(req);
+                    assertThat(body).contains("\"user_id\"").contains(USER_ID.toString());
+                    assertThat(body).contains("\"require_identity_binding\":true");
+                    assertThat(body).contains("\"binding_frame\"").contains("\"t\":42");
+                })
+                .andRespond(withSuccess("{\"verified\":true}", MediaType.APPLICATION_JSON));
+
+        var frame = new java.util.LinkedHashMap<String, Object>();
+        frame.put("t", 42L);
+        frame.put("f", java.util.List.of(1L, 2L, 3L));
+        var result = adapter.getPuzzleVerdictWithBinding(PUZZLE_SESSION_ID, USER_ID, PUZZLE_TENANT, frame);
+
+        assertThat(result).containsEntry("verified", true);
+        mockServer.verify();
+    }
+
+    @Test
+    @DisplayName("getPuzzleVerdict (no binding) does not send require_identity_binding")
+    void getPuzzleVerdict_noBindingFields() {
+        mockServer.expect(requestTo(BIO_URL + "/liveness/puzzle-session/" + PUZZLE_SESSION_ID + "/verdict"))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(req -> assertThat(bodyAsString(req))
+                        .doesNotContain("require_identity_binding")
+                        .doesNotContain("binding_frame"))
+                .andRespond(withSuccess("{\"verified\":true}", MediaType.APPLICATION_JSON));
+
+        adapter.getPuzzleVerdict(PUZZLE_SESSION_ID, USER_ID, PUZZLE_TENANT);
+
+        mockServer.verify();
+    }
 }

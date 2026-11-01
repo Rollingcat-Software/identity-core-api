@@ -787,8 +787,20 @@ public class BiometricServiceAdapter implements BiometricServicePort {
 
     @Override
     public Map<String, Object> getPuzzleVerdict(String sessionId, UUID userId, UUID tenantId) {
-        log.info("Calling biometric service for puzzle session verdict: sessionId={}, user: {} (tenant: {})",
-                sessionId, userId, tenantId);
+        return postPuzzleVerdict(sessionId, userId, tenantId, false, null);
+    }
+
+    @Override
+    public Map<String, Object> getPuzzleVerdictWithBinding(String sessionId, UUID userId, UUID tenantId,
+                                                           Map<String, Object> bindingFrame) {
+        return postPuzzleVerdict(sessionId, userId, tenantId, true, bindingFrame);
+    }
+
+    private Map<String, Object> postPuzzleVerdict(String sessionId, UUID userId, UUID tenantId,
+                                                  boolean requireIdentityBinding,
+                                                  Map<String, Object> bindingFrame) {
+        log.info("Calling biometric service for puzzle session verdict: sessionId={}, user: {} (tenant: {}), binding={}",
+                sessionId, userId, tenantId, requireIdentityBinding);
         // CV-2 canonical contract (the AUTH GATE): bio
         //   POST /api/v1/liveness/puzzle-session/{session_id}/verdict
         //   { user_id, tenant_id }  → { verified: bool }; CONSUMES the session.
@@ -798,6 +810,14 @@ public class BiometricServiceAdapter implements BiometricServicePort {
         Map<String, Object> body = new java.util.LinkedHashMap<>();
         body.put("user_id", java.util.Objects.requireNonNull(userId, "userId").toString());
         body.put("tenant_id", java.util.Objects.requireNonNull(tenantId, "tenantId").toString());
+        if (requireIdentityBinding) {
+            // Puzzle contract v2 split-capture binding: bio checks the declared
+            // frame against the session's verified face-challenge windows.
+            body.put("require_identity_binding", true);
+            if (bindingFrame != null) {
+                body.put("binding_frame", bindingFrame);
+            }
+        }
         try {
             return postJsonObject("/liveness/puzzle-session/" + sessionId + "/verdict", body);
         } catch (HttpClientErrorException e) {

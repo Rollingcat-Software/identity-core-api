@@ -499,4 +499,28 @@ public interface BiometricServicePort {
      *         error map on failure
      */
     Map<String, Object> getPuzzleVerdict(String sessionId, UUID userId, UUID tenantId);
+
+    /**
+     * Same AUTHORITATIVE, consuming verdict as
+     * {@link #getPuzzleVerdict(String, UUID, UUID)}, for a PUZZLE step that ALSO
+     * matches face identity ({@code puzzleConfig.alsoMatchFaceIdentity}).
+     *
+     * <p>Adds {@code require_identity_binding:true} and the client-declared
+     * {@code binding_frame} ({@code {t, f:[96 ints]}} — timestamp + trace-subset
+     * landmarks of the frame the identity embedding was computed from) to the bio
+     * verdict body. Under bio's puzzle contract v2 ({@code PUZZLE_TRACE_V2_ENABLED})
+     * the verdict then also requires that frame to lie inside a verified
+     * face-challenge window of the SAME session with consistent geometry
+     * (split-capture binding); a {@code null}/malformed frame fails closed there.
+     * On bio v1 the extra fields are ignored (legacy behaviour).
+     *
+     * <p>Default implementation delegates to the 3-arg verdict (no binding) so
+     * alternative implementations stay source-compatible.
+     *
+     * @param bindingFrame the client-declared binding frame, or {@code null}
+     */
+    default Map<String, Object> getPuzzleVerdictWithBinding(String sessionId, UUID userId, UUID tenantId,
+                                                            Map<String, Object> bindingFrame) {
+        return getPuzzleVerdict(sessionId, userId, tenantId);
+    }
 }

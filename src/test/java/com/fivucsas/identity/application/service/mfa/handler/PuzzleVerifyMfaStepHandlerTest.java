@@ -25,6 +25,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -106,7 +107,10 @@ class PuzzleVerifyMfaStepHandlerTest {
     private void bioVerdict(boolean verified) {
         Map<String, Object> resp = new HashMap<>();
         resp.put("verified", verified);
-        when(bio.getPuzzleVerdict(anyString(), any(UUID.class), any(UUID.class))).thenReturn(resp);
+        lenient().when(bio.getPuzzleVerdict(anyString(), any(UUID.class), any(UUID.class))).thenReturn(resp);
+        // Binding-required steps use the binding-carrying verdict (puzzle contract v2).
+        lenient().when(bio.getPuzzleVerdictWithBinding(anyString(), any(UUID.class), any(UUID.class), any()))
+                .thenReturn(resp);
     }
 
     // ---- SP-B identity-binding helpers --------------------------------------
@@ -350,7 +354,7 @@ class PuzzleVerifyMfaStepHandlerTest {
         MfaStepResult result = handler.verify(session, user, dataWithSessionAndEmbedding(embedding512()));
 
         assertThat(result.valid()).isTrue();
-        verify(bio).getPuzzleVerdict(eq(SESSION_ID), eq(USER_ID), eq(TENANT_ID));
+        verify(bio).getPuzzleVerdictWithBinding(eq(SESSION_ID), eq(USER_ID), eq(TENANT_ID), any());
         verify(bio).verifyEmbedding(eq(TENANT_ID.toString()), eq(USER_ID), any());
     }
 
@@ -460,7 +464,7 @@ class PuzzleVerifyMfaStepHandlerTest {
         assertThat(result.valid()).isTrue();
 
         // Liveness verdict — SERVER identity.
-        verify(bio).getPuzzleVerdict(eq(SESSION_ID), eq(USER_ID), eq(TENANT_ID));
+        verify(bio).getPuzzleVerdictWithBinding(eq(SESSION_ID), eq(USER_ID), eq(TENANT_ID), any());
 
         // Identity match — SERVER identity (tenant as the SERVER tenant string,
         // user as the SERVER user), NEVER the smuggled client values.
@@ -469,5 +473,94 @@ class PuzzleVerifyMfaStepHandlerTest {
         verify(bio).verifyEmbedding(tenantCaptor.capture(), userCaptor.capture(), any());
         assertThat(tenantCaptor.getValue()).isEqualTo(TENANT_ID.toString());
         assertThat(userCaptor.getValue()).isEqualTo(USER_ID);
+    }
+
+    // =====================================================================
+    // Puzzle contract v2 — split-capture binding frame forwarding.
+    // =====================================================================
+
+    private static List<Integer> frameInts(int n) {
+        List<Integer> f = new ArrayList<>();
+        for (int i = 0; i < n; i++) {
+            f.add(1000 + i);
+        }
+        return f;
+    }
+
+    @Test
+    @DisplayName("binding ON: the client binding_frame is sanitized to {t,f} and forwarded with the verdict")
+    void bindingOn_forwardsSanitizedBindingFrame() {
+        bioVerdict(true);
+        bioEmbeddingMatch(true);
+        stepBinding(true);
+        embeddingPolicyOn();
+
+        Map<String, Object> frame = new HashMap<>();
+        frame.put("t", 123456);
+        frame.put("f", frameInts(96));
+        frame.put("evil", "ignored");
+        Map<String, Object> data = dataWithSessionAndEmbedding(embedding512());
+        data.put("binding_frame", frame);
+
+        MfaStepResult result = handler.verify(session, user, data);
+
+        assertThat(result.valid()).isTrue();
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
+        verify(bio).getPuzzleVerdictWithBinding(eq(SESSION_ID), eq(USER_ID), eq(TENANT_ID), captor.capture());
+        assertThat(captor.getValue()).containsOnlyKeys("t", "f");
+        assertThat(captor.getValue()).containsEntry("t", 123456L);
+        assertThat((List<?>) captor.getValue().get("f")).hasSize(96);
+        verify(bio, never()).getPuzzleVerdict(anyString(), any(UUID.class), any(UUID.class));
+    }
+
+    @Test
+    @DisplayName("binding ON: a malformed binding_frame is forwarded as null (bio v2 fails it closed)")
+    void bindingOn_malformedBindingFrame_forwardedAsNull() {
+        bioVerdict(true);
+        bioEmbeddingMatch(true);
+        stepBinding(true);
+        embeddingPolicyOn();
+
+        Map<String, Object> frame = new HashMap<>();
+        frame.put("t", 1);
+        frame.put("f", frameInts(10));
+        Map<String, Object> data = dataWithSessionAndEmbedding(embedding512());
+        data.put("binding_frame", frame);
+
+        handler.verify(session, user, data);
+
+        verify(bio).getPuzzleVerdictWithBinding(eq(SESSION_ID), eq(USER_ID), eq(TENANT_ID), isNull());
+    }
+
+    @Test
+    @DisplayName("binding ON: bio verdict false (e.g. v2 BINDING_OUTSIDE_WINDOW) → FAIL, no identity match")
+    void bindingOn_bioBindingRejected_fails() {
+        Map<String, Object> resp = new HashMap<>();
+        resp.put("verified", false);
+        when(bio.getPuzzleVerdictWithBinding(anyString(), any(UUID.class), any(UUID.class), any()))
+                .thenReturn(resp);
+        stepBinding(true);
+        embeddingPolicyOn();
+
+        MfaStepResult result = handler.verify(session, user, dataWithSessionAndEmbedding(embedding512()));
+
+        assertThat(result.valid()).isFalse();
+        verify(bio, never()).verifyEmbedding(anyString(), any(UUID.class), any());
+    }
+
+    @Test
+    @DisplayName("binding OFF: the binding_frame is never forwarded (plain verdict)")
+    void bindingOff_doesNotForwardBindingFrame() {
+        bioVerdict(true);
+        stepBinding(false);
+        embeddingPolicyOn();
+        Map<String, Object> data = dataWithSessionId(SESSION_ID);
+        data.put("binding_frame", Map.of("t", 1, "f", frameInts(96)));
+
+        handler.verify(session, user, data);
+
+        verify(bio).getPuzzleVerdict(eq(SESSION_ID), eq(USER_ID), eq(TENANT_ID));
+        verify(bio, never()).getPuzzleVerdictWithBinding(anyString(), any(UUID.class), any(UUID.class), any());
     }
 }

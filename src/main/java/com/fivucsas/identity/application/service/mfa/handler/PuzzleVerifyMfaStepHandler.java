@@ -143,12 +143,23 @@ public class PuzzleVerifyMfaStepHandler implements VerifyMfaStepHandler {
             return MfaStepResult.fail();
         }
 
-        // 3. LIVENESS gate (first, unchanged): authoritative verdict from bio
-        //    (consumes the single-use session). Pass the SERVER user_id +
-        //    tenant_id, never any client value.
+        // Identity-binding requirement is resolved up front (server config only)
+        // so the liveness verdict can carry the split-capture binding frame.
+        boolean bindingRequired = isBindingRequired(session, tenantId);
+
+        // 3. LIVENESS gate (first): authoritative verdict from bio (consumes the
+        //    single-use session). Pass the SERVER user_id + tenant_id, never any
+        //    client value. When identity-binding is required, also forward the
+        //    client-declared binding frame (the landmarks + timestamp of the frame
+        //    the embedding came from); under bio puzzle contract v2 the verdict
+        //    then fails unless that frame lies inside a verified face-challenge
+        //    window of the SAME session with consistent geometry.
         Map<String, Object> verdict;
         try {
-            verdict = biometricService.getPuzzleVerdict(sessionId, userId, tenantId);
+            verdict = bindingRequired
+                    ? biometricService.getPuzzleVerdictWithBinding(sessionId, userId, tenantId,
+                            extractBindingFrame(data.get("binding_frame")))
+                    : biometricService.getPuzzleVerdict(sessionId, userId, tenantId);
         } catch (RuntimeException e) {
             // Error / timeout / unexpected — HARD FAIL (no fail-open). Re-set the
             // interrupt flag if the cause chain carries an InterruptedException.
@@ -168,7 +179,7 @@ public class PuzzleVerifyMfaStepHandler implements VerifyMfaStepHandler {
         // 4. IDENTITY-BINDING gate (SP-B, additive). Required iff the step's
         //    puzzleConfig.alsoMatchFaceIdentity is true AND the SP-A
         //    client-side-embedding policy is enabled for the tenant (double-gate).
-        if (!isBindingRequired(session, tenantId)) {
+        if (!bindingRequired) {
             // Binding off → PUZZLE proves LIVENESS only (canonical rule). Pass on
             // the liveness verdict alone.
             return MfaStepResult.ok();
@@ -285,6 +296,42 @@ public class PuzzleVerifyMfaStepHandler implements VerifyMfaStepHandler {
     }
 
     /** Extracts the opaque session id, accepting snake_case or camelCase. */
+    /** Face trace frame: 32 landmarks × (x, y, z) ints (bio puzzle contract v2). */
+    private static final int BINDING_FRAME_INTS = 96;
+
+    /**
+     * Shape-checks the client-declared split-capture binding frame
+     * ({@code {"t": <ms>, "f": [96 ints]}}) and returns a sanitized copy holding
+     * ONLY those two keys, or {@code null} when absent/malformed (bio v2 then
+     * fails the verdict closed with BINDING_FRAME_REQUIRED). bio re-validates
+     * value ranges; this only bounds what is forwarded.
+     */
+    static Map<String, Object> extractBindingFrame(Object raw) {
+        if (!(raw instanceof Map<?, ?> map)) {
+            return null;
+        }
+        Object t = map.get("t");
+        Object f = map.get("f");
+        if (!(t instanceof Number) || !(f instanceof List<?> list) || list.size() != BINDING_FRAME_INTS) {
+            return null;
+        }
+        List<Long> coords = new ArrayList<>(BINDING_FRAME_INTS);
+        for (Object v : list) {
+            if (!(v instanceof Number n)) {
+                return null;
+            }
+            double d = n.doubleValue();
+            if (d != Math.rint(d)) {
+                return null;
+            }
+            coords.add(n.longValue());
+        }
+        Map<String, Object> out = new java.util.LinkedHashMap<>();
+        out.put("t", ((Number) t).longValue());
+        out.put("f", coords);
+        return out;
+    }
+
     private static String extractSessionId(Map<String, Object> data) {
         if (data == null) {
             return null;
