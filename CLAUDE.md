@@ -100,6 +100,14 @@ not a real biometric. The `AuthMethodType.FINGERPRINT` enum value is retained
 ## Key Patterns
 
 - **Biometric enrollment-probe (login triage F2/F7/F9, 2026-06-12)**: `EnrollmentHealthService.hasBiometricData(FACE/VOICE)` no longer FAKES enrollment as always-present when the bio service is merely reachable (the old behaviour routed un-enrolled users into a VOICE step that could never pass → "No voice enrollment found" → generic "Doğrulama başarısız"; FACE was masked because most users did enroll). It now asks the biometric-processor whether a template REALLY exists via `BiometricServicePort.{voiceEnrollmentExists(userId), faceEnrollmentExists(userId, tenantId)}` → bio `GET /voice|/face/{userId}/exists`. **Tri-state**: definitive `TRUE`→enrolled; definitive `FALSE`→not-enrolled (the stale row is auto-revoked by `validateEnrollments`, so it stops being offered/auto-picked); `null` (UNKNOWN = bio OUTAGE: transport/5xx)→**fail-OPEN** (return true) so an outage never locks everyone out. Face probe is tenant-scoped (resolved via `userJpaRepository.findTenantIdById`) for verify-path parity. **KILL-SWITCH**: `app.auth.enrollment-probe.enabled` (`APP_AUTH_ENROLLMENT_PROBE_ENABLED`, default `true` = the fix). Set `false` to instantly revert to the legacy "trust the enrollment row if the bio service is reachable" behaviour with NO redeploy. **Prod rollout = deploy bio FIRST (the existence endpoints), then identity.**
+- **PUZZLE contract v2 guards (2026-11-01, bio flag `PUZZLE_TRACE_V2_ENABLED` default OFF):**
+  `PuzzleSessionGuardPort` (Redis) caps bio puzzle-session CREATEs at 3 per MFA session
+  token (4th → 429; store down → 503 fail-closed) and records the trace contract bio
+  advertised at CREATE. `PuzzleVerifyMfaStepHandler`: when identity-binding is required,
+  the step needs bio `binding_checked: true` unless CREATE recorded v1 (flag-OFF legacy);
+  a malformed/missing `binding_frame` fails in identity AND consumes the bio session.
+  Wording: this is a **binding-frame consistency check** (client frame vs client trace),
+  NOT proof the embedding came from the live capture; a modified client can pass it.
 - **N-step MFA**: JWT deferred until all steps complete. `POST /auth/mfa/step` with session token. RFC 8176 `amr` claim.
 - **WebAuthn base64**: `decodeBase64()` normalizes standard→URL-safe. NEVER use `Base64.getUrlDecoder()` on frontend data.
 - **Session path handlers**: Accept BOTH old and new field names for backward compatibility (B1-B6).

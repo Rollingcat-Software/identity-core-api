@@ -609,6 +609,25 @@ class BiometricServiceAdapterTest {
     }
 
     @Test
+    @DisplayName("createPuzzleSession(…, requireIdentityBinding) sends require_identity_binding; the 5-arg form omits it")
+    void createPuzzleSession_bindingFlag() {
+        mockServer.expect(requestTo(BIO_URL + "/liveness/puzzle-session"))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(req -> assertThat(bodyAsString(req)).contains("\"require_identity_binding\":false"))
+                .andRespond(withSuccess("{\"session_id\":\"" + PUZZLE_SESSION_ID + "\",\"challenges\":[]}",
+                        MediaType.APPLICATION_JSON));
+        mockServer.expect(requestTo(BIO_URL + "/liveness/puzzle-session"))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(req -> assertThat(bodyAsString(req)).doesNotContain("require_identity_binding"))
+                .andRespond(withSuccess("{\"session_id\":\"" + PUZZLE_SESSION_ID + "\",\"challenges\":[]}",
+                        MediaType.APPLICATION_JSON));
+
+        adapter.createPuzzleSession(PUZZLE_TENANT, USER_ID, List.of("blink"), 1, null, false);
+        adapter.createPuzzleSession(PUZZLE_TENANT, USER_ID, List.of("blink"), 1, null);
+        mockServer.verify();
+    }
+
+    @Test
     @DisplayName("createPuzzleSession omits a null difficulty from the JSON body")
     void createPuzzleSession_nullDifficulty_omitted() {
         mockServer.expect(requestTo(BIO_URL + "/liveness/puzzle-session"))

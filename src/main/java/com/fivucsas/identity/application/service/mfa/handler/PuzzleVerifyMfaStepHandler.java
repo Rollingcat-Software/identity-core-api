@@ -2,6 +2,7 @@ package com.fivucsas.identity.application.service.mfa.handler;
 
 import com.fivucsas.identity.application.port.output.AuthFlowRepositoryPort;
 import com.fivucsas.identity.application.port.output.BiometricServicePort;
+import com.fivucsas.identity.application.port.output.PuzzleSessionGuardPort;
 import com.fivucsas.identity.application.service.ClientSideEmbeddingPolicy;
 import com.fivucsas.identity.application.service.mfa.MfaStepResult;
 import com.fivucsas.identity.application.service.mfa.VerifyMfaStepHandler;
@@ -18,6 +19,7 @@ import org.springframework.stereotype.Component;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -83,6 +85,18 @@ import java.util.UUID;
  * RuntimeException from a bio call; or — when binding is required — a missing /
  * wrong-length embedding or an identity match that is not {@code verified:true}.
  *
+ * <p><b>Puzzle contract v2 binding-frame consistency check (version handshake,
+ * fail-closed).</b> When binding is required, the verdict also carries the
+ * client-declared {@code binding_frame}. bio v2 checks it ONLY against the
+ * client's own trace: it does NOT tie the matched embedding to the live capture,
+ * and a modified client can pass it (real binding needs server-observed image
+ * data or attested capture). The step then passes only if bio answers
+ * {@code binding_checked:true} — unless the identity side recorded at CREATE that
+ * bio advertised the legacy v1 contract for this session (bio flag OFF), in which
+ * case the legacy behaviour is kept. A malformed binding frame (or a missing one
+ * on a non-v1 session) fails in identity and the bio session is CONSUMED via a
+ * plain verdict call, so it can never be reused.
+ *
  * <p>Reachability is gated upstream: PUZZLE only appears as a selectable factor
  * when {@code PuzzleLayerPolicy} is on (Phase 1), so this handler is unreachable
  * by default; the identity-binding branch is additionally gated by
@@ -102,16 +116,20 @@ public class PuzzleVerifyMfaStepHandler implements VerifyMfaStepHandler {
     // binding so it cannot engage during a partial rollout.
     private final AuthFlowRepositoryPort authFlowRepository;
     private final ClientSideEmbeddingPolicy clientSideEmbeddingPolicy;
+    // Puzzle contract v2 (S5): the trace contract bio advertised at CREATE.
+    private final PuzzleSessionGuardPort puzzleSessionGuard;
     // Local, thread-safe mapper to parse the step `config` JSONB blob — mirrors
     // AuthController.puzzleObjectMapper (no shared bean needed, parse is read-only).
     private final ObjectMapper configObjectMapper = new ObjectMapper();
 
     public PuzzleVerifyMfaStepHandler(BiometricServicePort biometricService,
                                       AuthFlowRepositoryPort authFlowRepository,
-                                      ClientSideEmbeddingPolicy clientSideEmbeddingPolicy) {
+                                      ClientSideEmbeddingPolicy clientSideEmbeddingPolicy,
+                                      PuzzleSessionGuardPort puzzleSessionGuard) {
         this.biometricService = biometricService;
         this.authFlowRepository = authFlowRepository;
         this.clientSideEmbeddingPolicy = clientSideEmbeddingPolicy;
+        this.puzzleSessionGuard = puzzleSessionGuard;
     }
 
     @Override
@@ -144,8 +162,31 @@ public class PuzzleVerifyMfaStepHandler implements VerifyMfaStepHandler {
         }
 
         // Identity-binding requirement is resolved up front (server config only)
-        // so the liveness verdict can carry the split-capture binding frame.
+        // so the liveness verdict can carry the binding frame.
         boolean bindingRequired = isBindingRequired(session, tenantId);
+
+        // Contract v2 handshake inputs (only relevant when binding is required).
+        // legacyV1 = the identity side recorded at CREATE that bio advertised v1
+        // (bio flag OFF): keep the legacy behaviour. Unknown ⇒ strict.
+        boolean legacyV1 = false;
+        Map<String, Object> bindingFrame = null;
+        if (bindingRequired) {
+            legacyV1 = recordedContract(sessionId)
+                    .map(PuzzleSessionGuardPort.CONTRACT_V1::equals)
+                    .orElse(false);
+            Object rawFrame = data.get("binding_frame");
+            bindingFrame = extractBindingFrame(rawFrame);
+            boolean malformed = rawFrame != null && bindingFrame == null;
+            boolean missingOnV2 = rawFrame == null && !legacyV1;
+            if (malformed || missingOnV2) {
+                // S6: fail in identity AND consume the bio session (plain verdict,
+                // result ignored) so a rejected attempt cannot leave it live.
+                log.warn("AUDIT: PUZZLE step failed — binding frame {} (fail-closed, bio session consumed), userId={}",
+                        malformed ? "malformed" : "missing", userId);
+                consumeQuietly(sessionId, userId, tenantId);
+                return MfaStepResult.fail();
+            }
+        }
 
         // 3. LIVENESS gate (first): authoritative verdict from bio (consumes the
         //    single-use session). Pass the SERVER user_id + tenant_id, never any
@@ -153,12 +194,13 @@ public class PuzzleVerifyMfaStepHandler implements VerifyMfaStepHandler {
         //    client-declared binding frame (the landmarks + timestamp of the frame
         //    the embedding came from); under bio puzzle contract v2 the verdict
         //    then fails unless that frame lies inside a verified face-challenge
-        //    window of the SAME session with consistent geometry.
+        //    window of the SAME session with consistent geometry (the
+        //    binding-frame consistency check; client data checked against client
+        //    data, not proof of capture provenance).
         Map<String, Object> verdict;
         try {
             verdict = bindingRequired
-                    ? biometricService.getPuzzleVerdictWithBinding(sessionId, userId, tenantId,
-                            extractBindingFrame(data.get("binding_frame")))
+                    ? biometricService.getPuzzleVerdictWithBinding(sessionId, userId, tenantId, bindingFrame)
                     : biometricService.getPuzzleVerdict(sessionId, userId, tenantId);
         } catch (RuntimeException e) {
             // Error / timeout / unexpected — HARD FAIL (no fail-open). Re-set the
@@ -183,6 +225,15 @@ public class PuzzleVerifyMfaStepHandler implements VerifyMfaStepHandler {
             // Binding off → PUZZLE proves LIVENESS only (canonical rule). Pass on
             // the liveness verdict alone.
             return MfaStepResult.ok();
+        }
+
+        // S5 version handshake: a binding-required step on a non-v1 session passes
+        // only when bio confirms it actually evaluated the binding-frame check.
+        // Guards against a bio that ignores the binding (old build / flag skew).
+        if (!legacyV1 && !Boolean.TRUE.equals(verdict.get("binding_checked"))) {
+            log.warn("AUDIT: PUZZLE step failed — binding required but bio verdict lacks "
+                    + "binding_checked=true (fail-closed), userId={}", userId);
+            return MfaStepResult.fail();
         }
 
         // Binding required: the live-capture embedding MUST be present and a
@@ -295,16 +346,26 @@ public class PuzzleVerifyMfaStepHandler implements VerifyMfaStepHandler {
                 || "true".equalsIgnoreCase(String.valueOf(verifiedClaim));
     }
 
-    /** Extracts the opaque session id, accepting snake_case or camelCase. */
-    /** Face trace frame: 32 landmarks × (x, y, z) ints (bio puzzle contract v2). */
-    private static final int BINDING_FRAME_INTS = 96;
+    // ---- Puzzle contract v2 binding frame (bounds mirror bio's schema) ----
+
+    /** Face trace frame: 32 landmarks × (x, y, z) ints (bio {@code _FACE_TRACE_INTS}). */
+    static final int BINDING_FRAME_INTS = 32 * 3;
+    /** |coordinate| bound in 1e-4 units (bio {@code _TRACE_COORD_ABS_MAX}). */
+    static final long COORD_ABS_MAX = 20_000L;
+    /** Timestamp upper bound in ms (bio {@code le=2**53}). */
+    static final long T_MAX = 1L << 53;
+    /** Frame dimension bounds in px (bio {@code ge=64, le=8192}), checked when present. */
+    static final int FRAME_DIM_MIN = 64;
+    static final int FRAME_DIM_MAX = 8192;
 
     /**
-     * Shape-checks the client-declared split-capture binding frame
-     * ({@code {"t": <ms>, "f": [96 ints]}}) and returns a sanitized copy holding
-     * ONLY those two keys, or {@code null} when absent/malformed (bio v2 then
-     * fails the verdict closed with BINDING_FRAME_REQUIRED). bio re-validates
-     * value ranges; this only bounds what is forwarded.
+     * Validates the client-declared binding frame ({@code {"t": <ms>, "f": [96 ints]}})
+     * with the SAME bounds bio applies (|coord| ≤ 20000, 0 ≤ t ≤ 2^53, 96 ints for a
+     * face frame — a 63-int (21×3) hand frame is rejected; optional {@code frame_width}/{@code frame_height} within 64..8192
+     * when supplied, though they are not forwarded — bio uses the trace's own
+     * dimensions) and returns a sanitized copy holding ONLY {@code t} and {@code f},
+     * or {@code null} when absent or malformed. A malformed frame therefore fails in
+     * identity instead of reaching bio (S6).
      */
     static Map<String, Object> extractBindingFrame(Object raw) {
         if (!(raw instanceof Map<?, ?> map)) {
@@ -312,26 +373,82 @@ public class PuzzleVerifyMfaStepHandler implements VerifyMfaStepHandler {
         }
         Object t = map.get("t");
         Object f = map.get("f");
-        if (!(t instanceof Number) || !(f instanceof List<?> list) || list.size() != BINDING_FRAME_INTS) {
+        if (!(t instanceof Number tn) || !isIntegral(tn)) {
+            return null;
+        }
+        long tv = tn.longValue();
+        if (tv < 0 || tv > T_MAX) {
+            return null;
+        }
+        if (!dimensionOk(map.get("frame_width")) || !dimensionOk(map.get("frame_height"))) {
+            return null;
+        }
+        if (!(f instanceof List<?> list) || list.size() != BINDING_FRAME_INTS) {
             return null;
         }
         List<Long> coords = new ArrayList<>(BINDING_FRAME_INTS);
         for (Object v : list) {
-            if (!(v instanceof Number n)) {
+            if (!(v instanceof Number n) || !isIntegral(n)) {
                 return null;
             }
-            double d = n.doubleValue();
-            if (d != Math.rint(d)) {
+            long c = n.longValue();
+            if (c > COORD_ABS_MAX || c < -COORD_ABS_MAX) {
                 return null;
             }
-            coords.add(n.longValue());
+            coords.add(c);
         }
         Map<String, Object> out = new java.util.LinkedHashMap<>();
-        out.put("t", ((Number) t).longValue());
+        out.put("t", tv);
         out.put("f", coords);
         return out;
     }
 
+    private static boolean isIntegral(Number n) {
+        double d = n.doubleValue();
+        return Double.isFinite(d) && d == Math.rint(d);
+    }
+
+    /** Absent is fine; when present it must be an integral 64..8192. */
+    private static boolean dimensionOk(Object v) {
+        if (v == null) {
+            return true;
+        }
+        if (!(v instanceof Number n) || !isIntegral(n)) {
+            return false;
+        }
+        long d = n.longValue();
+        return d >= FRAME_DIM_MIN && d <= FRAME_DIM_MAX;
+    }
+
+    /** Trace contract recorded at CREATE for this bio session (empty = unknown). */
+    private Optional<String> recordedContract(String sessionId) {
+        try {
+            Optional<String> c = puzzleSessionGuard.traceContractFor(sessionId);
+            return c == null ? Optional.empty() : c;
+        } catch (RuntimeException e) {
+            log.warn("PUZZLE trace-contract lookup failed — treating as unknown (strict): {}", e.getMessage());
+            return Optional.empty();
+        }
+    }
+
+    /**
+     * Consumes the bio session via a plain verdict call and ignores the result
+     * (the step has already failed in identity). bio consumes a live session on
+     * any verdict, so a rejected attempt cannot leave it reusable.
+     */
+    private void consumeQuietly(String sessionId, UUID userId, UUID tenantId) {
+        try {
+            biometricService.getPuzzleVerdict(sessionId, userId, tenantId);
+        } catch (RuntimeException e) {
+            if (containsInterrupted(e)) {
+                Thread.currentThread().interrupt();
+            }
+            log.warn("PUZZLE session consume after binding-frame rejection failed (session expires by TTL): {}",
+                    e.getMessage());
+        }
+    }
+
+    /** Extracts the opaque session id, accepting snake_case or camelCase. */
     private static String extractSessionId(Map<String, Object> data) {
         if (data == null) {
             return null;

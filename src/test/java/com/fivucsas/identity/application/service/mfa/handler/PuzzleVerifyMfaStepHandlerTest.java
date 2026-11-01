@@ -2,6 +2,7 @@ package com.fivucsas.identity.application.service.mfa.handler;
 
 import com.fivucsas.identity.application.port.output.AuthFlowRepositoryPort;
 import com.fivucsas.identity.application.port.output.BiometricServicePort;
+import com.fivucsas.identity.application.port.output.PuzzleSessionGuardPort;
 import com.fivucsas.identity.application.service.ClientSideEmbeddingPolicy;
 import com.fivucsas.identity.application.service.mfa.MfaStepResult;
 import com.fivucsas.identity.domain.model.auth.AuthMethodType;
@@ -56,6 +57,7 @@ class PuzzleVerifyMfaStepHandlerTest {
 
     private BiometricServicePort bio;
     private AuthFlowRepositoryPort authFlowRepository;
+    private PuzzleSessionGuardPort guard;
     private MfaSession session;
     private User user;
     private PuzzleVerifyMfaStepHandler handler;
@@ -64,6 +66,12 @@ class PuzzleVerifyMfaStepHandlerTest {
     void setUp() {
         bio = mock(BiometricServicePort.class);
         authFlowRepository = mock(AuthFlowRepositoryPort.class);
+        guard = mock(PuzzleSessionGuardPort.class);
+        // Default: identity recorded at CREATE that bio advertised the legacy v1
+        // contract (bio PUZZLE_TRACE_V2_ENABLED OFF), so every pre-v2 test below
+        // asserts the unchanged flag-OFF behaviour. v2 tests override this.
+        lenient().when(guard.traceContractFor(anyString()))
+                .thenReturn(Optional.of(PuzzleSessionGuardPort.CONTRACT_V1));
         session = mock(MfaSession.class);
         user = mock(User.class);
         lenient().when(user.getId()).thenReturn(USER_ID);
@@ -87,7 +95,7 @@ class PuzzleVerifyMfaStepHandlerTest {
      */
     private PuzzleVerifyMfaStepHandler newHandler(boolean spaPolicyOn) {
         ClientSideEmbeddingPolicy policy = new ClientSideEmbeddingPolicy(spaPolicyOn, "");
-        return new PuzzleVerifyMfaStepHandler(bio, authFlowRepository, policy);
+        return new PuzzleVerifyMfaStepHandler(bio, authFlowRepository, policy, guard);
     }
 
     @Test
@@ -476,7 +484,7 @@ class PuzzleVerifyMfaStepHandlerTest {
     }
 
     // =====================================================================
-    // Puzzle contract v2 — split-capture binding frame forwarding.
+    // Puzzle contract v2 — binding-frame consistency check forwarding.
     // =====================================================================
 
     private static List<Integer> frameInts(int n) {
@@ -514,23 +522,177 @@ class PuzzleVerifyMfaStepHandlerTest {
         verify(bio, never()).getPuzzleVerdict(anyString(), any(UUID.class), any(UUID.class));
     }
 
+    /** A binding frame with the given tweaks applied to an otherwise-valid one. */
+    private static Map<String, Object> frameWith(String key, Object value) {
+        Map<String, Object> frame = new HashMap<>();
+        frame.put("t", 123456);
+        frame.put("f", frameInts(96));
+        frame.put(key, value);
+        return frame;
+    }
+
+    /**
+     * S6: a malformed binding frame fails IN IDENTITY and the bio session is
+     * CONSUMED (plain verdict) — never forwarded, never left live, no identity match.
+     */
+    private void assertMalformedFrameConsumesAndFails(Map<String, Object> frame) {
+        bio = mock(BiometricServicePort.class);
+        bioVerdict(true);
+        bioEmbeddingMatch(true);
+        stepBinding(true);
+        embeddingPolicyOn();
+        Map<String, Object> data = dataWithSessionAndEmbedding(embedding512());
+        data.put("binding_frame", frame);
+
+        MfaStepResult result = handler.verify(session, user, data);
+
+        assertThat(result.valid()).isFalse();
+        verify(bio).getPuzzleVerdict(eq(SESSION_ID), eq(USER_ID), eq(TENANT_ID));
+        verify(bio, never()).getPuzzleVerdictWithBinding(anyString(), any(UUID.class), any(UUID.class), any());
+        verify(bio, never()).verifyEmbedding(anyString(), any(UUID.class), any());
+    }
+
     @Test
-    @DisplayName("binding ON: a malformed binding_frame is forwarded as null (bio v2 fails it closed)")
-    void bindingOn_malformedBindingFrame_forwardedAsNull() {
+    @DisplayName("S6: wrong-size binding frame (10 ints / a 63-int hand frame) → FAIL in identity, bio session consumed")
+    void bindingOn_wrongSizeFrame_consumesAndFails() {
+        assertMalformedFrameConsumesAndFails(frameWith("f", frameInts(10)));
+        assertMalformedFrameConsumesAndFails(frameWith("f", frameInts(63)));
+    }
+
+    @Test
+    @DisplayName("S6: binding-frame coordinate outside ±20000 → FAIL in identity, bio session consumed")
+    void bindingOn_coordOutOfRange_consumesAndFails() {
+        List<Integer> f = frameInts(96);
+        f.set(5, 20_001);
+        assertMalformedFrameConsumesAndFails(frameWith("f", f));
+        List<Integer> g = frameInts(96);
+        g.set(7, -20_001);
+        assertMalformedFrameConsumesAndFails(frameWith("f", g));
+    }
+
+    @Test
+    @DisplayName("S6: binding-frame t outside [0, 2^53] or non-integral → FAIL, bio session consumed")
+    void bindingOn_badTimestamp_consumesAndFails() {
+        assertMalformedFrameConsumesAndFails(frameWith("t", -1));
+        assertMalformedFrameConsumesAndFails(frameWith("t", (1L << 53) + 1));
+        assertMalformedFrameConsumesAndFails(frameWith("t", 12.5));
+    }
+
+    @Test
+    @DisplayName("S6: binding-frame dims outside 64..8192 (when present) → FAIL, bio session consumed")
+    void bindingOn_badFrameDims_consumesAndFails() {
+        assertMalformedFrameConsumesAndFails(frameWith("frame_width", 32));
+        assertMalformedFrameConsumesAndFails(frameWith("frame_height", 9000));
+    }
+
+    @Test
+    @DisplayName("S6: bounds are inclusive — ±20000, t=0 and 2^53, dims 64/8192 are accepted (and dims not forwarded)")
+    void extractBindingFrame_inclusiveBounds() {
+        List<Integer> f = frameInts(96);
+        f.set(0, 20_000);
+        f.set(1, -20_000);
+        Map<String, Object> frame = frameWith("f", f);
+        frame.put("frame_width", 64);
+        frame.put("frame_height", 8192);
+        frame.put("t", 0);
+        assertThat(PuzzleVerifyMfaStepHandler.extractBindingFrame(frame)).containsOnlyKeys("t", "f");
+        frame.put("t", 1L << 53);
+        assertThat(PuzzleVerifyMfaStepHandler.extractBindingFrame(frame)).isNotNull();
+    }
+
+    // =====================================================================
+    // S5 — version handshake (binding_checked) on a v2 session.
+    // =====================================================================
+
+    private void v2Session() {
+        lenient().when(guard.traceContractFor(SESSION_ID))
+                .thenReturn(Optional.of(PuzzleSessionGuardPort.CONTRACT_V2));
+    }
+
+    private void bioBindingVerdict(Map<String, Object> resp) {
+        when(bio.getPuzzleVerdictWithBinding(anyString(), any(UUID.class), any(UUID.class), any()))
+                .thenReturn(resp);
+    }
+
+    private Map<String, Object> dataWithValidFrame() {
+        Map<String, Object> data = dataWithSessionAndEmbedding(embedding512());
+        data.put("binding_frame", frameWith("t", 123456));
+        return data;
+    }
+
+    @Test
+    @DisplayName("S5 v2: verified + binding_checked=true → success")
+    void v2_bindingChecked_success() {
+        v2Session();
+        bioBindingVerdict(Map.of("verified", true, "binding_checked", true));
+        bioEmbeddingMatch(true);
+        stepBinding(true);
+        embeddingPolicyOn();
+
+        assertThat(handler.verify(session, user, dataWithValidFrame()).valid()).isTrue();
+    }
+
+    @Test
+    @DisplayName("S5 v2: verified but NO binding_checked (bio ignored the binding) → FAIL, no identity match")
+    void v2_verifiedWithoutBindingChecked_failsClosed() {
+        v2Session();
+        bioBindingVerdict(Map.of("verified", true));
+        bioEmbeddingMatch(true);
+        stepBinding(true);
+        embeddingPolicyOn();
+
+        assertThat(handler.verify(session, user, dataWithValidFrame()).valid()).isFalse();
+        verify(bio, never()).verifyEmbedding(anyString(), any(UUID.class), any());
+    }
+
+    @Test
+    @DisplayName("S5: contract UNKNOWN (no CREATE record) is treated strictly — no binding_checked → FAIL")
+    void unknownContract_withoutBindingChecked_failsClosed() {
+        when(guard.traceContractFor(SESSION_ID)).thenReturn(Optional.empty());
+        bioBindingVerdict(Map.of("verified", true));
+        bioEmbeddingMatch(true);
+        stepBinding(true);
+        embeddingPolicyOn();
+
+        assertThat(handler.verify(session, user, dataWithValidFrame()).valid()).isFalse();
+    }
+
+    @Test
+    @DisplayName("S5/S6 v2: binding required but NO binding_frame → FAIL in identity, bio session consumed")
+    void v2_missingBindingFrame_consumesAndFails() {
+        v2Session();
         bioVerdict(true);
         bioEmbeddingMatch(true);
         stepBinding(true);
         embeddingPolicyOn();
 
-        Map<String, Object> frame = new HashMap<>();
-        frame.put("t", 1);
-        frame.put("f", frameInts(10));
-        Map<String, Object> data = dataWithSessionAndEmbedding(embedding512());
-        data.put("binding_frame", frame);
+        MfaStepResult result = handler.verify(session, user, dataWithSessionAndEmbedding(embedding512()));
 
-        handler.verify(session, user, data);
+        assertThat(result.valid()).isFalse();
+        verify(bio).getPuzzleVerdict(eq(SESSION_ID), eq(USER_ID), eq(TENANT_ID));
+        verify(bio, never()).getPuzzleVerdictWithBinding(anyString(), any(UUID.class), any(UUID.class), any());
+    }
 
+    @Test
+    @DisplayName("S5 flag-OFF (CREATE recorded v1): binding_checked not required — legacy behaviour unchanged")
+    void v1_bindingRequired_legacyPass() {
+        bioVerdict(true); // {verified:true}, no binding_checked
+        bioEmbeddingMatch(true);
+        stepBinding(true);
+        embeddingPolicyOn();
+
+        assertThat(handler.verify(session, user, dataWithSessionAndEmbedding(embedding512())).valid()).isTrue();
         verify(bio).getPuzzleVerdictWithBinding(eq(SESSION_ID), eq(USER_ID), eq(TENANT_ID), isNull());
+    }
+
+    @Test
+    @DisplayName("S5: binding NOT required → no contract lookup, plain verdict (flag-OFF no-binding unchanged)")
+    void bindingOff_noContractLookup() {
+        bioVerdict(true);
+        stepBinding(false);
+
+        assertThat(handler.verify(session, user, dataWithSessionId(SESSION_ID)).valid()).isTrue();
+        verifyNoInteractions(guard);
     }
 
     @Test

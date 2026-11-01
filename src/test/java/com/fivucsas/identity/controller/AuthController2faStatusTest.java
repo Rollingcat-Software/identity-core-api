@@ -142,6 +142,7 @@ class AuthController2faStatusTest {
     @MockBean private com.fivucsas.identity.application.service.LoginConfigService loginConfigService;
     @MockBean private com.fivucsas.identity.application.service.mfa.AvailableMethodsResolver availableMethodsResolver;
     @MockBean private com.fivucsas.identity.application.service.PuzzleLayerPolicy puzzleLayerPolicy;
+    @MockBean private com.fivucsas.identity.application.port.output.PuzzleSessionGuardPort puzzleSessionGuard;
 
     @BeforeEach
     void setUp() {

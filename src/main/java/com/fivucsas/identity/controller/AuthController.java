@@ -48,6 +48,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
+import com.fivucsas.identity.application.port.output.PuzzleSessionGuardPort;
 import com.fivucsas.identity.application.port.output.TokenGenerationPort;
 import com.fivucsas.identity.dto.AvailableMfaMethod;
 import com.fivucsas.identity.entity.AuthFlowStep;
@@ -110,6 +111,7 @@ public class AuthController {
     private final com.fivucsas.identity.application.service.LoginConfigService loginConfigService;
     private final com.fivucsas.identity.application.service.mfa.AvailableMethodsResolver availableMethodsResolver;
     private final com.fivucsas.identity.application.service.PuzzleLayerPolicy puzzleLayerPolicy;
+    private final PuzzleSessionGuardPort puzzleSessionGuard;
     private final com.fasterxml.jackson.databind.ObjectMapper puzzleObjectMapper =
             new com.fasterxml.jackson.databind.ObjectMapper();
 
@@ -1151,6 +1153,17 @@ public class AuthController {
     // ------------------------------------------------------------------------
 
     /**
+     * Max bio puzzle sessions one MFA session token may create (security review S2).
+     * bio caps failed attempts per puzzle SESSION (3); without this cap a client
+     * could create a fresh session after every 3 failures and retry forever.
+     */
+    static final int MAX_PUZZLE_SESSIONS_PER_MFA_SESSION = 3;
+    /** Counter lifetime: comfortably longer than an MFA session (15 min). */
+    private static final java.time.Duration PUZZLE_CREATE_COUNTER_TTL = java.time.Duration.ofMinutes(30);
+    /** Trace-contract record lifetime: longer than a bio puzzle session (300 s). */
+    private static final java.time.Duration PUZZLE_CONTRACT_RECORD_TTL = java.time.Duration.ofMinutes(10);
+
+    /**
      * CREATE a server-issued puzzle session for the in-progress MFA step.
      *
      * <p>Request body: {@code {"sessionToken":"<mfa session token>"}}. Any
@@ -1204,8 +1217,29 @@ public class AuthController {
                     .body(Map.of("message", "Puzzle step is not configured"));
         }
 
+        // S2: bound the number of bio puzzle sessions per MFA session token, so the
+        // bio per-session attempt cap cannot be reset by creating new sessions.
+        // Counted BEFORE the bio call (failed creates count too). Fail CLOSED when
+        // the counter store is unavailable: the counter IS the cap.
+        long creates;
+        try {
+            creates = puzzleSessionGuard.incrementCreates(sha256Hex(sessionToken), PUZZLE_CREATE_COUNTER_TTL);
+        } catch (IllegalStateException e) {
+            log.error("AUDIT: PUZZLE session create rejected — create counter unavailable, userId={}", userId);
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                    .body(Map.of("message", "Puzzle session service unavailable"));
+        }
+        if (creates > MAX_PUZZLE_SESSIONS_PER_MFA_SESSION) {
+            log.warn("AUDIT: PUZZLE session create throttled — userId={}, creates={}, max={}",
+                    userId, creates, MAX_PUZZLE_SESSIONS_PER_MFA_SESSION);
+            throw new com.fivucsas.identity.exception.RateLimitExceededException(
+                    "Too many puzzle attempts for this sign-in. Please start the sign-in again.",
+                    PUZZLE_CREATE_COUNTER_TTL.getSeconds());
+        }
+
         Map<String, Object> bioResponse = biometricService.createPuzzleSession(
-                tenantId, userId, policy.allowedChallengeTypes(), policy.count(), policy.difficulty());
+                tenantId, userId, policy.allowedChallengeTypes(), policy.count(), policy.difficulty(),
+                policy.alsoMatchFaceIdentity());
 
         // Fail-closed: a session without an opaque session_id is an error map.
         Object sessionId = bioResponse != null ? bioResponse.get("session_id") : null;
@@ -1215,7 +1249,15 @@ public class AuthController {
             return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
                     .body(Map.of("message", "Could not create puzzle session"));
         }
-        log.info("AUDIT: PUZZLE session created — userId={}, tenantId={}, count={}", userId, tenantId, policy.count());
+        // S5: record the trace contract bio advertised for this session so the
+        // verdict handler knows whether to demand binding_checked (v2) or keep the
+        // legacy v1 behaviour (bio flag OFF). Server-to-server data, never client.
+        String contract = PuzzleSessionGuardPort.CONTRACT_V2.equals(bioResponse.get("trace_contract"))
+                ? PuzzleSessionGuardPort.CONTRACT_V2
+                : PuzzleSessionGuardPort.CONTRACT_V1;
+        puzzleSessionGuard.recordTraceContract(String.valueOf(sessionId), contract, PUZZLE_CONTRACT_RECORD_TTL);
+        log.info("AUDIT: PUZZLE session created — userId={}, tenantId={}, count={}, contract={}, create={}/{}",
+                userId, tenantId, policy.count(), contract, creates, MAX_PUZZLE_SESSIONS_PER_MFA_SESSION);
         return ResponseEntity.ok(bioResponse);
     }
 
@@ -1282,7 +1324,8 @@ public class AuthController {
      * Parsed allowed-challenge policy for a PUZZLE step: the challenge types bio
      * may choose from, how many to issue, and an optional difficulty hint.
      */
-    private record PuzzleStepPolicy(List<String> allowedChallengeTypes, int count, String difficulty) {
+    private record PuzzleStepPolicy(List<String> allowedChallengeTypes, int count, String difficulty,
+                                    boolean alsoMatchFaceIdentity) {
     }
 
     /**
@@ -1340,10 +1383,25 @@ public class AuthController {
             }
             com.fasterxml.jackson.databind.JsonNode diffNode = puzzle.get("difficulty");
             String difficulty = (diffNode != null && diffNode.isTextual()) ? diffNode.asText() : null;
-            return new PuzzleStepPolicy(allowed, count, difficulty);
+            // Tells bio whether the verdict may require the binding-frame check (a
+            // superset of the handler's double-gate, so windows are kept whenever
+            // the handler could require binding).
+            com.fasterxml.jackson.databind.JsonNode bindNode = puzzle.get("alsoMatchFaceIdentity");
+            boolean alsoMatch = bindNode != null && bindNode.asBoolean(false);
+            return new PuzzleStepPolicy(allowed, count, difficulty, alsoMatch);
         } catch (Exception e) {
             log.warn("PUZZLE step config unparseable as JSON — failing closed: {}", e.getMessage());
             return null;
+        }
+    }
+
+    private static String sha256Hex(String value) {
+        try {
+            byte[] digest = java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(value.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            return java.util.HexFormat.of().formatHex(digest);
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 unavailable", e);
         }
     }
 

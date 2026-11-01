@@ -451,6 +451,26 @@ public interface BiometricServicePort {
                                             String difficulty);
 
     /**
+     * Same as {@link #createPuzzleSession(UUID, UUID, List, int, String)}, also
+     * telling bio whether the verdict may require the puzzle contract v2
+     * binding-frame consistency check ({@code require_identity_binding}, from the
+     * step's {@code alsoMatchFaceIdentity}). With {@code false} bio does not retain
+     * the per-challenge face windows (a smaller session); a later binding-required
+     * verdict then fails closed. Ignored by bio v1.
+     *
+     * <p>Default delegates to the 5-arg create so other implementations stay
+     * source-compatible.
+     */
+    default Map<String, Object> createPuzzleSession(UUID tenantId,
+                                                    UUID userId,
+                                                    List<String> allowedChallengeTypes,
+                                                    int count,
+                                                    String difficulty,
+                                                    boolean requireIdentityBinding) {
+        return createPuzzleSession(tenantId, userId, allowedChallengeTypes, count, difficulty);
+    }
+
+    /**
      * Submits one completed challenge's traces to an existing puzzle session for
      * per-challenge scoring (UX feedback — NOT the auth gate; that is
      * {@link #getPuzzleVerdict}).
@@ -511,8 +531,11 @@ public interface BiometricServicePort {
      * verdict body. Under bio's puzzle contract v2 ({@code PUZZLE_TRACE_V2_ENABLED})
      * the verdict then also requires that frame to lie inside a verified
      * face-challenge window of the SAME session with consistent geometry
-     * (split-capture binding); a {@code null}/malformed frame fails closed there.
-     * On bio v1 the extra fields are ignored (legacy behaviour).
+     * (binding-frame consistency check: it only compares the client-declared frame
+     * with the client's own trace, so it does NOT prove the embedding came from the
+     * live capture); a {@code null}/malformed frame fails closed there. bio v2 then
+     * answers {@code binding_checked:true} when the check ran and passed. On bio v1
+     * the extra fields are ignored (legacy behaviour, no {@code binding_checked}).
      *
      * <p>Default implementation delegates to the 3-arg verdict (no binding) so
      * alternative implementations stay source-compatible.

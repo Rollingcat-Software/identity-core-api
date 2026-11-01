@@ -2,7 +2,36 @@
 
 ## [Unreleased]
 
-### 2026-11-01 — PUZZLE contract v2: forward the split-capture binding frame
+### 2026-11-01 — PUZZLE contract v2: security-review fixes (bio flag `PUZZLE_TRACE_V2_ENABLED`, default OFF)
+
+- **S2 create cap:** `POST /auth/mfa/puzzle/session` counts bio puzzle sessions per MFA
+  session token (Redis INCR, key = SHA-256 of the token, 30 min TTL, new
+  `PuzzleSessionGuardPort` + `RedisPuzzleSessionGuardAdapter`). The 4th create → 429
+  (`RateLimitExceededException`, the global handler's shape); counted before the bio call;
+  counter store down → 503 (fail closed, the counter IS the cap). Stops resetting bio's
+  3-attempt per-session cap by creating fresh sessions.
+- **S5 version handshake:** CREATE records the trace contract bio advertised
+  (`trace_contract` "v2", else "v1"). When binding is required the handler fails closed
+  unless bio's verdict carries `binding_checked: true`, EXCEPT for sessions recorded as v1
+  (bio flag OFF), which keep the legacy behaviour; an unknown record is treated strictly.
+  Binding-off steps never consult the record.
+- **S6 binding-frame bounds:** `extractBindingFrame` applies bio's bounds (96 ints,
+  |coord| ≤ 20000, 0 ≤ t ≤ 2^53 integral, optional frame dims 64..8192). A malformed frame,
+  or a missing one on a non-v1 session, fails in identity and the bio session is CONSUMED
+  via a plain verdict call (no longer forwarded as null / left live).
+- CREATE now also sends `require_identity_binding` (= `alsoMatchFaceIdentity`) so bio keeps
+  face windows only when binding can be required (new 6-arg `createPuzzleSession` default
+  method; the 5-arg form is unchanged).
+- **N1:** orphaned Javadoc in `PuzzleVerifyMfaStepHandler` fixed.
+- **N4:** unsatisfiable v2 challenge types (`light`, `shape_trace`, `hold_position`) are
+  filtered by bio at CREATE (it alone knows the session will be v2); if none remain bio
+  returns 400, which this proxy surfaces as its existing 502 "Could not create puzzle session".
+- **B1 wording:** "split-capture binding" → "binding-frame consistency check": it only
+  checks the client-declared frame against the client's own trace, a modified client can
+  pass it, and real binding needs server-observed image data or attested capture. Wire
+  fields (`binding_frame`, `require_identity_binding`) unchanged.
+
+### 2026-11-01 — PUZZLE contract v2: forward the binding frame (binding-frame consistency check)
 
 - `PuzzleVerifyMfaStepHandler` now resolves the identity-binding requirement
   (`puzzleConfig.alsoMatchFaceIdentity` AND `ClientSideEmbeddingPolicy`) BEFORE the
