@@ -17,6 +17,21 @@
   is stripped), so v2 landmark traces need no api change; bio's schema bounds them
   (≤200 frames, fixed landmark counts).
 - Tests: +4 handler, +2 adapter. `mvn test`: 1847 run / 0 fail / 0 error / 67 skip.
+### 2026-11-01 — CI: tenant-isolation IT gate now catches a silently skipped class
+
+The "Assert tenant-isolation ITs actually executed" step summed only the Surefire
+`tests=` attribute. With `RUN_INTEGRATION` unset, a class-level
+`@EnabledIfEnvironmentVariable` makes Surefire 3.5.x + JUnit 5 write `tests="N"
+skipped="N"` (one skipped testcase per method), not `tests="0"`, so the gate passed
+a fully skipped class. Verified with a real Surefire 3.5.3 / JUnit 5.11.4 probe
+project. Latent only: CI sets `RUN_INTEGRATION=true`, so no IT was actually skipped.
+
+- Gate moved to `scripts/ci/assert-its-executed.sh`; a class passes only when
+  `tests - skipped >= 1` over its top-level and `@Nested` reports.
+- `scripts/ci/test-assert-its-executed.sh` fault-injects the gate on real Surefire
+  reports (healthy, unset variable, missing report, nested-only, all-zero) and runs
+  in CI before the gate.
+- No production code change.
 
 ### 2026-06-07 — Authorization IDOR / PII-leak / abuse-throttle hardening + test-suite green-up
 

@@ -133,50 +133,23 @@ jobs:
         # gate; here we only care that the isolation ITs pass.
         run: mvn -B -ntp -Dtest='*IntegrationTest,*IT' -DfailIfNoTests=true -Djacoco.skip=true verify
 
+      - name: Self-test the IT-executed gate (fault injection on real Surefire reports)
+        run: scripts/ci/test-assert-its-executed.sh
+
       - name: Assert tenant-isolation ITs actually executed (not skipped)
         # Defense against a silent regression where the ITs compile but get
         # skipped (e.g. RUN_INTEGRATION unset, or a rename drops them from the
-        # filter). Each named IT must have produced a surefire report with at
-        # least one run test and zero skips of the whole class.
+        # filter). Each named IT must have executed at least one test, counting
+        # tests - skipped across its top-level and @Nested surefire reports. An
+        # unset class-level @EnabledIfEnvironmentVariable yields tests="N"
+        # skipped="N", not tests="0", so skips must be subtracted.
         run: |
-          set -euo pipefail
-          reports=target/surefire-reports
-          required=(
-            CrossTenantIsolationIT
-            TenantSwitcherIsolationIT
-            IdentityBiometricConsentIT
-            IdentityBackfillIT
+          scripts/ci/assert-its-executed.sh target/surefire-reports \
+            CrossTenantIsolationIT \
+            TenantSwitcherIsolationIT \
+            IdentityBiometricConsentIT \
+            IdentityBackfillIT \
             RoleUnificationBackfillIT
-          )
-          fail=0
-          for it in "${required[@]}"; do
-            # A class that uses JUnit 5 @Nested writes its tests to PER-NESTED-CLASS
-            # surefire reports (TEST-...$it$Inner.xml) and leaves the top-level
-            # TEST-...$it.xml report with tests="0". CrossTenantIsolationIT is such a
-            # class, so we must SUM the test counts across the top-level report AND
-            # every "$it$..." nested-class report, not just read the first match.
-            # shellcheck disable=SC2206
-            matches=( $(ls "$reports/TEST-com.fivucsas.identity."*".$it.xml" \
-                           "$reports/TEST-com.fivucsas.identity."*".$it"'$'*".xml" \
-                        2>/dev/null || true) )
-            if [ "${#matches[@]}" -eq 0 ]; then
-              echo "::error::$it produced no surefire report — it did NOT run (RUN_INTEGRATION gating or -Dtest filter broke)"
-              fail=1
-              continue
-            fi
-            tests=0
-            for m in "${matches[@]}"; do
-              n=$(grep -oP 'testsuite[^>]*\btests="\K[0-9]+' "$m" | head -1 || echo 0)
-              tests=$((tests + ${n:-0}))
-            done
-            if [ "${tests:-0}" -lt 1 ]; then
-              echo "::error::$it ran 0 tests (reports: ${matches[*]})"
-              fail=1
-            else
-              echo "OK: $it executed ($tests test(s) across ${#matches[@]} report(s))"
-            fi
-          done
-          exit $fail
 
       - name: Upload surefire reports on failure
         if: failure()
