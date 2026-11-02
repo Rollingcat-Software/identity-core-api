@@ -77,6 +77,14 @@ docker compose -f docker-compose.prod.yml --env-file .env.prod up -d identity-co
 
 **Always use `--env-file .env.prod`** on VPS. Runs on port 8080. Swagger at `/swagger-ui.html`.
 
+**Auto-deploy is gated on CI (2026-11-02).** `.github/workflows/deploy-hetzner.yml` runs via
+`workflow_run` only after the `CI` workflow succeeds for a push to `main`, and deploys
+exactly that commit (`git merge --ff-only <head_sha>` on the box); a red build never deploys.
+Its `changes` job re-applies the old deploy path filter (files changed since the last
+successful deploy). Keep `ci.yml` push `paths:` a superset of the deploy paths, or a
+deploy-relevant change never runs CI and never deploys. `workflow_dispatch` = manual
+operator deploy of the tip of `main` (no CI gate).
+
 ## Key Directories
 
 - `controller/` - 25 REST controllers (incl. OAuth2, OpenIDConfig, NFC, WebAuthn)
@@ -319,6 +327,9 @@ redeploy, and support per-tenant canary. **Both MUST be passed via the compose
 `environment:` block** (the service uses an explicit block, NOT `env_file:` — a
 var only in `.env.prod` is silently dropped; this exact gap once broke the face
 flag).
+The same applies to the puzzle layer: `APP_AUTH_PUZZLE_LAYER` / `APP_AUTH_PUZZLE_LAYER_TENANTS`
+(`app.auth.puzzle-layer[-tenants]`) are now forwarded in the compose `environment:` block
+(default `false` / empty = unchanged prod behaviour).
 
 - **FACE** — `ClientSideEmbeddingPolicy` (`app.auth.client-side-embedding`):
   `FaceVerifyMfaStepHandler` + `BiometricController.enrollFaceEmbedding` route a
