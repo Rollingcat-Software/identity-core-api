@@ -2,6 +2,37 @@
 
 ## [Unreleased]
 
+### 2026-11-02 — User delete now erases biometric templates (transactional outbox, V87)
+
+Deleting a user (`ManageUserService.deleteUser`) only soft-deleted the `users` row;
+the face + voice templates held by biometric-processor were never removed, and the
+optional `SoftDeletePurgeJob` (default OFF) only cascades identity-DB tables
+(GDPR Art. 17 / KVKK erasure gap).
+
+- **V87 `biometric_deletion_outbox`** (`id, user_id, tenant_id, method, created_at,
+  attempts, last_error, next_attempt_at, completed_at`). `UNIQUE(user_id, method)` +
+  `INSERT ... ON CONFLICT DO NOTHING` makes enqueue idempotent; NO FK to `users` so a
+  hard purge never cascades a pending intent away. Not tenant-filtered (system queue).
+- **Enqueue:** `deleteUser` enqueues FACE + VOICE in the SAME transaction as the soft
+  delete; `SoftDeletePurgeJob.purgeBatch` enqueues again (no-op if present) BEFORE the
+  hard delete, covering users soft-deleted before V87.
+- **Drain:** `BiometricDeletionOutboxWorker` (ShedLock `BiometricDeletionOutboxWorker_drain`,
+  every 60 s) calls `BiometricServicePort.deleteFace/deleteVoice`. Success or bio 404
+  (nothing enrolled) → `completed_at`; any other outcome → `attempts+1`, `last_error`,
+  `next_attempt_at = now + 60 s * 2^attempts` (capped 6 h); parks after
+  `max-attempts` (default 10) with an ERROR log.
+- `BiometricServiceAdapter.deleteFace/deleteVoice` now map bio 404 to
+  `{success:false, notEnrolled:true}` (the user-facing delete endpoints still report
+  `success=false`; only the message text changes from "service error" to "No ... enrollment found").
+- Kill-switch `APP_BIOMETRIC_DELETION_OUTBOX_ENABLED` (default `true`, passed in
+  `docker-compose.prod.yml`); `false` pauses draining only, intents keep accumulating.
+- The purge default (`APP_PURGE_SOFT_DELETE_ENABLED=false`) is UNCHANGED (operator
+  decision); biometric erasure no longer depends on it.
+- Tests: `BiometricDeletionOutboxWorkerTest` (11), `BiometricDeletionOutboxAdapterTest` (2),
+  +2 `ManageUserServiceTest`, extended `SoftDeletePurgeJobTest`, +3 `BiometricServiceAdapterTest`.
+  Migration replayed on a fresh PostgreSQL 16 + pgvector (all migrations + test fixtures OK).
+- Branch also merges `fix/audit-logs-partition-time-bomb` (PR #277) so integration CI can go green.
+
 ### 2026-06-07 — Authorization IDOR / PII-leak / abuse-throttle hardening + test-suite green-up
 
 Three PRs merged to `main` on this date (HEAD ~`3aafc69`):
