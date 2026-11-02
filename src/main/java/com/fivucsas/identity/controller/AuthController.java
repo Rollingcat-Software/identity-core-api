@@ -112,6 +112,8 @@ public class AuthController {
     private final com.fivucsas.identity.application.service.mfa.AvailableMethodsResolver availableMethodsResolver;
     private final com.fivucsas.identity.application.service.PuzzleLayerPolicy puzzleLayerPolicy;
     private final PuzzleSessionGuardPort puzzleSessionGuard;
+    private final com.fivucsas.identity.application.service.attestation.AttestationChallengeIssuer
+            attestationChallengeIssuer;
     private final com.fasterxml.jackson.databind.ObjectMapper puzzleObjectMapper =
             new com.fasterxml.jackson.databind.ObjectMapper();
 
@@ -1258,6 +1260,23 @@ public class AuthController {
         puzzleSessionGuard.recordTraceContract(String.valueOf(sessionId), contract, PUZZLE_CONTRACT_RECORD_TTL);
         log.info("AUDIT: PUZZLE session created — userId={}, tenantId={}, count={}, contract={}, create={}/{}",
                 userId, tenantId, policy.count(), contract, creates, MAX_PUZZLE_SESSIONS_PER_MFA_SESSION);
+        // Attested puzzle binding (default OFF): issue a single-use hardware-attestation
+        // challenge bound to this MFA session + puzzle session. Absent when the policy
+        // is off, so the flag-OFF response is bio's verbatim.
+        if (attestationChallengeIssuer.applies(tenantId, policy.alsoMatchFaceIdentity())) {
+            Map<String, Object> withChallenge = new java.util.LinkedHashMap<>(bioResponse);
+            try {
+                withChallenge.put("attestation_challenge",
+                        attestationChallengeIssuer.issue(String.valueOf(sessionId), mfaSession.getId()));
+            } catch (IllegalStateException e) {
+                log.error("AUDIT: PUZZLE attestation challenge issue failed — userId={}: {}", userId, e.getMessage());
+                return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                        .body(Map.of("message", "Puzzle session service unavailable"));
+            }
+            withChallenge.put("attestation_payload_version",
+                    com.fivucsas.identity.application.service.attestation.AttestedBindingPayload.VERSION);
+            return ResponseEntity.ok(withChallenge);
+        }
         return ResponseEntity.ok(bioResponse);
     }
 

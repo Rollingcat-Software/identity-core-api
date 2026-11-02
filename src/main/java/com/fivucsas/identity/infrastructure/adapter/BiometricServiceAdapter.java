@@ -811,18 +811,25 @@ public class BiometricServiceAdapter implements BiometricServicePort {
 
     @Override
     public Map<String, Object> getPuzzleVerdict(String sessionId, UUID userId, UUID tenantId) {
-        return postPuzzleVerdict(sessionId, userId, tenantId, false, null);
+        return postPuzzleVerdict(sessionId, userId, tenantId, false, null, false);
     }
 
     @Override
     public Map<String, Object> getPuzzleVerdictWithBinding(String sessionId, UUID userId, UUID tenantId,
                                                            Map<String, Object> bindingFrame) {
-        return postPuzzleVerdict(sessionId, userId, tenantId, true, bindingFrame);
+        return postPuzzleVerdict(sessionId, userId, tenantId, true, bindingFrame, false);
+    }
+
+    @Override
+    public Map<String, Object> getPuzzleVerdictWithAttestedBinding(String sessionId, UUID userId, UUID tenantId,
+                                                                   Map<String, Object> bindingFrame) {
+        return postPuzzleVerdict(sessionId, userId, tenantId, true, bindingFrame, true);
     }
 
     private Map<String, Object> postPuzzleVerdict(String sessionId, UUID userId, UUID tenantId,
                                                   boolean requireIdentityBinding,
-                                                  Map<String, Object> bindingFrame) {
+                                                  Map<String, Object> bindingFrame,
+                                                  boolean includeTraceDigest) {
         log.info("Calling biometric service for puzzle session verdict: sessionId={}, user: {} (tenant: {}), binding={}",
                 sessionId, userId, tenantId, requireIdentityBinding);
         // CV-2 canonical contract (the AUTH GATE): bio
@@ -842,6 +849,12 @@ public class BiometricServiceAdapter implements BiometricServicePort {
             if (bindingFrame != null) {
                 body.put("binding_frame", bindingFrame);
             }
+        }
+        if (includeTraceDigest) {
+            // Attested puzzle binding: ask bio for the canonical digest of the
+            // traces it scored (only sent when attested binding is required, so
+            // every other verdict body is unchanged).
+            body.put("include_trace_digest", true);
         }
         try {
             return postJsonObject("/liveness/puzzle-session/" + sessionId + "/verdict", body);

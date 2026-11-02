@@ -202,6 +202,9 @@ class AuthControllerTest {
     @MockBean
     private com.fivucsas.identity.application.port.output.PuzzleSessionGuardPort puzzleSessionGuard;
 
+    @MockBean
+    private com.fivucsas.identity.application.service.attestation.AttestationChallengeIssuer attestationChallengeIssuer;
+
     // Test Data
     private static final String TEST_EMAIL = "test@fivucsas.com";
     private static final String TEST_PASSWORD = "SecurePassword123!";

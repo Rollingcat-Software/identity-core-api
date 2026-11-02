@@ -100,6 +100,16 @@ not a real biometric. The `AuthMethodType.FINGERPRINT` enum value is retained
 ## Key Patterns
 
 - **Biometric enrollment-probe (login triage F2/F7/F9, 2026-06-12)**: `EnrollmentHealthService.hasBiometricData(FACE/VOICE)` no longer FAKES enrollment as always-present when the bio service is merely reachable (the old behaviour routed un-enrolled users into a VOICE step that could never pass → "No voice enrollment found" → generic "Doğrulama başarısız"; FACE was masked because most users did enroll). It now asks the biometric-processor whether a template REALLY exists via `BiometricServicePort.{voiceEnrollmentExists(userId), faceEnrollmentExists(userId, tenantId)}` → bio `GET /voice|/face/{userId}/exists`. **Tri-state**: definitive `TRUE`→enrolled; definitive `FALSE`→not-enrolled (the stale row is auto-revoked by `validateEnrollments`, so it stops being offered/auto-picked); `null` (UNKNOWN = bio OUTAGE: transport/5xx)→**fail-OPEN** (return true) so an outage never locks everyone out. Face probe is tenant-scoped (resolved via `userJpaRepository.findTenantIdById`) for verify-path parity. **KILL-SWITCH**: `app.auth.enrollment-probe.enabled` (`APP_AUTH_ENROLLMENT_PROBE_ENABLED`, default `true` = the fix). Set `false` to instantly revert to the legacy "trust the enrollment row if the bio service is reachable" behaviour with NO redeploy. **Prod rollout = deploy bio FIRST (the existence endpoints), then identity.**
+- **Attested puzzle binding (2026-11-02, `app.auth.attested-binding` + `-tenants`, default OFF):**
+  real split-capture binding for the NATIVE Android app via hardware Key Attestation. CREATE
+  issues a single-use `attestation_challenge`; the PUZZLE step (when `alsoMatchFaceIdentity`)
+  then requires an attested EC P-256 key (TEE/StrongBox, genuine release-signed
+  `com.fivucsas.mobile`, verified boot, locked, not revoked) that signed (session, nonce,
+  embedding, bio `trace_digest`, binding frame); the matched embedding is exactly the signed
+  one. Browsers cannot attest ⇒ a bound PUZZLE step from the web fails closed for tenants with
+  the flag on. Set `APP_AUTH_ATTESTATION_ANDROID_SIGNING_CERT_SHA256` first (empty ⇒ reject
+  all). Design + residual risks (leaked keybox, HAL camera injection, deepfake into the real
+  camera): `docs/ATTESTED_PUZZLE_BINDING.md`.
 - **PUZZLE contract v2 guards (2026-11-01, bio flag `PUZZLE_TRACE_V2_ENABLED` default OFF):**
   `PuzzleSessionGuardPort` (Redis) caps bio puzzle-session CREATEs at 3 per MFA session
   token (4th → 429; store down → 503 fail-closed) and records the trace contract bio

@@ -2,6 +2,29 @@
 
 ## [Unreleased]
 
+### 2026-11-02 — Attested puzzle binding via Android Key Attestation (`app.auth.attested-binding`, default OFF)
+
+- New `docs/ATTESTED_PUZZLE_BINDING.md` (threat model, protocol, checks, revocation,
+  config, rollout, iOS App Attest twin).
+- CREATE `/auth/mfa/puzzle/session` returns a single-use 32-byte `attestation_challenge`
+  (Redis, bound to the MFA + bio puzzle session, TTL 300 s) when the policy is on for the
+  tenant and the step has `alsoMatchFaceIdentity`; otherwise unchanged.
+- `PuzzleVerifyMfaStepHandler`: with the policy on, a binding-required step needs an
+  `attestation` bundle. Verified before the consuming verdict: nonce consumed + bound to the
+  MFA session, Android Key Attestation chain (pinned Google roots by SPKI, signatures, name
+  chaining, validity, leaf-only KeyDescription, Google status-list revocation with cache +
+  configurable fail policy, challenge, TEE/StrongBox, hardware-generated SIGN EC P-256 key,
+  verified boot + locked, package + signing-cert SHA-256). After the verdict (now requesting
+  bio's `trace_digest`): ECDSA P-256 signature over the canonical (session, nonce, embedding,
+  trace digest, binding frame) payload; the matched embedding is exactly the signed one. Any
+  failure fails closed and consumes the bio session.
+- Hexagonal: `DeviceAttestationVerifierPort` (+ `AndroidKeyAttestationVerifierAdapter`, strict
+  in-house DER parser, BouncyCastle not needed), `AttestationChallengePort`
+  (+ `RedisAttestationChallengeAdapter`). No Flyway migration.
+- Tests: real device chains from `android/keyattestation` testdata (Apache-2.0, NOTICE
+  alongside), synthetic chains for negative paths and the chain-extension attack, end-to-end
+  handler tests, golden payload vector shared with client-apps and bio.
+
 ### 2026-11-01 — PUZZLE contract v2: security-review fixes (bio flag `PUZZLE_TRACE_V2_ENABLED`, default OFF)
 
 - **S2 create cap:** `POST /auth/mfa/puzzle/session` counts bio puzzle sessions per MFA

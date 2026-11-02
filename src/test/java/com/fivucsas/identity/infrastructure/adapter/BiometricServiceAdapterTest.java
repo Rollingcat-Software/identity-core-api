@@ -13,6 +13,7 @@ import org.springframework.web.multipart.MultipartFile;
 import java.io.ByteArrayOutputStream;
 import java.lang.reflect.Field;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -754,6 +755,31 @@ class BiometricServiceAdapterTest {
 
         assertThat(result).containsEntry("success", false);
         assertThat(result).doesNotContainKey("verified");
+        mockServer.verify();
+    }
+
+    @Test
+    @DisplayName("attested verdict sends include_trace_digest; the binding/plain verdicts never do")
+    void getPuzzleVerdict_attestedBinding_requestsTraceDigest() {
+        String url = BIO_URL + "/liveness/puzzle-session/" + PUZZLE_SESSION_ID + "/verdict";
+        mockServer.expect(requestTo(url))
+                .andExpect(req -> assertThat(bodyAsString(req))
+                        .contains("\"require_identity_binding\":true")
+                        .contains("\"include_trace_digest\":true"))
+                .andRespond(withSuccess("{\"verified\":true,\"binding_checked\":true,\"trace_digest\":\"ab\"}",
+                        MediaType.APPLICATION_JSON));
+        mockServer.expect(requestTo(url))
+                .andExpect(req -> assertThat(bodyAsString(req)).doesNotContain("include_trace_digest"))
+                .andRespond(withSuccess("{\"verified\":true}", MediaType.APPLICATION_JSON));
+        mockServer.expect(requestTo(url))
+                .andExpect(req -> assertThat(bodyAsString(req)).doesNotContain("include_trace_digest"))
+                .andRespond(withSuccess("{\"verified\":true}", MediaType.APPLICATION_JSON));
+
+        var attested = adapter.getPuzzleVerdictWithAttestedBinding(PUZZLE_SESSION_ID, USER_ID, PUZZLE_TENANT,
+                Map.of("t", 1L));
+        assertThat(attested).containsEntry("trace_digest", "ab");
+        adapter.getPuzzleVerdictWithBinding(PUZZLE_SESSION_ID, USER_ID, PUZZLE_TENANT, Map.of("t", 1L));
+        adapter.getPuzzleVerdict(PUZZLE_SESSION_ID, USER_ID, PUZZLE_TENANT);
         mockServer.verify();
     }
 

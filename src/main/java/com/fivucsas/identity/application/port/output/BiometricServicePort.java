@@ -546,4 +546,18 @@ public interface BiometricServicePort {
                                                             Map<String, Object> bindingFrame) {
         return getPuzzleVerdict(sessionId, userId, tenantId);
     }
+
+    /**
+     * Same consuming, binding-required verdict as
+     * {@link #getPuzzleVerdictWithBinding(String, UUID, UUID, Map)}, additionally
+     * asking bio for the canonical {@code trace_digest} of the traces it scored
+     * ({@code include_trace_digest:true}). Used by the ATTESTED puzzle binding
+     * ({@code docs/ATTESTED_PUZZLE_BINDING.md}): the attested client's signature
+     * must cover exactly this digest. A bio that does not return the digest makes
+     * the attested step fail closed (the default here omits it).
+     */
+    default Map<String, Object> getPuzzleVerdictWithAttestedBinding(String sessionId, UUID userId, UUID tenantId,
+                                                                    Map<String, Object> bindingFrame) {
+        return getPuzzleVerdictWithBinding(sessionId, userId, tenantId, bindingFrame);
+    }
 }

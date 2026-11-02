@@ -138,6 +138,7 @@ class AuthControllerPuzzleSessionProxyTest {
     @MockBean private com.fivucsas.identity.application.service.mfa.AvailableMethodsResolver availableMethodsResolver;
     @MockBean private PuzzleLayerPolicy puzzleLayerPolicy;
     @MockBean private PuzzleSessionGuardPort puzzleSessionGuard;
+    @MockBean private com.fivucsas.identity.application.service.attestation.AttestationChallengeIssuer attestationChallengeIssuer;
 
     @BeforeEach
     void setUp() {
@@ -439,5 +440,63 @@ class AuthControllerPuzzleSessionProxyTest {
         stubBioCreate(Map.of("session_id", BIO_SESSION_ID, "challenges", List.of()));
         postCreate().andExpect(status().isOk());
         verify(biometricService).createPuzzleSession(any(), any(), any(), anyInt(), any(), eq(false));
+    }
+
+    // ---- Attested puzzle binding: challenge issued at CREATE ------------------
+
+    @Test
+    @DisplayName("CREATE: attested binding applies → response carries a single-use attestation_challenge")
+    void create_attestedBinding_returnsChallenge() throws Exception {
+        MfaSession session = liveSessionRegistered();
+        UUID mfaId = UUID.fromString("bbbbbbbb-0000-0000-0000-000000000009");
+        when(session.getId()).thenReturn(mfaId);
+        stubPuzzleStepConfig();
+        when(biometricService.createPuzzleSession(any(), any(), any(), anyInt(), any(), anyBoolean()))
+                .thenReturn(Map.of("session_id", BIO_SESSION_ID, "challenges", List.of(),
+                        "trace_contract", "v2"));
+        when(attestationChallengeIssuer.applies(eq(SERVER_TENANT_ID), anyBoolean())).thenReturn(true);
+        when(attestationChallengeIssuer.issue(BIO_SESSION_ID, mfaId)).thenReturn("bm9uY2U");
+
+        mockMvc.perform(post("/api/v1/auth/mfa/puzzle/session")
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"sessionToken\":\"" + SESSION_TOKEN + "\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.session_id").value(BIO_SESSION_ID))
+                .andExpect(jsonPath("$.attestation_challenge").value("bm9uY2U"))
+                .andExpect(jsonPath("$.attestation_payload_version").value(1));
+    }
+
+    @Test
+    @DisplayName("CREATE: attested binding off → no attestation_challenge (bio response verbatim)")
+    void create_attestedBindingOff_noChallenge() throws Exception {
+        liveSessionRegistered();
+        stubPuzzleStepConfig();
+        when(biometricService.createPuzzleSession(any(), any(), any(), anyInt(), any(), anyBoolean()))
+                .thenReturn(Map.of("session_id", BIO_SESSION_ID, "challenges", List.of()));
+        mockMvc.perform(post("/api/v1/auth/mfa/puzzle/session")
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"sessionToken\":\"" + SESSION_TOKEN + "\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.attestation_challenge").doesNotExist());
+        verify(attestationChallengeIssuer, never()).issue(anyString(), any());
+    }
+
+    @Test
+    @DisplayName("CREATE: challenge store down → 503 fail-closed")
+    void create_attestedBinding_storeDown_returns503() throws Exception {
+        MfaSession session = liveSessionRegistered();
+        when(session.getId()).thenReturn(UUID.randomUUID());
+        stubPuzzleStepConfig();
+        when(biometricService.createPuzzleSession(any(), any(), any(), anyInt(), any(), anyBoolean()))
+                .thenReturn(Map.of("session_id", BIO_SESSION_ID, "challenges", List.of()));
+        when(attestationChallengeIssuer.applies(any(), anyBoolean())).thenReturn(true);
+        when(attestationChallengeIssuer.issue(anyString(), any())).thenThrow(new IllegalStateException("down"));
+        mockMvc.perform(post("/api/v1/auth/mfa/puzzle/session")
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"sessionToken\":\"" + SESSION_TOKEN + "\"}"))
+                .andExpect(status().isServiceUnavailable());
     }
 }
