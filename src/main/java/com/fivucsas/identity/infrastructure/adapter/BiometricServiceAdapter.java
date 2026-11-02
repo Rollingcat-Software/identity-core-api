@@ -736,6 +736,26 @@ public class BiometricServiceAdapter implements BiometricServicePort {
                                                    List<String> allowedChallengeTypes,
                                                    int count,
                                                    String difficulty) {
+        return postCreatePuzzleSession(tenantId, userId, allowedChallengeTypes, count, difficulty, null);
+    }
+
+    @Override
+    public Map<String, Object> createPuzzleSession(UUID tenantId,
+                                                   UUID userId,
+                                                   List<String> allowedChallengeTypes,
+                                                   int count,
+                                                   String difficulty,
+                                                   boolean requireIdentityBinding) {
+        return postCreatePuzzleSession(tenantId, userId, allowedChallengeTypes, count, difficulty,
+                requireIdentityBinding);
+    }
+
+    private Map<String, Object> postCreatePuzzleSession(UUID tenantId,
+                                                        UUID userId,
+                                                        List<String> allowedChallengeTypes,
+                                                        int count,
+                                                        String difficulty,
+                                                        Boolean requireIdentityBinding) {
         log.info("Calling biometric service to create puzzle session for user: {} (tenant: {}, count: {})",
                 userId, tenantId, count);
         // CV-2 canonical contract: bio POST /api/v1/liveness/puzzle-session
@@ -752,6 +772,10 @@ public class BiometricServiceAdapter implements BiometricServicePort {
         body.put("count", count);
         if (difficulty != null && !difficulty.isBlank()) {
             body.put("difficulty", difficulty);
+        }
+        if (requireIdentityBinding != null) {
+            // v2: lets bio skip retaining face windows when binding is never required.
+            body.put("require_identity_binding", requireIdentityBinding);
         }
         try {
             return postJsonObject("/liveness/puzzle-session", body);
@@ -801,8 +825,27 @@ public class BiometricServiceAdapter implements BiometricServicePort {
 
     @Override
     public Map<String, Object> getPuzzleVerdict(String sessionId, UUID userId, UUID tenantId) {
-        log.info("Calling biometric service for puzzle session verdict: sessionId={}, user: {} (tenant: {})",
-                sessionId, userId, tenantId);
+        return postPuzzleVerdict(sessionId, userId, tenantId, false, null, false);
+    }
+
+    @Override
+    public Map<String, Object> getPuzzleVerdictWithBinding(String sessionId, UUID userId, UUID tenantId,
+                                                           Map<String, Object> bindingFrame) {
+        return postPuzzleVerdict(sessionId, userId, tenantId, true, bindingFrame, false);
+    }
+
+    @Override
+    public Map<String, Object> getPuzzleVerdictWithAttestedBinding(String sessionId, UUID userId, UUID tenantId,
+                                                                   Map<String, Object> bindingFrame) {
+        return postPuzzleVerdict(sessionId, userId, tenantId, true, bindingFrame, true);
+    }
+
+    private Map<String, Object> postPuzzleVerdict(String sessionId, UUID userId, UUID tenantId,
+                                                  boolean requireIdentityBinding,
+                                                  Map<String, Object> bindingFrame,
+                                                  boolean includeTraceDigest) {
+        log.info("Calling biometric service for puzzle session verdict: sessionId={}, user: {} (tenant: {}), binding={}",
+                sessionId, userId, tenantId, requireIdentityBinding);
         // CV-2 canonical contract (the AUTH GATE): bio
         //   POST /api/v1/liveness/puzzle-session/{session_id}/verdict
         //   { user_id, tenant_id }  → { verified: bool }; CONSUMES the session.
@@ -812,6 +855,21 @@ public class BiometricServiceAdapter implements BiometricServicePort {
         Map<String, Object> body = new java.util.LinkedHashMap<>();
         body.put("user_id", java.util.Objects.requireNonNull(userId, "userId").toString());
         body.put("tenant_id", java.util.Objects.requireNonNull(tenantId, "tenantId").toString());
+        if (requireIdentityBinding) {
+            // Puzzle contract v2 binding-frame consistency check: bio checks the
+            // client-declared frame against the session's verified face-challenge
+            // windows (NOT proof the embedding came from the live capture).
+            body.put("require_identity_binding", true);
+            if (bindingFrame != null) {
+                body.put("binding_frame", bindingFrame);
+            }
+        }
+        if (includeTraceDigest) {
+            // Attested puzzle binding: ask bio for the canonical digest of the
+            // traces it scored (only sent when attested binding is required, so
+            // every other verdict body is unchanged).
+            body.put("include_trace_digest", true);
+        }
         try {
             return postJsonObject("/liveness/puzzle-session/" + sessionId + "/verdict", body);
         } catch (HttpClientErrorException e) {

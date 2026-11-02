@@ -2,6 +2,88 @@
 
 ## [Unreleased]
 
+### 2026-11-02 — Attested puzzle binding via Android Key Attestation (`app.auth.attested-binding`, default OFF)
+
+- New `docs/ATTESTED_PUZZLE_BINDING.md` (threat model, protocol, checks, revocation,
+  config, rollout, iOS App Attest twin).
+- CREATE `/auth/mfa/puzzle/session` returns a single-use 32-byte `attestation_challenge`
+  (Redis, bound to the MFA + bio puzzle session, TTL 300 s) when the policy is on for the
+  tenant and the step has `alsoMatchFaceIdentity`; otherwise unchanged.
+- `PuzzleVerifyMfaStepHandler`: with the policy on, a binding-required step needs an
+  `attestation` bundle. Verified before the consuming verdict: nonce consumed + bound to the
+  MFA session, Android Key Attestation chain (pinned Google roots by SPKI, signatures, name
+  chaining, validity, leaf-only KeyDescription, Google status-list revocation with cache +
+  configurable fail policy, challenge, TEE/StrongBox, hardware-generated SIGN EC P-256 key,
+  verified boot + locked, package + signing-cert SHA-256). After the verdict (now requesting
+  bio's `trace_digest`): ECDSA P-256 signature over the canonical (session, nonce, embedding,
+  trace digest, binding frame) payload; the matched embedding is exactly the signed one. Any
+  failure fails closed and consumes the bio session.
+- Hexagonal: `DeviceAttestationVerifierPort` (+ `AndroidKeyAttestationVerifierAdapter`, strict
+  in-house DER parser, BouncyCastle not needed), `AttestationChallengePort`
+  (+ `RedisAttestationChallengeAdapter`). No Flyway migration.
+- Tests: real device chains from `android/keyattestation` testdata (Apache-2.0, NOTICE
+  alongside), synthetic chains for negative paths and the chain-extension attack, end-to-end
+  handler tests, golden payload vector shared with client-apps and bio.
+
+### 2026-11-01 — PUZZLE contract v2: security-review fixes (bio flag `PUZZLE_TRACE_V2_ENABLED`, default OFF)
+
+- **S2 create cap:** `POST /auth/mfa/puzzle/session` counts bio puzzle sessions per MFA
+  session token (Redis INCR, key = SHA-256 of the token, 30 min TTL, new
+  `PuzzleSessionGuardPort` + `RedisPuzzleSessionGuardAdapter`). The 4th create → 429
+  (`RateLimitExceededException`, the global handler's shape); counted before the bio call;
+  counter store down → 503 (fail closed, the counter IS the cap). Stops resetting bio's
+  3-attempt per-session cap by creating fresh sessions.
+- **S5 version handshake:** CREATE records the trace contract bio advertised
+  (`trace_contract` "v2", else "v1"). When binding is required the handler fails closed
+  unless bio's verdict carries `binding_checked: true`, EXCEPT for sessions recorded as v1
+  (bio flag OFF), which keep the legacy behaviour; an unknown record is treated strictly.
+  Binding-off steps never consult the record.
+- **S6 binding-frame bounds:** `extractBindingFrame` applies bio's bounds (96 ints,
+  |coord| ≤ 20000, 0 ≤ t ≤ 2^53 integral, optional frame dims 64..8192). A malformed frame,
+  or a missing one on a non-v1 session, fails in identity and the bio session is CONSUMED
+  via a plain verdict call (no longer forwarded as null / left live).
+- CREATE now also sends `require_identity_binding` (= `alsoMatchFaceIdentity`) so bio keeps
+  face windows only when binding can be required (new 6-arg `createPuzzleSession` default
+  method; the 5-arg form is unchanged).
+- **N1:** orphaned Javadoc in `PuzzleVerifyMfaStepHandler` fixed.
+- **N4:** unsatisfiable v2 challenge types (`light`, `shape_trace`, `hold_position`) are
+  filtered by bio at CREATE (it alone knows the session will be v2); if none remain bio
+  returns 400, which this proxy surfaces as its existing 502 "Could not create puzzle session".
+- **B1 wording:** "split-capture binding" → "binding-frame consistency check": it only
+  checks the client-declared frame against the client's own trace, a modified client can
+  pass it, and real binding needs server-observed image data or attested capture. Wire
+  fields (`binding_frame`, `require_identity_binding`) unchanged.
+
+### 2026-11-01 — PUZZLE contract v2: forward the binding frame (binding-frame consistency check)
+
+- `PuzzleVerifyMfaStepHandler` now resolves the identity-binding requirement
+  (`puzzleConfig.alsoMatchFaceIdentity` AND `ClientSideEmbeddingPolicy`) BEFORE the
+  liveness verdict and, when required, calls the new
+  `BiometricServicePort.getPuzzleVerdictWithBinding`, which adds
+  `require_identity_binding:true` + the client `binding_frame` (sanitized to
+  `{t, f[96 ints]}`, malformed → null) to bio's verdict body. Under biometric-processor
+  puzzle contract v2 (`PUZZLE_TRACE_V2_ENABLED`) bio then requires the embedding's
+  source frame to lie inside a verified face-challenge window of the same session;
+  bio v1 ignores the fields. Binding-off steps keep the 3-arg verdict.
+- The challenge SUBMIT proxy already forwards the body verbatim (only `sessionToken`
+  is stripped), so v2 landmark traces need no api change; bio's schema bounds them
+  (≤200 frames, fixed landmark counts).
+- Tests: +4 handler, +2 adapter. `mvn test`: 1847 run / 0 fail / 0 error / 67 skip.
+### 2026-11-01 — CI: tenant-isolation IT gate now catches a silently skipped class
+
+The "Assert tenant-isolation ITs actually executed" step summed only the Surefire
+`tests=` attribute. With `RUN_INTEGRATION` unset, a class-level
+`@EnabledIfEnvironmentVariable` makes Surefire 3.5.x + JUnit 5 write `tests="N"
+skipped="N"` (one skipped testcase per method), not `tests="0"`, so the gate passed
+a fully skipped class. Verified with a real Surefire 3.5.3 / JUnit 5.11.4 probe
+project. Latent only: CI sets `RUN_INTEGRATION=true`, so no IT was actually skipped.
+
+- Gate moved to `scripts/ci/assert-its-executed.sh`; a class passes only when
+  `tests - skipped >= 1` over its top-level and `@Nested` reports.
+- `scripts/ci/test-assert-its-executed.sh` fault-injects the gate on real Surefire
+  reports (healthy, unset variable, missing report, nested-only, all-zero) and runs
+  in CI before the gate.
+- No production code change.
 ### 2026-11-02 — User delete now erases biometric templates (transactional outbox, V87)
 
 Deleting a user (`ManageUserService.deleteUser`) only soft-deleted the `users` row;

@@ -451,6 +451,26 @@ public interface BiometricServicePort {
                                             String difficulty);
 
     /**
+     * Same as {@link #createPuzzleSession(UUID, UUID, List, int, String)}, also
+     * telling bio whether the verdict may require the puzzle contract v2
+     * binding-frame consistency check ({@code require_identity_binding}, from the
+     * step's {@code alsoMatchFaceIdentity}). With {@code false} bio does not retain
+     * the per-challenge face windows (a smaller session); a later binding-required
+     * verdict then fails closed. Ignored by bio v1.
+     *
+     * <p>Default delegates to the 5-arg create so other implementations stay
+     * source-compatible.
+     */
+    default Map<String, Object> createPuzzleSession(UUID tenantId,
+                                                    UUID userId,
+                                                    List<String> allowedChallengeTypes,
+                                                    int count,
+                                                    String difficulty,
+                                                    boolean requireIdentityBinding) {
+        return createPuzzleSession(tenantId, userId, allowedChallengeTypes, count, difficulty);
+    }
+
+    /**
      * Submits one completed challenge's traces to an existing puzzle session for
      * per-challenge scoring (UX feedback — NOT the auth gate; that is
      * {@link #getPuzzleVerdict}).
@@ -499,4 +519,45 @@ public interface BiometricServicePort {
      *         error map on failure
      */
     Map<String, Object> getPuzzleVerdict(String sessionId, UUID userId, UUID tenantId);
+
+    /**
+     * Same AUTHORITATIVE, consuming verdict as
+     * {@link #getPuzzleVerdict(String, UUID, UUID)}, for a PUZZLE step that ALSO
+     * matches face identity ({@code puzzleConfig.alsoMatchFaceIdentity}).
+     *
+     * <p>Adds {@code require_identity_binding:true} and the client-declared
+     * {@code binding_frame} ({@code {t, f:[96 ints]}} — timestamp + trace-subset
+     * landmarks of the frame the identity embedding was computed from) to the bio
+     * verdict body. Under bio's puzzle contract v2 ({@code PUZZLE_TRACE_V2_ENABLED})
+     * the verdict then also requires that frame to lie inside a verified
+     * face-challenge window of the SAME session with consistent geometry
+     * (binding-frame consistency check: it only compares the client-declared frame
+     * with the client's own trace, so it does NOT prove the embedding came from the
+     * live capture); a {@code null}/malformed frame fails closed there. bio v2 then
+     * answers {@code binding_checked:true} when the check ran and passed. On bio v1
+     * the extra fields are ignored (legacy behaviour, no {@code binding_checked}).
+     *
+     * <p>Default implementation delegates to the 3-arg verdict (no binding) so
+     * alternative implementations stay source-compatible.
+     *
+     * @param bindingFrame the client-declared binding frame, or {@code null}
+     */
+    default Map<String, Object> getPuzzleVerdictWithBinding(String sessionId, UUID userId, UUID tenantId,
+                                                            Map<String, Object> bindingFrame) {
+        return getPuzzleVerdict(sessionId, userId, tenantId);
+    }
+
+    /**
+     * Same consuming, binding-required verdict as
+     * {@link #getPuzzleVerdictWithBinding(String, UUID, UUID, Map)}, additionally
+     * asking bio for the canonical {@code trace_digest} of the traces it scored
+     * ({@code include_trace_digest:true}). Used by the ATTESTED puzzle binding
+     * ({@code docs/ATTESTED_PUZZLE_BINDING.md}): the attested client's signature
+     * must cover exactly this digest. A bio that does not return the digest makes
+     * the attested step fail closed (the default here omits it).
+     */
+    default Map<String, Object> getPuzzleVerdictWithAttestedBinding(String sessionId, UUID userId, UUID tenantId,
+                                                                    Map<String, Object> bindingFrame) {
+        return getPuzzleVerdictWithBinding(sessionId, userId, tenantId, bindingFrame);
+    }
 }

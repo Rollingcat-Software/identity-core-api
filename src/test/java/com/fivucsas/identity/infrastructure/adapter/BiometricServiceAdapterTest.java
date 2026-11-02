@@ -13,6 +13,7 @@ import org.springframework.web.multipart.MultipartFile;
 import java.io.ByteArrayOutputStream;
 import java.lang.reflect.Field;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -609,6 +610,25 @@ class BiometricServiceAdapterTest {
     }
 
     @Test
+    @DisplayName("createPuzzleSession(…, requireIdentityBinding) sends require_identity_binding; the 5-arg form omits it")
+    void createPuzzleSession_bindingFlag() {
+        mockServer.expect(requestTo(BIO_URL + "/liveness/puzzle-session"))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(req -> assertThat(bodyAsString(req)).contains("\"require_identity_binding\":false"))
+                .andRespond(withSuccess("{\"session_id\":\"" + PUZZLE_SESSION_ID + "\",\"challenges\":[]}",
+                        MediaType.APPLICATION_JSON));
+        mockServer.expect(requestTo(BIO_URL + "/liveness/puzzle-session"))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(req -> assertThat(bodyAsString(req)).doesNotContain("require_identity_binding"))
+                .andRespond(withSuccess("{\"session_id\":\"" + PUZZLE_SESSION_ID + "\",\"challenges\":[]}",
+                        MediaType.APPLICATION_JSON));
+
+        adapter.createPuzzleSession(PUZZLE_TENANT, USER_ID, List.of("blink"), 1, null, false);
+        adapter.createPuzzleSession(PUZZLE_TENANT, USER_ID, List.of("blink"), 1, null);
+        mockServer.verify();
+    }
+
+    @Test
     @DisplayName("createPuzzleSession omits a null difficulty from the JSON body")
     void createPuzzleSession_nullDifficulty_omitted() {
         mockServer.expect(requestTo(BIO_URL + "/liveness/puzzle-session"))
@@ -739,6 +759,31 @@ class BiometricServiceAdapterTest {
     }
 
     @Test
+    @DisplayName("attested verdict sends include_trace_digest; the binding/plain verdicts never do")
+    void getPuzzleVerdict_attestedBinding_requestsTraceDigest() {
+        String url = BIO_URL + "/liveness/puzzle-session/" + PUZZLE_SESSION_ID + "/verdict";
+        mockServer.expect(requestTo(url))
+                .andExpect(req -> assertThat(bodyAsString(req))
+                        .contains("\"require_identity_binding\":true")
+                        .contains("\"include_trace_digest\":true"))
+                .andRespond(withSuccess("{\"verified\":true,\"binding_checked\":true,\"trace_digest\":\"ab\"}",
+                        MediaType.APPLICATION_JSON));
+        mockServer.expect(requestTo(url))
+                .andExpect(req -> assertThat(bodyAsString(req)).doesNotContain("include_trace_digest"))
+                .andRespond(withSuccess("{\"verified\":true}", MediaType.APPLICATION_JSON));
+        mockServer.expect(requestTo(url))
+                .andExpect(req -> assertThat(bodyAsString(req)).doesNotContain("include_trace_digest"))
+                .andRespond(withSuccess("{\"verified\":true}", MediaType.APPLICATION_JSON));
+
+        var attested = adapter.getPuzzleVerdictWithAttestedBinding(PUZZLE_SESSION_ID, USER_ID, PUZZLE_TENANT,
+                Map.of("t", 1L));
+        assertThat(attested).containsEntry("trace_digest", "ab");
+        adapter.getPuzzleVerdictWithBinding(PUZZLE_SESSION_ID, USER_ID, PUZZLE_TENANT, Map.of("t", 1L));
+        adapter.getPuzzleVerdict(PUZZLE_SESSION_ID, USER_ID, PUZZLE_TENANT);
+        mockServer.verify();
+    }
+
+    @Test
     @DisplayName("getPuzzleVerdict maps bio unreachable to a fail-closed error map")
     void getPuzzleVerdict_unreachable_failsClosed() {
         mockServer.expect(requestTo(BIO_URL + "/liveness/puzzle-session/" + PUZZLE_SESSION_ID + "/verdict"))
@@ -750,6 +795,43 @@ class BiometricServiceAdapterTest {
         var result = adapter.getPuzzleVerdict(PUZZLE_SESSION_ID, USER_ID, PUZZLE_TENANT);
 
         assertThat(result).containsEntry("success", false);
+        mockServer.verify();
+    }
+
+    @Test
+    @DisplayName("getPuzzleVerdictWithBinding adds require_identity_binding + binding_frame to the verdict body")
+    void getPuzzleVerdictWithBinding_postsBindingFrame() {
+        mockServer.expect(requestTo(BIO_URL + "/liveness/puzzle-session/" + PUZZLE_SESSION_ID + "/verdict"))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(req -> {
+                    String body = bodyAsString(req);
+                    assertThat(body).contains("\"user_id\"").contains(USER_ID.toString());
+                    assertThat(body).contains("\"require_identity_binding\":true");
+                    assertThat(body).contains("\"binding_frame\"").contains("\"t\":42");
+                })
+                .andRespond(withSuccess("{\"verified\":true}", MediaType.APPLICATION_JSON));
+
+        var frame = new java.util.LinkedHashMap<String, Object>();
+        frame.put("t", 42L);
+        frame.put("f", java.util.List.of(1L, 2L, 3L));
+        var result = adapter.getPuzzleVerdictWithBinding(PUZZLE_SESSION_ID, USER_ID, PUZZLE_TENANT, frame);
+
+        assertThat(result).containsEntry("verified", true);
+        mockServer.verify();
+    }
+
+    @Test
+    @DisplayName("getPuzzleVerdict (no binding) does not send require_identity_binding")
+    void getPuzzleVerdict_noBindingFields() {
+        mockServer.expect(requestTo(BIO_URL + "/liveness/puzzle-session/" + PUZZLE_SESSION_ID + "/verdict"))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(req -> assertThat(bodyAsString(req))
+                        .doesNotContain("require_identity_binding")
+                        .doesNotContain("binding_frame"))
+                .andRespond(withSuccess("{\"verified\":true}", MediaType.APPLICATION_JSON));
+
+        adapter.getPuzzleVerdict(PUZZLE_SESSION_ID, USER_ID, PUZZLE_TENANT);
+
         mockServer.verify();
     }
 

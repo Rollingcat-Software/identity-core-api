@@ -1,8 +1,14 @@
 package com.fivucsas.identity.application.service.mfa.handler;
 
+import com.fivucsas.identity.application.port.output.AttestationChallengePort;
 import com.fivucsas.identity.application.port.output.AuthFlowRepositoryPort;
 import com.fivucsas.identity.application.port.output.BiometricServicePort;
+import com.fivucsas.identity.application.port.output.PuzzleSessionGuardPort;
+import com.fivucsas.identity.application.port.output.DeviceAttestationVerifierPort;
+import com.fivucsas.identity.application.service.AttestedBindingPolicy;
 import com.fivucsas.identity.application.service.ClientSideEmbeddingPolicy;
+import com.fivucsas.identity.application.service.attestation.AttestedBindingPayload;
+import com.fivucsas.identity.application.service.attestation.AttestedPuzzleBindingVerifier;
 import com.fivucsas.identity.application.service.mfa.MfaStepResult;
 import com.fivucsas.identity.application.service.mfa.VerifyMfaStepHandler;
 import com.fivucsas.identity.domain.model.auth.AuthMethodType;
@@ -13,11 +19,15 @@ import com.fivucsas.identity.entity.User;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
+import java.security.PublicKey;
 import java.util.ArrayList;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -83,6 +93,30 @@ import java.util.UUID;
  * RuntimeException from a bio call; or — when binding is required — a missing /
  * wrong-length embedding or an identity match that is not {@code verified:true}.
  *
+ * <p><b>Puzzle contract v2 binding-frame consistency check (version handshake,
+ * fail-closed).</b> When binding is required, the verdict also carries the
+ * client-declared {@code binding_frame}. bio v2 checks it ONLY against the
+ * client's own trace: it does NOT tie the matched embedding to the live capture,
+ * and a modified client can pass it (real binding needs server-observed image
+ * data or attested capture). The step then passes only if bio answers
+ * {@code binding_checked:true} — unless the identity side recorded at CREATE that
+ * bio advertised the legacy v1 contract for this session (bio flag OFF), in which
+ * case the legacy behaviour is kept. A malformed binding frame (or a missing one
+ * on a non-v1 session) fails in identity and the bio session is CONSUMED via a
+ * plain verdict call, so it can never be reused.
+ *
+ * <p><b>Attested binding (Android Key Attestation, {@code AttestedBindingPolicy},
+ * default OFF).</b> When the policy is on for the tenant and identity binding is
+ * required, the step additionally requires an {@code attestation} bundle: a
+ * hardware key attestation chain whose challenge is the single-use nonce issued at
+ * puzzle CREATE (bound to this MFA session), and an ECDSA P-256 signature by that
+ * attested key over the canonical (puzzle session id, nonce, embedding, bio trace
+ * digest, binding frame) payload. The embedding that is matched is EXACTLY the one
+ * covered by the signature and the trace digest is the one bio scored, so the
+ * genuine, unmodified app on a genuine device vouches that the embedding and the
+ * liveness trace came from the same capture. Anything missing or invalid fails
+ * closed and consumes the bio session. See {@code docs/ATTESTED_PUZZLE_BINDING.md}.
+ *
  * <p>Reachability is gated upstream: PUZZLE only appears as a selectable factor
  * when {@code PuzzleLayerPolicy} is on (Phase 1), so this handler is unreachable
  * by default; the identity-binding branch is additionally gated by
@@ -102,16 +136,47 @@ public class PuzzleVerifyMfaStepHandler implements VerifyMfaStepHandler {
     // binding so it cannot engage during a partial rollout.
     private final AuthFlowRepositoryPort authFlowRepository;
     private final ClientSideEmbeddingPolicy clientSideEmbeddingPolicy;
+    // Puzzle contract v2 (S5): the trace contract bio advertised at CREATE.
+    private final PuzzleSessionGuardPort puzzleSessionGuard;
     // Local, thread-safe mapper to parse the step `config` JSONB blob — mirrors
     // AuthController.puzzleObjectMapper (no shared bean needed, parse is read-only).
     private final ObjectMapper configObjectMapper = new ObjectMapper();
+    // Attested binding (Android Key Attestation). Policy OFF ⇒ never consulted.
+    private final AttestedBindingPolicy attestedBindingPolicy;
+    private final AttestationChallengePort attestationChallenges;
+    private final AttestedPuzzleBindingVerifier attestedVerifier;
 
+    /** Legacy wiring (tests): attested binding disabled. */
     public PuzzleVerifyMfaStepHandler(BiometricServicePort biometricService,
                                       AuthFlowRepositoryPort authFlowRepository,
-                                      ClientSideEmbeddingPolicy clientSideEmbeddingPolicy) {
+                                      ClientSideEmbeddingPolicy clientSideEmbeddingPolicy,
+                                      PuzzleSessionGuardPort puzzleSessionGuard) {
+        this(biometricService, authFlowRepository, clientSideEmbeddingPolicy, puzzleSessionGuard,
+                new AttestedBindingPolicy(false, ""), null, null);
+    }
+
+    @Autowired
+    public PuzzleVerifyMfaStepHandler(BiometricServicePort biometricService,
+                                      AuthFlowRepositoryPort authFlowRepository,
+                                      ClientSideEmbeddingPolicy clientSideEmbeddingPolicy,
+                                      PuzzleSessionGuardPort puzzleSessionGuard,
+                                      AttestedBindingPolicy attestedBindingPolicy,
+                                      AttestationChallengePort attestationChallenges,
+                                      AttestedPuzzleBindingVerifier attestedVerifier) {
         this.biometricService = biometricService;
         this.authFlowRepository = authFlowRepository;
         this.clientSideEmbeddingPolicy = clientSideEmbeddingPolicy;
+        this.puzzleSessionGuard = puzzleSessionGuard;
+        this.attestedBindingPolicy = attestedBindingPolicy;
+        this.attestationChallenges = attestationChallenges;
+        this.attestedVerifier = attestedVerifier;
+    }
+
+    /** Pre-verdict attested-binding state (attested key + exact embedding to match). */
+    private record AttestedState(byte[] nonce,
+                                 AttestedPuzzleBindingVerifier.Evidence evidence,
+                                 PublicKey attestedKey,
+                                 List<Double> embedding) {
     }
 
     @Override
@@ -143,12 +208,63 @@ public class PuzzleVerifyMfaStepHandler implements VerifyMfaStepHandler {
             return MfaStepResult.fail();
         }
 
-        // 3. LIVENESS gate (first, unchanged): authoritative verdict from bio
-        //    (consumes the single-use session). Pass the SERVER user_id +
-        //    tenant_id, never any client value.
+        // Identity-binding requirement is resolved up front (server config only)
+        // so the liveness verdict can carry the binding frame.
+        boolean bindingRequired = isBindingRequired(session, tenantId);
+
+        // Contract v2 handshake inputs (only relevant when binding is required).
+        // legacyV1 = the identity side recorded at CREATE that bio advertised v1
+        // (bio flag OFF): keep the legacy behaviour. Unknown ⇒ strict.
+        boolean legacyV1 = false;
+        Map<String, Object> bindingFrame = null;
+        if (bindingRequired) {
+            legacyV1 = recordedContract(sessionId)
+                    .map(PuzzleSessionGuardPort.CONTRACT_V1::equals)
+                    .orElse(false);
+            Object rawFrame = data.get("binding_frame");
+            bindingFrame = extractBindingFrame(rawFrame);
+            boolean malformed = rawFrame != null && bindingFrame == null;
+            boolean missingOnV2 = rawFrame == null && !legacyV1;
+            if (malformed || missingOnV2) {
+                // S6: fail in identity AND consume the bio session (plain verdict,
+                // result ignored) so a rejected attempt cannot leave it live.
+                log.warn("AUDIT: PUZZLE step failed — binding frame {} (fail-closed, bio session consumed), userId={}",
+                        malformed ? "malformed" : "missing", userId);
+                consumeQuietly(sessionId, userId, tenantId);
+                return MfaStepResult.fail();
+            }
+        }
+
+        // Attested binding (default OFF): verify the hardware attestation BEFORE
+        // the consuming verdict; any failure consumes the bio session.
+        AttestedState attested = null;
+        if (bindingRequired && attestedBindingPolicy.isEnabledFor(tenantId)) {
+            attested = prepareAttestation(session, sessionId, data, bindingFrame, legacyV1, userId);
+            if (attested == null) {
+                consumeQuietly(sessionId, userId, tenantId);
+                return MfaStepResult.fail();
+            }
+        }
+
+        // 3. LIVENESS gate (first): authoritative verdict from bio (consumes the
+        //    single-use session). Pass the SERVER user_id + tenant_id, never any
+        //    client value. When identity-binding is required, also forward the
+        //    client-declared binding frame (the landmarks + timestamp of the frame
+        //    the embedding came from); under bio puzzle contract v2 the verdict
+        //    then fails unless that frame lies inside a verified face-challenge
+        //    window of the SAME session with consistent geometry (the
+        //    binding-frame consistency check; client data checked against client
+        //    data, not proof of capture provenance).
         Map<String, Object> verdict;
         try {
-            verdict = biometricService.getPuzzleVerdict(sessionId, userId, tenantId);
+            if (attested != null) {
+                verdict = biometricService.getPuzzleVerdictWithAttestedBinding(
+                        sessionId, userId, tenantId, bindingFrame);
+            } else {
+                verdict = bindingRequired
+                        ? biometricService.getPuzzleVerdictWithBinding(sessionId, userId, tenantId, bindingFrame)
+                        : biometricService.getPuzzleVerdict(sessionId, userId, tenantId);
+            }
         } catch (RuntimeException e) {
             // Error / timeout / unexpected — HARD FAIL (no fail-open). Re-set the
             // interrupt flag if the cause chain carries an InterruptedException.
@@ -168,15 +284,32 @@ public class PuzzleVerifyMfaStepHandler implements VerifyMfaStepHandler {
         // 4. IDENTITY-BINDING gate (SP-B, additive). Required iff the step's
         //    puzzleConfig.alsoMatchFaceIdentity is true AND the SP-A
         //    client-side-embedding policy is enabled for the tenant (double-gate).
-        if (!isBindingRequired(session, tenantId)) {
+        if (!bindingRequired) {
             // Binding off → PUZZLE proves LIVENESS only (canonical rule). Pass on
             // the liveness verdict alone.
             return MfaStepResult.ok();
         }
 
+        // S5 version handshake: a binding-required step on a non-v1 session passes
+        // only when bio confirms it actually evaluated the binding-frame check.
+        // Guards against a bio that ignores the binding (old build / flag skew).
+        if (!legacyV1 && !Boolean.TRUE.equals(verdict.get("binding_checked"))) {
+            log.warn("AUDIT: PUZZLE step failed — binding required but bio verdict lacks "
+                    + "binding_checked=true (fail-closed), userId={}", userId);
+            return MfaStepResult.fail();
+        }
+
+        // Attested binding: the attested key must have signed exactly this
+        // session's nonce, the embedding about to be matched, the trace digest
+        // bio scored and the binding frame bio checked.
+        if (attested != null && !verifyAttestedSignature(attested, sessionId, verdict, bindingFrame, userId)) {
+            return MfaStepResult.fail();
+        }
+
         // Binding required: the live-capture embedding MUST be present and a
         // 512-float vector — fail closed otherwise (NOT a liveness-only pass).
-        List<Double> embedding = extractEmbedding(data.get("embedding"));
+        // Attested: EXACTLY the list the signature was verified over.
+        List<Double> embedding = attested != null ? attested.embedding() : extractEmbedding(data.get("embedding"));
         if (embedding == null || embedding.size() != EMBEDDING_DIM) {
             log.warn("AUDIT: PUZZLE step failed — identity-binding required but embedding "
                             + "absent/wrong-length (fail-closed), userId={}, len={}",
@@ -204,6 +337,92 @@ public class PuzzleVerifyMfaStepHandler implements VerifyMfaStepHandler {
 
         // Pass: liveness verified:true AND identity verified:true.
         return MfaStepResult.ok();
+    }
+
+    /**
+     * Attested-binding pre-checks (before the consuming verdict): v2 contract with a
+     * binding frame, the single-use nonce issued to THIS MFA session, a well-formed
+     * attestation bundle, a 512-d embedding, and a valid device attestation over the
+     * nonce. Returns null (caller fails closed and consumes the bio session) on any
+     * failure.
+     */
+    private AttestedState prepareAttestation(MfaSession session, String sessionId, Map<String, Object> data,
+                                             Map<String, Object> bindingFrame, boolean legacyV1, UUID userId) {
+        if (attestationChallenges == null || attestedVerifier == null) {
+            log.error("AUDIT: PUZZLE attested binding required but not wired — failing closed, userId={}", userId);
+            return null;
+        }
+        // Consume the nonce first: whatever happens next, it can never be reused.
+        Optional<AttestationChallengePort.IssuedChallenge> issued;
+        try {
+            issued = attestationChallenges.consume(sessionId);
+        } catch (RuntimeException e) {
+            issued = Optional.empty();
+        }
+        if (legacyV1 || bindingFrame == null) {
+            log.warn("AUDIT: PUZZLE attested binding failed — reason=TRACE_CONTRACT_NOT_V2, userId={}", userId);
+            return null;
+        }
+        if (issued == null || issued.isEmpty()) {
+            log.warn("AUDIT: PUZZLE attested binding failed — reason=CHALLENGE_NOT_ISSUED_OR_USED, userId={}", userId);
+            return null;
+        }
+        if (session.getId() == null || !session.getId().equals(issued.get().mfaSessionId())) {
+            log.warn("AUDIT: PUZZLE attested binding failed — reason=CHALLENGE_SESSION_MISMATCH, userId={}", userId);
+            return null;
+        }
+        AttestedPuzzleBindingVerifier.Evidence evidence =
+                AttestedPuzzleBindingVerifier.parseEvidence(data.get("attestation"));
+        if (evidence == null) {
+            log.warn("AUDIT: PUZZLE attested binding failed — reason=ATTESTATION_MISSING_OR_MALFORMED, userId={}",
+                    userId);
+            return null;
+        }
+        List<Double> embedding = extractEmbedding(data.get("embedding"));
+        if (embedding == null || embedding.size() != EMBEDDING_DIM) {
+            log.warn("AUDIT: PUZZLE attested binding failed — reason=EMBEDDING_INVALID, userId={}", userId);
+            return null;
+        }
+        DeviceAttestationVerifierPort.Result device = attestedVerifier.verifyDevice(evidence, issued.get().nonce());
+        if (!device.valid() || device.attestedPublicKey() == null) {
+            log.warn("AUDIT: PUZZLE attested binding failed — reason=DEVICE_ATTESTATION_{}, userId={}",
+                    device.reason(), userId);
+            return null;
+        }
+        log.info("AUDIT: PUZZLE device attestation ok — level={}, package={}, boot={}, locked={}, userId={}",
+                device.securityLevel(), device.packageName(), device.verifiedBootState(), device.deviceLocked(),
+                userId);
+        return new AttestedState(issued.get().nonce(), evidence, device.attestedPublicKey(), embedding);
+    }
+
+    /** Post-verdict: verifies the attested signature over the canonical payload. */
+    @SuppressWarnings("unchecked")
+    private boolean verifyAttestedSignature(AttestedState attested, String sessionId, Map<String, Object> verdict,
+                                            Map<String, Object> bindingFrame, UUID userId) {
+        byte[] traceDigest = AttestedPuzzleBindingVerifier.decodeTraceDigest(verdict.get("trace_digest"));
+        if (traceDigest == null) {
+            log.warn("AUDIT: PUZZLE attested binding failed — reason=TRACE_DIGEST_MISSING (bio), userId={}", userId);
+            return false;
+        }
+        String clientDigest = attested.evidence().clientTraceDigestHex();
+        if (clientDigest != null && !clientDigest.equals(HexFormat.of().formatHex(traceDigest))) {
+            log.warn("AUDIT: PUZZLE attested binding failed — reason=TRACE_DIGEST_MISMATCH, userId={}", userId);
+            return false;
+        }
+        byte[] payload;
+        try {
+            payload = AttestedBindingPayload.encode(sessionId, attested.nonce(), attested.embedding(), traceDigest,
+                    (Long) bindingFrame.get("t"), (List<Long>) bindingFrame.get("f"));
+        } catch (RuntimeException e) {
+            log.warn("AUDIT: PUZZLE attested binding failed — reason=PAYLOAD_ENCODING, userId={}", userId);
+            return false;
+        }
+        if (!AttestedPuzzleBindingVerifier.verifySignature(attested.attestedKey(), attested.evidence().signature(),
+                payload)) {
+            log.warn("AUDIT: PUZZLE attested binding failed — reason=BINDING_SIGNATURE_INVALID, userId={}", userId);
+            return false;
+        }
+        return true;
     }
 
     /**
@@ -282,6 +501,108 @@ public class PuzzleVerifyMfaStepHandler implements VerifyMfaStepHandler {
         }
         return Boolean.TRUE.equals(verifiedClaim)
                 || "true".equalsIgnoreCase(String.valueOf(verifiedClaim));
+    }
+
+    // ---- Puzzle contract v2 binding frame (bounds mirror bio's schema) ----
+
+    /** Face trace frame: 32 landmarks × (x, y, z) ints (bio {@code _FACE_TRACE_INTS}). */
+    static final int BINDING_FRAME_INTS = 32 * 3;
+    /** |coordinate| bound in 1e-4 units (bio {@code _TRACE_COORD_ABS_MAX}). */
+    static final long COORD_ABS_MAX = 20_000L;
+    /** Timestamp upper bound in ms (bio {@code le=2**53}). */
+    static final long T_MAX = 1L << 53;
+    /** Frame dimension bounds in px (bio {@code ge=64, le=8192}), checked when present. */
+    static final int FRAME_DIM_MIN = 64;
+    static final int FRAME_DIM_MAX = 8192;
+
+    /**
+     * Validates the client-declared binding frame ({@code {"t": <ms>, "f": [96 ints]}})
+     * with the SAME bounds bio applies (|coord| ≤ 20000, 0 ≤ t ≤ 2^53, 96 ints for a
+     * face frame — a 63-int (21×3) hand frame is rejected; optional {@code frame_width}/{@code frame_height} within 64..8192
+     * when supplied, though they are not forwarded — bio uses the trace's own
+     * dimensions) and returns a sanitized copy holding ONLY {@code t} and {@code f},
+     * or {@code null} when absent or malformed. A malformed frame therefore fails in
+     * identity instead of reaching bio (S6).
+     */
+    static Map<String, Object> extractBindingFrame(Object raw) {
+        if (!(raw instanceof Map<?, ?> map)) {
+            return null;
+        }
+        Object t = map.get("t");
+        Object f = map.get("f");
+        if (!(t instanceof Number tn) || !isIntegral(tn)) {
+            return null;
+        }
+        long tv = tn.longValue();
+        if (tv < 0 || tv > T_MAX) {
+            return null;
+        }
+        if (!dimensionOk(map.get("frame_width")) || !dimensionOk(map.get("frame_height"))) {
+            return null;
+        }
+        if (!(f instanceof List<?> list) || list.size() != BINDING_FRAME_INTS) {
+            return null;
+        }
+        List<Long> coords = new ArrayList<>(BINDING_FRAME_INTS);
+        for (Object v : list) {
+            if (!(v instanceof Number n) || !isIntegral(n)) {
+                return null;
+            }
+            long c = n.longValue();
+            if (c > COORD_ABS_MAX || c < -COORD_ABS_MAX) {
+                return null;
+            }
+            coords.add(c);
+        }
+        Map<String, Object> out = new java.util.LinkedHashMap<>();
+        out.put("t", tv);
+        out.put("f", coords);
+        return out;
+    }
+
+    private static boolean isIntegral(Number n) {
+        double d = n.doubleValue();
+        return Double.isFinite(d) && d == Math.rint(d);
+    }
+
+    /** Absent is fine; when present it must be an integral 64..8192. */
+    private static boolean dimensionOk(Object v) {
+        if (v == null) {
+            return true;
+        }
+        if (!(v instanceof Number n) || !isIntegral(n)) {
+            return false;
+        }
+        long d = n.longValue();
+        return d >= FRAME_DIM_MIN && d <= FRAME_DIM_MAX;
+    }
+
+    /** Trace contract recorded at CREATE for this bio session (empty = unknown). */
+    private Optional<String> recordedContract(String sessionId) {
+        try {
+            Optional<String> c = puzzleSessionGuard.traceContractFor(sessionId);
+            return c == null ? Optional.empty() : c;
+        } catch (RuntimeException e) {
+            log.warn("PUZZLE trace-contract lookup failed — treating as unknown (strict): {}", e.getMessage());
+            return Optional.empty();
+        }
+    }
+
+    /**
+     * Consumes the bio session via a plain verdict call and ignores the result
+     * (the step has already failed in identity). bio consumes a live session on
+     * any verdict, so a rejected attempt cannot leave it reusable.
+     */
+    private void consumeQuietly(String sessionId, UUID userId, UUID tenantId) {
+        try {
+            biometricService.getPuzzleVerdict(sessionId, userId, tenantId);
+        } catch (RuntimeException e) {
+            if (containsInterrupted(e)) {
+                Thread.currentThread().interrupt();
+            }
+            log.warn("PUZZLE session consume after binding-frame rejection failed (session expires by TTL): {}",
+                    e.getMessage());
+        }
     }
 
     /** Extracts the opaque session id, accepting snake_case or camelCase. */

@@ -11,6 +11,7 @@ import com.fivucsas.identity.application.port.output.AuthFlowRepositoryPort;
 import com.fivucsas.identity.application.port.output.BiometricServicePort;
 import com.fivucsas.identity.application.port.output.CachePort;
 import com.fivucsas.identity.application.port.output.NfcCardRepositoryPort;
+import com.fivucsas.identity.application.port.output.PuzzleSessionGuardPort;
 import com.fivucsas.identity.application.port.output.TokenGenerationPort;
 import com.fivucsas.identity.application.port.output.WebAuthnCredentialRepositoryPort;
 import com.fivucsas.identity.application.service.EnrollmentHealthService;
@@ -55,6 +56,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -135,6 +137,8 @@ class AuthControllerPuzzleSessionProxyTest {
     @MockBean private com.fivucsas.identity.application.service.LoginConfigService loginConfigService;
     @MockBean private com.fivucsas.identity.application.service.mfa.AvailableMethodsResolver availableMethodsResolver;
     @MockBean private PuzzleLayerPolicy puzzleLayerPolicy;
+    @MockBean private PuzzleSessionGuardPort puzzleSessionGuard;
+    @MockBean private com.fivucsas.identity.application.service.attestation.AttestationChallengeIssuer attestationChallengeIssuer;
 
     @BeforeEach
     void setUp() {
@@ -142,6 +146,8 @@ class AuthControllerPuzzleSessionProxyTest {
         when(rateLimitService.allowMfaStepAttempt(anyString())).thenReturn(true);
         // Puzzle layer ON for the session tenant by default (the reachability gate).
         lenient().when(puzzleLayerPolicy.isEnabledFor(any())).thenReturn(true);
+        // First create under this MFA session by default (S2 cap not reached).
+        lenient().when(puzzleSessionGuard.incrementCreates(anyString(), any())).thenReturn(1L);
     }
 
     /**
@@ -183,7 +189,7 @@ class AuthControllerPuzzleSessionProxyTest {
     void create_stampsServerIdentity_ignoresClientUserId() throws Exception {
         liveSessionRegistered();
         stubPuzzleStepConfig();
-        when(biometricService.createPuzzleSession(any(), any(), any(), anyInt(), any()))
+        when(biometricService.createPuzzleSession(any(), any(), any(), anyInt(), any(), anyBoolean()))
                 .thenReturn(Map.of("session_id", BIO_SESSION_ID,
                         "challenges", List.of(Map.of("action", "blink"), Map.of("action", "smile"))));
 
@@ -206,7 +212,7 @@ class AuthControllerPuzzleSessionProxyTest {
         ArgumentCaptor<UUID> tenantCaptor = ArgumentCaptor.forClass(UUID.class);
         ArgumentCaptor<UUID> userCaptor = ArgumentCaptor.forClass(UUID.class);
         verify(biometricService).createPuzzleSession(
-                tenantCaptor.capture(), userCaptor.capture(), any(), anyInt(), any());
+                tenantCaptor.capture(), userCaptor.capture(), any(), anyInt(), any(), anyBoolean());
         assertThat(userCaptor.getValue()).isEqualTo(SERVER_USER_ID);
         assertThat(tenantCaptor.getValue()).isEqualTo(SERVER_TENANT_ID);
         assertThat(userCaptor.getValue()).isNotEqualTo(forgedUser);
@@ -218,7 +224,7 @@ class AuthControllerPuzzleSessionProxyTest {
     void create_usesServerStepConfig_notClientAllowList() throws Exception {
         liveSessionRegistered();
         stubPuzzleStepConfig();
-        when(biometricService.createPuzzleSession(any(), any(), any(), anyInt(), any()))
+        when(biometricService.createPuzzleSession(any(), any(), any(), anyInt(), any(), anyBoolean()))
                 .thenReturn(Map.of("session_id", BIO_SESSION_ID, "challenges", List.of()));
 
         String body = "{\"sessionToken\":\"" + SESSION_TOKEN + "\",\"allowedChallengeTypes\":[\"hand_flip\"]}";
@@ -231,7 +237,7 @@ class AuthControllerPuzzleSessionProxyTest {
         @SuppressWarnings("unchecked")
         ArgumentCaptor<List<String>> typesCaptor = ArgumentCaptor.forClass(List.class);
         verify(biometricService).createPuzzleSession(
-                eq(SERVER_TENANT_ID), eq(SERVER_USER_ID), typesCaptor.capture(), anyInt(), any());
+                eq(SERVER_TENANT_ID), eq(SERVER_USER_ID), typesCaptor.capture(), anyInt(), any(), anyBoolean());
         assertThat(typesCaptor.getValue()).containsExactlyInAnyOrder("blink", "smile");
         assertThat(typesCaptor.getValue()).doesNotContain("hand_flip");
     }
@@ -248,7 +254,7 @@ class AuthControllerPuzzleSessionProxyTest {
                         .content(body))
                 .andExpect(status().isUnauthorized());
 
-        verify(biometricService, never()).createPuzzleSession(any(), any(), any(), anyInt(), any());
+        verify(biometricService, never()).createPuzzleSession(any(), any(), any(), anyInt(), any(), anyBoolean());
     }
 
     @Test
@@ -264,7 +270,7 @@ class AuthControllerPuzzleSessionProxyTest {
                         .content(body))
                 .andExpect(status().isNotFound());
 
-        verify(biometricService, never()).createPuzzleSession(any(), any(), any(), anyInt(), any());
+        verify(biometricService, never()).createPuzzleSession(any(), any(), any(), anyInt(), any(), anyBoolean());
     }
 
     @Test
@@ -280,7 +286,7 @@ class AuthControllerPuzzleSessionProxyTest {
                         .content(body))
                 .andExpect(status().isUnprocessableEntity());
 
-        verify(biometricService, never()).createPuzzleSession(any(), any(), any(), anyInt(), any());
+        verify(biometricService, never()).createPuzzleSession(any(), any(), any(), anyInt(), any(), anyBoolean());
     }
 
     @Test
@@ -292,7 +298,7 @@ class AuthControllerPuzzleSessionProxyTest {
                         .content("{}"))
                 .andExpect(status().isBadRequest());
 
-        verify(biometricService, never()).createPuzzleSession(any(), any(), any(), anyInt(), any());
+        verify(biometricService, never()).createPuzzleSession(any(), any(), any(), anyInt(), any(), anyBoolean());
     }
 
     @Test
@@ -350,5 +356,147 @@ class AuthControllerPuzzleSessionProxyTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isBadGateway());
+    }
+
+    // ---- S2: per-MFA-session create cap + S5 contract record ----------------
+
+    private void stubBioCreate(Map<String, Object> response) {
+        when(biometricService.createPuzzleSession(any(), any(), any(), anyInt(), any(), anyBoolean()))
+                .thenReturn(response);
+    }
+
+    private org.springframework.test.web.servlet.ResultActions postCreate() throws Exception {
+        return mockMvc.perform(post("/api/v1/auth/mfa/puzzle/session")
+                .with(csrf())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"sessionToken\":\"" + SESSION_TOKEN + "\"}"));
+    }
+
+    @Test
+    @DisplayName("S2: the 3rd create under one MFA session is allowed; the 4th → 429, no bio call")
+    void create_overCap_returns429_noBioCall() throws Exception {
+        liveSessionRegistered();
+        stubPuzzleStepConfig();
+        stubBioCreate(Map.of("session_id", BIO_SESSION_ID, "challenges", List.of()));
+
+        when(puzzleSessionGuard.incrementCreates(anyString(), any()))
+                .thenReturn((long) AuthController.MAX_PUZZLE_SESSIONS_PER_MFA_SESSION);
+        postCreate().andExpect(status().isOk());
+
+        when(puzzleSessionGuard.incrementCreates(anyString(), any()))
+                .thenReturn((long) AuthController.MAX_PUZZLE_SESSIONS_PER_MFA_SESSION + 1);
+        postCreate().andExpect(status().isTooManyRequests());
+
+        verify(biometricService, org.mockito.Mockito.times(1))
+                .createPuzzleSession(any(), any(), any(), anyInt(), any(), anyBoolean());
+    }
+
+    @Test
+    @DisplayName("S2: the create counter is keyed per MFA session token (hashed, never the raw token)")
+    void create_counterKeyedByHashedToken() throws Exception {
+        liveSessionRegistered();
+        stubPuzzleStepConfig();
+        stubBioCreate(Map.of("session_id", BIO_SESSION_ID, "challenges", List.of()));
+
+        postCreate().andExpect(status().isOk());
+
+        ArgumentCaptor<String> keyCaptor = ArgumentCaptor.forClass(String.class);
+        verify(puzzleSessionGuard).incrementCreates(keyCaptor.capture(), any());
+        assertThat(keyCaptor.getValue()).hasSize(64).doesNotContain(SESSION_TOKEN);
+    }
+
+    @Test
+    @DisplayName("S2: counter store unavailable → 503 (fail closed), no bio call")
+    void create_counterUnavailable_failsClosed() throws Exception {
+        liveSessionRegistered();
+        stubPuzzleStepConfig();
+        when(puzzleSessionGuard.incrementCreates(anyString(), any()))
+                .thenThrow(new IllegalStateException("redis down"));
+
+        postCreate().andExpect(status().isServiceUnavailable());
+
+        verify(biometricService, never()).createPuzzleSession(any(), any(), any(), anyInt(), any(), anyBoolean());
+    }
+
+    @Test
+    @DisplayName("S5: CREATE records the contract bio advertised (v2) / v1 when absent")
+    void create_recordsAdvertisedTraceContract() throws Exception {
+        liveSessionRegistered();
+        stubPuzzleStepConfig();
+        stubBioCreate(Map.of("session_id", BIO_SESSION_ID, "challenges", List.of(), "trace_contract", "v2"));
+        postCreate().andExpect(status().isOk());
+        verify(puzzleSessionGuard).recordTraceContract(eq(BIO_SESSION_ID), eq("v2"), any());
+
+        stubBioCreate(Map.of("session_id", "other", "challenges", List.of()));
+        postCreate().andExpect(status().isOk());
+        verify(puzzleSessionGuard).recordTraceContract(eq("other"), eq("v1"), any());
+    }
+
+    @Test
+    @DisplayName("CREATE forwards alsoMatchFaceIdentity as require_identity_binding (false when absent)")
+    void create_forwardsBindingFlag() throws Exception {
+        liveSessionRegistered();
+        stubPuzzleStepConfig();
+        stubBioCreate(Map.of("session_id", BIO_SESSION_ID, "challenges", List.of()));
+        postCreate().andExpect(status().isOk());
+        verify(biometricService).createPuzzleSession(any(), any(), any(), anyInt(), any(), eq(false));
+    }
+
+    // ---- Attested puzzle binding: challenge issued at CREATE ------------------
+
+    @Test
+    @DisplayName("CREATE: attested binding applies → response carries a single-use attestation_challenge")
+    void create_attestedBinding_returnsChallenge() throws Exception {
+        MfaSession session = liveSessionRegistered();
+        UUID mfaId = UUID.fromString("bbbbbbbb-0000-0000-0000-000000000009");
+        when(session.getId()).thenReturn(mfaId);
+        stubPuzzleStepConfig();
+        when(biometricService.createPuzzleSession(any(), any(), any(), anyInt(), any(), anyBoolean()))
+                .thenReturn(Map.of("session_id", BIO_SESSION_ID, "challenges", List.of(),
+                        "trace_contract", "v2"));
+        when(attestationChallengeIssuer.applies(eq(SERVER_TENANT_ID), anyBoolean())).thenReturn(true);
+        when(attestationChallengeIssuer.issue(BIO_SESSION_ID, mfaId)).thenReturn("bm9uY2U");
+
+        mockMvc.perform(post("/api/v1/auth/mfa/puzzle/session")
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"sessionToken\":\"" + SESSION_TOKEN + "\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.session_id").value(BIO_SESSION_ID))
+                .andExpect(jsonPath("$.attestation_challenge").value("bm9uY2U"))
+                .andExpect(jsonPath("$.attestation_payload_version").value(1));
+    }
+
+    @Test
+    @DisplayName("CREATE: attested binding off → no attestation_challenge (bio response verbatim)")
+    void create_attestedBindingOff_noChallenge() throws Exception {
+        liveSessionRegistered();
+        stubPuzzleStepConfig();
+        when(biometricService.createPuzzleSession(any(), any(), any(), anyInt(), any(), anyBoolean()))
+                .thenReturn(Map.of("session_id", BIO_SESSION_ID, "challenges", List.of()));
+        mockMvc.perform(post("/api/v1/auth/mfa/puzzle/session")
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"sessionToken\":\"" + SESSION_TOKEN + "\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.attestation_challenge").doesNotExist());
+        verify(attestationChallengeIssuer, never()).issue(anyString(), any());
+    }
+
+    @Test
+    @DisplayName("CREATE: challenge store down → 503 fail-closed")
+    void create_attestedBinding_storeDown_returns503() throws Exception {
+        MfaSession session = liveSessionRegistered();
+        when(session.getId()).thenReturn(UUID.randomUUID());
+        stubPuzzleStepConfig();
+        when(biometricService.createPuzzleSession(any(), any(), any(), anyInt(), any(), anyBoolean()))
+                .thenReturn(Map.of("session_id", BIO_SESSION_ID, "challenges", List.of()));
+        when(attestationChallengeIssuer.applies(any(), anyBoolean())).thenReturn(true);
+        when(attestationChallengeIssuer.issue(anyString(), any())).thenThrow(new IllegalStateException("down"));
+        mockMvc.perform(post("/api/v1/auth/mfa/puzzle/session")
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"sessionToken\":\"" + SESSION_TOKEN + "\"}"))
+                .andExpect(status().isServiceUnavailable());
     }
 }

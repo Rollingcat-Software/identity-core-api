@@ -110,6 +110,9 @@ secrets/
 *.pem
 *.key
 *.crt
+# Public X.509 certificates only (Google attestation roots + public sample chains); no private keys.
+!src/main/resources/attestation/*.pem
+!src/test/resources/attestation/keyattestation-samples/*.pem
 
 # ============================================================================
 # Database

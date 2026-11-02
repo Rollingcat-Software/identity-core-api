@@ -109,6 +109,24 @@ not a real biometric. The `AuthMethodType.FINGERPRINT` enum value is retained
 
 - **Biometric erasure on user delete (transactional outbox, V87, 2026-11-02)**: `ManageUserService.deleteUser` enqueues FACE + VOICE rows in `biometric_deletion_outbox` in the SAME tx as the soft delete (and `SoftDeletePurgeJob` re-enqueues idempotently before a hard purge). `BiometricDeletionOutboxWorker` (ShedLock, 60 s) drains via `BiometricServicePort.deleteFace/deleteVoice`; bio 404 = nothing enrolled = done (adapter flags `notEnrolled`), other failures retry with `60 s * 2^attempts` backoff capped 6 h, parking after 10 attempts. Port `BiometricDeletionOutboxPort` / adapter `BiometricDeletionOutboxAdapter`. No FK to `users` (must survive the purge); `UNIQUE(user_id, method)` makes enqueue idempotent. Kill-switch `APP_BIOMETRIC_DELETION_OUTBOX_ENABLED` (default `true`; `false` only pauses draining). **Any new user-delete path must enqueue here too.** Purge default (`APP_PURGE_SOFT_DELETE_ENABLED=false`) is unchanged.
 - **Biometric enrollment-probe (login triage F2/F7/F9, 2026-06-12)**: `EnrollmentHealthService.hasBiometricData(FACE/VOICE)` no longer FAKES enrollment as always-present when the bio service is merely reachable (the old behaviour routed un-enrolled users into a VOICE step that could never pass → "No voice enrollment found" → generic "Doğrulama başarısız"; FACE was masked because most users did enroll). It now asks the biometric-processor whether a template REALLY exists via `BiometricServicePort.{voiceEnrollmentExists(userId), faceEnrollmentExists(userId, tenantId)}` → bio `GET /voice|/face/{userId}/exists`. **Tri-state**: definitive `TRUE`→enrolled; definitive `FALSE`→not-enrolled (the stale row is auto-revoked by `validateEnrollments`, so it stops being offered/auto-picked); `null` (UNKNOWN = bio OUTAGE: transport/5xx)→**fail-OPEN** (return true) so an outage never locks everyone out. Face probe is tenant-scoped (resolved via `userJpaRepository.findTenantIdById`) for verify-path parity. **KILL-SWITCH**: `app.auth.enrollment-probe.enabled` (`APP_AUTH_ENROLLMENT_PROBE_ENABLED`, default `true` = the fix). Set `false` to instantly revert to the legacy "trust the enrollment row if the bio service is reachable" behaviour with NO redeploy. **Prod rollout = deploy bio FIRST (the existence endpoints), then identity.**
+- **Attested puzzle binding (2026-11-02, `app.auth.attested-binding` + `-tenants`, default OFF):**
+  real split-capture binding for the NATIVE Android app via hardware Key Attestation. CREATE
+  issues a single-use `attestation_challenge`; the PUZZLE step (when `alsoMatchFaceIdentity`)
+  then requires an attested EC P-256 key (TEE/StrongBox, genuine release-signed
+  `com.fivucsas.mobile`, verified boot, locked, not revoked) that signed (session, nonce,
+  embedding, bio `trace_digest`, binding frame); the matched embedding is exactly the signed
+  one. Browsers cannot attest ⇒ a bound PUZZLE step from the web fails closed for tenants with
+  the flag on. Set `APP_AUTH_ATTESTATION_ANDROID_SIGNING_CERT_SHA256` first (empty ⇒ reject
+  all). Design + residual risks (leaked keybox, HAL camera injection, deepfake into the real
+  camera): `docs/ATTESTED_PUZZLE_BINDING.md`.
+- **PUZZLE contract v2 guards (2026-11-01, bio flag `PUZZLE_TRACE_V2_ENABLED` default OFF):**
+  `PuzzleSessionGuardPort` (Redis) caps bio puzzle-session CREATEs at 3 per MFA session
+  token (4th → 429; store down → 503 fail-closed) and records the trace contract bio
+  advertised at CREATE. `PuzzleVerifyMfaStepHandler`: when identity-binding is required,
+  the step needs bio `binding_checked: true` unless CREATE recorded v1 (flag-OFF legacy);
+  a malformed/missing `binding_frame` fails in identity AND consumes the bio session.
+  Wording: this is a **binding-frame consistency check** (client frame vs client trace),
+  NOT proof the embedding came from the live capture; a modified client can pass it.
 - **N-step MFA**: JWT deferred until all steps complete. `POST /auth/mfa/step` with session token. RFC 8176 `amr` claim.
 - **WebAuthn base64**: `decodeBase64()` normalizes standard→URL-safe. NEVER use `Base64.getUrlDecoder()` on frontend data.
 - **Session path handlers**: Accept BOTH old and new field names for backward compatibility (B1-B6).

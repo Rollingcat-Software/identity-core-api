@@ -109,6 +109,14 @@ services:
       # _TENANTS=<uuid>; reversible via .env.prod + `up -d` recreate (no rebuild).
       APP_AUTH_PUZZLE_LAYER: ${APP_AUTH_PUZZLE_LAYER:-false}
       APP_AUTH_PUZZLE_LAYER_TENANTS: ${APP_AUTH_PUZZLE_LAYER_TENANTS:-}
+      # Attested puzzle binding (docs/ATTESTED_PUZZLE_BINDING.md), default OFF.
+      # Set the release signing-cert SHA-256 BEFORE enabling (empty ⇒ all rejected).
+      APP_AUTH_ATTESTED_BINDING: ${APP_AUTH_ATTESTED_BINDING:-false}
+      APP_AUTH_ATTESTED_BINDING_TENANTS: ${APP_AUTH_ATTESTED_BINDING_TENANTS:-}
+      APP_AUTH_ATTESTATION_ANDROID_PACKAGE: ${APP_AUTH_ATTESTATION_ANDROID_PACKAGE:-com.fivucsas.mobile}
+      APP_AUTH_ATTESTATION_ANDROID_SIGNING_CERT_SHA256: ${APP_AUTH_ATTESTATION_ANDROID_SIGNING_CERT_SHA256:-}
+      APP_AUTH_ATTESTATION_ANDROID_REQUIRE_STRONGBOX: ${APP_AUTH_ATTESTATION_ANDROID_REQUIRE_STRONGBOX:-false}
+      APP_AUTH_ATTESTATION_ANDROID_REVOCATION_FAIL_POLICY: ${APP_AUTH_ATTESTATION_ANDROID_REVOCATION_FAIL_POLICY:-closed}
       # NFC serial-only login (2026-06-01). MUST be listed here — the service uses an
       # explicit `environment:` block, NOT `env_file:`, so a var only in .env.prod is
       # NOT passed into the container (this exact gap left the flag dead after the

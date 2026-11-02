@@ -132,6 +132,35 @@ app:
     #   APP_AUTH_PUZZLE_LAYER_TENANTS=<uuid>  → canary specific tenant(s)
     puzzle-layer: ${APP_AUTH_PUZZLE_LAYER:false}
     puzzle-layer-tenants: ${APP_AUTH_PUZZLE_LAYER_TENANTS:}
+    # ATTESTED puzzle binding (docs/ATTESTED_PUZZLE_BINDING.md). When true, a PUZZLE
+    # step with alsoMatchFaceIdentity REQUIRES Android hardware key attestation: the
+    # puzzle-session CREATE returns a single-use `attestation_challenge`, and the step
+    # fails closed unless the client signs (session, nonce, embedding, bio trace
+    # digest, binding frame) with a TEE/StrongBox key attested over that challenge by
+    # the genuine release-signed app. Browsers cannot attest, so only enable this for
+    # tenants whose bound puzzle runs in the native app. Default false = unchanged.
+    attested-binding: ${APP_AUTH_ATTESTED_BINDING:false}
+    # Per-tenant CANARY for the attested binding (comma-separated tenant UUIDs).
+    attested-binding-tenants: ${APP_AUTH_ATTESTED_BINDING_TENANTS:}
+    attestation:
+      android:
+        # Allowed applicationId(s) (comma-separated) and release signing-cert SHA-256
+        # digest(s) (hex, ':' allowed, or base64; comma-separated). EMPTY digest list
+        # ⇒ every attestation is rejected (fail closed) — set it before enabling.
+        package: ${APP_AUTH_ATTESTATION_ANDROID_PACKAGE:com.fivucsas.mobile}
+        signing-cert-sha256: ${APP_AUTH_ATTESTATION_ANDROID_SIGNING_CERT_SHA256:}
+        require-strongbox: ${APP_AUTH_ATTESTATION_ANDROID_REQUIRE_STRONGBOX:false}
+        require-verified-boot: ${APP_AUTH_ATTESTATION_ANDROID_REQUIRE_VERIFIED_BOOT:true}
+        require-device-locked: ${APP_AUTH_ATTESTATION_ANDROID_REQUIRE_DEVICE_LOCKED:true}
+        clock-skew: ${APP_AUTH_ATTESTATION_ANDROID_CLOCK_SKEW:PT5M}
+        revocation:
+          enabled: ${APP_AUTH_ATTESTATION_ANDROID_REVOCATION_ENABLED:true}
+          url: ${APP_AUTH_ATTESTATION_ANDROID_REVOCATION_URL:https://android.googleapis.com/attestation/status}
+          cache-ttl: ${APP_AUTH_ATTESTATION_ANDROID_REVOCATION_CACHE_TTL:PT1H}
+          # A stale list is used up to this long after a failed refresh.
+          max-stale: ${APP_AUTH_ATTESTATION_ANDROID_REVOCATION_MAX_STALE:PT24H}
+          # closed = reject when no usable list; open = accept with a warning.
+          fail-policy: ${APP_AUTH_ATTESTATION_ANDROID_REVOCATION_FAIL_POLICY:closed}
     # Tenant Auth-Methods true-gate kill-switch. Default ON (the gate enforces).
     # APP_AUTH_ENFORCE_TENANT_AUTH_METHODS=false disables login-time enforcement
     # instantly with no redeploy if the gate ever misbehaves in prod.

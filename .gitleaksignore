@@ -12,3 +12,4 @@ src/test/resources/db/test-fixtures/V28_5__align_default_login_flow_for_v29.sql:
 src/test/resources/db/test-fixtures/V28_5__align_default_login_flow_for_v29.sql:generic-api-key:12
 src/test/resources/application-test.yml:generic-api-key:47
 src/test/resources/application-test.yml:generic-api-key:55
+src/test/resources/attestation/keyattestation-samples/tegu_sdk36_SB_EC_2026_ROOT.json:generic-api-key:26
