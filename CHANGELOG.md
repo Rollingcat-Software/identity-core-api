@@ -2,6 +2,28 @@
 
 ## [Unreleased]
 
+### 2026-11-01 — SECURITY: legacy `/api/v1/auth/sessions` step-order and password-identity checks
+
+The anonymous legacy multi-step login path (`POST /auth/sessions`, `POST /auth/sessions/{id}/steps/{n}`,
+`ExecuteAuthSessionService`) mints access + refresh tokens when the last step completes. Two gaps:
+
+1. **Steps were not forced into flow order.** `completeStep` accepted any step number;
+   `findNextRequiredStep` only looks at later steps, so submitting the LAST step directly
+   completed the session with earlier steps (e.g. PASSWORD) still pending.
+   Now the requested step must be the lowest-order unfinished step (FAILED stays retryable),
+   else `DomainStateConflictException` (409) and an AUDIT log line.
+2. **PASSWORD step did not check identity.** A session started with a victim's email stayed
+   bound to the victim while the PASSWORD step validated whatever email/password the step data
+   named, so an attacker's own credentials passed the step for the victim's session.
+   Now, when the session is already bound to a user, the PASSWORD step's authenticated
+   `userId` must equal it (`AuthSession.isBoundToUserId`), else the step fails as
+   "Invalid credentials".
+
+Impact depends on each tenant's default APP_LOGIN flow: (2) alone is a full account takeover for
+any tenant whose default flow is PASSWORD-only; (1) reduces any multi-step flow to its last factor.
+The primary `/auth/mfa/step` path is not affected. Unit tests: 4 regressions in
+`ExecuteAuthSessionServiceTest`; full unit suite 1845 run / 0 fail.
+
 ### 2026-06-07 — Authorization IDOR / PII-leak / abuse-throttle hardening + test-suite green-up
 
 Three PRs merged to `main` on this date (HEAD ~`3aafc69`):
