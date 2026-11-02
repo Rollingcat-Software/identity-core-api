@@ -1,36 +1,111 @@
 name: Deploy to Hetzner VPS
 
+# Deploys are gated on CI: this workflow runs only after the "CI" workflow
+# finished SUCCESSFULLY for a push to main, and deploys exactly that commit
+# (github.event.workflow_run.head_sha). A red build can no longer deploy.
+# workflow_dispatch stays available for manual operator deploys; it skips the
+# CI gate and deploys the tip of origin/main, exactly as before.
+#
+# workflow_run has no `paths:` filter, so the `changes` job reproduces the old
+# push path filter: it lists the files changed since the commit of the last
+# run whose deploy job SUCCEEDED and deploys only if one matches DEPLOY_PATHS.
+# If that base can't be determined the deploy proceeds (fail toward deploying).
+# NOTE: the push `paths:` of ci.yml must stay a superset of DEPLOY_PATHS,
+# otherwise a deploy-relevant change never runs CI and therefore never deploys.
+
 on:
-  push:
-    branches: [master, main]
-    paths:
-      - 'src/**'
-      - 'Dockerfile*'
-      - 'docker-compose.prod.yml'
-      - 'pom.xml'
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
   workflow_dispatch:
 
 concurrency:
   group: deploy-identity
   cancel-in-progress: true
 
+permissions:
+  contents: read
+  actions: read
+
 jobs:
+  changes:
+    name: Check CI result + deploy paths
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push')
+    runs-on: ubuntu-latest
+    outputs:
+      deploy: ${{ steps.filter.outputs.deploy }}
+      sha: ${{ steps.filter.outputs.sha }}
+    steps:
+      - name: Match changed files against deploy paths
+        id: filter
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          EVENT: ${{ github.event_name }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          DEPLOY_JOB: 'Deploy Identity Core API'
+          DEPLOY_PATHS: '^(src/|Dockerfile|docker-compose\.prod\.yml$|pom\.xml$)'
+        run: |
+          if [ "$EVENT" = "workflow_dispatch" ]; then
+            echo "Manual dispatch: deploying the tip of origin/main"
+            echo "sha=" >> "$GITHUB_OUTPUT"; echo "deploy=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          echo "sha=$HEAD_SHA" >> "$GITHUB_OUTPUT"
+          # Base = commit of the most recent run whose deploy job succeeded.
+          BASE=""
+          for run in $(gh api "repos/$REPO/actions/workflows/deploy-hetzner.yml/runs?branch=main&status=success&per_page=30" \
+                         --jq '.workflow_runs[] | "\(.id):\(.head_sha)"' 2>/dev/null || true); do
+            ok=$(gh api "repos/$REPO/actions/runs/${run%%:*}/jobs" \
+                   --jq "[.jobs[] | select(.name == env.DEPLOY_JOB and .conclusion == \"success\")] | length" 2>/dev/null || echo 0)
+            if [ "$ok" != "0" ]; then BASE="${run#*:}"; break; fi
+          done
+          if [ -z "$BASE" ]; then
+            echo "No previous successful deploy found: deploying"; echo "deploy=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          if ! FILES=$(gh api "repos/$REPO/compare/$BASE...$HEAD_SHA" --jq '.files[].filename'); then
+            echo "Compare $BASE...$HEAD_SHA failed: deploying"; echo "deploy=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          COUNT=$(grep -c . <<< "$FILES" || true)
+          echo "Files changed since last deploy ($BASE): $COUNT"
+          if [ "$COUNT" -ge 300 ] || grep -qE "$DEPLOY_PATHS" <<< "$FILES"; then
+            echo "deploy=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No deploy-relevant changes: skipping deploy"; echo "deploy=false" >> "$GITHUB_OUTPUT"
+          fi
+
   deploy:
     name: Deploy Identity Core API
+    needs: changes
+    if: needs.changes.outputs.deploy == 'true'
     runs-on: [self-hosted, linux, x64]
     steps:
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1
         timeout-minutes: 8
+        env:
+          DEPLOY_SHA: ${{ needs.changes.outputs.sha }}
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           command_timeout: 6m
+          envs: DEPLOY_SHA
           script: |
             set -e
             cd /opt/projects/fivucsas/identity-core-api
-            git pull origin master || git pull origin main
+            # CI-gated run: fast-forward to exactly the CI-verified commit (no-op if
+            # the box is already at or past it). Manual dispatch: legacy pull.
+            if [ -n "$DEPLOY_SHA" ]; then
+              git fetch origin main
+              git merge --ff-only "$DEPLOY_SHA"
+            else
+              git pull origin master || git pull origin main
+            fi
+            echo "Deploying $(git rev-parse HEAD)"
             cd /opt/projects
             ./infra/deploy.sh build identity
             ./infra/deploy.sh restart identity

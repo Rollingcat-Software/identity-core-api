@@ -106,6 +106,14 @@ public class AuthSession {
         this.completedAt = Instant.now();
     }
 
+    /**
+     * True when this session is bound to the user whose id is {@code userId}
+     * (string form). Used to reject a step that authenticated a different account.
+     */
+    public boolean isBoundToUserId(Object userId) {
+        return user != null && userId != null && user.getId().toString().equals(String.valueOf(userId));
+    }
+
     public void advanceStep() {
         this.currentStepOrder++;
     }

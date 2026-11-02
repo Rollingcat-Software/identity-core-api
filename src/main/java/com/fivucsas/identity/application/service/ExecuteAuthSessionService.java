@@ -148,6 +148,22 @@ public class ExecuteAuthSessionService implements ExecuteAuthSessionUseCase {
 
         AuthFlowStep flowStep = currentStep.getAuthFlowStep();
 
+        // SECURITY: steps must be completed in flow order. Without this check a
+        // caller could submit the LAST step directly; findNextRequiredStep only
+        // looks at later steps, so the session would complete with every earlier
+        // step (e.g. PASSWORD) still pending. The expected step is the lowest-order
+        // step that is not finished (FAILED steps stay retryable).
+        Integer expectedOrder = sessionSteps.stream()
+                .filter(s -> !isFinished(s.getStatus()))
+                .map(s -> s.getAuthFlowStep().getStepOrder())
+                .min(Integer::compare)
+                .orElse(null);
+        if (expectedOrder == null || expectedOrder != stepOrder) {
+            log.warn("AUDIT: out-of-order auth step rejected: session={} requested={} expected={}",
+                    sessionId, stepOrder, expectedOrder);
+            throw new DomainStateConflictException("Step " + stepOrder + " is not the current step");
+        }
+
         currentStep.incrementAttempts();
         if (currentStep.hasExceededMaxAttempts(flowStep.getMaxAttempts())) {
             currentStep.fail("{\"error\":\"max_attempts_exceeded\"}");
@@ -161,6 +177,19 @@ public class ExecuteAuthSessionService implements ExecuteAuthSessionUseCase {
 
         AuthMethodHandler handler = handlerRegistry.getHandler(currentStep.getMethodType());
         StepResult result = handler.validate(session, flowStep, command.data());
+
+        // SECURITY: a PASSWORD step authenticates whichever account its own
+        // email/password name. When the session was already bound to a user at
+        // start (by email), the password must belong to THAT user; otherwise an
+        // attacker could start a session for a victim's email and pass the step
+        // with their own credentials while the session stays bound to the victim.
+        if (result.isSuccess()
+                && currentStep.getMethodType() == AuthMethodType.PASSWORD
+                && session.getUser() != null
+                && !session.isBoundToUserId(result.data() == null ? null : result.data().get("userId"))) {
+            log.warn("AUDIT: PASSWORD step identity mismatch rejected: session={}", sessionId);
+            result = StepResult.failure("Invalid credentials");
+        }
 
         if (result.isSuccess()) {
             currentStep.complete(result.toJson());
@@ -321,6 +350,12 @@ public class ExecuteAuthSessionService implements ExecuteAuthSessionUseCase {
         if (method == null) return false;
         if (!method.isRequiresEnrollment()) return true;
         return Boolean.TRUE.equals(healthStatus.get(method.getType()));
+    }
+
+    private static boolean isFinished(AuthStepStatus status) {
+        return status == AuthStepStatus.COMPLETED
+                || status == AuthStepStatus.SKIPPED
+                || status == AuthStepStatus.DELEGATED;
     }
 
     private Integer findNextRequiredStep(List<AuthSessionStep> steps, int currentOrder) {

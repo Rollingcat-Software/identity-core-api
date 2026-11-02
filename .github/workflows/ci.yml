@@ -7,12 +7,16 @@ on:
       - 'src/**'
       - 'pom.xml'
       - '.github/workflows/ci.yml'
+      - 'Dockerfile*'
+      - 'docker-compose.prod.yml'
   pull_request:
     branches: [main]
     paths:
       - 'src/**'
       - 'pom.xml'
       - '.github/workflows/ci.yml'
+      - 'Dockerfile*'
+      - 'docker-compose.prod.yml'
 
 concurrency:
   group: ci-${{ github.ref }}
