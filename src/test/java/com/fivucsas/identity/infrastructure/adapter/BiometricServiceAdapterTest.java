@@ -834,4 +834,49 @@ class BiometricServiceAdapterTest {
 
         mockServer.verify();
     }
+
+    // ── delete: 404 = nothing enrolled (consumed by BiometricDeletionOutboxWorker) ──
+
+    @Test
+    @DisplayName("deleteFace maps bio 404 to notEnrolled=true (success stays false)")
+    void deleteFace_404_flagsNotEnrolled() {
+        mockServer.expect(requestTo(BIO_URL + "/enroll/" + USER_ID))
+                .andExpect(method(HttpMethod.DELETE))
+                .andRespond(org.springframework.test.web.client.response.MockRestResponseCreators
+                        .withStatus(org.springframework.http.HttpStatus.NOT_FOUND)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .body("{\"detail\":\"No enrollment found\"}"));
+
+        var result = adapter.deleteFace(USER_ID);
+
+        assertThat(result).containsEntry("success", false).containsEntry("notEnrolled", true);
+        mockServer.verify();
+    }
+
+    @Test
+    @DisplayName("deleteVoice success passes the bio body through")
+    void deleteVoice_success() {
+        mockServer.expect(requestTo(BIO_URL + "/voice/" + USER_ID))
+                .andExpect(method(HttpMethod.DELETE))
+                .andRespond(withSuccess("{\"success\":true}", MediaType.APPLICATION_JSON));
+
+        var result = adapter.deleteVoice(USER_ID);
+
+        assertThat(result).containsEntry("success", true);
+        mockServer.verify();
+    }
+
+    @Test
+    @DisplayName("deleteVoice bio 500 is an error WITHOUT notEnrolled (so the outbox retries)")
+    void deleteVoice_500_isRetryableError() {
+        mockServer.expect(requestTo(BIO_URL + "/voice/" + USER_ID))
+                .andExpect(method(HttpMethod.DELETE))
+                .andRespond(org.springframework.test.web.client.response.MockRestResponseCreators
+                        .withServerError());
+
+        var result = adapter.deleteVoice(USER_ID);
+
+        assertThat(result).containsEntry("success", false).doesNotContainKey("notEnrolled");
+        mockServer.verify();
+    }
 }

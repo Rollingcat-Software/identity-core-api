@@ -50,6 +50,7 @@ class SoftDeletePurgeJobTest {
 
     @Mock private UserRepository userRepository;
     @Mock private AuditLogPort auditLogPort;
+    @Mock private com.fivucsas.identity.application.port.output.BiometricDeletionOutboxPort biometricDeletionOutbox;
     @Mock private EntityManager entityManager;
     @Mock private Query query;
 
@@ -123,6 +124,14 @@ class SoftDeletePurgeJobTest {
         // re-stamping the same soft-deleted rows). See UserRepository.hardDeleteById.
         verify(userRepository).hardDeleteById(oldUser.getId());
         verify(userRepository, never()).delete(any());
+        // Biometric templates live in bio: deletion intent enqueued (idempotently)
+        // BEFORE the identity row is hard-deleted.
+        var inOrder = org.mockito.Mockito.inOrder(biometricDeletionOutbox, userRepository);
+        inOrder.verify(biometricDeletionOutbox).enqueue(oldUser.getId(),
+            com.fivucsas.identity.application.port.output.BiometricDeletionOutboxPort.Method.FACE);
+        inOrder.verify(userRepository).hardDeleteById(oldUser.getId());
+        verify(biometricDeletionOutbox).enqueue(oldUser.getId(),
+            com.fivucsas.identity.application.port.output.BiometricDeletionOutboxPort.Method.VOICE);
         verify(auditLogPort).logSecurityEvent(
             any(),  // actor=null for system scheduler
             eq("USER_HARD_PURGED"),

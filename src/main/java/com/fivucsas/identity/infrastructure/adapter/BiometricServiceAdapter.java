@@ -321,6 +321,13 @@ public class BiometricServiceAdapter implements BiometricServicePort {
         log.info("Calling biometric service to delete face data for user: {}", userId);
         try {
             return deleteResource("/enroll/" + userId);
+        } catch (HttpClientErrorException.NotFound e) {
+            // Nothing enrolled: the goal state (no template) already holds. Flag it
+            // so the deletion outbox worker can treat it as done; success stays
+            // false so the user-facing delete endpoint keeps its semantics.
+            log.info("No face enrollment to delete for user: {}", userId);
+            return Map.of("success", false, "notEnrolled", true,
+                    "message", "No face enrollment found");
         } catch (ResourceAccessException e) {
             log.error("Biometric service unreachable for face deletion: {}", e.getMessage());
             return errorResponse("Face deletion service unavailable");
@@ -335,6 +342,13 @@ public class BiometricServiceAdapter implements BiometricServicePort {
         log.info("Calling biometric service to delete voice data for user: {}", userId);
         try {
             return deleteResource("/voice/" + userId);
+        } catch (HttpClientErrorException.NotFound e) {
+            // Nothing enrolled: the goal state (no template) already holds. Flag it
+            // so the deletion outbox worker can treat it as done; success stays
+            // false so the user-facing delete endpoint keeps its semantics.
+            log.info("No voice enrollment to delete for user: {}", userId);
+            return Map.of("success", false, "notEnrolled", true,
+                    "message", "No voice enrollment found");
         } catch (ResourceAccessException e) {
             log.error("Biometric service unreachable for voice deletion: {}", e.getMessage());
             return errorResponse("Voice deletion service unavailable");

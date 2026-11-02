@@ -210,6 +210,15 @@ app:
   purge:
     softDelete:
       enabled: ${APP_PURGE_SOFT_DELETE_ENABLED:false}
+  # Biometric-template deletion outbox (V87). deleteUser() + the hard purge
+  # enqueue FACE/VOICE rows; BiometricDeletionOutboxWorker drains them via the
+  # biometric-processor DELETE endpoints (404 = nothing enrolled = done), with
+  # exponential backoff (base * 2^attempts, capped) up to max-attempts.
+  # enabled=false only pauses draining; intents keep accumulating durably.
+  biometric-deletion:
+    outbox:
+      enabled: ${APP_BIOMETRIC_DELETION_OUTBOX_ENABLED:true}
+      max-attempts: ${APP_BIOMETRIC_DELETION_OUTBOX_MAX_ATTEMPTS:10}
   # WebAuthn allowed RP origins (P1-2). Exact-match, case-sensitive (RFC 6454 §4).
   # Any origin not in this list is rejected. Override with WEBAUTHN_ALLOWED_ORIGINS
   # (comma-separated) per environment. Default profile retains prod hosts plus
