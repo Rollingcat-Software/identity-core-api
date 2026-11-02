@@ -97,6 +97,14 @@ services:
       # OFF until the client mel+VAD is validated.
       APP_AUTH_CLIENT_SIDE_VOICE_EMBEDDING: ${APP_AUTH_CLIENT_SIDE_VOICE_EMBEDDING:-false}
       APP_AUTH_CLIENT_SIDE_VOICE_EMBEDDING_TENANTS: ${APP_AUTH_CLIENT_SIDE_VOICE_EMBEDDING_TENANTS:-}
+      # Puzzle as a first-class auth-flow layer (app.auth.puzzle-layer /
+      # app.auth.puzzle-layer-tenants, PuzzleLayerPolicy). MUST be listed here for
+      # the same reason as the flags above (explicit environment: block, not
+      # env_file:). Default OFF = PUZZLE absent from the catalog and every
+      # login-config response (byte-identical to before). Canary one tenant via
+      # _TENANTS=<uuid>; reversible via .env.prod + `up -d` recreate (no rebuild).
+      APP_AUTH_PUZZLE_LAYER: ${APP_AUTH_PUZZLE_LAYER:-false}
+      APP_AUTH_PUZZLE_LAYER_TENANTS: ${APP_AUTH_PUZZLE_LAYER_TENANTS:-}
       # NFC serial-only login (2026-06-01). MUST be listed here — the service uses an
       # explicit `environment:` block, NOT `env_file:`, so a var only in .env.prod is
       # NOT passed into the container (this exact gap left the flag dead after the
