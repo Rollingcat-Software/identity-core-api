@@ -72,6 +72,9 @@ class ManageUserServiceTest {
     @Mock
     private UserRoleRepositoryPort userRoleRepository;
 
+    @Mock
+    private com.fivucsas.identity.application.port.output.BiometricDeletionOutboxPort biometricDeletionOutbox;
+
     @InjectMocks
     private ManageUserService manageUserService;
 
@@ -463,6 +466,35 @@ class ManageUserServiceTest {
             // Then
             verify(userRepository).findById(userId);
             verify(userRepository).delete(existingUser);
+        }
+
+        @Test
+        @DisplayName("Should enqueue FACE and VOICE biometric-template deletion with the soft delete")
+        void shouldEnqueueBiometricDeletionForBothMethods() {
+            when(tenantScopeResolver.currentScope()).thenReturn(null);
+            when(userRepository.findById(userId)).thenReturn(Optional.of(existingUser));
+
+            manageUserService.deleteUser(userId.toString());
+
+            var inOrder = inOrder(userRepository, biometricDeletionOutbox);
+            inOrder.verify(userRepository).delete(existingUser);
+            verify(biometricDeletionOutbox).enqueue(userId,
+                    com.fivucsas.identity.application.port.output.BiometricDeletionOutboxPort.Method.FACE);
+            verify(biometricDeletionOutbox).enqueue(userId,
+                    com.fivucsas.identity.application.port.output.BiometricDeletionOutboxPort.Method.VOICE);
+            verifyNoMoreInteractions(biometricDeletionOutbox);
+        }
+
+        @Test
+        @DisplayName("Should NOT enqueue biometric deletion when the user does not exist")
+        void shouldNotEnqueueWhenUserMissing() {
+            UUID nonExistentId = UUID.randomUUID();
+            when(userRepository.findById(nonExistentId)).thenReturn(Optional.empty());
+
+            assertThatThrownBy(() -> manageUserService.deleteUser(nonExistentId.toString()))
+                .isInstanceOf(UserNotFoundException.class);
+
+            verifyNoInteractions(biometricDeletionOutbox);
         }
 
         @Test

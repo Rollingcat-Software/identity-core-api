@@ -8,6 +8,7 @@ import com.fivucsas.identity.application.dto.query.SearchUsersQuery;
 import com.fivucsas.identity.application.dto.response.UserResponse;
 import com.fivucsas.identity.application.port.input.ManageUserUseCase;
 import com.fivucsas.identity.application.port.output.AuditLogPort;
+import com.fivucsas.identity.application.port.output.BiometricDeletionOutboxPort;
 import com.fivucsas.identity.application.port.output.AuditLogQueryPort;
 import com.fivucsas.identity.application.port.output.PasswordEncoderPort;
 import com.fivucsas.identity.domain.exception.DuplicateEmailException;
@@ -62,6 +63,7 @@ public class ManageUserService implements ManageUserUseCase {
     private final AuditLogPort auditLogPort;
     private final TenantScopeResolver tenantScopeResolver;
     private final RbacAuthorizationService rbacService;
+    private final BiometricDeletionOutboxPort biometricDeletionOutbox;
 
     @Override
     @Transactional
@@ -392,6 +394,14 @@ public class ManageUserService implements ManageUserUseCase {
                 : scopeTenantId.toString();
 
         userRepository.delete(user);
+
+        // GDPR Art. 17 / KVKK: the user's face + voice templates live in
+        // biometric-processor, outside this DB. Record the deletion intent in
+        // the SAME transaction as the soft delete (transactional outbox, V87);
+        // BiometricDeletionOutboxWorker drains it with retries. Idempotent.
+        for (BiometricDeletionOutboxPort.Method method : BiometricDeletionOutboxPort.Method.values()) {
+            biometricDeletionOutbox.enqueue(uuid, method);
+        }
         log.info("User deleted successfully: {}", userId);
 
         // INVESTIGATION_MASTER_2026-05-07 §"audit-log blind spots":

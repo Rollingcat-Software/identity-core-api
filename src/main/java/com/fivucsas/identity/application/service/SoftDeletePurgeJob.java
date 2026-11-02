@@ -1,6 +1,7 @@
 package com.fivucsas.identity.application.service;
 
 import com.fivucsas.identity.application.port.output.AuditLogPort;
+import com.fivucsas.identity.application.port.output.BiometricDeletionOutboxPort;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.repository.UserRepository;
 import jakarta.persistence.EntityManager;
@@ -35,6 +36,10 @@ import java.util.UUID;
  *   <li>Most user-related tables declare {@code ON DELETE CASCADE} (V11, V16, V18, V19,
  *       V22, V30, V6) so deleting the user removes enrollments, sessions, devices,
  *       WebAuthn credentials, API keys, NFC cards, MFA sessions and refresh tokens.</li>
+ *   <li>Biometric templates (face/voice) live in biometric-processor, outside this DB:
+ *       a FACE + VOICE row is enqueued in {@code biometric_deletion_outbox} (V87,
+ *       idempotent, no FK so it survives the purge) and drained by
+ *       {@code BiometricDeletionOutboxWorker}.</li>
  *   <li>{@code audit_logs.user_id} is {@code ON DELETE SET NULL} (V5) — audit history
  *       persists per regulatory requirement (SOC2 / ISO 27001 / KVKK 7-year
  *       retention), with the user reference nulled.</li>
@@ -60,6 +65,7 @@ public class SoftDeletePurgeJob {
 
     private final UserRepository userRepository;
     private final AuditLogPort auditLogPort;
+    private final BiometricDeletionOutboxPort biometricDeletionOutbox;
 
     @PersistenceContext
     private EntityManager entityManager;
@@ -157,6 +163,14 @@ public class SoftDeletePurgeJob {
                 // here would re-stamp deleted_at/status and cause the purge loop to
                 // rediscover the same rows forever. Use the native hardDeleteById
                 // escape hatch added on UserRepository for this purpose.
+                // Belt-and-braces: make sure a biometric-template deletion intent
+                // exists BEFORE the identity row disappears (covers users
+                // soft-deleted before the V87 outbox shipped). Idempotent — a
+                // no-op when deleteUser() already enqueued. The outbox has no FK
+                // to users, so the hard delete below never cascades it away.
+                for (BiometricDeletionOutboxPort.Method method : BiometricDeletionOutboxPort.Method.values()) {
+                    biometricDeletionOutbox.enqueue(userId, method);
+                }
                 int rows = userRepository.hardDeleteById(userId);
                 userRepository.flush();   // force the FK cascades to run inside this tx
                 if (rows == 0) {
