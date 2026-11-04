@@ -2,6 +2,33 @@
 
 ## [Unreleased]
 
+### 2026-11-04 — Liveness rule for client-side face embeddings, gap Ü2 (`app.auth.face-embedding-liveness.mode`, default AUDIT)
+
+- An embedding carries no frame, so bio cannot run PAD on it. New `FaceEmbeddingLivenessPolicy`
+  (`OFF | AUDIT | ENFORCE`, env `APP_AUTH_FACE_EMBEDDING_LIVENESS_MODE`, canary list
+  `APP_AUTH_FACE_EMBEDDING_LIVENESS_ENFORCE_TENANTS` = tenant UUIDs that get ENFORCE while the
+  global mode is AUDIT; OFF ignores the list). Unknown values parse to AUDIT. No migration.
+- `FaceVerifyMfaStepHandler`: the only accepted liveness evidence for an embedding is a PUZZLE
+  completed earlier in the same MFA session. Unpaired, decided before any matching:
+  AUDIT = unchanged + WARN + `FACE_EMBEDDING_UNPAIRED` audit row; ENFORCE + image in the payload =
+  image path (bio passive PAD), audit `FACE_EMBEDDING_REROUTED_TO_IMAGE`; ENFORCE + no image =
+  non-terminal `{"status":"FACE_IMAGE_REQUIRED","requiredInput":"image",...}` (HTTP 200, no strike,
+  no completed method, no step advance, no TTL slide), audit `FACE_IMAGE_REQUIRED`. Image path,
+  spoof rule, malformed-embedding fall-through and `completeMfa` unchanged.
+- Enrollment (`EnrollBiometricService`, `POST /api/v1/biometric/enroll-embedding/{userId}`):
+  AUDIT = unchanged + `FACE_EMBEDDING_ENROLL_UNPAIRED` audit; ENFORCE = self-service embedding
+  enroll refused with 409 `{"code":"FACE_IMAGE_REQUIRED"}` (new `FaceImageRequiredException`);
+  an operator with `biometric:enroll` enrolling another user stays allowed, audited
+  `FACE_EMBEDDING_ENROLL_ON_BEHALF`.
+- Default AUDIT in `application.yml`, `application-prod.yml`, `docker-compose.prod.yml`: production
+  behaviour is identical. Rollback = set the env var to AUDIT (or OFF) and restart identity.
+- Before ENFORCE on any tenant: the web-app must handle `FACE_IMAGE_REQUIRED` (re-send the frame
+  once, 409 enroll fallback), mobile clients must be checked, bio must accept image `/verify`, and
+  bio `ENROLL_LIVENESS_ENABLED` must be on in production. See `docs/FACE_EMBEDDING_LIVENESS.md`.
+- Tests: `FaceEmbeddingLivenessPolicyTest` (new), Ü2 matrix in `FaceVerifyMfaStepHandlerTest`,
+  orchestrator ENFORCE journeys in `VerifyMfaStepServiceTest`, 409 / AUDIT / operator cases in
+  `EnrollBiometricServiceTest` and `BiometricControllerTest`.
+
 ### 2026-11-02 — Attested puzzle binding via Android Key Attestation (`app.auth.attested-binding`, default OFF)
 
 - New `docs/ATTESTED_PUZZLE_BINDING.md` (threat model, protocol, checks, revocation,

@@ -1,7 +1,9 @@
 package com.fivucsas.identity.application.service.mfa.handler;
 
+import com.fivucsas.identity.application.port.output.AuditLogPort;
 import com.fivucsas.identity.application.port.output.BiometricServicePort;
 import com.fivucsas.identity.application.service.ClientSideEmbeddingPolicy;
+import com.fivucsas.identity.application.service.FaceEmbeddingLivenessPolicy;
 import com.fivucsas.identity.application.service.mfa.MfaStepResult;
 import com.fivucsas.identity.application.service.mfa.VerifyMfaStepHandler;
 import com.fivucsas.identity.domain.model.auth.AuthMethodType;
@@ -16,6 +18,7 @@ import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -28,6 +31,16 @@ public class FaceVerifyMfaStepHandler implements VerifyMfaStepHandler {
     // Phase 5 (sub-project A): gates the client-side-embedding path. Default OFF
     // means the legacy image path below is byte-identical to before.
     private final ClientSideEmbeddingPolicy clientSideEmbeddingPolicy;
+    // Gap Ü2: what to do with an embedding FACE factor that has no liveness
+    // factor (PUZZLE) before it. Default AUDIT = unchanged behaviour + audit.
+    private final FaceEmbeddingLivenessPolicy livenessPolicy;
+    private final AuditLogPort auditLogPort;
+
+    /** Non-terminal status asking the client to re-send the step with an image. */
+    public static final String STATUS_FACE_IMAGE_REQUIRED = "FACE_IMAGE_REQUIRED";
+    static final String EVENT_UNPAIRED = "FACE_EMBEDDING_UNPAIRED";
+    static final String EVENT_REROUTED_TO_IMAGE = "FACE_EMBEDDING_REROUTED_TO_IMAGE";
+    static final String EVENT_IMAGE_REQUIRED = "FACE_IMAGE_REQUIRED";
 
     @Override
     public AuthMethodType supports() {
@@ -46,14 +59,48 @@ public class FaceVerifyMfaStepHandler implements VerifyMfaStepHandler {
         // floats — the raw image never left the device), match against the bio
         // /verify-embedding endpoint. Otherwise fall through to the UNCHANGED
         // legacy image path. Default OFF (policy + no embedding) ⇒ identical to
-        // the pre-Phase-5 behaviour. NOTE: an embedding carries no frame, so the
-        // bio processor cannot run liveness/anti-spoof on it — an embedding FACE
-        // factor MUST be paired with a liveness factor (puzzle/passive) in the
-        // flow (enforced by sub-projects B/C); this handler only routes the match.
+        // the pre-Phase-5 behaviour.
+        //
+        // LIVENESS (gap Ü2): an embedding carries no frame, so bio cannot run PAD
+        // on it. The ONLY liveness evidence this handler accepts for an embedding
+        // is a PUZZLE completed EARLIER in the same MFA session. Without it,
+        // FaceEmbeddingLivenessPolicy decides — BEFORE any matching, so the
+        // response never reveals whether the face would have matched:
+        //   OFF     → embedding path as before;
+        //   AUDIT   → embedding path as before + WARN + FACE_EMBEDDING_UNPAIRED audit;
+        //   ENFORCE → image in the same payload: take the image path (bio passive
+        //             PAD), audit FACE_EMBEDDING_REROUTED_TO_IMAGE; no image:
+        //             return a non-terminal FACE_IMAGE_REQUIRED challenge (no
+        //             strike, no completed method, no advance), audit
+        //             FACE_IMAGE_REQUIRED.
+        // A PUZZLE completed AFTER FACE does not count (deliberate trade-off; no
+        // production flow has that order).
         List<Double> embedding = extractEmbedding(data.get("embedding"));
         boolean embeddingPathEnabled =
                 clientSideEmbeddingPolicy.isEnabledForTenant(session.getTenantId());
         if (embeddingPathEnabled && embedding != null && !embedding.isEmpty()) {
+            boolean paired = session.getCompletedMethods().contains(AuthMethodType.PUZZLE.name());
+            if (!paired) {
+                FaceEmbeddingLivenessPolicy.Mode mode = livenessPolicy.modeFor(session.getTenantId());
+                if (mode == FaceEmbeddingLivenessPolicy.Mode.ENFORCE) {
+                    String image = imageOf(data);
+                    if (image != null) {
+                        audit(session, userId, EVENT_REROUTED_TO_IMAGE);
+                        log.info("AUDIT: unpaired FACE embedding re-routed to image path — userId={}, tenantId={}",
+                                userId, session.getTenantId());
+                        return verifyImage(userId, image);
+                    }
+                    audit(session, userId, EVENT_IMAGE_REQUIRED);
+                    log.info("AUDIT: unpaired FACE embedding refused, image capture required — userId={}, tenantId={}",
+                            userId, session.getTenantId());
+                    return MfaStepResult.challenge(imageRequiredBody(session));
+                }
+                if (mode == FaceEmbeddingLivenessPolicy.Mode.AUDIT) {
+                    log.warn("AUDIT: FACE embedding accepted without a liveness factor — userId={}, tenantId={}, step={}/{}",
+                            userId, session.getTenantId(), session.getCurrentStep(), session.getTotalSteps());
+                    audit(session, userId, EVENT_UNPAIRED);
+                }
+            }
             String tenantId = session.getTenantId() != null ? session.getTenantId().toString() : null;
             Map<String, Object> embeddingResult =
                     biometricService.verifyEmbedding(tenantId, userId, embedding);
@@ -61,16 +108,55 @@ public class FaceVerifyMfaStepHandler implements VerifyMfaStepHandler {
         }
 
         // --- Legacy image path (UNCHANGED) ---
-        String image = (String) data.get("image");
-        if (image == null || image.isBlank()) {
+        String image = imageOf(data);
+        if (image == null) {
             return MfaStepResult.fail();
         }
+        return verifyImage(userId, image);
+    }
+
+    /** The image path: bio /verify runs passive PAD on the frame, then matches. */
+    private MfaStepResult verifyImage(java.util.UUID userId, String image) {
         byte[] bytes = Base64.getDecoder().decode(
                 image.contains(",") ? image.substring(image.indexOf(",") + 1) : image);
         MultipartFile faceFile = new InMemoryFaceImage(bytes);
 
         Map<String, Object> faceResult = biometricService.verifyFace(userId, faceFile);
         return interpretFaceResult(userId, faceResult, "image");
+    }
+
+    private static String imageOf(Map<String, Object> data) {
+        Object raw = data.get("image");
+        if (raw instanceof String s && !s.isBlank()) {
+            return s;
+        }
+        return null;
+    }
+
+    private static Map<String, Object> imageRequiredBody(MfaSession session) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("status", STATUS_FACE_IMAGE_REQUIRED);
+        body.put("method", AuthMethodType.FACE.name());
+        body.put("requiredInput", "image");
+        body.put("currentStep", session.getCurrentStep());
+        body.put("totalSteps", session.getTotalSteps());
+        body.put("message", "Face verification requires an image capture");
+        return body;
+    }
+
+    /**
+     * Best-effort audit row (tenant, user, step, user agent; never the embedding).
+     * An audit failure must never change the login outcome.
+     */
+    private void audit(MfaSession session, java.util.UUID userId, String eventType) {
+        try {
+            String details = "tenantId=" + session.getTenantId()
+                    + ", step=" + session.getCurrentStep() + "/" + session.getTotalSteps()
+                    + ", userAgent=" + session.getUserAgent();
+            auditLogPort.logSecurityEvent(userId.toString(), eventType, session.getIpAddress(), details);
+        } catch (RuntimeException e) {
+            log.warn("Failed to write {} audit event for userId={}: {}", eventType, userId, e.getMessage());
+        }
     }
 
     /**

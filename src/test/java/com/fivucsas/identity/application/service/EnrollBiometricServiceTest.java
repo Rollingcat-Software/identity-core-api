@@ -3,6 +3,7 @@ package com.fivucsas.identity.application.service;
 import com.fivucsas.identity.application.dto.command.EnrollBiometricCommand;
 import com.fivucsas.identity.application.dto.response.BiometricResponse;
 import com.fivucsas.identity.application.port.input.ManageEnrollmentUseCase;
+import com.fivucsas.identity.application.port.output.AuditLogPort;
 import com.fivucsas.identity.application.port.output.BiometricServicePort;
 import com.fivucsas.identity.application.port.output.EventPublisherPort;
 import com.fivucsas.identity.domain.exception.BiometricEnrollmentException;
@@ -18,6 +19,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -87,6 +89,13 @@ class EnrollBiometricServiceTest {
 
     @Mock
     private ClientSideEmbeddingPolicy clientSideEmbeddingPolicy;
+
+    // Real default (AUDIT) policy; individual tests override modeFor via doReturn.
+    @Spy
+    private FaceEmbeddingLivenessPolicy livenessPolicy = new FaceEmbeddingLivenessPolicy("AUDIT", "");
+
+    @Mock
+    private AuditLogPort auditLogPort;
 
     @InjectMocks
     private EnrollBiometricService enrollBiometricService;
@@ -635,6 +644,104 @@ class EnrollBiometricServiceTest {
                 userId, java.util.List.of(faceImage), null, null, null, true);
 
             verify(userDomainRepository, never()).save(any());
+        }
+    }
+
+    @Nested
+    @DisplayName("Ü2 embedding-enroll liveness rule (FaceEmbeddingLivenessPolicy)")
+    class EmbeddingEnrollLiveness {
+
+        private final java.util.List<Double> embedding = java.util.List.of(0.1, 0.2, 0.3);
+
+        private EnrollBiometricCommand embeddingCommand(boolean onBehalf) {
+            return EnrollBiometricCommand.builder()
+                .userId(userId.toString())
+                .tenantId("t-marmara")
+                .embedding(embedding)
+                .onBehalfOfOtherUser(onBehalf)
+                .build();
+        }
+
+        private void embeddingPathOn() {
+            when(userRepository.findById(userId)).thenReturn(Optional.of(existingUser));
+            when(clientSideEmbeddingPolicy.isEnabledForTenant("t-marmara")).thenReturn(true);
+        }
+
+        private void bioAccepts() {
+            when(biometricService.enrollEmbedding(eq("t-marmara"), eq(userId), eq(embedding)))
+                .thenReturn(Map.of("success", true, "message", "Embedding enrolled"));
+            when(userRepository.save(any(User.class))).thenReturn(existingUser);
+        }
+
+        @Test
+        @DisplayName("AUDIT (default) → enrolls as before + FACE_EMBEDDING_ENROLL_UNPAIRED audit")
+        void audit_passesThroughWithAuditEvent() {
+            embeddingPathOn();
+            bioAccepts();
+
+            BiometricResponse response = enrollBiometricService.execute(embeddingCommand(false));
+
+            assertThat(response.isSuccess()).isTrue();
+            verify(biometricService).enrollEmbedding("t-marmara", userId, embedding);
+            verify(auditLogPort).logSecurityEvent(eq(userId.toString()),
+                eq("FACE_EMBEDDING_ENROLL_UNPAIRED"), eq(null), org.mockito.ArgumentMatchers.contains("tenantId=t-marmara"));
+        }
+
+        @Test
+        @DisplayName("OFF → enrolls as before, no audit")
+        void off_noAudit() {
+            doReturn(FaceEmbeddingLivenessPolicy.Mode.OFF).when(livenessPolicy).modeFor("t-marmara");
+            embeddingPathOn();
+            bioAccepts();
+
+            BiometricResponse response = enrollBiometricService.execute(embeddingCommand(false));
+
+            assertThat(response.isSuccess()).isTrue();
+            verifyNoInteractions(auditLogPort);
+        }
+
+        @Test
+        @DisplayName("ENFORCE + self-service → FaceImageRequiredException (409) before any bio call")
+        void enforce_selfService_refused() {
+            doReturn(FaceEmbeddingLivenessPolicy.Mode.ENFORCE).when(livenessPolicy).modeFor("t-marmara");
+            embeddingPathOn();
+
+            assertThatThrownBy(() -> enrollBiometricService.execute(embeddingCommand(false)))
+                .isInstanceOf(com.fivucsas.identity.domain.exception.FaceImageRequiredException.class)
+                .extracting("errorCode").isEqualTo("FACE_IMAGE_REQUIRED");
+            verify(biometricService, never()).enrollEmbedding(any(), any(), any());
+            verify(biometricService, never()).enrollFace(any(), any(), any(), any(), any(), anyBoolean());
+            verify(userRepository, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("ENFORCE + operator enrolling another user → allowed + FACE_EMBEDDING_ENROLL_ON_BEHALF audit")
+        void enforce_operatorOnBehalf_allowedAndAudited() {
+            doReturn(FaceEmbeddingLivenessPolicy.Mode.ENFORCE).when(livenessPolicy).modeFor("t-marmara");
+            embeddingPathOn();
+            bioAccepts();
+
+            BiometricResponse response = enrollBiometricService.execute(embeddingCommand(true));
+
+            assertThat(response.isSuccess()).isTrue();
+            verify(biometricService).enrollEmbedding("t-marmara", userId, embedding);
+            verify(auditLogPort).logSecurityEvent(eq(userId.toString()),
+                eq("FACE_EMBEDDING_ENROLL_ON_BEHALF"), eq(null),
+                org.mockito.ArgumentMatchers.contains("onBehalfOfOtherUser=true"));
+        }
+
+        @Test
+        @DisplayName("ENFORCE never touches the image enroll path")
+        void enforce_imageEnrollUnchanged() {
+            when(userRepository.findById(userId)).thenReturn(Optional.of(existingUser));
+            when(biometricService.enrollFace(eq(userId), eq(faceImage), eq(null), eq(null), eq(null), eq(false)))
+                .thenReturn(Map.of("success", true));
+            when(userRepository.save(any(User.class))).thenReturn(existingUser);
+
+            BiometricResponse response = enrollBiometricService.execute(validCommand);
+
+            assertThat(response.isSuccess()).isTrue();
+            verifyNoInteractions(auditLogPort);
         }
     }
 }

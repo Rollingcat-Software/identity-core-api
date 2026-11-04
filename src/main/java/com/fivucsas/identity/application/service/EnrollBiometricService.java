@@ -4,8 +4,10 @@ import com.fivucsas.identity.application.dto.command.EnrollBiometricCommand;
 import com.fivucsas.identity.application.dto.response.BiometricResponse;
 import com.fivucsas.identity.application.port.input.EnrollBiometricUseCase;
 import com.fivucsas.identity.application.port.input.ManageEnrollmentUseCase;
+import com.fivucsas.identity.application.port.output.AuditLogPort;
 import com.fivucsas.identity.application.port.output.BiometricServicePort;
 import com.fivucsas.identity.domain.exception.BiometricEnrollmentException;
+import com.fivucsas.identity.domain.exception.FaceImageRequiredException;
 import com.fivucsas.identity.domain.exception.UserNotFoundException;
 import com.fivucsas.identity.domain.model.auth.AuthMethodType;
 import com.fivucsas.identity.domain.repository.UserDomainRepository;
@@ -42,6 +44,13 @@ public class EnrollBiometricService implements EnrollBiometricUseCase {
     // Phase 5 (sub-project A): gates the client-side-embedding enroll path.
     // Default OFF ⇒ the legacy image enroll below is byte-identical to before.
     private final ClientSideEmbeddingPolicy clientSideEmbeddingPolicy;
+    // Gap Ü2: liveness rule for embedding enrollments (an embedding carries no
+    // frame, so bio cannot run enroll liveness on it). Default AUDIT = unchanged.
+    private final FaceEmbeddingLivenessPolicy livenessPolicy;
+    private final AuditLogPort auditLogPort;
+
+    static final String EVENT_ENROLL_UNPAIRED = "FACE_EMBEDDING_ENROLL_UNPAIRED";
+    static final String EVENT_ENROLL_ON_BEHALF = "FACE_EMBEDDING_ENROLL_ON_BEHALF";
 
     @Override
     @Transactional
@@ -57,10 +66,14 @@ public class EnrollBiometricService implements EnrollBiometricUseCase {
         // raw image never left the device), enroll via the bio /enroll-embedding
         // endpoint. Otherwise fall through to the UNCHANGED legacy image enroll.
         // Default OFF (policy + no embedding) ⇒ identical to the pre-Phase-5
-        // behaviour. SECURITY: the embedding carries no frame, so the bio
-        // processor cannot run liveness/anti-spoof on it — an embedding FACE
-        // factor MUST be paired with a liveness factor (puzzle/passive) in the
-        // flow (enforced by sub-projects B/C); this only routes the enroll.
+        // behaviour. LIVENESS (gap Ü2): the embedding carries no frame, so bio
+        // cannot run enroll liveness on it. FaceEmbeddingLivenessPolicy decides
+        // before the bio call: OFF = as before; AUDIT = as before + a
+        // FACE_EMBEDDING_ENROLL_UNPAIRED audit row; ENFORCE = a self-service
+        // embedding enroll is refused with FaceImageRequiredException (409
+        // FACE_IMAGE_REQUIRED, the client re-enrolls with an image), while an
+        // operator with biometric:enroll enrolling another user is still allowed
+        // and audited (FACE_EMBEDDING_ENROLL_ON_BEHALF).
         List<Double> embedding = command.getEmbedding();
         boolean hasEmbedding = embedding != null && !embedding.isEmpty();
         Map<String, Object> response;
@@ -74,6 +87,7 @@ public class EnrollBiometricService implements EnrollBiometricUseCase {
         // OFF for the tenant, so a JSON request with the flag off never reaches
         // here with an embedding; the policy re-check below is defense-in-depth.
         if (hasEmbedding && clientSideEmbeddingPolicy.isEnabledForTenant(command.getTenantId())) {
+            enforceEmbeddingEnrollLiveness(command);
             response = biometricService.enrollEmbedding(command.getTenantId(), userId, embedding);
         } else {
             // Call external biometric service. Forward tenant_id +
@@ -121,6 +135,39 @@ public class EnrollBiometricService implements EnrollBiometricUseCase {
             .message(message != null ? message : "Biometric enrollment successful")
             .userId(command.getUserId())
             .build();
+    }
+
+    /**
+     * Gap Ü2 enrollment rule; see the comment at the call site. Throws
+     * {@link FaceImageRequiredException} before any bio call when refused.
+     */
+    private void enforceEmbeddingEnrollLiveness(EnrollBiometricCommand command) {
+        FaceEmbeddingLivenessPolicy.Mode mode = livenessPolicy.modeFor(command.getTenantId());
+        switch (mode) {
+            case OFF -> { /* behaviour from before the policy existed */ }
+            case AUDIT -> audit(command, EVENT_ENROLL_UNPAIRED);
+            case ENFORCE -> {
+                if (!command.isOnBehalfOfOtherUser()) {
+                    log.info("AUDIT: embedding face enrollment refused, image required — userId={}, tenantId={}",
+                            command.getUserId(), command.getTenantId());
+                    throw new FaceImageRequiredException();
+                }
+                log.warn("AUDIT: embedding face enrollment by an operator for another user allowed under ENFORCE — userId={}, tenantId={}",
+                        command.getUserId(), command.getTenantId());
+                audit(command, EVENT_ENROLL_ON_BEHALF);
+            }
+        }
+    }
+
+    private void audit(EnrollBiometricCommand command, String eventType) {
+        try {
+            auditLogPort.logSecurityEvent(command.getUserId(), eventType, null,
+                    "tenantId=" + command.getTenantId()
+                            + ", onBehalfOfOtherUser=" + command.isOnBehalfOfOtherUser());
+        } catch (RuntimeException e) {
+            log.warn("Failed to write {} audit event for userId={}: {}",
+                    eventType, command.getUserId(), e.getMessage());
+        }
     }
 
     @Override

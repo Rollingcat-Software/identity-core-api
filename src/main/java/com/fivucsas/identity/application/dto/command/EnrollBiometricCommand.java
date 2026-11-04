@@ -69,4 +69,12 @@ public class EnrollBiometricCommand {
      * ignored and the legacy image path is used (byte-identical behaviour).</p>
      */
     private List<Double> embedding;
+
+    /**
+     * Gap Ü2: true when the caller is an operator with {@code biometric:enroll}
+     * enrolling ANOTHER user (set by the controller from the security context).
+     * Such an enrollment stays allowed when the face-embedding liveness policy is
+     * ENFORCE, and is audited. Default false (self-service).
+     */
+    private boolean onBehalfOfOtherUser;
 }

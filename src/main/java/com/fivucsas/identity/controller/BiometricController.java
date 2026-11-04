@@ -155,6 +155,13 @@ public class BiometricController {
      * and the service's routing decision can never disagree. The 512-length is
      * bean-validated ({@code 400} on a wrong-length / empty vector) BEFORE the
      * flag check, so a malformed payload is rejected regardless of the flag.</p>
+     *
+     * <p><b>Liveness (gap Ü2):</b> when {@code FaceEmbeddingLivenessPolicy} is
+     * ENFORCE for the tenant, a self-service embedding enroll is refused with
+     * {@code 409 {"code":"FACE_IMAGE_REQUIRED"}} (the client then enrolls with an
+     * image through {@link #enrollFace}, where bio can run enroll liveness). An
+     * operator with {@code biometric:enroll} enrolling ANOTHER user stays allowed
+     * and is audited. AUDIT (the default) only audits.</p>
      */
     @PostMapping(value = "/api/v1/biometric/enroll-embedding/{userId}",
             consumes = MediaType.APPLICATION_JSON_VALUE)
@@ -189,6 +196,7 @@ public class BiometricController {
             .userId(userId.toString())
             .tenantId(tenantId)
             .embedding(request.embedding())
+            .onBehalfOfOtherUser(isOperatorEnrollingAnotherUser(userId))
             .build();
 
         BiometricResponse response = enrollBiometricUseCase.execute(command);
@@ -474,6 +482,17 @@ public class BiometricController {
      * a missing user here as a hard auth failure rather than silently passing
      * a null tenant downstream).
      */
+    /**
+     * Gap Ü2: true when the authenticated caller is NOT the subject {@code userId}
+     * and holds {@code biometric:enroll} (the only other way past the endpoint's
+     * {@code @PreAuthorize}). An unresolvable caller counts as self-service, so
+     * the ENFORCE rule applies (fail toward the stricter path).
+     */
+    private boolean isOperatorEnrollingAnotherUser(UUID userId) {
+        boolean self = rbacService.getCurrentUserId().map(userId::equals).orElse(true);
+        return !self && rbacService.hasPermission("biometric:enroll");
+    }
+
     private String resolveCurrentTenantId() {
         // Resolve the principal's tenant via the security-layer helper, which keeps
         // the JPA `entity.User` type contained inside `security..` per the

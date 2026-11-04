@@ -295,6 +295,30 @@ public class GlobalExceptionHandler {
     }
 
     /**
+     * Gap Ü2: an embedding face enrollment was refused because the face-embedding
+     * liveness policy is ENFORCE for the tenant. HTTP 409; the client re-enrolls
+     * with an image. {@code code}, {@code error} and {@code errorCode} all carry
+     * {@code FACE_IMAGE_REQUIRED}.
+     */
+    @ExceptionHandler(FaceImageRequiredException.class)
+    public ResponseEntity<java.util.Map<String, Object>> handleFaceImageRequired(
+            FaceImageRequiredException ex,
+            HttpServletRequest request) {
+        log.info("Face embedding enrollment refused (image required): path={}", request.getRequestURI());
+
+        java.util.Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("timestamp", java.time.Instant.now().toString());
+        body.put("status", HttpStatus.CONFLICT.value());
+        body.put("code", ex.getErrorCode());
+        body.put("error", ex.getErrorCode());
+        body.put("errorCode", ex.getErrorCode());
+        body.put("message", ex.getMessage());
+        body.put("path", request.getRequestURI());
+
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(body);
+    }
+
+    /**
      * P0-#7 (INVESTIGATION_MASTER_2026-05-07): tenant user-quota exceeded.
      * Mapped to HTTP 409 Conflict — same status family as
      * {@link DuplicateEmailException} (the request cannot be fulfilled given

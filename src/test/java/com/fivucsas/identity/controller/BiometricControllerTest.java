@@ -310,4 +310,92 @@ class BiometricControllerTest {
 
         verify(enrollBiometricUseCase, org.mockito.Mockito.never()).execute(any());
     }
+
+    // ── Gap Ü2: embedding-enroll liveness rule (409 FACE_IMAGE_REQUIRED) ──
+
+    private org.mockito.ArgumentCaptor<com.fivucsas.identity.application.dto.command.EnrollBiometricCommand>
+            enrollOk(UUID userId, String tenantId) {
+        when(clientSideEmbeddingPolicy.isEnabledForTenant(tenantId)).thenReturn(true);
+        when(enrollBiometricUseCase.execute(any()))
+                .thenReturn(com.fivucsas.identity.application.dto.response.BiometricResponse.builder()
+                        .success(true).message("ok").userId(userId.toString()).build());
+        return org.mockito.ArgumentCaptor.forClass(
+                com.fivucsas.identity.application.dto.command.EnrollBiometricCommand.class);
+    }
+
+    @Test
+    @DisplayName("POST enroll-embedding - ENFORCE refusal → 409 {code: FACE_IMAGE_REQUIRED}")
+    void enrollEmbedding_enforceRefusal_returns409() throws Exception {
+        UUID userId = UUID.randomUUID();
+        String tenantId = "11111111-1111-1111-1111-111111111111";
+        when(clientSideEmbeddingPolicy.isEnabledForTenant(tenantId)).thenReturn(true);
+        when(enrollBiometricUseCase.execute(any()))
+                .thenThrow(new com.fivucsas.identity.domain.exception.FaceImageRequiredException());
+
+        mockMvc.perform(post("/api/v1/biometric/enroll-embedding/" + userId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(embeddingJson(512, tenantId)))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("FACE_IMAGE_REQUIRED"))
+                .andExpect(jsonPath("$.errorCode").value("FACE_IMAGE_REQUIRED"));
+    }
+
+    @Test
+    @DisplayName("POST enroll-embedding - AUDIT pass-through: self-service caller → onBehalfOfOtherUser=false, 200")
+    void enrollEmbedding_selfService_notOnBehalf() throws Exception {
+        UUID userId = UUID.randomUUID();
+        String tenantId = "11111111-1111-1111-1111-111111111111";
+        var cmd = enrollOk(userId, tenantId);
+        when(rbacService.getCurrentUserId()).thenReturn(Optional.of(userId));
+        when(rbacService.hasPermission("biometric:enroll")).thenReturn(true);
+
+        mockMvc.perform(post("/api/v1/biometric/enroll-embedding/" + userId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(embeddingJson(512, tenantId)))
+                .andExpect(status().isOk());
+
+        verify(enrollBiometricUseCase).execute(cmd.capture());
+        org.assertj.core.api.Assertions.assertThat(cmd.getValue().isOnBehalfOfOtherUser()).isFalse();
+    }
+
+    @Test
+    @DisplayName("POST enroll-embedding - operator with biometric:enroll for another user → onBehalfOfOtherUser=true")
+    void enrollEmbedding_operatorForAnotherUser_onBehalf() throws Exception {
+        UUID userId = UUID.randomUUID();
+        String tenantId = "11111111-1111-1111-1111-111111111111";
+        var cmd = enrollOk(userId, tenantId);
+        when(rbacService.getCurrentUserId()).thenReturn(Optional.of(UUID.randomUUID()));
+        when(rbacService.hasPermission("biometric:enroll")).thenReturn(true);
+
+        mockMvc.perform(post("/api/v1/biometric/enroll-embedding/" + userId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(embeddingJson(512, tenantId)))
+                .andExpect(status().isOk());
+
+        verify(enrollBiometricUseCase).execute(cmd.capture());
+        org.assertj.core.api.Assertions.assertThat(cmd.getValue().isOnBehalfOfOtherUser()).isTrue();
+    }
+
+    @Test
+    @DisplayName("POST enroll-embedding - another user without biometric:enroll, or unresolvable caller → not on behalf")
+    void enrollEmbedding_noPermissionOrUnknownCaller_notOnBehalf() throws Exception {
+        UUID userId = UUID.randomUUID();
+        String tenantId = "11111111-1111-1111-1111-111111111111";
+        var cmd = enrollOk(userId, tenantId);
+        when(rbacService.getCurrentUserId())
+                .thenReturn(Optional.of(UUID.randomUUID()))
+                .thenReturn(Optional.empty());
+        when(rbacService.hasPermission("biometric:enroll")).thenReturn(false);
+
+        for (int i = 0; i < 2; i++) {
+            mockMvc.perform(post("/api/v1/biometric/enroll-embedding/" + userId)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(embeddingJson(512, tenantId)))
+                    .andExpect(status().isOk());
+        }
+
+        verify(enrollBiometricUseCase, org.mockito.Mockito.times(2)).execute(cmd.capture());
+        org.assertj.core.api.Assertions.assertThat(cmd.getAllValues())
+                .allMatch(c -> !c.isOnBehalfOfOtherUser());
+    }
 }
