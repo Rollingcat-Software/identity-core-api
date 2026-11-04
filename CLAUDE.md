@@ -77,13 +77,15 @@ docker compose -f docker-compose.prod.yml --env-file .env.prod up -d identity-co
 
 **Always use `--env-file .env.prod`** on VPS. Runs on port 8080. Swagger at `/swagger-ui.html`.
 
-**Auto-deploy is gated on CI (2026-11-02).** `.github/workflows/deploy-hetzner.yml` runs via
-`workflow_run` only after the `CI` workflow succeeds for a push to `main`, and deploys
-exactly that commit (`git merge --ff-only <head_sha>` on the box); a red build never deploys.
-Its `changes` job re-applies the old deploy path filter (files changed since the last
-successful deploy). Keep `ci.yml` push `paths:` a superset of the deploy paths, or a
-deploy-relevant change never runs CI and never deploys. `workflow_dispatch` = manual
-operator deploy of the tip of `main` (no CI gate).
+**Production deploys are pulled by the mordecai deployer (2026-11-04).** The GitHub
+`Deploy to Hetzner` workflow (`deploy-hetzner.yml`) was removed: it SSHed to the
+decommissioned Hetzner box or waited for a self-hosted runner, which a public repository
+must not have. The `fivucsas-deployer` container on mordecai (FIVUCSAS `infra/deployer/`)
+fast-forwards `/opt/projects/fivucsas/identity-core-api` to the newest `main` commit whose
+`CI` push run succeeded, rebuilds, health-checks and rolls back on failure; no
+GitHub secret or runner is involved. A commit whose files are all outside the `ci.yml`
+push `paths:` runs no CI and ships with the next green commit. Pause with
+`docker exec fivucsas-deployer touch /state/PAUSED.identity-core-api`; see that README for the rest.
 
 ## Key Directories
 

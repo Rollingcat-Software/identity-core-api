@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### 2026-11-04 - Deploys pulled by the mordecai deployer; Hetzner deploy workflow removed
+
+- Removed `.github/workflows/deploy-hetzner.yml`. It deployed over SSH to the
+  decommissioned Hetzner box or waited for a self-hosted runner that a public repository
+  must not have. Production on mordecai is now deployed by the FIVUCSAS pull deployer
+  (`infra/deployer/`), which ships the newest `main` commit with a green `CI` push
+  run and rolls back on a failed health check. CI is unchanged.
+
 ### 2026-11-02 — Attested puzzle binding via Android Key Attestation (`app.auth.attested-binding`, default OFF)
 
 - New `docs/ATTESTED_PUZZLE_BINDING.md` (threat model, protocol, checks, revocation,
