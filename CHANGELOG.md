@@ -2,6 +2,51 @@
 
 ## [Unreleased]
 
+### 2026-11-04 — Liveness rule for client-side face embeddings, gap Ü2 (`app.auth.face-embedding-liveness.mode`, default AUDIT)
+
+- An embedding carries no frame, so bio cannot run PAD on it. New `FaceEmbeddingLivenessPolicy`
+  (`OFF | AUDIT | ENFORCE`, env `APP_AUTH_FACE_EMBEDDING_LIVENESS_MODE`, canary list
+  `APP_AUTH_FACE_EMBEDDING_LIVENESS_ENFORCE_TENANTS` = tenant UUIDs that get ENFORCE while the
+  global mode is AUDIT; OFF ignores the list). Unknown values parse to AUDIT.
+- `FaceVerifyMfaStepHandler`: the only accepted liveness evidence for an embedding is a PUZZLE
+  completed earlier in the same MFA session whose ATTESTED identity binding ran and passed on
+  exactly this embedding. `PuzzleVerifyMfaStepHandler` stores the SHA-256 of the embedding it
+  matched (only on the attested binding-passed path, `app.auth.attested-binding` on for the
+  tenant; the non-attested v2 binding check compares client data with client data, so a
+  modified client can pass it with a photo-derived embedding, and it pins nothing) in the new nullable `mfa_sessions.liveness_embedding_sha256`
+  (migration **V88**; the embedding itself is never stored), and the FACE embedding must have the
+  same digest (`LivenessEmbeddingDigest`, constant-time compare). A liveness-only or non-attested
+  bound PUZZLE (`PUZZLE_NOT_BOUND`) or a different vector (`EMBEDDING_MISMATCH`) counts as unpaired, like
+  `NO_PUZZLE`; the reason goes into the audit row. Paired steps are audited too
+  (`FACE_EMBEDDING_PAIRED`, AUDIT and ENFORCE). Unpaired, decided before any matching:
+  AUDIT = unchanged + WARN + `FACE_EMBEDDING_UNPAIRED` audit row; ENFORCE + image in the payload =
+  image path (bio passive PAD), audit `FACE_EMBEDDING_REROUTED_TO_IMAGE`; ENFORCE + no image =
+  non-terminal `{"status":"FACE_IMAGE_REQUIRED","requiredInput":"image",...}` (HTTP 200, no strike,
+  no completed method, no step advance, no TTL slide), audit `FACE_IMAGE_REQUIRED`. Image path,
+  spoof rule, malformed-embedding fall-through and `completeMfa` unchanged.
+- Enrollment (`EnrollBiometricService`, `POST /api/v1/biometric/enroll-embedding/{userId}`):
+  AUDIT = unchanged + `FACE_EMBEDDING_ENROLL_UNPAIRED` audit; ENFORCE = self-service embedding
+  enroll refused with 409 `{"code":"FACE_IMAGE_REQUIRED"}` (new `FaceImageRequiredException`);
+  an administrator (TENANT_ADMIN or ROOT) with `biometric:enroll` who may manage the subject
+  (`RbacAuthorizationService.canManageUser`: same tenant and higher user type, or ROOT)
+  enrolling another user stays allowed, audited `FACE_EMBEDDING_ENROLL_ON_BEHALF`. The
+  permission alone is not enough: the seeded USER and TENANT_EDITOR roles carry it. The mode is decided on the authenticated principal's tenant
+  (`EnrollBiometricCommand.livenessTenantId`), never on the client-controlled body `tenant_id`
+  (that stays the bio scoping hint), so a canary-ENFORCE user cannot name another tenant to fall
+  back to the global AUDIT.
+- Default AUDIT in `application.yml`, `application-prod.yml`, `docker-compose.prod.yml`: production
+  behaviour is identical. Rollback = set the env var to AUDIT (or OFF) and restart identity.
+- Before ENFORCE on any tenant: the web-app must handle `FACE_IMAGE_REQUIRED` (re-send the frame
+  once, 409 enroll fallback), mobile clients must be checked, bio must accept image `/verify`, and
+  bio `ENROLL_LIVENESS_ENABLED` must be on in production. See `docs/FACE_EMBEDDING_LIVENESS.md`.
+- Tests: `FaceEmbeddingLivenessPolicyTest` (new), Ü2 matrix in `FaceVerifyMfaStepHandlerTest`
+  (incl. not-bound / mismatch / digest cases), digest pinning (attested only; the non-attested bound PUZZLE pins nothing) in
+  `PuzzleVerifyMfaStepHandlerTest`,
+  orchestrator ENFORCE journeys in `VerifyMfaStepServiceTest` (bound PUZZLE same vector, liveness-only
+  PUZZLE, own-face PUZZLE + victim embedding, non-attested bound PUZZLE + same vector),
+  409 / AUDIT / operator / non-admin and cross-tenant permission holders / mismatched-body-tenant cases
+  in `EnrollBiometricServiceTest` and `BiometricControllerTest`.
+
 ### 2026-11-04 - Email-verification and mail-health flags read from `.env.prod`
 
 - `docker-compose.prod.yml`: `FEATURE_EMAIL_VERIFICATION_ENABLED` and the new

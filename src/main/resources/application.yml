@@ -96,13 +96,26 @@ app:
     # endpoints (the raw image never leaves the device). Default false = legacy
     # image path (/verify, /enroll), byte-identical to before. Revert = unset.
     # SECURITY: the embedding path has no image → no server-side liveness on a
-    # frame, so an embedding FACE factor MUST be paired with a liveness factor
-    # (puzzle/passive) in the auth flow (enforced by sub-projects B/C).
+    # frame. The pairing rule is face-embedding-liveness below (gap Ü2).
     client-side-embedding: ${APP_AUTH_CLIENT_SIDE_EMBEDDING:false}
     # Per-tenant CANARY for the embedding path: comma-separated tenant UUIDs that
     # get the embedding path even while the master switch above is false. Invalid
     # UUIDs are skipped with a warn (never widens the rollout / crashes startup).
     client-side-embedding-tenants: ${APP_AUTH_CLIENT_SIDE_EMBEDDING_TENANTS:}
+    # Liveness rule for the embedding FACE path (gap Ü2). An embedding carries no
+    # frame, so bio cannot run PAD on it; the only accepted liveness evidence is a
+    # PUZZLE completed earlier in the same MFA session. Without it:
+    #   OFF     = behaviour from before this rule existed;
+    #   AUDIT   = unchanged + WARN + audit row (FACE_EMBEDDING_UNPAIRED /
+    #             FACE_EMBEDDING_ENROLL_UNPAIRED) — the default;
+    #   ENFORCE = login re-routed to the image path (PAD) or asked for an image
+    #             (non-terminal FACE_IMAGE_REQUIRED); self-service embedding
+    #             enroll refused with 409 FACE_IMAGE_REQUIRED.
+    # Unknown values parse to AUDIT (never toward lockout). Rollback = AUDIT + restart.
+    face-embedding-liveness:
+      mode: ${APP_AUTH_FACE_EMBEDDING_LIVENESS_MODE:AUDIT}
+      # Tenant UUIDs that get ENFORCE while the global mode is AUDIT (canary).
+      enforce-tenants: ${APP_AUTH_FACE_EMBEDDING_LIVENESS_ENFORCE_TENANTS:}
     # CLIENT-SIDE VOICE embedding (audit H3, GPU-less). VOICE twin of the face flag
     # above. When true, a VOICE step / enroll payload carrying a precomputed 256-d
     # Resemblyzer speaker embedding is matched via the biometric-processor's

@@ -113,10 +113,18 @@ app:
     # legacy image path (/verify, /enroll). KILL-SWITCH / CANARY — no redeploy:
     #   APP_AUTH_CLIENT_SIDE_EMBEDDING=true            → embedding path, ALL tenants
     #   APP_AUTH_CLIENT_SIDE_EMBEDDING_TENANTS=<uuid>  → canary specific tenant(s)
-    # Embedding-only FACE carries no image (no server-side liveness on a frame),
-    # so it MUST be paired with a liveness factor (puzzle/passive) in the flow.
+    # Embedding-only FACE carries no image (no server-side liveness on a frame);
+    # the pairing rule is face-embedding-liveness below (gap Ü2).
     client-side-embedding: ${APP_AUTH_CLIENT_SIDE_EMBEDDING:false}
     client-side-embedding-tenants: ${APP_AUTH_CLIENT_SIDE_EMBEDDING_TENANTS:}
+    # Embedding FACE liveness rule (gap Ü2): OFF | AUDIT (default) | ENFORCE.
+    # AUDIT keeps prod behaviour identical and audits unpaired embedding logins /
+    # enrollments. Canary ENFORCE per tenant via _ENFORCE_TENANTS=<uuid>,<uuid>.
+    # Before ENFORCE: web-app must handle FACE_IMAGE_REQUIRED, mobile clients must
+    # be checked, and bio ENROLL_LIVENESS_ENABLED must be on. Rollback = AUDIT.
+    face-embedding-liveness:
+      mode: ${APP_AUTH_FACE_EMBEDDING_LIVENESS_MODE:AUDIT}
+      enforce-tenants: ${APP_AUTH_FACE_EMBEDDING_LIVENESS_ENFORCE_TENANTS:}
     # Client-side-embedding VOICE path (audit H3, GPU-less). Default OFF = legacy
     # audio path (/voice/verify, /voice/enroll). KILL-SWITCH / CANARY — no redeploy:
     #   APP_AUTH_CLIENT_SIDE_VOICE_EMBEDDING=true            → embedding, ALL tenants

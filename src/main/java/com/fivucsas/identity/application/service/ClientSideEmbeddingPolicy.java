@@ -42,9 +42,9 @@ import java.util.UUID;
  *
  * <p><b>SECURITY:</b> the embedding path carries NO image, therefore the
  * biometric-processor cannot run server-side liveness / anti-spoof on a raw
- * frame. An embedding-only FACE factor MUST be paired with a separate liveness
- * factor (puzzle / passive) in the auth flow — that enforcement is delivered by
- * sub-projects B/C; this policy only governs WHERE the embedding is matched.
+ * frame. Whether an unpaired embedding is accepted, audited, re-routed to the
+ * image path or refused is decided by {@link FaceEmbeddingLivenessPolicy}
+ * (gap Ü2); this policy only governs WHERE the embedding is matched.
  */
 @Component
 @Slf4j

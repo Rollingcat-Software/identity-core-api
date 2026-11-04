@@ -805,4 +805,259 @@ class VerifyMfaStepServiceTest {
 
         assertThat(session.getExpiresAt()).isEqualTo(farExpiry);
     }
+
+    // ─────────────────────────────────────────────────────────────────
+    // Gap Ü2 end-to-end through the orchestrator, with the REAL
+    // FaceVerifyMfaStepHandler in ENFORCE: the FACE_IMAGE_REQUIRED challenge is
+    // non-terminal (no strike, no completed method, no advance, no TTL slide)
+    // and the image re-send completes the step normally.
+    // ─────────────────────────────────────────────────────────────────
+
+    @org.junit.jupiter.api.Nested
+    class FaceEmbeddingLivenessEnforce {
+
+        private final List<Double> embedding = List.of(0.1, 0.2, 0.3);
+        private final String image = java.util.Base64.getEncoder().encodeToString("jpeg".getBytes());
+
+        private com.fivucsas.identity.application.port.output.BiometricServicePort bio;
+
+        private VerifyMfaStepService enforcing;
+
+        @BeforeEach
+        void wireRealFaceHandler() {
+            bio = org.mockito.Mockito.mock(com.fivucsas.identity.application.port.output.BiometricServicePort.class);
+            com.fivucsas.identity.application.service.mfa.handler.FaceVerifyMfaStepHandler realFace =
+                    new com.fivucsas.identity.application.service.mfa.handler.FaceVerifyMfaStepHandler(
+                            bio,
+                            new com.fivucsas.identity.application.service.ClientSideEmbeddingPolicy(true, ""),
+                            new com.fivucsas.identity.application.service.FaceEmbeddingLivenessPolicy("ENFORCE", ""),
+                            auditLogPort);
+            enforcing = new VerifyMfaStepService(
+                    List.of(passwordHandler, realFace),
+                    mfaSessionRepository, userRepository, authFlowRepository,
+                    enrollmentHealthService, tokenGenerator, refreshTokenService, auditLogPort,
+                    new AvailableMethodsResolver(), tenantAuthMethodPolicy, loginAccountStateGuard,
+                    manageDeviceUseCase);
+        }
+
+        private void stubTokens() {
+            when(tokenGenerator.generateAccessToken(anyString(), any())).thenReturn("access-jwt");
+            when(tokenGenerator.getExpirationMillis()).thenReturn(86400000L);
+            RefreshToken refresh = org.mockito.Mockito.mock(RefreshToken.class);
+            when(refresh.getToken()).thenReturn("refresh-tok");
+            when(refreshTokenService.createRefreshToken(any(), any(), any())).thenReturn(refresh);
+            when(mfaSessionRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        }
+
+        @Test
+        void passwordThenFace_embeddingGetsChallenge_thenImageAuthenticates() {
+            UUID userId = UUID.randomUUID();
+            UUID flowId = UUID.randomUUID();
+            MfaSession session = mfaSessionAt(SESSION_TOKEN, userId, flowId, 2, 2, "[\"PASSWORD\"]");
+            Instant expiryBefore = session.getExpiresAt();
+            AuthFlow flow = flowOf(flowId,
+                    stepOf(1, AuthMethodType.PASSWORD),
+                    stepOf(2, AuthMethodType.FACE));
+            User user = userMock(userId);
+            when(mfaSessionRepository.findBySessionTokenForUpdate(SESSION_TOKEN))
+                    .thenReturn(Optional.of(session));
+            when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+            when(authFlowRepository.findById(flowId)).thenReturn(Optional.of(flow));
+
+            // 1) embedding without a liveness factor → non-terminal challenge
+            VerifyMfaStepResponse first = enforcing.execute(req("FACE", Map.of("embedding", embedding)));
+
+            assertThat(first.status()).isEqualTo(VerifyMfaStepResponse.Status.OK);
+            assertThat(first.body())
+                    .containsEntry("status", "FACE_IMAGE_REQUIRED")
+                    .containsEntry("requiredInput", "image")
+                    .containsEntry("currentStep", 2)
+                    .containsEntry("totalSteps", 2);
+            assertThat(session.getCurrentStep()).isEqualTo(2);
+            assertThat(session.getCompletedMethods()).containsExactly("PASSWORD");
+            assertThat(session.getExpiresAt()).isEqualTo(expiryBefore);
+            assertThat(session.isCompleted()).isFalse();
+            verify(loginAccountStateGuard, never()).recordFailedAttempt(any(), any(), any());
+            verify(auditLogPort, never()).logMfaStepFailed(any(), any(), any(), any(), any());
+            verify(mfaSessionRepository, never()).save(any());
+            verify(bio, never()).verifyEmbedding(any(), any(), any());
+
+            // 2) the same step re-sent with the image → bio PAD + match → AUTHENTICATED
+            stubTokens();
+            when(bio.verifyFace(eq(userId), any())).thenReturn(Map.of("verified", true));
+
+            VerifyMfaStepResponse second = enforcing.execute(req("FACE", Map.of("image", image)));
+
+            assertThat(second.body()).containsEntry("status", "AUTHENTICATED");
+            assertThat(second.body().get("status")).isNotEqualTo("METHOD_ALREADY_USED");
+            @SuppressWarnings("unchecked")
+            ArgumentCaptor<List<String>> amr = ArgumentCaptor.forClass(List.class);
+            verify(tokenGenerator).generateAccessToken(anyString(), amr.capture());
+            assertThat(amr.getValue()).containsExactly("pwd", "face");
+            verify(loginAccountStateGuard, never()).recordFailedAttempt(any(), any(), any());
+            verify(auditLogPort).logSecurityEvent(eq(userId.toString()), eq("FACE_IMAGE_REQUIRED"), any(), anyString());
+        }
+
+        private MfaSession puzzleThenFaceSession(UUID userId, UUID flowId, String pinnedDigest) {
+            MfaSession session = mfaSessionAt(SESSION_TOKEN, userId, flowId, 2, 2, "[\"PUZZLE\"]");
+            session.setLivenessEmbeddingSha256(pinnedDigest);
+            AuthFlow flow = flowOf(flowId,
+                    stepOf(1, AuthMethodType.PUZZLE),
+                    stepOf(2, AuthMethodType.FACE));
+            User user = userMock(userId);
+            when(mfaSessionRepository.findBySessionTokenForUpdate(SESSION_TOKEN))
+                    .thenReturn(Optional.of(session));
+            when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+            when(authFlowRepository.findById(flowId)).thenReturn(Optional.of(flow));
+            return session;
+        }
+
+        @Test
+        void boundPuzzleThenFace_sameEmbedding_staysOnEmbeddingPath_andIsAudited() {
+            UUID userId = UUID.randomUUID();
+            puzzleThenFaceSession(userId, UUID.randomUUID(), LivenessEmbeddingDigest.sha256Hex(embedding));
+            stubTokens();
+            when(bio.verifyEmbedding(any(), eq(userId), eq(embedding))).thenReturn(Map.of("verified", true));
+
+            VerifyMfaStepResponse result = enforcing.execute(req("FACE", Map.of("embedding", embedding)));
+
+            assertThat(result.body()).containsEntry("status", "AUTHENTICATED");
+            verify(bio).verifyEmbedding(any(), eq(userId), eq(embedding));
+            verify(bio, never()).verifyFace(any(), any());
+            verify(auditLogPort).logSecurityEvent(eq(userId.toString()), eq("FACE_EMBEDDING_PAIRED"), any(),
+                    org.mockito.ArgumentMatchers.contains("pairing=PAIRED"));
+        }
+
+        @Test
+        void livenessOnlyPuzzleThenFace_isUnpaired_getsChallenge() {
+            // The review scenario: a PUZZLE without identity binding proves only that
+            // SOME live person did it; it must not unlock the embedding path.
+            UUID userId = UUID.randomUUID();
+            MfaSession session = puzzleThenFaceSession(userId, UUID.randomUUID(), null);
+
+            VerifyMfaStepResponse result = enforcing.execute(req("FACE", Map.of("embedding", embedding)));
+
+            assertThat(result.body()).containsEntry("status", "FACE_IMAGE_REQUIRED");
+            assertThat(session.getCompletedMethods()).containsExactly("PUZZLE");
+            verify(bio, never()).verifyEmbedding(any(), any(), any());
+        }
+
+        @Test
+        void boundPuzzleThenFace_differentEmbedding_isUnpaired_getsChallenge() {
+            // Attacker passes the PUZZLE with their own live face, then sends the
+            // victim's embedding (from a photo) on the FACE step.
+            UUID userId = UUID.randomUUID();
+            puzzleThenFaceSession(userId, UUID.randomUUID(),
+                    LivenessEmbeddingDigest.sha256Hex(List.of(0.9, 0.8, 0.7)));
+
+            VerifyMfaStepResponse result = enforcing.execute(req("FACE", Map.of("embedding", embedding)));
+
+            assertThat(result.body()).containsEntry("status", "FACE_IMAGE_REQUIRED");
+            verify(bio, never()).verifyEmbedding(any(), any(), any());
+            verify(auditLogPort).logSecurityEvent(eq(userId.toString()), eq("FACE_IMAGE_REQUIRED"), any(),
+                    org.mockito.ArgumentMatchers.contains("pairing=EMBEDDING_MISMATCH"));
+        }
+
+        @Test
+        void nonAttestedBoundPuzzleThenFace_sameEmbedding_isNotLivenessBacked_getsChallenge() {
+            // Review finding: the non-attested binding check compares client data with
+            // client data, so a modified client can do the PUZZLE with its own live face
+            // and send a photo-derived embedding E as data.embedding. The identity match
+            // on E passes. E must NOT then count as liveness-backed on the FACE step.
+            UUID userId = UUID.randomUUID();
+            UUID flowId = UUID.randomUUID();
+            List<Double> photoEmbedding = new ArrayList<>();
+            for (int i = 0; i < 512; i++) {
+                photoEmbedding.add(i / 1000.0);
+            }
+            MfaSession session = mfaSessionAt(SESSION_TOKEN, userId, flowId, 1, 2, "[]");
+            AuthFlowStep puzzleStep = AuthFlowStep.builder()
+                    .id(UUID.randomUUID())
+                    .stepOrder(1)
+                    .authMethod(methodOf(AuthMethodType.PUZZLE))
+                    .stepType(StepType.SEQUENTIAL)
+                    .alternativeMethods(Collections.emptyList())
+                    .isRequired(true)
+                    .timeoutSeconds(120)
+                    .maxAttempts(3)
+                    .allowsDelegation(true)
+                    .config("{\"puzzleConfig\":{\"alsoMatchFaceIdentity\":true}}")
+                    .build();
+            AuthFlow flow = flowOf(flowId, puzzleStep, stepOf(2, AuthMethodType.FACE));
+            User user = userMock(userId);
+            when(mfaSessionRepository.findBySessionTokenForUpdate(SESSION_TOKEN))
+                    .thenReturn(Optional.of(session));
+            when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+            when(authFlowRepository.findById(flowId)).thenReturn(Optional.of(flow));
+            lenient().when(mfaSessionRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+            lenient().when(enrollmentHealthService.validateEnrollments(any())).thenReturn(Map.of());
+
+            com.fivucsas.identity.application.port.output.PuzzleSessionGuardPort guard =
+                    org.mockito.Mockito.mock(com.fivucsas.identity.application.port.output.PuzzleSessionGuardPort.class);
+            lenient().when(guard.traceContractFor(anyString()))
+                    .thenReturn(Optional.of(com.fivucsas.identity.application.port.output.PuzzleSessionGuardPort.CONTRACT_V1));
+            com.fivucsas.identity.application.service.mfa.handler.PuzzleVerifyMfaStepHandler realPuzzle =
+                    new com.fivucsas.identity.application.service.mfa.handler.PuzzleVerifyMfaStepHandler(
+                            bio, authFlowRepository,
+                            new com.fivucsas.identity.application.service.ClientSideEmbeddingPolicy(true, ""),
+                            guard);
+            com.fivucsas.identity.application.service.mfa.handler.FaceVerifyMfaStepHandler realFace =
+                    new com.fivucsas.identity.application.service.mfa.handler.FaceVerifyMfaStepHandler(
+                            bio,
+                            new com.fivucsas.identity.application.service.ClientSideEmbeddingPolicy(true, ""),
+                            new com.fivucsas.identity.application.service.FaceEmbeddingLivenessPolicy("ENFORCE", ""),
+                            auditLogPort);
+            VerifyMfaStepService puzzleThenFace = new VerifyMfaStepService(
+                    List.of(realPuzzle, realFace),
+                    mfaSessionRepository, userRepository, authFlowRepository,
+                    enrollmentHealthService, tokenGenerator, refreshTokenService, auditLogPort,
+                    new AvailableMethodsResolver(), tenantAuthMethodPolicy, loginAccountStateGuard,
+                    manageDeviceUseCase);
+            when(bio.getPuzzleVerdictWithBinding(anyString(), eq(userId), any(), any()))
+                    .thenReturn(Map.of("verified", true));
+            when(bio.verifyEmbedding(any(), eq(userId), eq(photoEmbedding)))
+                    .thenReturn(Map.of("verified", true));
+
+            // 1) PUZZLE with own live face + photo-derived embedding: the step passes.
+            VerifyMfaStepResponse puzzle = puzzleThenFace.execute(req("PUZZLE",
+                    Map.of("puzzle_session_id", "tok_puzzle", "embedding", photoEmbedding)));
+            assertThat(puzzle.status()).isEqualTo(VerifyMfaStepResponse.Status.OK);
+            assertThat(session.getCompletedMethods()).containsExactly("PUZZLE");
+            assertThat(session.getLivenessEmbeddingSha256()).isNull();
+
+            // 2) FACE with the SAME vector: not paired, challenged for an image.
+            VerifyMfaStepResponse face = puzzleThenFace.execute(req("FACE", Map.of("embedding", photoEmbedding)));
+
+            assertThat(face.body()).containsEntry("status", "FACE_IMAGE_REQUIRED");
+            verify(bio, times(1)).verifyEmbedding(any(), any(), any());
+            verify(auditLogPort, never()).logSecurityEvent(any(), eq("FACE_EMBEDDING_PAIRED"), any(), any());
+            verify(auditLogPort).logSecurityEvent(eq(userId.toString()), eq("FACE_IMAGE_REQUIRED"), any(),
+                    org.mockito.ArgumentMatchers.contains("pairing=PUZZLE_NOT_BOUND"));
+        }
+
+        @Test
+        void imageResend_spoofDetected_failsAndRecordsStrike() {
+            UUID userId = UUID.randomUUID();
+            UUID flowId = UUID.randomUUID();
+            MfaSession session = mfaSessionAt(SESSION_TOKEN, userId, flowId, 2, 2, "[\"PASSWORD\"]");
+            AuthFlow flow = flowOf(flowId,
+                    stepOf(1, AuthMethodType.PASSWORD),
+                    stepOf(2, AuthMethodType.FACE));
+            User user = userMock(userId);
+            when(mfaSessionRepository.findBySessionTokenForUpdate(SESSION_TOKEN))
+                    .thenReturn(Optional.of(session));
+            when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+            when(authFlowRepository.findById(flowId)).thenReturn(Optional.of(flow));
+
+            VerifyMfaStepResponse first = enforcing.execute(req("FACE", Map.of("embedding", embedding)));
+            assertThat(first.body()).containsEntry("status", "FACE_IMAGE_REQUIRED");
+
+            when(bio.verifyFace(eq(userId), any())).thenReturn(Map.of("error_code", "SPOOF_DETECTED"));
+            VerifyMfaStepResponse second = enforcing.execute(req("FACE", Map.of("image", image)));
+
+            assertThat(second.body()).containsEntry("status", "FAILED");
+            assertThat(session.getCompletedMethods()).containsExactly("PASSWORD");
+            verify(loginAccountStateGuard, times(1)).recordFailedAttempt(eq(userId), any(), eq(CLIENT_IP));
+        }
+    }
 }
