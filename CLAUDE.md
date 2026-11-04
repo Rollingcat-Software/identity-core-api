@@ -77,6 +77,11 @@ docker compose -f docker-compose.prod.yml --env-file .env.prod up -d identity-co
 
 **Always use `--env-file .env.prod`** on VPS. Runs on port 8080. Swagger at `/swagger-ui.html`.
 
+**No local edits in the prod checkout.** Prod-only values go in `.env.prod` and are
+forwarded by `${VAR:-default}` in `docker-compose.prod.yml`. Production sets
+`FEATURE_EMAIL_VERIFICATION_ENABLED=false` and `MANAGEMENT_HEALTH_MAIL_ENABLED=false` there
+(they used to be uncommitted edits of the compose file).
+
 **Production deploys are pulled by the mordecai deployer (2026-11-04).** The GitHub
 `Deploy to Hetzner` workflow (`deploy-hetzner.yml`) was removed: it SSHed to the
 decommissioned Hetzner box or waited for a self-hosted runner, which a public repository

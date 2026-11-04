@@ -10,6 +10,13 @@
   (`infra/deployer/`), which ships the newest `main` commit with a green `CI` push
   run and rolls back on a failed health check. CI is unchanged.
 
+### 2026-11-04 - Email-verification and mail-health flags read from `.env.prod`
+
+- `docker-compose.prod.yml`: `FEATURE_EMAIL_VERIFICATION_ENABLED` and the new
+  `MANAGEMENT_HEALTH_MAIL_ENABLED` are interpolated (`${VAR:-true}`), so production sets
+  them in `.env.prod` instead of carrying uncommitted edits in the checkout. Defaults are
+  unchanged (`true`). Needed for the pull deployer, which fast-forwards the checkout.
+
 ### 2026-11-02 — Attested puzzle binding via Android Key Attestation (`app.auth.attested-binding`, default OFF)
 
 - New `docs/ATTESTED_PUZZLE_BINDING.md` (threat model, protocol, checks, revocation,
