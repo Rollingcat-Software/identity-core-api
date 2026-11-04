@@ -162,7 +162,11 @@ services:
       LOGGING_LEVEL_SQL: WARN
       MANAGEMENT_ENDPOINTS_ENABLED: "true"
       MANAGEMENT_HEALTH_SHOW_DETAILS: authorized
-      FEATURE_EMAIL_VERIFICATION_ENABLED: "true"
+      # Operator-tunable from .env.prod (non-secret). Production currently runs with
+      # both set to false there; defaults keep the repository behavior. Disabling the
+      # mail health contributor keeps /actuator/health UP when SMTP is unreachable.
+      MANAGEMENT_HEALTH_MAIL_ENABLED: ${MANAGEMENT_HEALTH_MAIL_ENABLED:-true}
+      FEATURE_EMAIL_VERIFICATION_ENABLED: ${FEATURE_EMAIL_VERIFICATION_ENABLED:-true}
       FEATURE_PHONE_VERIFICATION_ENABLED: "false"
       FEATURE_TWO_FACTOR_AUTH_ENABLED: "false"
       FEATURE_SOCIAL_LOGIN_ENABLED: "false"

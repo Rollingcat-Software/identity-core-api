@@ -77,6 +77,11 @@ docker compose -f docker-compose.prod.yml --env-file .env.prod up -d identity-co
 
 **Always use `--env-file .env.prod`** on VPS. Runs on port 8080. Swagger at `/swagger-ui.html`.
 
+**No local edits in the prod checkout.** Prod-only values go in `.env.prod` and are
+forwarded by `${VAR:-default}` in `docker-compose.prod.yml`. Production sets
+`FEATURE_EMAIL_VERIFICATION_ENABLED=false` and `MANAGEMENT_HEALTH_MAIL_ENABLED=false` there
+(they used to be uncommitted edits of the compose file).
+
 **Auto-deploy is gated on CI (2026-11-02).** `.github/workflows/deploy-hetzner.yml` runs via
 `workflow_run` only after the `CI` workflow succeeds for a push to `main`, and deploys
 exactly that commit (`git merge --ff-only <head_sha>` on the box); a red build never deploys.
