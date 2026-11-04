@@ -160,8 +160,10 @@ public class BiometricController {
      * ENFORCE for the tenant, a self-service embedding enroll is refused with
      * {@code 409 {"code":"FACE_IMAGE_REQUIRED"}} (the client then enrolls with an
      * image through {@link #enrollFace}, where bio can run enroll liveness). An
-     * operator with {@code biometric:enroll} enrolling ANOTHER user stays allowed
-     * and is audited. AUDIT (the default) only audits.</p>
+     * administrator (TENANT_ADMIN or ROOT) holding {@code biometric:enroll} who
+     * may manage the subject (same tenant and outranks them, or ROOT) enrolling
+     * ANOTHER user stays allowed and is audited; holding the permission alone is
+     * not enough. AUDIT (the default) only audits.</p>
      */
     @PostMapping(value = "/api/v1/biometric/enroll-embedding/{userId}",
             consumes = MediaType.APPLICATION_JSON_VALUE)
@@ -480,13 +482,20 @@ public class BiometricController {
 
     /**
      * Gap Ü2: true when the authenticated caller is NOT the subject {@code userId}
-     * and holds {@code biometric:enroll} (the only other way past the endpoint's
-     * {@code @PreAuthorize}). An unresolvable caller counts as self-service, so
-     * the ENFORCE rule applies (fail toward the stricter path).
+     * AND holds {@code biometric:enroll} AND is an administrator (TENANT_ADMIN or
+     * ROOT) AND may manage the subject ({@code canManageUser}: ROOT, or the same
+     * tenant with a higher user type). The permission alone is not enough: the
+     * seeded USER and TENANT_EDITOR roles carry {@code biometric:enroll}, and the
+     * endpoint's {@code @PreAuthorize} has no tenant scope, so the permission by
+     * itself must never open the way past ENFORCE. An unresolvable caller counts
+     * as self-service, so the ENFORCE rule applies (fail toward the stricter path).
      */
     private boolean isOperatorEnrollingAnotherUser(UUID userId) {
         boolean self = rbacService.getCurrentUserId().map(userId::equals).orElse(true);
-        return !self && rbacService.hasPermission("biometric:enroll");
+        return !self
+                && rbacService.hasPermission("biometric:enroll")
+                && rbacService.isTenantAdmin()
+                && rbacService.canManageUser(userId);
     }
 
     /**

@@ -366,9 +366,11 @@ class PuzzleVerifyMfaStepHandlerTest {
         assertThat(result.valid()).isTrue();
         verify(bio).getPuzzleVerdictWithBinding(eq(SESSION_ID), eq(USER_ID), eq(TENANT_ID), any());
         verify(bio).verifyEmbedding(eq(TENANT_ID.toString()), eq(USER_ID), any());
-        // Gap Ü2: the digest of EXACTLY the matched embedding is pinned on the MFA session.
-        verify(session).setLivenessEmbeddingSha256(
-                com.fivucsas.identity.application.service.mfa.LivenessEmbeddingDigest.sha256Hex(embedding512()));
+        // Gap Ü2: the NON-attested binding check compares client data with client data
+        // (a modified client can pass it with a photo-derived embedding), so it pins
+        // nothing; a later FACE embedding step sees PUZZLE_NOT_BOUND. Only the attested
+        // path pins (AttestedPuzzleBindingHandlerTest).
+        verify(session, never()).setLivenessEmbeddingSha256(any());
     }
 
     @Test

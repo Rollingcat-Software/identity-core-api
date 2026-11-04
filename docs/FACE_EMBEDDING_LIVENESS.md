@@ -12,12 +12,14 @@ factor, but nothing enforced that.
 ## Rule
 
 The only liveness evidence accepted for an embedding is a **PUZZLE completed
-earlier in the same MFA session whose identity binding ran and passed, on exactly
-this embedding**:
+earlier in the same MFA session whose attested identity binding ran and passed, on
+exactly this embedding**:
 
 1. `session.getCompletedMethods()` contains `PUZZLE`, and
 2. that PUZZLE ran its identity binding (`puzzleConfig.alsoMatchFaceIdentity` on and
-   the client-side-embedding policy on) and the match passed. Only then does
+   the client-side-embedding policy on), the binding was **attested**
+   (`app.auth.attested-binding` on for the tenant, `docs/ATTESTED_PUZZLE_BINDING.md`),
+   and the match passed. Only then does
    `PuzzleVerifyMfaStepHandler` store the SHA-256 of the embedding it matched on the
    MFA session (`mfa_sessions.liveness_embedding_sha256`, migration V88; the
    embedding itself is never stored), and
@@ -30,6 +32,16 @@ could solve the PUZZLE with their own live face and then send the victim's embed
 (computed from a photo, with a modified client) on the FACE step. Each failed condition
 gives a reason that goes into the audit row: `NO_PUZZLE`, `PUZZLE_NOT_BOUND`,
 `EMBEDDING_MISMATCH`. All three count as unpaired.
+
+Why attested only: the non-attested v2 binding check compares client data with client
+data (the binding frame the client declares against the trace the client sent). It
+does not tie the matched embedding to the live capture, so a modified client can solve
+the PUZZLE with its own live face and send a photo-derived embedding as `embedding`; the
+identity match on that vector passes. Pinning there would let the FACE step send the
+same vector and be labelled liveness-backed. Only the attested path, where the device
+key signs the embedding together with the trace bio scored, pins the digest. A
+non-attested bound PUZZLE therefore gives `PUZZLE_NOT_BOUND`. Attested binding is
+default OFF, so until a tenant turns it on every embedding FACE step is unpaired.
 
 A PUZZLE completed *after* FACE does not count. That is a deliberate trade-off, and no
 production flow has that order today.
@@ -80,9 +92,14 @@ These parts are unchanged:
 - **AUDIT:** the enrollment is accepted and audited as `FACE_EMBEDDING_ENROLL_UNPAIRED`.
 - **ENFORCE:** a self-service embedding enrollment gets 409, with
   `code`, `error` and `errorCode` all set to `FACE_IMAGE_REQUIRED`. The client then enrolls
-  with an image through the multipart `/enroll`. An operator with `biometric:enroll`
-  enrolling another user is still allowed, and the enrollment is audited as
-  `FACE_EMBEDDING_ENROLL_ON_BEHALF`.
+  with an image through the multipart `/enroll`. An administrator enrolling another
+  user is still allowed, and the enrollment is audited as
+  `FACE_EMBEDDING_ENROLL_ON_BEHALF`. "Administrator" means all of: the caller is not
+  the subject, holds `biometric:enroll`, is TENANT_ADMIN or ROOT, and
+  `RbacAuthorizationService.canManageUser(subject)` is true (ROOT, or the same tenant
+  with a higher user type). The permission alone is not enough: the seeded USER role
+  (V3) and TENANT_EDITOR (V10) carry `biometric:enroll`, and the endpoint's
+  `@PreAuthorize` has no tenant scope.
 - **Which tenant decides the mode:** the authenticated principal's tenant, never the
   `tenant_id` in the request body. The body value is only the bio scoping hint and is
   client-controlled, so a self-service user of a canary-ENFORCE tenant could otherwise

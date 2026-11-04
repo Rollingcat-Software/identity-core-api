@@ -345,9 +345,20 @@ public class PuzzleVerifyMfaStepHandler implements VerifyMfaStepHandler {
         // Pass: liveness verified:true AND identity verified:true.
         // Gap Ü2: pin the digest of EXACTLY the embedding this step matched, so a
         // later FACE embedding step counts as backed by this liveness factor only
-        // when it sends the same vector (FaceVerifyMfaStepHandler). Set only here,
-        // on the binding-passed path: a liveness-only PUZZLE pins nothing.
-        session.setLivenessEmbeddingSha256(LivenessEmbeddingDigest.sha256Hex(embedding));
+        // when it sends the same vector (FaceVerifyMfaStepHandler). Pinned ONLY on
+        // the ATTESTED path: there the device key signed this embedding together
+        // with the trace bio scored, which ties the vector to the live capture.
+        // The non-attested v2 binding check compares client data with client data
+        // (a modified client can do the puzzle with its own live face and send a
+        // photo-derived embedding), so it must not make a FACE embedding count as
+        // liveness-backed; FACE then sees PUZZLE_NOT_BOUND. A liveness-only PUZZLE
+        // pins nothing either.
+        if (attested != null) {
+            session.setLivenessEmbeddingSha256(LivenessEmbeddingDigest.sha256Hex(embedding));
+        } else {
+            log.info("AUDIT: PUZZLE binding passed without attestation — no liveness pin for a later FACE "
+                    + "embedding, userId={}", userId);
+        }
         return MfaStepResult.ok();
     }
 

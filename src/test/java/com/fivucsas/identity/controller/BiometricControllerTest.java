@@ -359,13 +359,15 @@ class BiometricControllerTest {
     }
 
     @Test
-    @DisplayName("POST enroll-embedding - operator with biometric:enroll for another user → onBehalfOfOtherUser=true")
+    @DisplayName("POST enroll-embedding - admin with biometric:enroll who may manage the other user → onBehalfOfOtherUser=true")
     void enrollEmbedding_operatorForAnotherUser_onBehalf() throws Exception {
         UUID userId = UUID.randomUUID();
         String tenantId = "11111111-1111-1111-1111-111111111111";
         var cmd = enrollOk(userId, tenantId);
         when(rbacService.getCurrentUserId()).thenReturn(Optional.of(UUID.randomUUID()));
         when(rbacService.hasPermission("biometric:enroll")).thenReturn(true);
+        when(rbacService.isTenantAdmin()).thenReturn(true);
+        when(rbacService.canManageUser(userId)).thenReturn(true);
 
         mockMvc.perform(post("/api/v1/biometric/enroll-embedding/" + userId)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -374,6 +376,46 @@ class BiometricControllerTest {
 
         verify(enrollBiometricUseCase).execute(cmd.capture());
         org.assertj.core.api.Assertions.assertThat(cmd.getValue().isOnBehalfOfOtherUser()).isTrue();
+    }
+
+    @Test
+    @DisplayName("POST enroll-embedding - biometric:enroll but not an admin (seeded USER / TENANT_EDITOR role) → not on behalf")
+    void enrollEmbedding_permissionHolderNotAdmin_notOnBehalf() throws Exception {
+        UUID userId = UUID.randomUUID();
+        String tenantId = "11111111-1111-1111-1111-111111111111";
+        var cmd = enrollOk(userId, tenantId);
+        when(rbacService.getCurrentUserId()).thenReturn(Optional.of(UUID.randomUUID()));
+        when(rbacService.hasPermission("biometric:enroll")).thenReturn(true);
+        when(rbacService.isTenantAdmin()).thenReturn(false);
+        org.mockito.Mockito.lenient().when(rbacService.canManageUser(userId)).thenReturn(true);
+
+        mockMvc.perform(post("/api/v1/biometric/enroll-embedding/" + userId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(embeddingJson(512, tenantId)))
+                .andExpect(status().isOk());
+
+        verify(enrollBiometricUseCase).execute(cmd.capture());
+        org.assertj.core.api.Assertions.assertThat(cmd.getValue().isOnBehalfOfOtherUser()).isFalse();
+    }
+
+    @Test
+    @DisplayName("POST enroll-embedding - admin with biometric:enroll for a user it cannot manage (other tenant) → not on behalf")
+    void enrollEmbedding_adminOtherTenant_notOnBehalf() throws Exception {
+        UUID userId = UUID.randomUUID();
+        String tenantId = "11111111-1111-1111-1111-111111111111";
+        var cmd = enrollOk(userId, tenantId);
+        when(rbacService.getCurrentUserId()).thenReturn(Optional.of(UUID.randomUUID()));
+        when(rbacService.hasPermission("biometric:enroll")).thenReturn(true);
+        when(rbacService.isTenantAdmin()).thenReturn(true);
+        when(rbacService.canManageUser(userId)).thenReturn(false);
+
+        mockMvc.perform(post("/api/v1/biometric/enroll-embedding/" + userId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(embeddingJson(512, tenantId)))
+                .andExpect(status().isOk());
+
+        verify(enrollBiometricUseCase).execute(cmd.capture());
+        org.assertj.core.api.Assertions.assertThat(cmd.getValue().isOnBehalfOfOtherUser()).isFalse();
     }
 
     @Test

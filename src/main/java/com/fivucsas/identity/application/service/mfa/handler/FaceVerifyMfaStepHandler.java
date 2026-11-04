@@ -46,11 +46,15 @@ public class FaceVerifyMfaStepHandler implements VerifyMfaStepHandler {
 
     /** How (or why not) this FACE embedding is backed by an earlier bound PUZZLE. */
     enum Pairing {
-        /** An earlier PUZZLE's identity binding matched exactly this embedding. */
+        /** An earlier PUZZLE's ATTESTED identity binding matched exactly this embedding. */
         PAIRED,
         /** No PUZZLE completed earlier in the session. */
         NO_PUZZLE,
-        /** A PUZZLE completed, but without identity binding (no embedding pinned). */
+        /**
+         * A PUZZLE completed, but without ATTESTED identity binding (no embedding
+         * pinned): liveness-only, or the non-attested binding check, which a
+         * modified client can pass with an embedding that is not from the capture.
+         */
         PUZZLE_NOT_BOUND,
         /** A bound PUZZLE pinned a different embedding than the one sent here. */
         EMBEDDING_MISMATCH
@@ -88,12 +92,15 @@ public class FaceVerifyMfaStepHandler implements VerifyMfaStepHandler {
         //
         // LIVENESS (gap Ü2): an embedding carries no frame, so bio cannot run PAD
         // on it. The ONLY liveness evidence this handler accepts for an embedding
-        // is a PUZZLE completed EARLIER in the same MFA session whose identity
-        // binding ran and passed AND matched EXACTLY this embedding: the PUZZLE
-        // handler pins the SHA-256 of the vector it matched on the session
-        // (livenessEmbeddingSha256) and this step must send the same vector. A
-        // PUZZLE without binding proves only that SOME live person did it, not
-        // whose face it was, so it does not count (pairing = NO_PUZZLE /
+        // is a PUZZLE completed EARLIER in the same MFA session whose ATTESTED
+        // identity binding ran and passed AND matched EXACTLY this embedding: the
+        // PUZZLE handler pins the SHA-256 of the vector it matched on the session
+        // (livenessEmbeddingSha256) only on the attested path (the device key
+        // signed that vector with the scored trace), and this step must send the
+        // same vector. A PUZZLE without binding proves only that SOME live person
+        // did it, not whose face it was; the non-attested binding check compares
+        // client data with client data, so a modified client can pass it with a
+        // photo-derived embedding. Neither counts (pairing = NO_PUZZLE /
         // PUZZLE_NOT_BOUND / EMBEDDING_MISMATCH → unpaired).
         // FaceEmbeddingLivenessPolicy decides — BEFORE any matching, so the
         // response never reveals whether the face would have matched:
