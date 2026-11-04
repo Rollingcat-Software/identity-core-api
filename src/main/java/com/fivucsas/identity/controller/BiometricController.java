@@ -155,6 +155,15 @@ public class BiometricController {
      * and the service's routing decision can never disagree. The 512-length is
      * bean-validated ({@code 400} on a wrong-length / empty vector) BEFORE the
      * flag check, so a malformed payload is rejected regardless of the flag.</p>
+     *
+     * <p><b>Liveness (gap Ü2):</b> when {@code FaceEmbeddingLivenessPolicy} is
+     * ENFORCE for the tenant, a self-service embedding enroll is refused with
+     * {@code 409 {"code":"FACE_IMAGE_REQUIRED"}} (the client then enrolls with an
+     * image through {@link #enrollFace}, where bio can run enroll liveness). An
+     * administrator (TENANT_ADMIN or ROOT) holding {@code biometric:enroll} who
+     * may manage the subject (same tenant and outranks them, or ROOT) enrolling
+     * ANOTHER user stays allowed and is audited; holding the permission alone is
+     * not enough. AUDIT (the default) only audits.</p>
      */
     @PostMapping(value = "/api/v1/biometric/enroll-embedding/{userId}",
             consumes = MediaType.APPLICATION_JSON_VALUE)
@@ -189,6 +198,10 @@ public class BiometricController {
             .userId(userId.toString())
             .tenantId(tenantId)
             .embedding(request.embedding())
+            .onBehalfOfOtherUser(isOperatorEnrollingAnotherUser(userId))
+            // Gap Ü2: the liveness mode is decided on the PRINCIPAL's tenant,
+            // never on the body hint above (client-controlled).
+            .livenessTenantId(rbacService.getCurrentUserTenantId().map(UUID::toString).orElse(null))
             .build();
 
         BiometricResponse response = enrollBiometricUseCase.execute(command);
@@ -465,6 +478,24 @@ public class BiometricController {
         Map<String, Object> result = biometricServicePort.searchFace(
                 image, tenantId, clientEmbedding, clientEmbeddings);
         return ResponseEntity.ok(result);
+    }
+
+    /**
+     * Gap Ü2: true when the authenticated caller is NOT the subject {@code userId}
+     * AND holds {@code biometric:enroll} AND is an administrator (TENANT_ADMIN or
+     * ROOT) AND may manage the subject ({@code canManageUser}: ROOT, or the same
+     * tenant with a higher user type). The permission alone is not enough: the
+     * seeded USER and TENANT_EDITOR roles carry {@code biometric:enroll}, and the
+     * endpoint's {@code @PreAuthorize} has no tenant scope, so the permission by
+     * itself must never open the way past ENFORCE. An unresolvable caller counts
+     * as self-service, so the ENFORCE rule applies (fail toward the stricter path).
+     */
+    private boolean isOperatorEnrollingAnotherUser(UUID userId) {
+        boolean self = rbacService.getCurrentUserId().map(userId::equals).orElse(true);
+        return !self
+                && rbacService.hasPermission("biometric:enroll")
+                && rbacService.isTenantAdmin()
+                && rbacService.canManageUser(userId);
     }
 
     /**

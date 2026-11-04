@@ -354,8 +354,22 @@ The same applies to the puzzle layer: `APP_AUTH_PUZZLE_LAYER` / `APP_AUTH_PUZZLE
   `APP_AUTH_CLIENT_SIDE_VOICE_EMBEDDING(_TENANTS)`.
 
 SECURITY: an embedding carries no media, so the bio side cannot run
-liveness/replay on it — an embedding FACE/VOICE factor MUST be paired with a
-liveness factor in the auth flow. **Rollout ordering:** flip this (identity) flag
+liveness/replay on it. For FACE this is now a server rule (gap Ü2,
+`FaceEmbeddingLivenessPolicy`, `app.auth.face-embedding-liveness.mode` =
+`OFF | AUDIT | ENFORCE`, env `APP_AUTH_FACE_EMBEDDING_LIVENESS_MODE`, canary
+`APP_AUTH_FACE_EMBEDDING_LIVENESS_ENFORCE_TENANTS`, default **AUDIT**): the only accepted
+liveness evidence is a PUZZLE completed EARLIER in the same MFA session whose ATTESTED identity
+binding passed on EXACTLY this embedding (the PUZZLE pins its SHA-256 in
+`mfa_sessions.liveness_embedding_sha256`, V88, only when `app.auth.attested-binding` is on for
+the tenant; a liveness-only or non-attested bound PUZZLE, or a different vector, is unpaired).
+The ENFORCE enroll exemption for another user needs TENANT_ADMIN/ROOT + `biometric:enroll` +
+`canManageUser(subject)`; the permission alone (seeded USER role has it) is not enough. The enroll mode is decided on the principal's tenant, never the body
+`tenant_id`. AUDIT only audits (`FACE_EMBEDDING_UNPAIRED` / `FACE_EMBEDDING_PAIRED`); ENFORCE re-routes an unpaired embedding to the image path when
+the payload also has an image, else returns the non-terminal `FACE_IMAGE_REQUIRED` status
+(no strike/advance), and refuses a self-service embedding enroll with 409
+`FACE_IMAGE_REQUIRED`. Do not set ENFORCE before the web-app handles that status and the
+mobile clients are checked — see `docs/FACE_EMBEDDING_LIVENESS.md`. VOICE embeddings still
+have no such rule. **Rollout ordering:** flip this (identity) flag
 ON BEFORE the web `VITE_CLIENT_SIDE_*_EMBEDDING` flag (web-ON + identity-OFF
 breaks the factor). The VOICE web preprocessing port is still a documented
 scaffold (browser mel+VAD not yet parity-validated — see biometric-processor

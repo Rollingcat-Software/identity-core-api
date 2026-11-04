@@ -185,6 +185,9 @@ class AttestedPuzzleBindingHandlerTest {
         verify(bio).getPuzzleVerdictWithAttestedBinding(eq(PUZZLE_SESSION), eq(USER_ID), eq(TENANT_ID), any());
         verify(bio).verifyEmbedding(TENANT_ID.toString(), USER_ID, emb);
         verify(challenges).consume(PUZZLE_SESSION);
+        // Gap Ü2: only the attested path pins the digest of EXACTLY the signed, matched embedding.
+        verify(session).setLivenessEmbeddingSha256(
+                com.fivucsas.identity.application.service.mfa.LivenessEmbeddingDigest.sha256Hex(emb));
     }
 
     @Test
@@ -193,6 +196,7 @@ class AttestedPuzzleBindingHandlerTest {
         String sig = sign(chain.leaf().getPrivate(), embedding(1), TRACE_DIGEST);
         assertThat(handler.verify(session, user, data(embedding(2), sig, true)).valid()).isFalse();
         verify(bio, never()).verifyEmbedding(anyString(), any(), any());
+        verify(session, never()).setLivenessEmbeddingSha256(any());
     }
 
     @Test
@@ -271,5 +275,7 @@ class AttestedPuzzleBindingHandlerTest {
         assertThat(handler.verify(session, user, data(embedding(1), null, false)).valid()).isTrue();
         verify(bio).getPuzzleVerdictWithBinding(eq(PUZZLE_SESSION), eq(USER_ID), eq(TENANT_ID), any());
         verify(challenges, never()).consume(anyString());
+        // Gap Ü2: a non-attested binding pass does not make a later FACE embedding liveness-backed.
+        verify(session, never()).setLivenessEmbeddingSha256(any());
     }
 }
