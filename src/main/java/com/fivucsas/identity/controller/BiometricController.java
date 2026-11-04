@@ -197,6 +197,9 @@ public class BiometricController {
             .tenantId(tenantId)
             .embedding(request.embedding())
             .onBehalfOfOtherUser(isOperatorEnrollingAnotherUser(userId))
+            // Gap Ü2: the liveness mode is decided on the PRINCIPAL's tenant,
+            // never on the body hint above (client-controlled).
+            .livenessTenantId(rbacService.getCurrentUserTenantId().map(UUID::toString).orElse(null))
             .build();
 
         BiometricResponse response = enrollBiometricUseCase.execute(command);
@@ -476,13 +479,6 @@ public class BiometricController {
     }
 
     /**
-     * Resolves the tenant_id of the currently authenticated principal. Throws
-     * 401 when no principal is on the security context (defense-in-depth: the
-     * @PreAuthorize("isAuthenticated()") gate already guards this, but we treat
-     * a missing user here as a hard auth failure rather than silently passing
-     * a null tenant downstream).
-     */
-    /**
      * Gap Ü2: true when the authenticated caller is NOT the subject {@code userId}
      * and holds {@code biometric:enroll} (the only other way past the endpoint's
      * {@code @PreAuthorize}). An unresolvable caller counts as self-service, so
@@ -493,6 +489,13 @@ public class BiometricController {
         return !self && rbacService.hasPermission("biometric:enroll");
     }
 
+    /**
+     * Resolves the tenant_id of the currently authenticated principal. Throws
+     * 401 when no principal is on the security context (defense-in-depth: the
+     * @PreAuthorize("isAuthenticated()") gate already guards this, but we treat
+     * a missing user here as a hard auth failure rather than silently passing
+     * a null tenant downstream).
+     */
     private String resolveCurrentTenantId() {
         // Resolve the principal's tenant via the security-layer helper, which keeps
         // the JPA `entity.User` type contained inside `security..` per the

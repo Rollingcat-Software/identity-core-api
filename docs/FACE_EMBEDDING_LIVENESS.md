@@ -12,9 +12,34 @@ factor, but nothing enforced that.
 ## Rule
 
 The only liveness evidence accepted for an embedding is a **PUZZLE completed
-earlier in the same MFA session** (`session.getCompletedMethods()` contains
-`PUZZLE`). A PUZZLE completed *after* FACE does not count. That is a deliberate
-trade-off, and no production flow has that order today.
+earlier in the same MFA session whose identity binding ran and passed, on exactly
+this embedding**:
+
+1. `session.getCompletedMethods()` contains `PUZZLE`, and
+2. that PUZZLE ran its identity binding (`puzzleConfig.alsoMatchFaceIdentity` on and
+   the client-side-embedding policy on) and the match passed. Only then does
+   `PuzzleVerifyMfaStepHandler` store the SHA-256 of the embedding it matched on the
+   MFA session (`mfa_sessions.liveness_embedding_sha256`, migration V88; the
+   embedding itself is never stored), and
+3. the FACE step sends the same vector: its digest (`LivenessEmbeddingDigest`, over the
+   IEEE-754 bits of every value, constant-time compare) equals the stored one.
+
+Why all three: a PUZZLE without binding proves only that *some* live person solved it,
+not whose face it was. Without the digest, an attacker who holds the earlier factors
+could solve the PUZZLE with their own live face and then send the victim's embedding
+(computed from a photo, with a modified client) on the FACE step. Each failed condition
+gives a reason that goes into the audit row: `NO_PUZZLE`, `PUZZLE_NOT_BOUND`,
+`EMBEDDING_MISMATCH`. All three count as unpaired.
+
+A PUZZLE completed *after* FACE does not count. That is a deliberate trade-off, and no
+production flow has that order today.
+
+**Client impact:** today's web-app computes a fresh embedding for the FACE step, so it
+does not send the PUZZLE's vector again. Under ENFORCE a PUZZLE-then-FACE login is
+therefore unpaired (`EMBEDDING_MISMATCH`) and takes the image path through the
+`FACE_IMAGE_REQUIRED` re-send. It still works, but the frame reaches the server. Keeping
+the image on the device in that flow needs the client to reuse the PUZZLE's embedding
+for the FACE step.
 
 `FaceEmbeddingLivenessPolicy` decides what happens to an unpaired embedding. It
 decides before any matching, so the response never reveals whether the face would
@@ -23,9 +48,9 @@ have matched.
 | Mode | Paired | Login (`FaceVerifyMfaStepHandler`) |
 |---|---|---|
 | OFF | any | Same as before the rule, no extra logging |
-| AUDIT (default) | yes | Unchanged |
+| AUDIT (default) | yes | Unchanged, plus the audit event `FACE_EMBEDDING_PAIRED` |
 | AUDIT | no | Unchanged, plus a WARN log and the audit event `FACE_EMBEDDING_UNPAIRED` |
-| ENFORCE | yes | Unchanged (embedding path) |
+| ENFORCE | yes | Unchanged (embedding path), audit event `FACE_EMBEDDING_PAIRED` |
 | ENFORCE | no, `image` in the payload | Image path (bio passive PAD), audit event `FACE_EMBEDDING_REROUTED_TO_IMAGE` |
 | ENFORCE | no, no image | Non-terminal challenge (see below), audit event `FACE_IMAGE_REQUIRED` |
 
@@ -58,10 +83,16 @@ These parts are unchanged:
   with an image through the multipart `/enroll`. An operator with `biometric:enroll`
   enrolling another user is still allowed, and the enrollment is audited as
   `FACE_EMBEDDING_ENROLL_ON_BEHALF`.
+- **Which tenant decides the mode:** the authenticated principal's tenant, never the
+  `tenant_id` in the request body. The body value is only the bio scoping hint and is
+  client-controlled, so a self-service user of a canary-ENFORCE tenant could otherwise
+  name another tenant (or a non-UUID string) and fall back to the global AUDIT. The
+  controller passes the principal's tenant as `EnrollBiometricCommand.livenessTenantId`.
+  Login already uses the server-side `MfaSession.tenantId`.
 
 Audit rows go through `AuditLogPort.logSecurityEvent`. They carry the user, tenant,
-step and user agent, and never the embedding. If the audit write fails, the outcome
-does not change.
+step, user agent and (login) the pairing reason, and never the embedding. If the audit
+write fails, the outcome does not change.
 
 ## Configuration
 
@@ -76,7 +107,9 @@ does not change.
 - **Unknown mode values** parse to AUDIT. A typo cannot cause a lockout.
 - **Compose:** the variable is forwarded in the `docker-compose.prod.yml` `environment:` block.
 
-**Rollback:** set the mode to `AUDIT` (or `OFF`) and restart identity. Nothing is persisted.
+**Rollback:** set the mode to `AUDIT` (or `OFF`) and restart identity. The only
+persisted state is the nullable `mfa_sessions.liveness_embedding_sha256` column (V88),
+which lives only as long as the MFA session and needs no rollback.
 
 ## Rollout
 
@@ -102,6 +135,8 @@ the PAD verdict in the bio logs, and record the image-path p95 on the CPU-only b
 
 - Passive PAD gives only medium assurance.
 - The PUZZLE v2 binding frame is not tied to the live capture, except with Android attestation.
+  The digest ties the FACE step to the vector the PUZZLE matched, but without attestation a
+  modified client can still choose which vector it sends on the PUZZLE step itself.
 - Templates already enrolled from embeddings stay unverified.
 - MiniFASNet can false-reject on poor webcams.
 - Under ENFORCE without PUZZLE, the server sees the face image again, so the "on-device"

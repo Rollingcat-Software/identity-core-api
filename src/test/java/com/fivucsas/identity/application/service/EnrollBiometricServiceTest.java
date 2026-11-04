@@ -659,7 +659,69 @@ class EnrollBiometricServiceTest {
                 .tenantId("t-marmara")
                 .embedding(embedding)
                 .onBehalfOfOtherUser(onBehalf)
+                .livenessTenantId("t-marmara")
                 .build();
+        }
+
+        private static final String CANARY = "22222222-2222-2222-2222-222222222222";
+        private static final String OTHER = "33333333-3333-3333-3333-333333333333";
+
+        /** Routes the spy's modeFor(String) through a real policy: global AUDIT, CANARY on ENFORCE. */
+        private void canaryPolicy() {
+            FaceEmbeddingLivenessPolicy real = new FaceEmbeddingLivenessPolicy("AUDIT", CANARY);
+            org.mockito.Mockito.doAnswer(inv -> real.modeFor((String) inv.getArgument(0)))
+                .when(livenessPolicy).modeFor((String) any());
+        }
+
+        private EnrollBiometricCommand commandWithTenants(String bodyTenant, String principalTenant) {
+            return EnrollBiometricCommand.builder()
+                .userId(userId.toString())
+                .tenantId(bodyTenant)
+                .embedding(embedding)
+                .livenessTenantId(principalTenant)
+                .build();
+        }
+
+        @Test
+        @DisplayName("canary ENFORCE on the principal's tenant: a different body tenant cannot fall back to global AUDIT")
+        void canary_mismatchedBodyTenant_stillRefused() {
+            canaryPolicy();
+            when(userRepository.findById(userId)).thenReturn(Optional.of(existingUser));
+            when(clientSideEmbeddingPolicy.isEnabledForTenant(OTHER)).thenReturn(true);
+
+            assertThatThrownBy(() -> enrollBiometricService.execute(commandWithTenants(OTHER, CANARY)))
+                .isInstanceOf(com.fivucsas.identity.domain.exception.FaceImageRequiredException.class);
+            verify(biometricService, never()).enrollEmbedding(any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("canary ENFORCE: a non-UUID body tenant cannot fall back to global AUDIT either")
+        void canary_nonUuidBodyTenant_stillRefused() {
+            canaryPolicy();
+            when(userRepository.findById(userId)).thenReturn(Optional.of(existingUser));
+            when(clientSideEmbeddingPolicy.isEnabledForTenant("not-a-uuid")).thenReturn(true);
+
+            assertThatThrownBy(() -> enrollBiometricService.execute(commandWithTenants("not-a-uuid", CANARY)))
+                .isInstanceOf(com.fivucsas.identity.domain.exception.FaceImageRequiredException.class);
+            verify(biometricService, never()).enrollEmbedding(any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("canary tenant named only in the body (principal elsewhere) → the principal's global AUDIT applies")
+        void canary_onlyInBody_principalModeWins() {
+            canaryPolicy();
+            when(userRepository.findById(userId)).thenReturn(Optional.of(existingUser));
+            when(clientSideEmbeddingPolicy.isEnabledForTenant(CANARY)).thenReturn(true);
+            when(biometricService.enrollEmbedding(eq(CANARY), eq(userId), eq(embedding)))
+                .thenReturn(Map.of("success", true, "message", "Embedding enrolled"));
+            when(userRepository.save(any(User.class))).thenReturn(existingUser);
+
+            BiometricResponse response = enrollBiometricService.execute(commandWithTenants(CANARY, OTHER));
+
+            assertThat(response.isSuccess()).isTrue();
+            verify(auditLogPort).logSecurityEvent(eq(userId.toString()),
+                eq("FACE_EMBEDDING_ENROLL_UNPAIRED"), eq(null),
+                org.mockito.ArgumentMatchers.contains("tenantId=" + OTHER));
         }
 
         private void embeddingPathOn() {

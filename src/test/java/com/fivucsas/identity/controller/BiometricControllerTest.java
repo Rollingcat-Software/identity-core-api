@@ -398,4 +398,33 @@ class BiometricControllerTest {
         org.assertj.core.api.Assertions.assertThat(cmd.getAllValues())
                 .allMatch(c -> !c.isOnBehalfOfOtherUser());
     }
+
+    @Test
+    @DisplayName("POST enroll-embedding - liveness mode is decided on the principal's tenant, not the body tenant_id")
+    void enrollEmbedding_livenessTenantIsPrincipalTenant_notBodyHint() throws Exception {
+        UUID userId = UUID.randomUUID();
+        UUID principalTenant = UUID.fromString("22222222-2222-2222-2222-222222222222");
+        // Hostile/mismatched body hints: another tenant's UUID, then a non-UUID string.
+        String[] bodyTenants = {"33333333-3333-3333-3333-333333333333", "not-a-uuid"};
+        when(rbacService.getCurrentUserTenantId()).thenReturn(Optional.of(principalTenant));
+        when(rbacService.getCurrentUserId()).thenReturn(Optional.of(userId));
+        var cmd = enrollOk(userId, bodyTenants[0]);
+        when(clientSideEmbeddingPolicy.isEnabledForTenant(bodyTenants[1])).thenReturn(true);
+
+        for (String bodyTenant : bodyTenants) {
+            mockMvc.perform(post("/api/v1/biometric/enroll-embedding/" + userId)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(embeddingJson(512, bodyTenant)))
+                    .andExpect(status().isOk());
+        }
+
+        verify(enrollBiometricUseCase, org.mockito.Mockito.times(2)).execute(cmd.capture());
+        org.assertj.core.api.Assertions.assertThat(cmd.getAllValues())
+                .extracting(c -> c.getLivenessTenantId())
+                .containsOnly(principalTenant.toString());
+        // The body hint still scopes the bio store (unchanged contract).
+        org.assertj.core.api.Assertions.assertThat(cmd.getAllValues())
+                .extracting(c -> c.getTenantId())
+                .containsExactly(bodyTenants[0], bodyTenants[1]);
+    }
 }

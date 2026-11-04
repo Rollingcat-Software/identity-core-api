@@ -142,18 +142,21 @@ public class EnrollBiometricService implements EnrollBiometricUseCase {
      * {@link FaceImageRequiredException} before any bio call when refused.
      */
     private void enforceEmbeddingEnrollLiveness(EnrollBiometricCommand command) {
-        FaceEmbeddingLivenessPolicy.Mode mode = livenessPolicy.modeFor(command.getTenantId());
+        // Decided on the principal's tenant (server-side), NOT command.getTenantId():
+        // that one can be the client's body hint, and a mismatched hint must not
+        // move a canary-ENFORCE tenant's user back to the global mode.
+        FaceEmbeddingLivenessPolicy.Mode mode = livenessPolicy.modeFor(command.getLivenessTenantId());
         switch (mode) {
             case OFF -> { /* behaviour from before the policy existed */ }
             case AUDIT -> audit(command, EVENT_ENROLL_UNPAIRED);
             case ENFORCE -> {
                 if (!command.isOnBehalfOfOtherUser()) {
                     log.info("AUDIT: embedding face enrollment refused, image required — userId={}, tenantId={}",
-                            command.getUserId(), command.getTenantId());
+                            command.getUserId(), command.getLivenessTenantId());
                     throw new FaceImageRequiredException();
                 }
                 log.warn("AUDIT: embedding face enrollment by an operator for another user allowed under ENFORCE — userId={}, tenantId={}",
-                        command.getUserId(), command.getTenantId());
+                        command.getUserId(), command.getLivenessTenantId());
                 audit(command, EVENT_ENROLL_ON_BEHALF);
             }
         }
@@ -162,7 +165,8 @@ public class EnrollBiometricService implements EnrollBiometricUseCase {
     private void audit(EnrollBiometricCommand command, String eventType) {
         try {
             auditLogPort.logSecurityEvent(command.getUserId(), eventType, null,
-                    "tenantId=" + command.getTenantId()
+                    "tenantId=" + command.getLivenessTenantId()
+                            + ", requestTenantId=" + command.getTenantId()
                             + ", onBehalfOfOtherUser=" + command.isOnBehalfOfOtherUser());
         } catch (RuntimeException e) {
             log.warn("Failed to write {} audit event for userId={}: {}",

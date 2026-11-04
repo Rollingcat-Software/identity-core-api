@@ -898,11 +898,9 @@ class VerifyMfaStepServiceTest {
             verify(auditLogPort).logSecurityEvent(eq(userId.toString()), eq("FACE_IMAGE_REQUIRED"), any(), anyString());
         }
 
-        @Test
-        void puzzleThenFace_staysOnEmbeddingPath() {
-            UUID userId = UUID.randomUUID();
-            UUID flowId = UUID.randomUUID();
+        private MfaSession puzzleThenFaceSession(UUID userId, UUID flowId, String pinnedDigest) {
             MfaSession session = mfaSessionAt(SESSION_TOKEN, userId, flowId, 2, 2, "[\"PUZZLE\"]");
+            session.setLivenessEmbeddingSha256(pinnedDigest);
             AuthFlow flow = flowOf(flowId,
                     stepOf(1, AuthMethodType.PUZZLE),
                     stepOf(2, AuthMethodType.FACE));
@@ -911,6 +909,13 @@ class VerifyMfaStepServiceTest {
                     .thenReturn(Optional.of(session));
             when(userRepository.findById(userId)).thenReturn(Optional.of(user));
             when(authFlowRepository.findById(flowId)).thenReturn(Optional.of(flow));
+            return session;
+        }
+
+        @Test
+        void boundPuzzleThenFace_sameEmbedding_staysOnEmbeddingPath_andIsAudited() {
+            UUID userId = UUID.randomUUID();
+            puzzleThenFaceSession(userId, UUID.randomUUID(), LivenessEmbeddingDigest.sha256Hex(embedding));
             stubTokens();
             when(bio.verifyEmbedding(any(), eq(userId), eq(embedding))).thenReturn(Map.of("verified", true));
 
@@ -919,7 +924,38 @@ class VerifyMfaStepServiceTest {
             assertThat(result.body()).containsEntry("status", "AUTHENTICATED");
             verify(bio).verifyEmbedding(any(), eq(userId), eq(embedding));
             verify(bio, never()).verifyFace(any(), any());
-            verify(auditLogPort, never()).logSecurityEvent(any(), any(), any(), any());
+            verify(auditLogPort).logSecurityEvent(eq(userId.toString()), eq("FACE_EMBEDDING_PAIRED"), any(),
+                    org.mockito.ArgumentMatchers.contains("pairing=PAIRED"));
+        }
+
+        @Test
+        void livenessOnlyPuzzleThenFace_isUnpaired_getsChallenge() {
+            // The review scenario: a PUZZLE without identity binding proves only that
+            // SOME live person did it; it must not unlock the embedding path.
+            UUID userId = UUID.randomUUID();
+            MfaSession session = puzzleThenFaceSession(userId, UUID.randomUUID(), null);
+
+            VerifyMfaStepResponse result = enforcing.execute(req("FACE", Map.of("embedding", embedding)));
+
+            assertThat(result.body()).containsEntry("status", "FACE_IMAGE_REQUIRED");
+            assertThat(session.getCompletedMethods()).containsExactly("PUZZLE");
+            verify(bio, never()).verifyEmbedding(any(), any(), any());
+        }
+
+        @Test
+        void boundPuzzleThenFace_differentEmbedding_isUnpaired_getsChallenge() {
+            // Attacker passes the PUZZLE with their own live face, then sends the
+            // victim's embedding (from a photo) on the FACE step.
+            UUID userId = UUID.randomUUID();
+            puzzleThenFaceSession(userId, UUID.randomUUID(),
+                    LivenessEmbeddingDigest.sha256Hex(List.of(0.9, 0.8, 0.7)));
+
+            VerifyMfaStepResponse result = enforcing.execute(req("FACE", Map.of("embedding", embedding)));
+
+            assertThat(result.body()).containsEntry("status", "FACE_IMAGE_REQUIRED");
+            verify(bio, never()).verifyEmbedding(any(), any(), any());
+            verify(auditLogPort).logSecurityEvent(eq(userId.toString()), eq("FACE_IMAGE_REQUIRED"), any(),
+                    org.mockito.ArgumentMatchers.contains("pairing=EMBEDDING_MISMATCH"));
         }
 
         @Test

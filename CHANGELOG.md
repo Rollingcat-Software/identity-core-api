@@ -7,9 +7,16 @@
 - An embedding carries no frame, so bio cannot run PAD on it. New `FaceEmbeddingLivenessPolicy`
   (`OFF | AUDIT | ENFORCE`, env `APP_AUTH_FACE_EMBEDDING_LIVENESS_MODE`, canary list
   `APP_AUTH_FACE_EMBEDDING_LIVENESS_ENFORCE_TENANTS` = tenant UUIDs that get ENFORCE while the
-  global mode is AUDIT; OFF ignores the list). Unknown values parse to AUDIT. No migration.
+  global mode is AUDIT; OFF ignores the list). Unknown values parse to AUDIT.
 - `FaceVerifyMfaStepHandler`: the only accepted liveness evidence for an embedding is a PUZZLE
-  completed earlier in the same MFA session. Unpaired, decided before any matching:
+  completed earlier in the same MFA session whose identity binding ran and passed on exactly
+  this embedding. `PuzzleVerifyMfaStepHandler` stores the SHA-256 of the embedding it matched
+  (only on the binding-passed path) in the new nullable `mfa_sessions.liveness_embedding_sha256`
+  (migration **V88**; the embedding itself is never stored), and the FACE embedding must have the
+  same digest (`LivenessEmbeddingDigest`, constant-time compare). A liveness-only PUZZLE
+  (`PUZZLE_NOT_BOUND`) or a different vector (`EMBEDDING_MISMATCH`) counts as unpaired, like
+  `NO_PUZZLE`; the reason goes into the audit row. Paired steps are audited too
+  (`FACE_EMBEDDING_PAIRED`, AUDIT and ENFORCE). Unpaired, decided before any matching:
   AUDIT = unchanged + WARN + `FACE_EMBEDDING_UNPAIRED` audit row; ENFORCE + image in the payload =
   image path (bio passive PAD), audit `FACE_EMBEDDING_REROUTED_TO_IMAGE`; ENFORCE + no image =
   non-terminal `{"status":"FACE_IMAGE_REQUIRED","requiredInput":"image",...}` (HTTP 200, no strike,
@@ -19,15 +26,20 @@
   AUDIT = unchanged + `FACE_EMBEDDING_ENROLL_UNPAIRED` audit; ENFORCE = self-service embedding
   enroll refused with 409 `{"code":"FACE_IMAGE_REQUIRED"}` (new `FaceImageRequiredException`);
   an operator with `biometric:enroll` enrolling another user stays allowed, audited
-  `FACE_EMBEDDING_ENROLL_ON_BEHALF`.
+  `FACE_EMBEDDING_ENROLL_ON_BEHALF`. The mode is decided on the authenticated principal's tenant
+  (`EnrollBiometricCommand.livenessTenantId`), never on the client-controlled body `tenant_id`
+  (that stays the bio scoping hint), so a canary-ENFORCE user cannot name another tenant to fall
+  back to the global AUDIT.
 - Default AUDIT in `application.yml`, `application-prod.yml`, `docker-compose.prod.yml`: production
   behaviour is identical. Rollback = set the env var to AUDIT (or OFF) and restart identity.
 - Before ENFORCE on any tenant: the web-app must handle `FACE_IMAGE_REQUIRED` (re-send the frame
   once, 409 enroll fallback), mobile clients must be checked, bio must accept image `/verify`, and
   bio `ENROLL_LIVENESS_ENABLED` must be on in production. See `docs/FACE_EMBEDDING_LIVENESS.md`.
-- Tests: `FaceEmbeddingLivenessPolicyTest` (new), Ü2 matrix in `FaceVerifyMfaStepHandlerTest`,
-  orchestrator ENFORCE journeys in `VerifyMfaStepServiceTest`, 409 / AUDIT / operator cases in
-  `EnrollBiometricServiceTest` and `BiometricControllerTest`.
+- Tests: `FaceEmbeddingLivenessPolicyTest` (new), Ü2 matrix in `FaceVerifyMfaStepHandlerTest`
+  (incl. not-bound / mismatch / digest cases), digest pinning in `PuzzleVerifyMfaStepHandlerTest`,
+  orchestrator ENFORCE journeys in `VerifyMfaStepServiceTest` (bound PUZZLE same vector, liveness-only
+  PUZZLE, own-face PUZZLE + victim embedding), 409 / AUDIT / operator / mismatched-body-tenant cases
+  in `EnrollBiometricServiceTest` and `BiometricControllerTest`.
 
 ### 2026-11-02 — Attested puzzle binding via Android Key Attestation (`app.auth.attested-binding`, default OFF)
 

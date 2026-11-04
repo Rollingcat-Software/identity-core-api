@@ -92,6 +92,16 @@ public class MfaSession {
     @Column(name = "client_id", length = 128)
     private String clientId;
 
+    /**
+     * Gap Ü2 (V88): SHA-256 hex of the face embedding a PUZZLE step's identity
+     * binding matched in this session (see {@code LivenessEmbeddingDigest}). A
+     * later FACE embedding step counts as backed by that liveness factor only
+     * when its embedding has the same digest. Null = no bound PUZZLE yet. The
+     * embedding itself is never stored.
+     */
+    @Column(name = "liveness_embedding_sha256", length = 64)
+    private String livenessEmbeddingSha256;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     @Builder.Default
     private Instant createdAt = Instant.now();

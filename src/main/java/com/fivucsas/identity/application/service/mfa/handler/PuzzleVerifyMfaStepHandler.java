@@ -9,6 +9,7 @@ import com.fivucsas.identity.application.service.AttestedBindingPolicy;
 import com.fivucsas.identity.application.service.ClientSideEmbeddingPolicy;
 import com.fivucsas.identity.application.service.attestation.AttestedBindingPayload;
 import com.fivucsas.identity.application.service.attestation.AttestedPuzzleBindingVerifier;
+import com.fivucsas.identity.application.service.mfa.LivenessEmbeddingDigest;
 import com.fivucsas.identity.application.service.mfa.MfaStepResult;
 import com.fivucsas.identity.application.service.mfa.VerifyMfaStepHandler;
 import com.fivucsas.identity.domain.model.auth.AuthMethodType;
@@ -116,6 +117,12 @@ import java.util.UUID;
  * genuine, unmodified app on a genuine device vouches that the embedding and the
  * liveness trace came from the same capture. Anything missing or invalid fails
  * closed and consumes the bio session. See {@code docs/ATTESTED_PUZZLE_BINDING.md}.
+ *
+ * <p><b>Pairing pin for a later FACE step (gap Ü2).</b> When the binding ran and
+ * passed, the handler stores the SHA-256 of exactly the matched embedding on the MFA
+ * session ({@code livenessEmbeddingSha256}). {@link FaceVerifyMfaStepHandler} counts
+ * a later embedding FACE step as backed by this liveness factor only when its
+ * embedding has the same digest. A liveness-only PUZZLE pins nothing.
  *
  * <p>Reachability is gated upstream: PUZZLE only appears as a selectable factor
  * when {@code PuzzleLayerPolicy} is on (Phase 1), so this handler is unreachable
@@ -336,6 +343,11 @@ public class PuzzleVerifyMfaStepHandler implements VerifyMfaStepHandler {
         }
 
         // Pass: liveness verified:true AND identity verified:true.
+        // Gap Ü2: pin the digest of EXACTLY the embedding this step matched, so a
+        // later FACE embedding step counts as backed by this liveness factor only
+        // when it sends the same vector (FaceVerifyMfaStepHandler). Set only here,
+        // on the binding-passed path: a liveness-only PUZZLE pins nothing.
+        session.setLivenessEmbeddingSha256(LivenessEmbeddingDigest.sha256Hex(embedding));
         return MfaStepResult.ok();
     }
 

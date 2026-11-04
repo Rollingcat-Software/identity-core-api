@@ -4,6 +4,7 @@ import com.fivucsas.identity.application.port.output.AuditLogPort;
 import com.fivucsas.identity.application.port.output.BiometricServicePort;
 import com.fivucsas.identity.application.service.ClientSideEmbeddingPolicy;
 import com.fivucsas.identity.application.service.FaceEmbeddingLivenessPolicy;
+import com.fivucsas.identity.application.service.mfa.LivenessEmbeddingDigest;
 import com.fivucsas.identity.application.service.mfa.MfaStepResult;
 import com.fivucsas.identity.entity.MfaSession;
 import com.fivucsas.identity.entity.User;
@@ -206,8 +207,23 @@ class FaceVerifyMfaStepHandlerTest {
             when(session.getCompletedMethods()).thenReturn(List.of("PASSWORD"));
         }
 
+        /** A bound PUZZLE earlier in the session matched EXACTLY {@code EMBEDDING}. */
         private void paired() {
             when(session.getCompletedMethods()).thenReturn(List.of("PASSWORD", "PUZZLE"));
+            when(session.getLivenessEmbeddingSha256()).thenReturn(LivenessEmbeddingDigest.sha256Hex(EMBEDDING));
+        }
+
+        /** A PUZZLE completed earlier, but without identity binding: nothing pinned. */
+        private void puzzleNotBound() {
+            when(session.getCompletedMethods()).thenReturn(List.of("PASSWORD", "PUZZLE"));
+            when(session.getLivenessEmbeddingSha256()).thenReturn(null);
+        }
+
+        /** A bound PUZZLE pinned a DIFFERENT embedding (e.g. the attacker's own live face). */
+        private void puzzleBoundToOtherEmbedding() {
+            when(session.getCompletedMethods()).thenReturn(List.of("PASSWORD", "PUZZLE"));
+            when(session.getLivenessEmbeddingSha256())
+                    .thenReturn(LivenessEmbeddingDigest.sha256Hex(List.of(0.9, 0.8, 0.7)));
         }
 
         private void embeddingMatches() {
@@ -296,7 +312,7 @@ class FaceVerifyMfaStepHandlerTest {
         }
 
         @Test
-        @DisplayName("AUDIT + paired → embedding path, no audit")
+        @DisplayName("AUDIT + paired → embedding path + FACE_EMBEDDING_PAIRED audit")
         void audit_paired() {
             paired();
             embeddingMatches();
@@ -304,7 +320,35 @@ class FaceVerifyMfaStepHandlerTest {
             MfaStepResult r = handler(true, "AUDIT").verify(session, user, Map.of("embedding", EMBEDDING));
 
             assertThat(r.valid()).isTrue();
-            verifyNoInteractions(audit);
+            verify(audit).logSecurityEvent(eq(USER_ID.toString()), eq("FACE_EMBEDDING_PAIRED"),
+                    eq("10.0.0.9"), contains("pairing=PAIRED"));
+            verify(audit, never()).logSecurityEvent(any(), eq("FACE_EMBEDDING_UNPAIRED"), any(), any());
+        }
+
+        @Test
+        @DisplayName("AUDIT + PUZZLE without identity binding → counted as unpaired (PUZZLE_NOT_BOUND)")
+        void audit_puzzleNotBound_isUnpaired() {
+            puzzleNotBound();
+            embeddingMatches();
+
+            MfaStepResult r = handler(true, "AUDIT").verify(session, user, Map.of("embedding", EMBEDDING));
+
+            assertThat(r.valid()).isTrue();
+            verify(audit).logSecurityEvent(eq(USER_ID.toString()), eq("FACE_EMBEDDING_UNPAIRED"),
+                    any(), contains("pairing=PUZZLE_NOT_BOUND"));
+        }
+
+        @Test
+        @DisplayName("AUDIT + bound PUZZLE on a different embedding → counted as unpaired (EMBEDDING_MISMATCH)")
+        void audit_embeddingMismatch_isUnpaired() {
+            puzzleBoundToOtherEmbedding();
+            embeddingMatches();
+
+            MfaStepResult r = handler(true, "AUDIT").verify(session, user, Map.of("embedding", EMBEDDING));
+
+            assertThat(r.valid()).isTrue();
+            verify(audit).logSecurityEvent(eq(USER_ID.toString()), eq("FACE_EMBEDDING_UNPAIRED"),
+                    any(), contains("pairing=EMBEDDING_MISMATCH"));
         }
 
         @Test
@@ -387,7 +431,7 @@ class FaceVerifyMfaStepHandlerTest {
         }
 
         @Test
-        @DisplayName("ENFORCE + paired (PUZZLE earlier) → embedding path, no audit")
+        @DisplayName("ENFORCE + paired (bound PUZZLE on this exact embedding) → embedding path + PAIRED audit")
         void enforce_paired_embedding() {
             paired();
             embeddingMatches();
@@ -396,7 +440,65 @@ class FaceVerifyMfaStepHandlerTest {
 
             assertThat(r.valid()).isTrue();
             verify(bio, never()).verifyFace(any(), any());
-            verifyNoInteractions(audit);
+            verify(audit).logSecurityEvent(eq(USER_ID.toString()), eq("FACE_EMBEDDING_PAIRED"),
+                    eq("10.0.0.9"), contains("pairing=PAIRED"));
+        }
+
+        @Test
+        @DisplayName("ENFORCE + PUZZLE without identity binding + no image → challenge, verifyEmbedding never called")
+        void enforce_puzzleNotBound_challenge() {
+            puzzleNotBound();
+
+            MfaStepResult r = handler(true, "ENFORCE").verify(session, user, Map.of("embedding", EMBEDDING));
+
+            assertThat(r.isChallenge()).isTrue();
+            assertThat(r.challengeResponse()).containsEntry("status", "FACE_IMAGE_REQUIRED");
+            verifyNoInteractions(bio);
+            verify(audit).logSecurityEvent(eq(USER_ID.toString()), eq("FACE_IMAGE_REQUIRED"),
+                    any(), contains("pairing=PUZZLE_NOT_BOUND"));
+        }
+
+        @Test
+        @DisplayName("ENFORCE: own live face on the PUZZLE, victim's embedding on FACE → challenge (EMBEDDING_MISMATCH)")
+        void enforce_embeddingMismatch_challenge() {
+            puzzleBoundToOtherEmbedding();
+
+            MfaStepResult r = handler(true, "ENFORCE").verify(session, user, Map.of("embedding", EMBEDDING));
+
+            assertThat(r.isChallenge()).isTrue();
+            verifyNoInteractions(bio);
+            verify(audit).logSecurityEvent(eq(USER_ID.toString()), eq("FACE_IMAGE_REQUIRED"),
+                    any(), contains("pairing=EMBEDDING_MISMATCH"));
+        }
+
+        @Test
+        @DisplayName("ENFORCE + embedding mismatch + image present → re-routed to the image path (PAD)")
+        void enforce_embeddingMismatch_image_reroutes() {
+            puzzleBoundToOtherEmbedding();
+            imageMatches();
+
+            MfaStepResult r = handler(true, "ENFORCE").verify(session, user,
+                    Map.of("embedding", EMBEDDING, "image", IMAGE_B64));
+
+            assertThat(r.valid()).isTrue();
+            verify(bio, times(1)).verifyFace(eq(USER_ID), any());
+            verify(bio, never()).verifyEmbedding(any(), any(), any());
+            verify(audit).logSecurityEvent(eq(USER_ID.toString()), eq("FACE_EMBEDDING_REROUTED_TO_IMAGE"),
+                    any(), contains("pairing=EMBEDDING_MISMATCH"));
+        }
+
+        @Test
+        @DisplayName("digest: one changed value in the vector breaks the pairing")
+        void digest_singleValueChange_breaksPairing() {
+            when(session.getCompletedMethods()).thenReturn(List.of("PUZZLE"));
+            when(session.getLivenessEmbeddingSha256()).thenReturn(LivenessEmbeddingDigest.sha256Hex(EMBEDDING));
+
+            assertThat(FaceVerifyMfaStepHandler.pairingOf(session, List.of(0.1, 0.2, 0.3)))
+                    .isEqualTo(FaceVerifyMfaStepHandler.Pairing.PAIRED);
+            assertThat(FaceVerifyMfaStepHandler.pairingOf(session, List.of(0.1, 0.2, 0.30000000000000004)))
+                    .isEqualTo(FaceVerifyMfaStepHandler.Pairing.EMBEDDING_MISMATCH);
+            assertThat(FaceVerifyMfaStepHandler.pairingOf(session, List.of(0.1, 0.2)))
+                    .isEqualTo(FaceVerifyMfaStepHandler.Pairing.EMBEDDING_MISMATCH);
         }
 
         @Test
