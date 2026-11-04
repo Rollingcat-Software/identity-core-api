@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### 2026-11-04 - Deploys pulled by the mordecai deployer; Hetzner deploy workflow removed
+
+- Removed `.github/workflows/deploy-hetzner.yml`. It deployed over SSH to the
+  decommissioned Hetzner box or waited for a self-hosted runner that a public repository
+  must not have. Production on mordecai is now deployed by the FIVUCSAS pull deployer
+  (`infra/deployer/`), which ships the newest `main` commit with a green `CI` push
+  run and rolls back on a failed health check. CI is unchanged.
+
 ### 2026-11-04 — Liveness rule for client-side face embeddings, gap Ü2 (`app.auth.face-embedding-liveness.mode`, default AUDIT)
 
 - An embedding carries no frame, so bio cannot run PAD on it. New `FaceEmbeddingLivenessPolicy`
