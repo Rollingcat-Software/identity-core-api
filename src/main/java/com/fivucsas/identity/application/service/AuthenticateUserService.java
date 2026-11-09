@@ -292,11 +292,20 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
             throw new PasswordRejected(user.getId());
         }
 
-        // Successful login: reset failed attempts and record login metadata
-        if (user.getFailedLoginAttempts() > 0) {
-            user.resetFailedLoginAttempts();
+        // Verified password: reset failed attempts and record login metadata. This
+        // transaction commits before the completion step (#285), so both survive a
+        // later completion failure (for example NEEDS_ENROLLMENT): the password was
+        // verified either way. An identifier-first Layer-1 has verified NO factor
+        // here, so it must not touch the strike counter (resetting it would let a
+        // bare /auth/login undo the strikes of failed /auth/mfa/step guesses); its
+        // login is recorded in the completion transaction with the MFA session, and
+        // the strikes are reset by the first verified factor (LoginAccountStateGuard).
+        if (layer1IsPassword) {
+            if (user.getFailedLoginAttempts() > 0) {
+                user.resetFailedLoginAttempts();
+            }
+            user.recordLogin(command.getIpAddress());
         }
-        user.recordLogin(command.getIpAddress());
 
         log.info("AUDIT: User authenticated — layer1: {}, userId={}, ip={}, userAgent={}",
                 layer1IsPassword ? "PASSWORD" : layer1Methods,
@@ -325,8 +334,10 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
         });
         eventPublisher.publishUserAuthenticated(userId, email);
 
-        // Save user (resets failed attempts + updates lastLoginAt if needed)
-        userRepository.save(user);
+        if (layer1IsPassword) {
+            // Save user (resets failed attempts + updates lastLoginAt if needed)
+            userRepository.save(user);
+        }
 
         UserResponse userResponse = com.fivucsas.identity.application.mapper.UserResponseMapper.toResponse(user);
         return new VerifiedFirstFactor(user, layer1IsPassword, layer1Methods, userResponse,
@@ -403,6 +414,11 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
                         // Layer-1: an identifier-first Layer-1 has nothing completed yet.
                         String stepsData = layer1IsPassword ? "[\"PASSWORD\"]" : "[]";
 
+                        UserResponse userResponse = layer1IsPassword
+                                ? firstFactor.userResponse()
+                                : recordIdentifierFirstLogin(user.getId(), command.getIpAddress())
+                                        .orElse(firstFactor.userResponse());
+
                         String sessionToken = UUID.randomUUID().toString().replace("-", "");
                         MfaSession mfaSession = MfaSession.builder()
                             .sessionToken(sessionToken)
@@ -428,7 +444,7 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
                         // Return MFA pending response: NO accessToken, NO refreshToken.
                         return AuthenticationResponse.ofMfaPending(
                             sessionToken, flow.getStepCount(), startStep, primaryMethod, availableMethods,
-                            firstFactor.userResponse(), mfaSession.getCompletedMethods()
+                            userResponse, mfaSession.getCompletedMethods()
                         );
                     }
                 }
@@ -470,6 +486,21 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
 
         return AuthenticationResponse.of(accessToken, refreshToken.getToken(), tokenGenerator.getExpirationMillis(),
                 firstFactor.userResponse());
+    }
+
+    /**
+     * Records last_login_at for an identifier-first Layer-1 in the completion
+     * transaction, so it commits together with the MFA session and rolls back with
+     * it. Re-reads the user instead of merging the copy from the first-factor
+     * transaction, which would write back a stale strike counter. The strike counter
+     * is deliberately left alone: no factor has been verified yet.
+     */
+    private Optional<UserResponse> recordIdentifierFirstLogin(UUID userId, String ipAddress) {
+        return userRepository.findById(userId).map(current -> {
+            current.recordLogin(ipAddress);
+            userRepository.save(current);
+            return com.fivucsas.identity.application.mapper.UserResponseMapper.toResponse(current);
+        });
     }
 
     /**
