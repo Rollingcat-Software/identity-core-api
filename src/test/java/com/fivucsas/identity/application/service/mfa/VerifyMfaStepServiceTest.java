@@ -428,6 +428,52 @@ class VerifyMfaStepServiceTest {
         verify(mfaSessionRepository, never()).save(any());
     }
 
+    @Test
+    void execute_WhenFaceHandlerReportsMismatch_ShouldAuditFaceMismatchNotMissingImage() {
+        UUID userId = UUID.randomUUID();
+        UUID flowId = UUID.randomUUID();
+        MfaSession session = mfaSessionAt(SESSION_TOKEN, userId, flowId, 1, 2, "[]");
+        AuthFlow flow = flowOf(flowId,
+                stepOf(1, AuthMethodType.FACE),
+                stepOf(2, AuthMethodType.FINGERPRINT));
+        User user = userMock(userId);
+
+        when(mfaSessionRepository.findBySessionTokenForUpdate(SESSION_TOKEN))
+                .thenReturn(Optional.of(session));
+        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+        when(authFlowRepository.findById(flowId)).thenReturn(Optional.of(flow));
+        when(faceHandler.verify(eq(session), eq(user), any()))
+                .thenReturn(MfaStepResult.fail(MfaFailureReasons.FACE_MISMATCH));
+
+        // Embedding-path payload: no "image" key, exactly as the browser sends it.
+        service.execute(req("FACE", Map.of("embedding", List.of(0.1, 0.2))));
+
+        verify(auditLogPort).logMfaStepFailed(eq(userId.toString()), eq("FACE"),
+                eq(MfaFailureReasons.FACE_MISMATCH), eq(CLIENT_IP), eq(UA));
+    }
+
+    @Test
+    void execute_WhenFaceEmbeddingFailsWithoutHandlerReason_ShouldNotAuditMissingImage() {
+        UUID userId = UUID.randomUUID();
+        UUID flowId = UUID.randomUUID();
+        MfaSession session = mfaSessionAt(SESSION_TOKEN, userId, flowId, 1, 2, "[]");
+        AuthFlow flow = flowOf(flowId,
+                stepOf(1, AuthMethodType.FACE),
+                stepOf(2, AuthMethodType.FINGERPRINT));
+        User user = userMock(userId);
+
+        when(mfaSessionRepository.findBySessionTokenForUpdate(SESSION_TOKEN))
+                .thenReturn(Optional.of(session));
+        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+        when(authFlowRepository.findById(flowId)).thenReturn(Optional.of(flow));
+        when(faceHandler.verify(eq(session), eq(user), any())).thenReturn(MfaStepResult.fail());
+
+        service.execute(req("FACE", Map.of("embedding", List.of(0.1, 0.2))));
+
+        verify(auditLogPort).logMfaStepFailed(eq(userId.toString()), eq("FACE"),
+                eq(MfaFailureReasons.FACE_VERIFICATION_FAILED), eq(CLIENT_IP), eq(UA));
+    }
+
     // ============== Step-binding guard (P1-1) ==============
 
     @Test

@@ -11,6 +11,7 @@ import com.fivucsas.identity.application.dto.response.UserResponse;
 import com.fivucsas.identity.application.port.input.*;
 import com.fivucsas.identity.application.port.output.AuthFlowRepositoryPort;
 import com.fivucsas.identity.application.port.output.BiometricServicePort;
+import com.fivucsas.identity.application.service.mfa.MfaFailureReasons;
 import com.fivucsas.identity.domain.model.auth.AuthMethodType;
 import com.fivucsas.identity.domain.model.auth.OperationType;
 import com.fivucsas.identity.infrastructure.totp.TotpService;
@@ -1534,38 +1535,38 @@ public class AuthController {
      */
     private String resolveFailureReason(AuthMethodType methodType, Map<String, Object> data) {
         return switch (methodType) {
-            case PASSWORD -> "invalid_password";
+            case PASSWORD -> MfaFailureReasons.INVALID_PASSWORD;
             case EMAIL_OTP, SMS_OTP -> {
                 String code = data != null ? (String) data.get("code") : null;
-                yield (code == null || code.isBlank()) ? "missing_otp_code" : "invalid_or_expired_otp";
+                yield (code == null || code.isBlank()) ? MfaFailureReasons.MISSING_OTP_CODE : MfaFailureReasons.INVALID_OR_EXPIRED_OTP;
             }
             case TOTP -> {
                 String code = data != null ? (String) data.get("code") : null;
-                yield (code == null || code.isBlank()) ? "missing_totp_code" : "invalid_totp_code";
+                yield (code == null || code.isBlank()) ? MfaFailureReasons.MISSING_TOTP_CODE : MfaFailureReasons.INVALID_TOTP_CODE;
             }
             case FACE -> {
                 String image = data != null ? (String) data.get("image") : null;
-                yield (image == null || image.isBlank()) ? "missing_face_image" : "face_verification_failed";
+                yield (image == null || image.isBlank()) ? MfaFailureReasons.MISSING_FACE_IMAGE : MfaFailureReasons.FACE_VERIFICATION_FAILED;
             }
             case VOICE -> {
                 String voiceData = data != null ? (String) data.get("voiceData") : null;
-                yield (voiceData == null || voiceData.isBlank()) ? "missing_voice_data" : "voice_verification_failed";
+                yield (voiceData == null || voiceData.isBlank()) ? MfaFailureReasons.MISSING_VOICE_DATA : MfaFailureReasons.VOICE_VERIFICATION_FAILED;
             }
             case FINGERPRINT, HARDWARE_KEY -> {
                 // P0 FIX (Investigation 2026-05-07 F1): the legacy /2fa/verify-method
                 // route cannot verify WebAuthn assertions (no challenge handshake);
                 // we now fail closed and steer callers to the canonical paths.
-                yield "legacy_route_unsupported_use_webauthn_authenticate";
+                yield MfaFailureReasons.LEGACY_ROUTE_UNSUPPORTED_USE_WEBAUTHN_AUTHENTICATE;
             }
             case QR_CODE -> {
                 String token = data != null ? (String) data.get("token") : null;
-                yield (token == null || token.isBlank()) ? "missing_qr_token" : "invalid_qr_token";
+                yield (token == null || token.isBlank()) ? MfaFailureReasons.MISSING_QR_TOKEN : MfaFailureReasons.INVALID_QR_TOKEN;
             }
             case NFC_DOCUMENT -> {
                 String nfcData = data != null ? (String) data.get("nfcData") : null;
-                yield (nfcData == null || nfcData.isBlank()) ? "missing_nfc_data" : "nfc_card_not_found_or_not_owned";
+                yield (nfcData == null || nfcData.isBlank()) ? MfaFailureReasons.MISSING_NFC_DATA : MfaFailureReasons.NFC_CARD_NOT_FOUND_OR_NOT_OWNED;
             }
-            default -> "verification_failed";
+            default -> MfaFailureReasons.VERIFICATION_FAILED;
         };
     }
 

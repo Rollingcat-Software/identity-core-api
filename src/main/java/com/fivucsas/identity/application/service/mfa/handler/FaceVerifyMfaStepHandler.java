@@ -5,6 +5,7 @@ import com.fivucsas.identity.application.port.output.BiometricServicePort;
 import com.fivucsas.identity.application.service.ClientSideEmbeddingPolicy;
 import com.fivucsas.identity.application.service.FaceEmbeddingLivenessPolicy;
 import com.fivucsas.identity.application.service.mfa.LivenessEmbeddingDigest;
+import com.fivucsas.identity.application.service.mfa.MfaFailureReasons;
 import com.fivucsas.identity.application.service.mfa.MfaStepResult;
 import com.fivucsas.identity.application.service.mfa.VerifyMfaStepHandler;
 import com.fivucsas.identity.domain.model.auth.AuthMethodType;
@@ -151,7 +152,7 @@ public class FaceVerifyMfaStepHandler implements VerifyMfaStepHandler {
         // --- Legacy image path (UNCHANGED) ---
         String image = imageOf(data);
         if (image == null) {
-            return MfaStepResult.fail();
+            return MfaStepResult.fail(MfaFailureReasons.MISSING_FACE_IMAGE);
         }
         return verifyImage(userId, image);
     }
@@ -219,7 +220,7 @@ public class FaceVerifyMfaStepHandler implements VerifyMfaStepHandler {
         Object errorCode = faceResult.get("error_code");
         if (errorCode instanceof String ec && "SPOOF_DETECTED".equals(ec)) {
             log.warn("AUDIT: MFA face spoof detected ({} path) — userId={}", pathLabel, userId);
-            return MfaStepResult.fail();
+            return MfaStepResult.fail(MfaFailureReasons.FACE_SPOOF_DETECTED);
         }
 
         // SECURITY (P0, BACKEND_REVIEW 2026-05-12): Trust ONLY the bio
@@ -232,14 +233,14 @@ public class FaceVerifyMfaStepHandler implements VerifyMfaStepHandler {
         if (verifiedClaim == null) {
             log.error("AUDIT: MFA face verify missing `verified` field ({} path) — userId={}, rejecting. response keys={}",
                     pathLabel, userId, faceResult.keySet());
-            return MfaStepResult.fail();
+            return MfaStepResult.fail(MfaFailureReasons.FACE_VERIFIER_NO_VERDICT);
         }
         boolean verified = Boolean.TRUE.equals(verifiedClaim)
                 || "true".equalsIgnoreCase(String.valueOf(verifiedClaim));
         if (!verified) {
             log.warn("AUDIT: MFA face verify failed ({} path, server verified=false) — userId={}", pathLabel, userId);
         }
-        return verified ? MfaStepResult.ok() : MfaStepResult.fail();
+        return verified ? MfaStepResult.ok() : MfaStepResult.fail(MfaFailureReasons.FACE_MISMATCH);
     }
 
     /**
