@@ -13,6 +13,7 @@ import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.entity.UserEnrollment;
 import com.fivucsas.identity.entity.UserStatus;
 import com.fivucsas.identity.repository.UserEnrollmentRepository;
+import com.fivucsas.identity.security.BiometricEnrollmentTenantResolver;
 import com.fivucsas.identity.security.RbacAuthorizationService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -46,6 +47,7 @@ class UserEnrollmentFlowControllerTest {
     @Mock private EnrollBiometricUseCase enrollBiometricUseCase;
     @Mock private BiometricServicePort biometricService;
     @Mock private RbacAuthorizationService rbacService;
+    @Mock private BiometricEnrollmentTenantResolver enrollmentTenantResolver;
 
     @InjectMocks
     private EnrollmentController controller;
@@ -78,6 +80,27 @@ class UserEnrollmentFlowControllerTest {
     @DisplayName("Submit Enrollment")
     class SubmitEnrollment {
 
+        /** Tenant the resolver names for the enrolled user (issue #284). */
+        private static final String TENANT = "55555555-5555-5555-5555-555555555555";
+
+        @BeforeEach
+        void tenantOfTheEnrolledUser() {
+            org.mockito.Mockito.lenient().when(enrollmentTenantResolver.resolve(userId, null)).thenReturn(TENANT);
+        }
+
+        @Test
+        void submitEnrollment_WhenUserHasATenant_ShouldStoreTheFaceUnderThatTenant() {
+            when(rbacService.getCurrentUser()).thenReturn(Optional.of(testUser));
+            when(biometricService.enrollFace(eq(userId), any(MultipartFile.class), any(), any(), any()))
+                    .thenReturn(Map.of("success", true));
+
+            controller.submitEnrollment("12345678", "1990-01-01", "John Doe", "token-123", "0.95",
+                    mock(MultipartFile.class));
+
+            verify(enrollmentTenantResolver).resolve(userId, null);
+            verify(biometricService).enrollFace(eq(userId), any(MultipartFile.class), eq(TENANT), eq(null), eq(null));
+        }
+
         @Test
         @DisplayName("Should submit enrollment successfully")
         void shouldSubmitEnrollment() {
@@ -86,7 +109,8 @@ class UserEnrollmentFlowControllerTest {
             enrollResult.put("success", true);
             enrollResult.put("quality_score", 92.5);
             enrollResult.put("message", "Face enrolled successfully");
-            when(biometricService.enrollFace(eq(userId), any(MultipartFile.class))).thenReturn(enrollResult);
+            when(biometricService.enrollFace(eq(userId), any(MultipartFile.class), eq(TENANT), eq(null), eq(null)))
+                    .thenReturn(enrollResult);
 
             MultipartFile mockFile = mock(MultipartFile.class);
 
@@ -110,7 +134,8 @@ class UserEnrollmentFlowControllerTest {
             Map<String, Object> enrollResult = new LinkedHashMap<>();
             enrollResult.put("success", false);
             enrollResult.put("message", "No face detected");
-            when(biometricService.enrollFace(eq(userId), any(MultipartFile.class))).thenReturn(enrollResult);
+            when(biometricService.enrollFace(eq(userId), any(MultipartFile.class), eq(TENANT), eq(null), eq(null)))
+                    .thenReturn(enrollResult);
 
             MultipartFile mockFile = mock(MultipartFile.class);
 
@@ -130,7 +155,8 @@ class UserEnrollmentFlowControllerTest {
             when(rbacService.getCurrentUser()).thenReturn(Optional.of(testUser));
             Map<String, Object> enrollResult = new LinkedHashMap<>();
             enrollResult.put("success", true);
-            when(biometricService.enrollFace(eq(userId), any(MultipartFile.class))).thenReturn(enrollResult);
+            when(biometricService.enrollFace(eq(userId), any(MultipartFile.class), eq(TENANT), eq(null), eq(null)))
+                    .thenReturn(enrollResult);
 
             MultipartFile mockFile = mock(MultipartFile.class);
 

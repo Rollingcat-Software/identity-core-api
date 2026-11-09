@@ -2,6 +2,37 @@
 
 ## [Unreleased]
 
+### 2026-11-09 - Face/voice enroll stores the template under the enrolled user's tenant (#284)
+
+- `POST /api/v1/biometric/enroll/{userId}` (image) and `POST /api/v1/enrollment/submit` forwarded
+  a null tenant, so biometric-processor stored the row with `tenant_id` NULL; the next login's
+  `EnrollmentHealthService` probe (tenant-scoped to the user's tenant) answered "missing" and
+  auto-revoked the FACE enrollment (`NEEDS_ENROLLMENT`).
+- New `security.BiometricEnrollmentTenantResolver`, the one place the face enroll endpoints
+  (image, multi-image, embedding, `/enrollment/submit`) and the voice embedding enroll get their
+  bio tenant from: the tenant of the user being enrolled (`UserRepository.findTenantIdById`, the
+  same lookup the probe uses), `null` only for a tenant-less user. A client `tenant_id` is no
+  longer trusted (kept on the wire, logged and ignored when it differs). The tenant-less
+  `enrollFace(UUID, MultipartFile)` and `enrollFaceMulti(UUID, List)` overloads are removed from
+  `BiometricServicePort`, so a caller cannot drop the tenant by accident.
+- Cross-tenant guard on every enroll endpoint, including the legacy
+  `POST /api/v1/biometric/voice/enroll/{userId}` (`assertMayEnroll`): enrolling ANOTHER user
+  requires access to that user's tenant (`canAccessTenant`: same tenant or ROOT), else 403; a
+  tenant-less subject can be enrolled by itself or ROOT only. "Self" is the same predicate as
+  `@PreAuthorize` (`UserSecurityService.isCurrentUser`). An unknown subject is 404 for ROOT and
+  403 for anyone else, so user ids of other tenants cannot be probed. The resolver runs in its
+  own read-only transaction (`TenantFilterBypass` needs one). Before, the embedding endpoints
+  stored under whatever body `tenant_id` was sent.
+- Existing templates outside the user's tenant (NULL tenant, or a tenant a client sent before
+  this change): when the tenant-scoped face probe says "no", the health check now probes once
+  more without a tenant and keeps FACE enrolled if a template exists (WARN log), because bio's
+  1:1 verify (`find_by_user_id`) matches on user id only, so those templates still verify.
+  Unknown (outage) still fails open. Login needs no data migration. 1:N search does: it reads
+  only CENTROID rows of the caller's tenant, and re-enrolling does NOT fix an existing centroid
+  (bio's `save()` updates the centroid without touching `tenant_id`; needs a
+  biometric-processor change). Until that bio change ships, the backfill in the #284 PR is the only
+  way to make those users findable by `/biometric/search`.
+
 ### 2026-11-04 - Deploys pulled by the mordecai deployer; Hetzner deploy workflow removed
 
 - Removed `.github/workflows/deploy-hetzner.yml`. It deployed over SSH to the
