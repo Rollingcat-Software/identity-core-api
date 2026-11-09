@@ -10,6 +10,8 @@ import com.fivucsas.identity.domain.model.auth.EnrollmentStatus;
 import com.fivucsas.identity.domain.repository.UserRepository;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.entity.UserEnrollment;
+import com.fivucsas.identity.application.service.transaction.TrackingTransactionManager;
+import com.fivucsas.identity.application.service.transaction.TransactionRunner;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -49,12 +51,13 @@ class EnrollmentHealthServiceTest {
     @Mock private com.fivucsas.identity.repository.UserRepository userJpaRepository;
 
     private final UUID userId = UUID.randomUUID();
+    private final TrackingTransactionManager transactionManager = new TrackingTransactionManager();
 
     private EnrollmentHealthService service(boolean probeEnabled) {
         return new EnrollmentHealthService(
                 userEnrollmentRepository, userRepository, webAuthnCredentialRepository,
                 userDeviceRepository, nfcCardRepository, redisTemplate, biometricServicePort,
-                userJpaRepository,
+                new TransactionRunner(transactionManager), userJpaRepository,
                 /* crossMembershipNfcEnabled */ false,
                 /* enrollmentProbeEnabled   */ probeEnabled);
     }
@@ -64,10 +67,34 @@ class EnrollmentHealthServiceTest {
                 .firstName("A").lastName("B").build();
         when(userRepository.findById(userId)).thenReturn(Optional.of(user));
         UserEnrollment enrollment = UserEnrollment.builder()
+                .id(UUID.randomUUID())
                 .authMethodType(type)
                 .status(EnrollmentStatus.ENROLLED)
                 .build();
         when(userEnrollmentRepository.findAllByUserId(userId)).thenReturn(List.of(enrollment));
+        // Stale rows are re-read by id in the revoke transaction.
+        lenient().when(userEnrollmentRepository.findById(enrollment.getId())).thenReturn(Optional.of(enrollment));
+    }
+
+    // -- Connection use (#285) --------------------------------------------------
+
+    @Test
+    void validateEnrollments_WhenBiometricProbeRuns_ShouldHoldNoTransaction() {
+        givenUserWithEnrollment(AuthMethodType.FACE);
+        when(userJpaRepository.findTenantIdById(userId)).thenReturn(Optional.empty());
+        java.util.List<Integer> openDuringProbe = new java.util.ArrayList<>();
+        when(biometricServicePort.faceEnrollmentExists(userId, null)).thenAnswer(invocation -> {
+            openDuringProbe.add(transactionManager.openTransactions());
+            return Boolean.FALSE;
+        });
+
+        Map<AuthMethodType, Boolean> health = service(true).validateEnrollments(userId);
+
+        assertThat(health.get(AuthMethodType.FACE)).isFalse();
+        assertThat(openDuringProbe).containsExactly(0);
+        // read transaction, then the separate revoke transaction for the stale row
+        assertThat(transactionManager.events()).containsExactly("begin", "commit", "begin", "commit");
+        verify(userEnrollmentRepository).save(any(UserEnrollment.class));
     }
 
     // -- VOICE -----------------------------------------------------------------

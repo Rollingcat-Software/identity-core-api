@@ -25,6 +25,8 @@ import com.fivucsas.identity.repository.MfaSessionRepository;
 import com.fivucsas.identity.repository.UserEnrollmentRepository;
 import com.fivucsas.identity.service.RefreshTokenService;
 import com.fivucsas.identity.application.port.output.OAuth2ClientRepositoryPort;
+import com.fivucsas.identity.application.service.transaction.DeferredEffects;
+import com.fivucsas.identity.application.service.transaction.TransactionRunner;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -33,6 +35,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 /**
@@ -64,6 +67,8 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
     // #15 — best-effort login-device upsert so a successful login surfaces in the
     // dashboard Devices view (the input port, kept hexagonal).
     private final com.fivucsas.identity.application.port.input.ManageDeviceUseCase manageDeviceUseCase;
+    // #285: splits the login into short transactions and runs audit writes after them.
+    private final TransactionRunner transactionRunner;
 
     private static final int MAX_FAILED_ATTEMPTS = 5;
     private static final Duration LOCKOUT_DURATION = Duration.ofMinutes(15);
@@ -77,20 +82,103 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
     // one-line constant, no migration.
     private static final Duration MFA_SESSION_TTL = Duration.ofMinutes(15);
 
+    /**
+     * Password-or-identifier login (POST /auth/login).
+     *
+     * <p>Deliberately NOT one {@code @Transactional} method (identity-core-api #285).
+     * The old single transaction held a pooled connection while the REQUIRES_NEW
+     * audit, strike-counter and enrollment-health writes asked for a second one, and
+     * while the enrollment probe called the biometric-processor over HTTP. Around 20
+     * concurrent logins (the production pool size) then deadlocked the Hikari pool
+     * until its 30 s acquisition timeout. The login now runs as a sequence in which a
+     * thread never holds more than one connection and never holds one across HTTP:</p>
+     * <ol>
+     *   <li>first-factor transaction: resolve the user, run the account and tenant
+     *       gates, verify the password, record the login;</li>
+     *   <li>after it ends: its audit rows, and on a wrong password the strike counter
+     *       (own transaction, committed even though the login fails);</li>
+     *   <li>no transaction: the enrollment-health probe (biometric HTTP), whose stale
+     *       enrollment revocations run in their own short transaction;</li>
+     *   <li>completion transaction: open the MFA session, or mint the tokens;</li>
+     *   <li>after it ends: remaining audit rows and the login-device upsert.</li>
+     * </ol>
+     * <p>The request runs without open-in-view (see {@code LoginOpenInViewConfig}),
+     * otherwise the request-bound EntityManager would keep the first connection.</p>
+     */
     @Override
-    @Transactional
     public AuthenticationResponse execute(AuthenticateUserCommand command) {
         log.info("AUDIT: Login attempt — email={}, ip={}", command.getEmail(), command.getIpAddress());
 
+        VerifiedFirstFactor firstFactor;
+        try {
+            firstFactor = transactionRunner.inTransaction(effects -> verifyFirstFactor(command, effects));
+        } catch (PasswordRejected rejected) {
+            throw recordRejectedPassword(rejected.userId, command);
+        }
+
+        Optional<Map<AuthMethodType, Boolean>> enrollmentHealth = firstFactor.hasLoginFlow()
+                ? probeEnrollmentHealth(firstFactor.user().getId())
+                : Optional.empty();
+
+        AuthenticationResponse response = transactionRunner.inTransaction(
+                effects -> completeLogin(command, firstFactor, enrollmentHealth, effects));
+
+        if (!response.isMfaRequired()) {
+            // #15: single-factor login completed: UPSERT a UserDevice row so the
+            // user surfaces in the dashboard Devices view. Best-effort (the impl
+            // swallows all errors) so device tracking can never fail the login. Runs
+            // after the completion transaction so its own REQUIRES_NEW transaction is
+            // the only connection this thread holds.
+            manageDeviceUseCase.recordLoginDevice(firstFactor.user().getId(), command.getUserAgent());
+        }
+        return response;
+    }
+
+    /** Outcome of the first-factor transaction, carried into the completion transaction. */
+    private record VerifiedFirstFactor(User user, boolean layer1IsPassword, Set<AuthMethodType> layer1Methods,
+                                       UserResponse userResponse, boolean hasLoginFlow) {
+    }
+
+    /**
+     * Wrong password: rolls the first-factor transaction back (exactly as the former
+     * single transaction did) so the strike counter can be recorded afterwards, in its
+     * own transaction, without a second connection.
+     */
+    private static final class PasswordRejected extends RuntimeException {
+        private final UUID userId;
+
+        private PasswordRejected(UUID userId) {
+            super("password rejected", null, false, false);
+            this.userId = userId;
+        }
+    }
+
+    private RuntimeException recordRejectedPassword(UUID userId, AuthenticateUserCommand command) {
+        // SECURITY (2026-06-01): the failed attempt is recorded in its OWN committed
+        // transaction (LoginAccountStateGuard) so the strike counter / lock SURVIVES
+        // the failed login (6 wrong passwords used to leave failed_login_attempts=0).
+        boolean justLocked = loginAccountStateGuard.recordFailedAttempt(
+                userId, command.getEmail(), command.getIpAddress());
+        log.warn("AUDIT: Login failed — email={}, reason: invalid_password, ip={}",
+                command.getEmail(), command.getIpAddress());
+        // P0-#5: when this attempt triggered the lockout, surface AccountLocked
+        // (HTTP 423) instead of "invalid credentials" on the 5th wrong try.
+        if (justLocked) {
+            return new AccountLockedException(LOCKOUT_DURATION.getSeconds());
+        }
+        return new InvalidCredentialsException();
+    }
+
+    private VerifiedFirstFactor verifyFirstFactor(AuthenticateUserCommand command, DeferredEffects effects) {
         User user = userRepository.findByEmail(command.getEmail())
             .orElseThrow(InvalidCredentialsException::new);
 
         // P0-#8 (INVESTIGATION_MASTER_2026-05-07): refuse authentication when
         // the user's tenant is not ACTIVE. Tenant.canAcceptUsers() existed in
-        // the domain model with zero non-DTO callers — suspended /
+        // the domain model with zero non-DTO callers: suspended /
         // inactive / pending tenants kept minting JWTs through this path.
         // Reject AFTER the email is found (no enumeration leak: the tenant
-        // identity is not exposed in the response — only the suspension fact)
+        // identity is not exposed in the response: only the suspension fact)
         // and BEFORE the lockout / password / MFA branches so the gate
         // applies uniformly to all auth strategies.
         if (user.getTenant() != null
@@ -98,18 +186,16 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
             log.warn("AUDIT: Login refused — tenant not active, email={}, tenantId={}, tenantStatus={}, ip={}",
                     command.getEmail(), user.getTenant().getId(),
                     user.getTenant().getStatus(), command.getIpAddress());
-            auditLogPort.logAuthenticationFailed(command.getEmail(),
-                    command.getIpAddress(),
-                    "Tenant " + user.getTenant().getStatus() + " — auth refused");
+            String reason = "Tenant " + user.getTenant().getStatus() + " — auth refused";
+            effects.afterCompletion(() -> auditLogPort.logAuthenticationFailed(command.getEmail(),
+                    command.getIpAddress(), reason));
             throw new TenantSuspendedException(user.getTenant().getStatus());
         }
 
         // Check if account is locked
         if (user.isLocked()) {
             // Cache lockedUntil in a local so this branch makes only ONE
-            // entity.User.getLockedUntil() call site — preserves the existing
-            // ArchUnit FreezingArchRule baseline (UserDomainBoundaryTest) that
-            // pins entity-User invocations by (caller, callee) tuple.
+            // entity.User.getLockedUntil() call site.
             Instant lockedUntil = user.getLockedUntil();
             if (lockedUntil != null && Instant.now().isAfter(lockedUntil)) {
                 // Lock period expired, auto-unlock
@@ -118,12 +204,11 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
                 log.info("Account auto-unlocked after lockout period for user: {}", command.getEmail());
             } else {
                 log.warn("AUDIT: Login failed — email={}, reason: account_locked, ip={}", command.getEmail(), command.getIpAddress());
-                auditLogPort.logAuthenticationFailed(command.getEmail(), command.getIpAddress(), "Account locked");
+                effects.afterCompletion(() -> auditLogPort.logAuthenticationFailed(command.getEmail(),
+                        command.getIpAddress(), "Account locked"));
                 // P0-#5 (INVESTIGATION_MASTER_2026-05-07): surface a dedicated
                 // AccountLockedException carrying the remaining-seconds value so
-                // GlobalExceptionHandler can return HTTP 423 with a structured
-                // body. Previously this path threw InvalidCredentialsException
-                // and the frontend's i18n key `errors.ACCOUNT_LOCKED` was dead.
+                // GlobalExceptionHandler can return HTTP 423 with a structured body.
                 long remainingSeconds = lockedUntil != null
                         ? Math.max(0L, Duration.between(Instant.now(), lockedUntil).getSeconds())
                         : 0L;
@@ -139,76 +224,53 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
             String state = user.isSuspended() ? "SUSPENDED" : "INACTIVE";
             log.warn("AUDIT: Login refused — email={}, reason: account_not_active ({}), ip={}",
                     command.getEmail(), state, command.getIpAddress());
-            auditLogPort.logAuthenticationFailed(command.getEmail(), command.getIpAddress(),
-                    "Account not active: " + state);
+            effects.afterCompletion(() -> auditLogPort.logAuthenticationFailed(command.getEmail(),
+                    command.getIpAddress(), "Account not active: " + state));
             throw new com.fivucsas.identity.domain.exception.AccountNotActiveException();
         }
 
-        // Tenant lock — when the login originates from an OAuth client that is
+        // Tenant lock: when the login originates from an OAuth client that is
         // bound to a specific tenant (e.g. demo.fivucsas.com → marmara-bys-demo
         // → Marmara University), refuse the login if the user belongs to a
-        // different tenant. Without this gate any user from any tenant could
-        // sign in on a tenant-branded surface (the user reported logging into
-        // demo.fivucsas.com with their Fivucsas-tenant account on 2026-04-28).
-        // Reject BEFORE the password check so the user gets a clear inline
-        // error at the password step — instead of passing password + MFA only
-        // to fail at /oauth2/authorize/complete with no enrollment in the
-        // foreign tenant.
-        //
-        // 2026-05-07 (T-TENANT-GATE): switched from InvalidCredentialsException
-        // (which made the password step look like a wrong-password retry loop)
-        // to a dedicated TenantMismatchException carrying the required-tenant
-        // display name so the frontend can render
-        // "This account is not a {{tenant}} member." inline. The tenant
-        // identity is already known to the user (they're on the tenant's own
-        // hosted login surface) so there is no enumeration leak.
-        enforceTenantLock(user, command.getClientId(), command.getEmail(), command.getIpAddress());
+        // different tenant (T-TENANT-GATE, 2026-05-07). Rejected BEFORE the
+        // password check so the user gets a clear inline error at the password step.
+        enforceTenantLock(user, command.getClientId(), command.getEmail(), command.getIpAddress(),
+                effects::afterCompletion);
 
         // Resolve the tenant's configured Layer-1 (step-order 1) method for the
-        // default APP_LOGIN flow. Task #16 B: login is now fully config-driven —
-        // we no longer hard-gate every login on a password check. Instead we run
-        // whatever the tenant configured as Layer-1:
-        //   * PASSWORD            → verify it here as step 1 (observable behavior
-        //                           is UNCHANGED for today's PASSWORD-first
-        //                           tenants — same lockout, audit, MFA-pending
-        //                           shape), then continue to the remaining steps.
+        // default APP_LOGIN flow (task #16 B, config-driven login):
+        //   * PASSWORD            → verify it here as step 1, then continue to the
+        //                           remaining steps (legacy behavior, unchanged).
         //   * any other method    → an identifier-first factor (EMAIL_OTP / FACE /
-        //                           TOTP / …). We do NOT check the password; the
-        //                           MfaSession starts at step 1 with that method
-        //                           and VerifyMfaStepService runs it generically.
-        // A null/empty flow (or a flow with no step 1) falls back to PASSWORD so
-        // tenants without a configured flow keep the legacy password login.
+        //                           TOTP / …). The password is NOT checked; the
+        //                           MfaSession starts at step 1 with that method.
+        // A null/empty flow (or a flow with no step 1) falls back to PASSWORD.
         //
         // REVERSIBILITY GATE (operator directive 2026-05-30): the config-driven
         // engine is OFF by default. When OFF for this tenant we resolve NO
         // Layer-1 methods → layer1IsPassword=true → the hard password gate +
-        // legacy step-2/["PASSWORD"] flow below run EXACTLY as before. Flip
-        // app.auth.config-driven-login (or canary a tenant) to enable the new
-        // model with no redeploy.
+        // legacy step-2/["PASSWORD"] flow run EXACTLY as before.
+        Optional<AuthFlow> defaultLoginFlow = findDefaultLoginFlow(user);
         boolean configDriven = user.getTenant() != null
                 && configDrivenLoginPolicy.isEnabledFor(user.getTenant().getId());
         Set<AuthMethodType> layer1Methods = configDriven
-                ? resolveLayer1Methods(user)
+                ? resolveLayer1Methods(user, defaultLoginFlow)
                 : Set.of();
         boolean layer1IsPassword = layer1Methods.isEmpty()
                 || layer1Methods.contains(AuthMethodType.PASSWORD);
 
         // ENFORCEMENT (Layer-1 of the login path): reject a Layer-1 factor that
         // is EXPLICITLY disabled for the tenant (tenant_auth_methods row with
-        // is_enabled=false). SAFE semantics: no row = allowed, so a tenant that
-        // never touched its Auth-Methods toggles is never locked out. For a
-        // PASSWORD Layer-1 we gate on PASSWORD; for an identifier-first Layer-1
-        // (EMAIL_OTP / FACE / …) we gate on each configured Layer-1 option and
-        // block only when EVERY option is disabled (one enabled option still
-        // lets the user in — fail-closed for the disabled method only).
+        // is_enabled=false). SAFE semantics: no row = allowed. For an
+        // identifier-first Layer-1 we block only when EVERY option is disabled.
         UUID tenantIdForPolicy = user.getTenant() != null ? user.getTenant().getId() : null;
         if (layer1IsPassword) {
             if (tenantAuthMethodPolicy.isLoginMethodExplicitlyDisabled(
                     tenantIdForPolicy, AuthMethodType.PASSWORD)) {
                 log.warn("AUDIT: Login refused — PASSWORD disabled for tenant, email={}, tenantId={}, ip={}",
                         command.getEmail(), tenantIdForPolicy, command.getIpAddress());
-                auditLogPort.logAuthenticationFailed(command.getEmail(), command.getIpAddress(),
-                        "auth_method_disabled_for_tenant:PASSWORD");
+                effects.afterCompletion(() -> auditLogPort.logAuthenticationFailed(command.getEmail(),
+                        command.getIpAddress(), "auth_method_disabled_for_tenant:PASSWORD"));
                 throw new com.fivucsas.identity.domain.exception.AuthMethodDisabledException(
                         AuthMethodType.PASSWORD.name());
             }
@@ -219,34 +281,18 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
             if (allLayer1Disabled) {
                 log.warn("AUDIT: Login refused — all Layer-1 methods disabled for tenant, email={}, tenantId={}, methods={}, ip={}",
                         command.getEmail(), tenantIdForPolicy, layer1Methods, command.getIpAddress());
-                auditLogPort.logAuthenticationFailed(command.getEmail(), command.getIpAddress(),
-                        "auth_method_disabled_for_tenant:" + layer1Methods);
+                effects.afterCompletion(() -> auditLogPort.logAuthenticationFailed(command.getEmail(),
+                        command.getIpAddress(), "auth_method_disabled_for_tenant:" + layer1Methods));
                 throw new com.fivucsas.identity.domain.exception.AuthMethodDisabledException(
                         layer1Methods.iterator().next().name());
             }
         }
 
         if (layer1IsPassword && !passwordEncoder.matches(command.getPassword(), user.getPasswordHash())) {
-            // SECURITY (2026-06-01): record the failed attempt in its OWN committed
-            // transaction (LoginAccountStateGuard, REQUIRES_NEW) so the strike
-            // counter / lock SURVIVES the rollback caused by throwing below. The
-            // previous inline increment+save ran inside this @Transactional method
-            // and was discarded when it threw InvalidCredentialsException — so the
-            // 5-strike lockout never actually persisted (confirmed on staging:
-            // 6 wrong passwords left failed_login_attempts=0).
-            boolean justLocked = loginAccountStateGuard.recordFailedAttempt(
-                    user.getId(), command.getEmail(), command.getIpAddress());
-            log.warn("AUDIT: Login failed — email={}, reason: invalid_password, ip={}",
-                    command.getEmail(), command.getIpAddress());
-            // P0-#5: when this attempt triggered the lockout, surface AccountLocked
-            // (HTTP 423) instead of "invalid credentials" on the 5th wrong try.
-            if (justLocked) {
-                throw new AccountLockedException(LOCKOUT_DURATION.getSeconds());
-            }
-            throw new InvalidCredentialsException();
+            throw new PasswordRejected(user.getId());
         }
 
-        // Successful login — reset failed attempts and record login metadata
+        // Successful login: reset failed attempts and record login metadata
         if (user.getFailedLoginAttempts() > 0) {
             user.resetFailedLoginAttempts();
         }
@@ -267,168 +313,174 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
             }
         }
 
-        if (oauthClientName != null) {
-            auditLogPort.logUserAuthenticated(user.getId().toString(), user.getEmail(), command.getIpAddress(), command.getUserAgent(), oauthClientName);
-        } else {
-            auditLogPort.logUserAuthenticated(user.getId().toString(), user.getEmail(), command.getIpAddress(), command.getUserAgent());
-        }
-        eventPublisher.publishUserAuthenticated(user.getId().toString(), user.getEmail());
+        String userId = user.getId().toString();
+        String email = user.getEmail();
+        String clientName = oauthClientName;
+        effects.afterCommit(() -> {
+            if (clientName != null) {
+                auditLogPort.logUserAuthenticated(userId, email, command.getIpAddress(), command.getUserAgent(), clientName);
+            } else {
+                auditLogPort.logUserAuthenticated(userId, email, command.getIpAddress(), command.getUserAgent());
+            }
+        });
+        eventPublisher.publishUserAuthenticated(userId, email);
 
         // Save user (resets failed attempts + updates lastLoginAt if needed)
         userRepository.save(user);
 
         UserResponse userResponse = com.fivucsas.identity.application.mapper.UserResponseMapper.toResponse(user);
+        return new VerifiedFirstFactor(user, layer1IsPassword, layer1Methods, userResponse,
+                defaultLoginFlow.isPresent());
+    }
+
+    /**
+     * Enrollment health for the flow's step filtering, computed once per login and
+     * outside any transaction: for FACE / VOICE it asks the biometric-processor over
+     * HTTP, which must not happen while a connection is held. A failure falls back to
+     * the single-factor path, exactly as the former in-transaction catch-all did.
+     */
+    private Optional<Map<AuthMethodType, Boolean>> probeEnrollmentHealth(UUID userId) {
+        try {
+            return Optional.of(enrollmentHealthService.validateEnrollments(userId));
+        } catch (Exception e) {
+            log.warn("Failed to check tenant auth flow for user {}: {}", userId, e.getMessage(), e);
+            return Optional.empty();
+        }
+    }
+
+    private AuthenticationResponse completeLogin(AuthenticateUserCommand command, VerifiedFirstFactor firstFactor,
+                                                 Optional<Map<AuthMethodType, Boolean>> enrollmentHealth,
+                                                 DeferredEffects effects) {
+        User user = firstFactor.user();
+        boolean layer1IsPassword = firstFactor.layer1IsPassword();
 
         // Drive the rest of login from the tenant's configured default APP_LOGIN
-        // flow. When Layer-1 is PASSWORD it was already verified above, so the
+        // flow. When Layer-1 is PASSWORD it was already verified, so the
         // "remaining" steps are step-order > 1 and the session starts at step 2
         // with PASSWORD pre-credited (legacy behavior, byte-for-byte). When
-        // Layer-1 is an identifier-first method (EMAIL_OTP / FACE / TOTP / …) no
-        // password was checked: ALL steps remain, the session starts at step 1
-        // with no completed methods, and VerifyMfaStepService runs the Layer-1
-        // method as the first step.
-        try {
-            Optional<AuthFlow> defaultLoginFlow = authFlowRepository
-                .findByTenantIdAndIsDefaultTrueAndIsActiveTrueAndOperationType(
-                    user.getTenant().getId(), OperationType.APP_LOGIN);
+        // Layer-1 is an identifier-first method no password was checked: ALL steps
+        // remain, the session starts at step 1 with no completed methods.
+        if (enrollmentHealth.isPresent()) {
+            Map<AuthMethodType, Boolean> healthStatus = enrollmentHealth.get();
+            try {
+                Optional<AuthFlow> defaultLoginFlow = authFlowRepository
+                    .findByTenantIdAndIsDefaultTrueAndIsActiveTrueAndOperationType(
+                        user.getTenant().getId(), OperationType.APP_LOGIN);
 
-            if (defaultLoginFlow.isPresent()) {
-                AuthFlow flow = defaultLoginFlow.get();
+                if (defaultLoginFlow.isPresent()) {
+                    AuthFlow flow = defaultLoginFlow.get();
 
-                // First flow step we still need to run. PASSWORD Layer-1 already
-                // satisfied step 1 ⇒ start from step 2; any other Layer-1 ⇒ start
-                // from step 1 (its own step).
-                int startStep = layer1IsPassword ? 2 : 1;
+                    // First flow step we still need to run. PASSWORD Layer-1 already
+                    // satisfied step 1 ⇒ start from step 2; any other Layer-1 ⇒ start
+                    // from step 1 (its own step).
+                    int startStep = layer1IsPassword ? 2 : 1;
 
-                // Optional steps are skipped when the user has no enrollment in any
-                // enrollment-requiring method for that step — avoids forcing repeated
-                // EMAIL_OTP loops on users who haven't set up biometric MFA yet.
-                Map<AuthMethodType, Boolean> healthStatus =
-                    enrollmentHealthService.validateEnrollments(user.getId());
+                    // Optional steps are skipped when the user has no enrollment in any
+                    // enrollment-requiring method for that step: avoids forcing repeated
+                    // EMAIL_OTP loops on users who haven't set up biometric MFA yet.
+                    List<AuthFlowStep> remainingSteps = flow.getSteps().stream()
+                        .filter(step -> step.getStepOrder() >= startStep)
+                        .sorted(Comparator.comparingInt(AuthFlowStep::getStepOrder))
+                        // SECURITY (2026-06-01): a non-PASSWORD identifier-first Layer-1
+                        // step is the user's FIRST and only proof of identity: it must
+                        // ALWAYS run, even when marked optional + non-enrollment
+                        // (otherwise a zero-factor session could be minted).
+                        .filter(step -> (!layer1IsPassword && step.getStepOrder() == startStep)
+                                || step.isRequired() || stepHasBiometricEnrollment(step, healthStatus))
+                        .toList();
 
-                List<AuthFlowStep> remainingSteps = flow.getSteps().stream()
-                    .filter(step -> step.getStepOrder() >= startStep)
-                    .sorted(Comparator.comparingInt(AuthFlowStep::getStepOrder))
-                    // SECURITY (2026-06-01): a non-PASSWORD identifier-first Layer-1
-                    // step is the user's FIRST and only proof of identity — it must
-                    // ALWAYS run, even when marked optional + non-enrollment. Mirrors
-                    // the beginIdentifierLogin() guard. Without this, an optional
-                    // non-enrollment step 1 (e.g. optional EMAIL_OTP) was filtered
-                    // out, remainingSteps went empty, and execute() fell through to
-                    // mint a session with ZERO factors verified (auth bypass).
-                    .filter(step -> (!layer1IsPassword && step.getStepOrder() == startStep)
-                            || step.isRequired() || stepHasBiometricEnrollment(step, healthStatus))
-                    .toList();
+                    if (!remainingSteps.isEmpty()) {
+                        // Post-audit 2026-04-24 login edge case #5: dead-end prevention:
+                        // every REQUIRED step needs an enrolled method or a fallback.
+                        verifyUserCanCompleteFlow(remainingSteps, healthStatus);
 
-                if (!remainingSteps.isEmpty()) {
-                    // Post-audit 2026-04-24 login edge case #5 — dead-end prevention.
-                    // Before committing the user to a multi-step flow, verify every
-                    // REQUIRED step has either a method the user is enrolled in or
-                    // a configured fallback. Otherwise we would authenticate Layer-1
-                    // and then strand them mid-flow with no way to proceed.
-                    // A usernameless Layer-1 step (PASSKEY/APPROVE_LOGIN/QR_CODE)
-                    // proves its own enrollment by being completed, so it is exempt
-                    // from the prior-enrollment requirement (task #16 F).
-                    verifyUserCanCompleteFlow(user, remainingSteps);
+                        // MFA required: DO NOT issue JWT yet. Only create MFA session.
+                        AuthFlowStep nextStep = remainingSteps.get(0);
+                        List<AvailableMfaMethod> availableMethods = buildAvailableMethods(nextStep, user, healthStatus);
+                        String primaryMethod = pickPrimaryMethod(availableMethods, user.getPreferred2faMethod());
 
-                    // MFA required — DO NOT issue JWT yet. Only create MFA session.
-                    AuthFlowStep nextStep = remainingSteps.get(0);
-                    List<AvailableMfaMethod> availableMethods = buildAvailableMethods(nextStep, user);
-                    String primaryMethod = pickPrimaryMethod(availableMethods, user.getPreferred2faMethod());
+                        // stepsData credits PASSWORD only when it was the verified
+                        // Layer-1: an identifier-first Layer-1 has nothing completed yet.
+                        String stepsData = layer1IsPassword ? "[\"PASSWORD\"]" : "[]";
 
-                    // stepsData credits PASSWORD only when it was the verified
-                    // Layer-1 — an identifier-first Layer-1 has nothing completed
-                    // yet (its own step is the first one to run).
-                    String stepsData = layer1IsPassword ? "[\"PASSWORD\"]" : "[]";
+                        String sessionToken = UUID.randomUUID().toString().replace("-", "");
+                        MfaSession mfaSession = MfaSession.builder()
+                            .sessionToken(sessionToken)
+                            .userId(user.getId())
+                            .tenantId(user.getTenant().getId())
+                            .flowId(flow.getId())
+                            .currentStep(startStep)
+                            .totalSteps(flow.getStepCount())
+                            .stepsData(stepsData)  // track by AuthMethodType for reuse check; AMR mapped at token issuance
+                            .ipAddress(command.getIpAddress())
+                            .userAgent(command.getUserAgent())
+                            // Bind this MFA session to the OAuth2 client_id when the hosted
+                            // login initiated the flow: enforced at /oauth2/authorize/complete
+                            // to prevent cross-client authorization-code replay within a tenant.
+                            .clientId(command.getClientId())
+                            .expiresAt(Instant.now().plus(MFA_SESSION_TTL))
+                            .build();
+                        mfaSessionRepository.save(mfaSession);
 
-                    String sessionToken = UUID.randomUUID().toString().replace("-", "");
-                    MfaSession mfaSession = MfaSession.builder()
-                        .sessionToken(sessionToken)
-                        .userId(user.getId())
-                        .tenantId(user.getTenant().getId())
-                        .flowId(flow.getId())
-                        .currentStep(startStep)
-                        .totalSteps(flow.getStepCount())
-                        .stepsData(stepsData)  // track by AuthMethodType for reuse check; AMR mapped at token issuance
-                        .ipAddress(command.getIpAddress())
-                        .userAgent(command.getUserAgent())
-                        // Bind this MFA session to the OAuth2 client_id when the hosted
-                        // login initiated the flow — enforced at /oauth2/authorize/complete
-                        // to prevent cross-client authorization-code replay within a tenant.
-                        .clientId(command.getClientId())
-                        .expiresAt(Instant.now().plus(MFA_SESSION_TTL))
-                        .build();
-                    mfaSessionRepository.save(mfaSession);
+                        log.info("AUDIT: MFA required — userId={}, startStep={}, remainingSteps={}, nextStepType={}, availableMethods={}, ip={}",
+                            user.getId(), startStep, remainingSteps.size(), nextStep.getStepType(), availableMethods.size(), command.getIpAddress());
 
-                    log.info("AUDIT: MFA required — userId={}, startStep={}, remainingSteps={}, nextStepType={}, availableMethods={}, ip={}",
-                        user.getId(), startStep, remainingSteps.size(), nextStep.getStepType(), availableMethods.size(), command.getIpAddress());
-
-                    // Return MFA pending response — NO accessToken, NO refreshToken.
-                    // Echo completed methods sourced from the MfaSession so the response
-                    // always reflects stored state (if the session ever records multiple
-                    // methods at create-time in the future, the response stays in sync).
-                    return AuthenticationResponse.ofMfaPending(
-                        sessionToken, flow.getStepCount(), startStep, primaryMethod, availableMethods, userResponse,
-                        mfaSession.getCompletedMethods()
-                    );
+                        // Return MFA pending response: NO accessToken, NO refreshToken.
+                        return AuthenticationResponse.ofMfaPending(
+                            sessionToken, flow.getStepCount(), startStep, primaryMethod, availableMethods,
+                            firstFactor.userResponse(), mfaSession.getCompletedMethods()
+                        );
+                    }
                 }
+            } catch (NeedsEnrollmentException e) {
+                // Propagate dead-end detection to the client (login edge case #5) so
+                // GlobalExceptionHandler renders a structured 400 with method +
+                // enrollmentUrl. The password has been verified, but NO token is issued.
+                log.warn("AUDIT: Login blocked — user {} cannot complete flow (needs {} enrollment)",
+                        user.getId(), e.getMethod());
+                effects.afterCompletion(() -> auditLogPort.logAuthenticationFailed(command.getEmail(),
+                        command.getIpAddress(), "needs_enrollment:" + e.getMethod()));
+                throw e;
+            } catch (Exception e) {
+                log.warn("Failed to check tenant auth flow for user {}: {}", user.getId(), e.getMessage(), e);
             }
-        } catch (NeedsEnrollmentException e) {
-            // Propagate dead-end detection to the client (login edge case #5).
-            // We deliberately let this bubble past the generic catch so the
-            // GlobalExceptionHandler can render a structured 400 with method +
-            // enrollmentUrl. The password has been verified at this point so
-            // re-auth is not required, but we DO NOT issue a token.
-            log.warn("AUDIT: Login blocked — user {} cannot complete flow (needs {} enrollment)",
-                    user.getId(), e.getMethod());
-            auditLogPort.logAuthenticationFailed(command.getEmail(), command.getIpAddress(),
-                    "needs_enrollment:" + e.getMethod());
-            throw e;
-        } catch (Exception e) {
-            log.warn("Failed to check tenant auth flow for user {}: {}", user.getId(), e.getMessage(), e);
         }
 
-        // SECURITY (2026-06-01) — fail-closed defense-in-depth against a zero-factor
-        // mint. Only a PASSWORD Layer-1 (verified at line ~203) may reach this
-        // single-factor token mint. A non-PASSWORD identifier-first Layer-1 MUST run
-        // its own step via the MFA-pending branch above; arriving here with
-        // layer1IsPassword=false means NO factor was verified (optional non-enrollment
-        // step 1 filtered out, no default flow, or the flow block threw and was
-        // swallowed by the catch above). Never issue a session in that case.
+        // SECURITY (2026-06-01): fail-closed defense-in-depth against a zero-factor
+        // mint. Only a PASSWORD Layer-1 may reach this single-factor token mint. A
+        // non-PASSWORD identifier-first Layer-1 MUST run its own step via the
+        // MFA-pending branch above; arriving here with layer1IsPassword=false means
+        // NO factor was verified. Never issue a session in that case.
         if (!layer1IsPassword) {
             log.error("AUDIT: Login bypass prevented — identifier-first Layer-1 reached the single-factor mint with no verified factor; userId={}, layer1={}, ip={}",
-                    user.getId(), layer1Methods, command.getIpAddress());
-            auditLogPort.logAuthenticationFailed(command.getEmail(), command.getIpAddress(),
-                    "identifier_first_no_factor_verified");
+                    user.getId(), firstFactor.layer1Methods(), command.getIpAddress());
+            effects.afterCompletion(() -> auditLogPort.logAuthenticationFailed(command.getEmail(),
+                    command.getIpAddress(), "identifier_first_no_factor_verified"));
             throw new InvalidCredentialsException();
         }
 
-        // No MFA required — single-factor login, issue JWT immediately. The amr
-        // reflects the verified Layer-1 factor: "pwd" for a PASSWORD Layer-1
-        // (the only single-step case in practice — an identifier-first Layer-1
-        // always contributes its own runnable step and goes through MFA-pending).
-        List<String> amr = layer1IsPassword ? List.of("pwd") : amrFor(layer1Methods);
+        // No MFA required: single-factor login, issue JWT immediately with amr=pwd
+        // (the verified PASSWORD Layer-1; an identifier-first Layer-1 always goes
+        // through MFA-pending above).
+        List<String> amr = layer1IsPassword ? List.of("pwd") : amrFor(firstFactor.layer1Methods());
         String accessToken = tokenGenerator.generateAccessToken(user.getEmail(), amr);
         RefreshToken refreshToken = refreshTokenService.createRefreshToken(
             user, command.getIpAddress(), command.getUserAgent()
         );
 
-        // #15 — single-factor login completed: UPSERT a UserDevice row so the
-        // user surfaces in the dashboard Devices view. Best-effort (the impl
-        // swallows all errors) so device tracking can never fail the login.
-        manageDeviceUseCase.recordLoginDevice(user.getId(), command.getUserAgent());
-
-        return AuthenticationResponse.of(accessToken, refreshToken.getToken(), tokenGenerator.getExpirationMillis(), userResponse);
+        return AuthenticationResponse.of(accessToken, refreshToken.getToken(), tokenGenerator.getExpirationMillis(),
+                firstFactor.userResponse());
     }
 
     /**
      * Builds the list of available MFA methods for a step, filtered by validated enrollments.
-     * Uses EnrollmentHealthService to verify backing data actually exists.
+     * {@code healthStatus} is the enrollment health computed once per login (see
+     * EnrollmentHealthService), so the biometric probe is not repeated per helper.
      */
-    private List<AvailableMfaMethod> buildAvailableMethods(AuthFlowStep step, User user) {
+    private List<AvailableMfaMethod> buildAvailableMethods(AuthFlowStep step, User user,
+                                                           Map<AuthMethodType, Boolean> healthStatus) {
         // Delegate to the single shared resolver so EVERY login layer uses the same
         // enrolled rule (incl. PASSWORD-by-password-hash). See AvailableMethodsResolver.
-        Map<AuthMethodType, Boolean> healthStatus = enrollmentHealthService.validateEnrollments(user.getId());
         return availableMethodsResolver.build(
                 step,
                 com.fivucsas.identity.application.service.mfa.AvailableMethodsResolver.hasPassword(user.getPasswordHash()),
@@ -466,10 +518,8 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
      *   <li>OR its configured {@code fallbackMethod} is enrolled.
      * </ol>
      */
-    private void verifyUserCanCompleteFlow(User user, List<AuthFlowStep> remainingSteps) {
-        Map<AuthMethodType, Boolean> healthStatus =
-                enrollmentHealthService.validateEnrollments(user.getId());
-
+    private void verifyUserCanCompleteFlow(List<AuthFlowStep> remainingSteps,
+                                           Map<AuthMethodType, Boolean> healthStatus) {
         for (AuthFlowStep step : remainingSteps) {
             if (!step.isRequired()) {
                 continue;
@@ -524,6 +574,24 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
     }
 
     /**
+     * The tenant's default APP_LOGIN flow, or empty when the user has no tenant, the
+     * tenant has no default flow, or the lookup fails (the caller then falls back to
+     * the legacy PASSWORD login, as before).
+     */
+    private Optional<AuthFlow> findDefaultLoginFlow(User user) {
+        if (user.getTenant() == null) {
+            return Optional.empty();
+        }
+        try {
+            return authFlowRepository.findByTenantIdAndIsDefaultTrueAndIsActiveTrueAndOperationType(
+                    user.getTenant().getId(), OperationType.APP_LOGIN);
+        } catch (Exception e) {
+            log.warn("Failed to check tenant auth flow for user {}: {}", user.getId(), e.getMessage(), e);
+            return Optional.empty();
+        }
+    }
+
+    /**
      * Resolves the set of {@link AuthMethodType}s configured for step-order 1
      * (Layer-1) of the tenant's default APP_LOGIN flow. Returns an empty set
      * when the tenant has no default flow / no step 1, in which case the caller
@@ -535,14 +603,8 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
      * password they already typed, and any other option is offered as a later
      * step or a CHOICE the MFA engine handles.
      */
-    private Set<AuthMethodType> resolveLayer1Methods(User user) {
+    private Set<AuthMethodType> resolveLayer1Methods(User user, Optional<AuthFlow> defaultLoginFlow) {
         try {
-            if (user.getTenant() == null) {
-                return Set.of();
-            }
-            Optional<AuthFlow> defaultLoginFlow = authFlowRepository
-                .findByTenantIdAndIsDefaultTrueAndIsActiveTrueAndOperationType(
-                    user.getTenant().getId(), OperationType.APP_LOGIN);
             if (defaultLoginFlow.isEmpty()) {
                 return Set.of();
             }
@@ -603,8 +665,12 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
      * password login path AND the identifier-first pre-flight share one
      * implementation. Non-mismatch failures are swallowed (fail-open to the
      * regular login path), exactly as the inline gate behaved before extraction.
+     *
+     * <p>{@code auditWriter} decides when the failure audit row is written: right
+     * away, or deferred until the caller's transaction has released its connection.</p>
      */
-    private void enforceTenantLock(User user, String clientId, String email, String ipAddress) {
+    private void enforceTenantLock(User user, String clientId, String email, String ipAddress,
+                                   Consumer<Runnable> auditWriter) {
         if (clientId == null || clientId.isBlank()) {
             return;
         }
@@ -630,8 +696,8 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
                     log.warn("AUDIT: Login refused — tenant mismatch, email={}, " +
                                     "userTenant={}, clientTenant={}, clientId={}, ip={}",
                             email, user.getTenant().getId(), clientTenantId, clientId, ipAddress);
-                    auditLogPort.logAuthenticationFailed(email, ipAddress,
-                            "Tenant mismatch for OAuth client " + clientId);
+                    auditWriter.accept(() -> auditLogPort.logAuthenticationFailed(email, ipAddress,
+                            "Tenant mismatch for OAuth client " + clientId));
                     throw new TenantMismatchException(requiredTenantName);
                 }
             }
@@ -659,7 +725,7 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
             return;
         }
         userRepository.findByEmail(email)
-                .ifPresent(user -> enforceTenantLock(user, clientId, email, null));
+                .ifPresent(user -> enforceTenantLock(user, clientId, email, null, Runnable::run));
     }
 
     @Override
@@ -690,7 +756,7 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
 
         // Tenant-lock (hosted surface bound to a tenant) — 403 on mismatch, same
         // as the password path, so the email step shows "not a {tenant} member".
-        enforceTenantLock(user, clientId, email, ipAddress);
+        enforceTenantLock(user, clientId, email, ipAddress, Runnable::run);
 
         // Arbitrary-first-factor is part of the config-driven engine. When OFF for
         // the tenant (or no default flow), there is no password-less entry — return
@@ -724,9 +790,9 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
 
         // Dead-end guard (login edge case #5): bubbles NeedsEnrollmentException so
         // the client routes the user to enroll instead of stranding them mid-flow.
-        verifyUserCanCompleteFlow(user, steps);
+        verifyUserCanCompleteFlow(steps, healthStatus);
 
-        List<AvailableMfaMethod> availableMethods = buildAvailableMethods(step1, user);
+        List<AvailableMfaMethod> availableMethods = buildAvailableMethods(step1, user, healthStatus);
         String primaryMethod = pickPrimaryMethod(availableMethods, user.getPreferred2faMethod());
 
         String sessionToken = UUID.randomUUID().toString().replace("-", "");

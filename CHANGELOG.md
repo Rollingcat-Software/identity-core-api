@@ -2,6 +2,39 @@
 
 ## [Unreleased]
 
+### 2026-11-09 - Login no longer starves the connection pool (#285)
+
+- `AuthenticateUserService.execute` (POST `/api/v1/auth/login`) is no longer one
+  `@Transactional` method. It held a pooled connection while REQUIRES_NEW audit,
+  strike-counter and enrollment-health writes asked for a second one, and while the
+  enrollment probe called the biometric-processor over HTTP; about 20 concurrent logins
+  (the production pool size) deadlocked Hikari until its 30 s timeout. The login now runs
+  a first-factor transaction, then its audit rows (and on a wrong password the strike
+  counter in its own transaction), then the enrollment probe with no transaction, then a
+  completion transaction (MFA session or tokens), then the device upsert. A thread holds
+  at most one connection and none during HTTP.
+- New `application.service.transaction.TransactionRunner` / `DeferredEffects`: run work in
+  a transaction and run the side effects it queued (audit writes) after that transaction
+  ended. `afterCompletion` effects also run after a rollback, so failed-login audit rows
+  stay durable as with REQUIRES_NEW; `afterCommit` effects run only on commit.
+- `EnrollmentHealthService.validateEnrollments` is no longer REQUIRES_NEW: it reads in a
+  short transaction (joining the caller's, if any), probes FACE / VOICE without a
+  transaction, and revokes stale rows in a separate short transaction. The login computes
+  it once instead of three times per request.
+- `LoginAccountStateGuard.recordFailedAttempt` writes its audit row after its own
+  transaction ended instead of nesting a second REQUIRES_NEW inside it.
+- `spring.jpa.open-in-view: false`; `LoginOpenInViewConfig` re-registers Spring's
+  open-in-view interceptor for every path except `/api/v1/auth/login`, so other endpoints
+  (and the tenant-filter aspects that rely on a request-bound EntityManager outside
+  transactions) behave as before.
+- Behaviour change: the first-factor transaction commits before the MFA session is
+  opened, so a password-verified login that then fails with `NEEDS_ENROLLMENT` now keeps
+  its `last_login_at` / strike-counter reset (it was rolled back before).
+- New `LoginConnectionPoolIT` (pool of 2, 6 concurrent logins over HTTP, password-only and
+  PASSWORD then FACE flows, plus a check that no transaction, EntityManager or JDBC
+  connection is bound during the biometric probe); it fails on the previous code with
+  Hikari connection timeouts.
+
 ### 2026-11-04 - Deploys pulled by the mordecai deployer; Hetzner deploy workflow removed
 
 - Removed `.github/workflows/deploy-hetzner.yml`. It deployed over SSH to the

@@ -5,6 +5,7 @@ import com.fivucsas.identity.application.port.output.NfcCardRepositoryPort;
 import com.fivucsas.identity.application.port.output.UserDeviceRepositoryPort;
 import com.fivucsas.identity.application.port.output.UserEnrollmentRepositoryPort;
 import com.fivucsas.identity.application.port.output.WebAuthnCredentialRepositoryPort;
+import com.fivucsas.identity.application.service.transaction.TransactionRunner;
 import com.fivucsas.identity.domain.model.auth.AuthMethodType;
 import com.fivucsas.identity.domain.model.auth.EnrollmentStatus;
 import com.fivucsas.identity.domain.repository.UserRepository;
@@ -16,8 +17,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Propagation;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.util.*;
 
@@ -71,6 +70,7 @@ public class EnrollmentHealthService {
     private final NfcCardRepositoryPort nfcCardRepository;
     private final StringRedisTemplate redisTemplate;
     private final BiometricServicePort biometricServicePort;
+    private final TransactionRunner transactionRunner;
 
     /**
      * Spring Data {@code User} repository — used ONLY for the cross-membership
@@ -110,6 +110,7 @@ public class EnrollmentHealthService {
             NfcCardRepositoryPort nfcCardRepository,
             StringRedisTemplate redisTemplate,
             BiometricServicePort biometricServicePort,
+            TransactionRunner transactionRunner,
             com.fivucsas.identity.repository.UserRepository userJpaRepository,
             @Value("${app.identity.cross-membership-enrollment-resolution:false}")
             boolean crossMembershipNfcEnabled,
@@ -122,6 +123,7 @@ public class EnrollmentHealthService {
         this.nfcCardRepository = nfcCardRepository;
         this.redisTemplate = redisTemplate;
         this.biometricServicePort = biometricServicePort;
+        this.transactionRunner = transactionRunner;
         this.userJpaRepository = userJpaRepository;
         this.crossMembershipNfcEnabled = crossMembershipNfcEnabled;
         this.enrollmentProbeEnabled = enrollmentProbeEnabled;
@@ -132,54 +134,129 @@ public class EnrollmentHealthService {
      * Returns a map of method type to whether it is genuinely usable.
      * Stale enrollments (ENROLLED but no backing data) are auto-revoked.
      *
+     * <p>Connection use (identity-core-api #285): this method no longer runs as one
+     * REQUIRES_NEW transaction, which held a second pooled connection on top of the
+     * caller's and kept it across the biometric HTTP probe. It now reads the stored
+     * state in a short transaction (joining the caller's when there is one), asks the
+     * biometric-processor about FACE / VOICE with no transaction of its own, and
+     * revokes stale rows in a separate short transaction that commits independently
+     * of the caller, as before. Called outside a transaction (the login path), no
+     * connection is held during the HTTP call.</p>
+     *
      * @param userId the user whose enrollments to validate
      * @return map of AuthMethodType to validity (true = usable, false = stale/revoked)
      */
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public Map<AuthMethodType, Boolean> validateEnrollments(UUID userId) {
-        List<UserEnrollment> enrollments = userEnrollmentRepository.findAllByUserId(userId);
-        Optional<User> userOpt = userRepository.findById(userId);
-
-        if (userOpt.isEmpty()) {
-            log.warn("Enrollment health check requested for non-existent user: {}", userId);
+        Optional<StoredEnrollmentState> stored =
+                transactionRunner.inTransaction(effects -> readStoredEnrollmentState(userId));
+        if (stored.isEmpty()) {
             return Collections.emptyMap();
         }
 
-        User user = userOpt.get();
         Map<AuthMethodType, Boolean> healthMap = new EnumMap<>(AuthMethodType.class);
-
-        for (UserEnrollment enrollment : enrollments) {
-            if (enrollment.getStatus() != EnrollmentStatus.ENROLLED) {
-                healthMap.put(enrollment.getAuthMethodType(), false);
-                continue;
+        List<UUID> staleEnrollmentIds = new ArrayList<>();
+        for (EnrollmentCheck check : stored.get().checks()) {
+            boolean valid = check.needsBiometricProbe()
+                    ? hasBiometricData(userId, check.methodType(), stored.get().faceTenantId())
+                    : check.storedDataValid();
+            healthMap.put(check.methodType(), valid);
+            if (check.enrolled() && !valid) {
+                staleEnrollmentIds.add(check.enrollmentId());
             }
+        }
 
-            boolean valid = checkBackingData(enrollment.getAuthMethodType(), userId, user);
-            healthMap.put(enrollment.getAuthMethodType(), valid);
-
-            if (!valid) {
-                log.info("Auto-revoking stale {} enrollment for user {} (backing data missing)",
-                        enrollment.getAuthMethodType(), userId);
-                enrollment.revoke();
-                userEnrollmentRepository.save(enrollment);
-            }
+        if (!staleEnrollmentIds.isEmpty()) {
+            transactionRunner.inNewTransaction(effects -> {
+                revokeStaleEnrollments(userId, staleEnrollmentIds);
+                return null;
+            });
         }
 
         // Cross-membership NFC (flag-gated, NFC only): a person may hold their NFC
         // card under one membership (e.g. tenant FIVUCSAS) but log in via another
         // (e.g. tenant Marmara, reached through hosted login) whose active row has
-        // NO NFC user_enrollments row at all — so the loop above never produced an
+        // NO NFC user_enrollments row at all, so the loop above never produced an
         // NFC entry. Surface NFC as enrolled when a sibling membership has an
-        // active card, so AvailableMethodsResolver offers it. (When the active row
-        // DOES have an NFC enrollment, hasActiveNfcCard already resolved it above —
-        // and that same cross-membership hit also prevents an erroneous auto-revoke
-        // of a legitimately empty active-row card set.)
-        if (crossMembershipNfcEnabled && !Boolean.TRUE.equals(healthMap.get(AuthMethodType.NFC_DOCUMENT))
-                && hasCrossMembershipActiveNfcCard(userId)) {
+        // active card, so AvailableMethodsResolver offers it.
+        if (stored.get().crossMembershipNfcCard()) {
             healthMap.put(AuthMethodType.NFC_DOCUMENT, true);
         }
 
         return healthMap;
+    }
+
+    /** Methods whose backing data lives in the biometric-processor (checked over HTTP). */
+    private static final Set<AuthMethodType> BIOMETRIC_PROBE_TYPES =
+            Set.of(AuthMethodType.FACE, AuthMethodType.VOICE);
+
+    /**
+     * One enrollment row as seen in the read transaction. For FACE / VOICE the
+     * verdict is left to the biometric probe that runs after the transaction.
+     */
+    private record EnrollmentCheck(UUID enrollmentId, AuthMethodType methodType, boolean enrolled,
+                                   boolean needsBiometricProbe, boolean storedDataValid) {
+    }
+
+    /** Everything validateEnrollments needs from the database, read in one short transaction. */
+    private record StoredEnrollmentState(List<EnrollmentCheck> checks, String faceTenantId,
+                                         boolean crossMembershipNfcCard) {
+    }
+
+    private Optional<StoredEnrollmentState> readStoredEnrollmentState(UUID userId) {
+        List<UserEnrollment> enrollments = userEnrollmentRepository.findAllByUserId(userId);
+        Optional<User> userOpt = userRepository.findById(userId);
+
+        if (userOpt.isEmpty()) {
+            log.warn("Enrollment health check requested for non-existent user: {}", userId);
+            return Optional.empty();
+        }
+
+        User user = userOpt.get();
+        List<EnrollmentCheck> checks = new ArrayList<>();
+        Boolean nfcValid = null;
+        boolean probesFace = false;
+        for (UserEnrollment enrollment : enrollments) {
+            AuthMethodType type = enrollment.getAuthMethodType();
+            if (enrollment.getStatus() != EnrollmentStatus.ENROLLED) {
+                checks.add(new EnrollmentCheck(enrollment.getId(), type, false, false, false));
+                if (type == AuthMethodType.NFC_DOCUMENT) {
+                    nfcValid = false;
+                }
+            } else if (BIOMETRIC_PROBE_TYPES.contains(type)) {
+                checks.add(new EnrollmentCheck(enrollment.getId(), type, true, true, false));
+                probesFace |= type == AuthMethodType.FACE;
+            } else {
+                boolean valid = checkBackingData(type, userId, user);
+                checks.add(new EnrollmentCheck(enrollment.getId(), type, true, false, valid));
+                if (type == AuthMethodType.NFC_DOCUMENT) {
+                    nfcValid = valid;
+                }
+            }
+        }
+
+        // Face verify is tenant-scoped; resolve the user's tenant now so the probe
+        // after this transaction queries the same partition the verify path would
+        // (null means the bio default partition).
+        String faceTenantId = probesFace && enrollmentProbeEnabled
+                ? userJpaRepository.findTenantIdById(userId).map(UUID::toString).orElse(null)
+                : null;
+        boolean crossMembershipNfcCard = crossMembershipNfcEnabled && !Boolean.TRUE.equals(nfcValid)
+                && hasCrossMembershipActiveNfcCard(userId);
+        return Optional.of(new StoredEnrollmentState(checks, faceTenantId, crossMembershipNfcCard));
+    }
+
+    /** Re-reads each stale row and revokes it if it is still ENROLLED. */
+    private void revokeStaleEnrollments(UUID userId, List<UUID> staleEnrollmentIds) {
+        for (UUID enrollmentId : staleEnrollmentIds) {
+            userEnrollmentRepository.findById(enrollmentId)
+                    .filter(enrollment -> enrollment.getStatus() == EnrollmentStatus.ENROLLED)
+                    .ifPresent(enrollment -> {
+                        log.info("Auto-revoking stale {} enrollment for user {} (backing data missing)",
+                                enrollment.getAuthMethodType(), userId);
+                        enrollment.revoke();
+                        userEnrollmentRepository.save(enrollment);
+                    });
+        }
     }
 
     /**
@@ -194,8 +271,6 @@ public class EnrollmentHealthService {
             case TOTP -> hasTotpSecret(userId, user);
             case FINGERPRINT -> hasWebAuthnCredential(userId, true);
             case HARDWARE_KEY -> hasWebAuthnCredential(userId, false);
-            case FACE -> hasBiometricData(userId, AuthMethodType.FACE);
-            case VOICE -> hasBiometricData(userId, AuthMethodType.VOICE);
             case NFC_DOCUMENT -> hasActiveNfcCard(userId);
             case SMS_OTP -> user.getPhoneNumber() != null && !user.getPhoneNumber().isBlank();
             case EMAIL_OTP -> user.getEmail() != null && !user.getEmail().isBlank();
@@ -310,18 +385,16 @@ public class EnrollmentHealthService {
      * trust-if-reachable check (no probe), so prod can disable the new behaviour
      * instantly without a redeploy.</p>
      */
-    private boolean hasBiometricData(UUID userId, AuthMethodType biometricType) {
+    private boolean hasBiometricData(UUID userId, AuthMethodType biometricType, String faceTenantId) {
         if (!enrollmentProbeEnabled) {
             return legacyTrustIfReachable(userId, biometricType);
         }
 
         Boolean exists;
         if (biometricType == AuthMethodType.FACE) {
-            // Face verify is tenant-scoped; resolve the user's tenant so the probe
-            // queries the same partition the verify path would (null → bio default).
-            String tenantId = userJpaRepository.findTenantIdById(userId)
-                    .map(UUID::toString).orElse(null);
-            exists = biometricServicePort.faceEnrollmentExists(userId, tenantId);
+            // Face verify is tenant-scoped: faceTenantId was resolved in the read
+            // transaction (null means the bio default partition).
+            exists = biometricServicePort.faceEnrollmentExists(userId, faceTenantId);
         } else {
             // Voice verify is not tenant-scoped (probe by userId only).
             exists = biometricServicePort.voiceEnrollmentExists(userId);
