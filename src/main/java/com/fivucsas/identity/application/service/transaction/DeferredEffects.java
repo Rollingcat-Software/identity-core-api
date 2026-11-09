@@ -29,15 +29,20 @@ public final class DeferredEffects {
     }
 
     /**
-     * Runs {@code effect} after the transaction ends, whether it committed or rolled
-     * back. Use it for records that must survive a rollback, such as a failed-login
-     * audit row written right before the work throws.
+     * Runs {@code effect} after the transaction ends (the caller's transaction when the
+     * work joined one), whether it committed or rolled back. Use it for records that
+     * must survive a rollback, such as a failed-login audit row written right before
+     * the work throws.
      */
     public void afterCompletion(Runnable effect) {
         effects.add(new Effect(effect, false));
     }
 
-    /** Runs {@code effect} only if the work returned normally and its transaction committed. */
+    /**
+     * Runs {@code effect} only if the transaction the work ran in committed. When the
+     * work joined a caller's transaction, that is the caller's transaction: the effect
+     * waits for its commit and is skipped if it rolls back.
+     */
     public void afterCommit(Runnable effect) {
         effects.add(new Effect(effect, true));
     }

@@ -1,6 +1,7 @@
 package com.fivucsas.identity.application.service.transaction;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -72,5 +73,41 @@ class TransactionRunnerTest {
 
         assertThat(seen).containsExactly("inner work, open=2", "inner effect, open=1");
         assertThat(transactionManager.events()).containsExactly("begin", "begin", "commit", "commit");
+    }
+
+    @Test
+    void inTransaction_WhenJoinedOuterTransactionRollsBack_ShouldSkipCommitOnlyEffectsAndRunTheRestAfterTheOuterEnds() {
+        List<String> seen = new ArrayList<>();
+        TransactionTemplate outer = new TransactionTemplate(transactionManager);
+
+        outer.executeWithoutResult(status -> {
+            runner.inTransaction(effects -> {
+                effects.afterCompletion(() -> seen.add("always, open=" + transactionManager.openTransactions()));
+                effects.afterCommit(() -> seen.add("commit-only"));
+                return null;
+            });
+            seen.add("outer continues");
+            status.setRollbackOnly();
+        });
+
+        assertThat(seen).containsExactly("outer continues", "always, open=0");
+        assertThat(transactionManager.events()).containsExactly("begin", "rollback");
+    }
+
+    @Test
+    void inTransaction_WhenJoinedOuterTransactionCommits_ShouldRunEffectsOnlyAfterTheOuterCommit() {
+        List<String> seen = new ArrayList<>();
+        TransactionTemplate outer = new TransactionTemplate(transactionManager);
+
+        outer.executeWithoutResult(status -> {
+            runner.inTransaction(effects -> {
+                effects.afterCommit(() -> seen.add("commit-only, open=" + transactionManager.openTransactions()));
+                return null;
+            });
+            seen.add("outer continues");
+        });
+
+        assertThat(seen).containsExactly("outer continues", "commit-only, open=0");
+        assertThat(transactionManager.events()).containsExactly("begin", "commit");
     }
 }
