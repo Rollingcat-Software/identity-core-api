@@ -347,21 +347,26 @@ public class EnrollmentHealthService {
 
     /**
      * Second, unscoped probe after the tenant-scoped one answered "no" (issue #284).
-     * Before #284 an image enroll without {@code tenant_id} stored the template
-     * with a NULL tenant, which bio's tenant-scoped existence query can never
-     * match. bio's 1:1 verify ({@code find_by_user_id}) is keyed on the user id
-     * only, so such a template still verifies at login and must not be revoked.
-     * User ids are globally unique, so a template found without the tenant filter
-     * is this user's. New enrollments are stored under the user's tenant
+     * Before #284 a template could be stored outside the user's tenant: an image
+     * enroll without {@code tenant_id} stored it with a NULL tenant, and the
+     * embedding enroll honoured any client {@code tenant_id}. bio's tenant-scoped
+     * existence query cannot match either row, but bio's 1:1 verify
+     * ({@code find_by_user_id}) is keyed on the user id only, so such a template
+     * still verifies at login and must not be revoked. User ids are globally
+     * unique, so a template found without the tenant filter is this user's.
+     * New enrollments are stored under the user's tenant
      * ({@code BiometricEnrollmentTenantResolver}), so this branch only fires for
      * legacy rows or a user with no template at all (one extra call, once, before
      * the revoke). The tri-state contract is kept: {@code null} fails open.
+     * Such rows are still missing from tenant-scoped 1:N search until they are
+     * backfilled (see the #284 PR).
      */
     private Boolean probeTenantlessFaceTemplate(UUID userId, String tenantId) {
         Boolean anyTenant = biometricServicePort.faceEnrollmentExists(userId, null);
         if (Boolean.TRUE.equals(anyTenant)) {
             log.warn("FACE template of user {} is not stored under the user's tenant {} "
-                    + "(tenant-less enroll from before #284); keeping the enrollment", userId, tenantId);
+                    + "(legacy NULL or mis-scoped tenant from before #284); keeping the enrollment",
+                    userId, tenantId);
         }
         return anyTenant;
     }
