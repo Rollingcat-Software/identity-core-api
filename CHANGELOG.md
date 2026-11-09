@@ -2,6 +2,23 @@
 
 ## [Unreleased]
 
+### 2026-11-09 - OAuth2 code exchange persists the refresh token it returns
+
+- `OAuth2Service` is `@Transactional(readOnly = true)` at class level and the
+  `exchangeCode` overloads had no method-level transaction, so the
+  `authorization_code` exchange ran read-only. The refresh token minted inside it was
+  saved into a transaction that never flushes: the client received a wire token whose
+  row never existed. Every later `refresh_token` grant failed with "Refresh token not
+  found or has been revoked" and the mobile app was sent back to sign-in once its
+  access token expired. Production evidence: `refresh_tokens` holds no row with a
+  `client_id` at all, and family `eec7942c-...` logged for the 2026-11-03 22:02:49
+  exchange for `fivucsas-mobile` does not exist. The `exchangeCode` overloads are now
+  write transactions; `OAuth2ServiceTransactionBoundaryTest` pins the resolved attribute.
+- `OAuth2RefreshTokenPersistenceIntegrationTest` (real PostgreSQL via Testcontainers, real
+  Redis) runs the whole path: mint a PKCE code, exchange it, then refresh with the returned
+  `refresh_token`. Without the fix it fails with 0 `refresh_tokens` rows for the user; with
+  it the row exists and the refresh grant rotates the token.
+
 ### 2026-11-04 - Deploys pulled by the mordecai deployer; Hetzner deploy workflow removed
 
 - Removed `.github/workflows/deploy-hetzner.yml`. It deployed over SSH to the
