@@ -17,8 +17,12 @@
   a transaction and run the side effects it queued (audit writes) after that transaction
   ended. `afterCompletion` effects also run after a rollback, so failed-login audit rows
   stay durable as with REQUIRES_NEW; `afterCommit` effects run only on commit.
-- `EnrollmentHealthService.validateEnrollments` is no longer REQUIRES_NEW: it reads in a
-  short transaction (joining the caller's, if any), probes FACE / VOICE without a
+  When the work joins a caller's transaction, the effects are handed to that transaction
+  and run after it completes (`afterCommit` only if it commits).
+- `EnrollmentHealthService.validateEnrollments` no longer holds one REQUIRES_NEW
+  transaction across the biometric probe: it reads in its own short transaction (still
+  isolated from a caller's transaction, as before: it does not see the caller's
+  uncommitted writes and cannot mark it rollback-only), probes FACE / VOICE without a
   transaction, and revokes stale rows in a separate short transaction. The login computes
   it once instead of three times per request.
 - `LoginAccountStateGuard.recordFailedAttempt` writes its audit row after its own
@@ -27,9 +31,22 @@
   open-in-view interceptor for every path except `/api/v1/auth/login`, so other endpoints
   (and the tenant-filter aspects that rely on a request-bound EntityManager outside
   transactions) behave as before.
-- Behaviour change: the first-factor transaction commits before the MFA session is
-  opened, so a password-verified login that then fails with `NEEDS_ENROLLMENT` now keeps
-  its `last_login_at` / strike-counter reset (it was rolled back before).
+- Behaviour change (PASSWORD Layer-1): the first-factor transaction commits before the
+  completion step, so once the password is verified its `last_login_at` update and
+  strike-counter reset survive any completion failure (`NEEDS_ENROLLMENT`, a refresh-token
+  insert failure, a rollback of the completion transaction); before, they were rolled back.
+- Behaviour change (identifier-first Layer-1, config-driven engine only): `/auth/login`
+  verifies no factor here, so it no longer resets the strike counter (before, it did on
+  the MFA-pending path, which let a bare `/auth/login` undo the strikes of failed
+  `/auth/mfa/step` guesses). The first verified factor resets it
+  (`LoginAccountStateGuard.recordSuccess`). `last_login_at` is recorded in the completion
+  transaction with the MFA session, so a login that ends with no verified factor changes
+  nothing on the user row.
+- CI: `LoginConnectionPoolIT` is added to the "ITs actually executed" assertion, so a
+  rename or gate change cannot skip it silently.
+- Scope: `/auth/mfa/step`, `/auth/login/begin` and the `/login/preflight` audit write
+  still hold a connection across REQUIRES_NEW writes or biometric HTTP; #285 stays open
+  until they are split the same way.
 - New `LoginConnectionPoolIT` (pool of 2, 6 concurrent logins over HTTP, password-only and
   PASSWORD then FACE flows, plus a check that no transaction, EntityManager or JDBC
   connection is bound during the biometric probe); it fails on the previous code with
