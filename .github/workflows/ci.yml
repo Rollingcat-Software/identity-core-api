@@ -123,7 +123,8 @@ jobs:
         #                      guarantees and previously never ran in CI:
         #                      CrossTenantIsolationIT, TenantSwitcherIsolationIT,
         #                      IdentityBiometricConsentIT, IdentityBackfillIT,
-        #                      RoleUnificationBackfillIT.
+        #                      RoleUnificationBackfillIT,
+        #                      BiometricEnrollmentTenantResolverIT.
         # Passing an explicit -Dtest overrides surefire's default include glob,
         # so the `*IT` classes (which surefire would otherwise leave to failsafe)
         # are executed in the `test` phase. -DfailIfNoTests guards against the
@@ -153,7 +154,8 @@ jobs:
             TenantSwitcherIsolationIT \
             IdentityBiometricConsentIT \
             IdentityBackfillIT \
-            RoleUnificationBackfillIT
+            RoleUnificationBackfillIT \
+            BiometricEnrollmentTenantResolverIT
 
       - name: Upload surefire reports on failure
         if: failure()

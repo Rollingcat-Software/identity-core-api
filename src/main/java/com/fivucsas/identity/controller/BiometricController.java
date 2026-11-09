@@ -271,6 +271,9 @@ public class BiometricController {
             @PathVariable UUID userId,
             @RequestBody Map<String, String> request) {
 
+        // Issue #284: same cross-tenant guard as every other enroll endpoint. The
+        // bio voice store is user-scoped, so only the guard is needed, not the tenant.
+        enrollmentTenantResolver.assertMayEnroll(userId);
         log.info("Voice enrollment request for user: {}", userId);
 
         String voiceData = request.get("voiceData");
