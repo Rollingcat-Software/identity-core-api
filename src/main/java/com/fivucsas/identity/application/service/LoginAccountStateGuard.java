@@ -1,6 +1,7 @@
 package com.fivucsas.identity.application.service;
 
 import com.fivucsas.identity.application.port.output.AuditLogPort;
+import com.fivucsas.identity.application.service.transaction.TransactionRunner;
 import com.fivucsas.identity.domain.exception.AccountLockedException;
 import com.fivucsas.identity.domain.exception.AccountNotActiveException;
 import com.fivucsas.identity.entity.User;
@@ -48,6 +49,7 @@ public class LoginAccountStateGuard {
 
     private final UserRepository userRepository;
     private final AuditLogPort auditLogPort;
+    private final TransactionRunner transactionRunner;
 
     /**
      * Rejects the login if the account is currently locked (an EXPIRED lock is
@@ -89,26 +91,30 @@ public class LoginAccountStateGuard {
      *
      * @return true if THIS failure triggered the lockout
      */
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public boolean recordFailedAttempt(UUID userId, String email, String ipAddress) {
-        User user = userRepository.findById(userId).orElse(null);
-        if (user == null) {
-            return false;
-        }
-        user.incrementFailedLoginAttempts();
-        boolean justLocked = false;
-        if (user.getFailedLoginAttempts() >= MAX_FAILED_ATTEMPTS) {
-            user.lockAccount(LOCKOUT_DURATION);
-            justLocked = true;
-            log.warn("AUDIT: Account locked — email={}, failedAttempts={}, ip={}", email, MAX_FAILED_ATTEMPTS, ipAddress);
-            auditLogPort.logAuthenticationFailed(email, ipAddress,
-                    "Account locked after " + MAX_FAILED_ATTEMPTS + " failed attempts");
-        } else {
-            auditLogPort.logAuthenticationFailed(email, ipAddress,
-                    "Invalid credential (attempt " + user.getFailedLoginAttempts() + "/" + MAX_FAILED_ATTEMPTS + ")");
-        }
-        userRepository.save(user);
-        return justLocked;
+        // The audit row is written after the strike transaction has ended (#285):
+        // written inside it, its REQUIRES_NEW transaction needed a second pooled
+        // connection while this one was still held.
+        return transactionRunner.inNewTransaction(effects -> {
+            User user = userRepository.findById(userId).orElse(null);
+            if (user == null) {
+                return false;
+            }
+            user.incrementFailedLoginAttempts();
+            boolean justLocked = false;
+            String reason;
+            if (user.getFailedLoginAttempts() >= MAX_FAILED_ATTEMPTS) {
+                user.lockAccount(LOCKOUT_DURATION);
+                justLocked = true;
+                log.warn("AUDIT: Account locked: email={}, failedAttempts={}, ip={}", email, MAX_FAILED_ATTEMPTS, ipAddress);
+                reason = "Account locked after " + MAX_FAILED_ATTEMPTS + " failed attempts";
+            } else {
+                reason = "Invalid credential (attempt " + user.getFailedLoginAttempts() + "/" + MAX_FAILED_ATTEMPTS + ")";
+            }
+            effects.afterCompletion(() -> auditLogPort.logAuthenticationFailed(email, ipAddress, reason));
+            userRepository.save(user);
+            return justLocked;
+        });
     }
 
     /** Resets the strike counter after a successful factor (own committed tx). */
