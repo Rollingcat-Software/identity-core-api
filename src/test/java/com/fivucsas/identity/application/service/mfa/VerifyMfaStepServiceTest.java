@@ -443,13 +443,13 @@ class VerifyMfaStepServiceTest {
         when(userRepository.findById(userId)).thenReturn(Optional.of(user));
         when(authFlowRepository.findById(flowId)).thenReturn(Optional.of(flow));
         when(faceHandler.verify(eq(session), eq(user), any()))
-                .thenReturn(MfaStepResult.fail("face_mismatch"));
+                .thenReturn(MfaStepResult.fail(MfaFailureReasons.FACE_MISMATCH));
 
         // Embedding-path payload: no "image" key, exactly as the browser sends it.
         service.execute(req("FACE", Map.of("embedding", List.of(0.1, 0.2))));
 
         verify(auditLogPort).logMfaStepFailed(eq(userId.toString()), eq("FACE"),
-                eq("face_mismatch"), eq(CLIENT_IP), eq(UA));
+                eq(MfaFailureReasons.FACE_MISMATCH), eq(CLIENT_IP), eq(UA));
     }
 
     @Test
@@ -471,7 +471,7 @@ class VerifyMfaStepServiceTest {
         service.execute(req("FACE", Map.of("embedding", List.of(0.1, 0.2))));
 
         verify(auditLogPort).logMfaStepFailed(eq(userId.toString()), eq("FACE"),
-                eq("face_verification_failed"), eq(CLIENT_IP), eq(UA));
+                eq(MfaFailureReasons.FACE_VERIFICATION_FAILED), eq(CLIENT_IP), eq(UA));
     }
 
     // ============== Step-binding guard (P1-1) ==============

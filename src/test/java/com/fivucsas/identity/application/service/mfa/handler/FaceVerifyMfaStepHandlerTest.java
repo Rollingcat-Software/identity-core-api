@@ -5,6 +5,7 @@ import com.fivucsas.identity.application.port.output.BiometricServicePort;
 import com.fivucsas.identity.application.service.ClientSideEmbeddingPolicy;
 import com.fivucsas.identity.application.service.FaceEmbeddingLivenessPolicy;
 import com.fivucsas.identity.application.service.mfa.LivenessEmbeddingDigest;
+import com.fivucsas.identity.application.service.mfa.MfaFailureReasons;
 import com.fivucsas.identity.application.service.mfa.MfaStepResult;
 import com.fivucsas.identity.entity.MfaSession;
 import com.fivucsas.identity.entity.User;
@@ -148,7 +149,7 @@ class FaceVerifyMfaStepHandlerTest {
 
         MfaStepResult result = handler.verify(session, user, Map.of("embedding", EMBEDDING));
 
-        assertThat(result.failureReason()).isEqualTo("face_mismatch");
+        assertThat(result.failureReason()).isEqualTo(MfaFailureReasons.FACE_MISMATCH);
     }
 
     @Test
@@ -158,7 +159,7 @@ class FaceVerifyMfaStepHandlerTest {
 
         MfaStepResult result = handler.verify(session, user, Map.of("image", IMAGE_B64));
 
-        assertThat(result.failureReason()).isEqualTo("face_mismatch");
+        assertThat(result.failureReason()).isEqualTo(MfaFailureReasons.FACE_MISMATCH);
     }
 
     @Test
@@ -169,7 +170,7 @@ class FaceVerifyMfaStepHandlerTest {
 
         MfaStepResult result = handler.verify(session, user, Map.of("embedding", EMBEDDING));
 
-        assertThat(result.failureReason()).isEqualTo("face_spoof_detected");
+        assertThat(result.failureReason()).isEqualTo(MfaFailureReasons.FACE_SPOOF_DETECTED);
     }
 
     @Test
@@ -180,7 +181,7 @@ class FaceVerifyMfaStepHandlerTest {
 
         MfaStepResult result = handler.verify(session, user, Map.of("embedding", EMBEDDING));
 
-        assertThat(result.failureReason()).isEqualTo("face_verifier_no_verdict");
+        assertThat(result.failureReason()).isEqualTo(MfaFailureReasons.FACE_VERIFIER_NO_VERDICT);
     }
 
     @Test
@@ -189,7 +190,7 @@ class FaceVerifyMfaStepHandlerTest {
 
         MfaStepResult result = handler.verify(session, user, Map.of());
 
-        assertThat(result.failureReason()).isEqualTo("missing_face_image");
+        assertThat(result.failureReason()).isEqualTo(MfaFailureReasons.MISSING_FACE_IMAGE);
     }
 
     @Test

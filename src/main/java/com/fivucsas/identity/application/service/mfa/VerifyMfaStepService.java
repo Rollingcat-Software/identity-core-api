@@ -607,14 +607,14 @@ public class VerifyMfaStepService {
      */
     private String resolveFailureReason(AuthMethodType methodType, Map<String, Object> data) {
         return switch (methodType) {
-            case PASSWORD -> "invalid_password";
+            case PASSWORD -> MfaFailureReasons.INVALID_PASSWORD;
             case EMAIL_OTP, SMS_OTP -> {
                 String code = data != null ? (String) data.get("code") : null;
-                yield (code == null || code.isBlank()) ? "missing_otp_code" : "invalid_or_expired_otp";
+                yield (code == null || code.isBlank()) ? MfaFailureReasons.MISSING_OTP_CODE : MfaFailureReasons.INVALID_OR_EXPIRED_OTP;
             }
             case TOTP -> {
                 String code = data != null ? (String) data.get("code") : null;
-                yield (code == null || code.isBlank()) ? "missing_totp_code" : "invalid_totp_code";
+                yield (code == null || code.isBlank()) ? MfaFailureReasons.MISSING_TOTP_CODE : MfaFailureReasons.INVALID_TOTP_CODE;
             }
             case FACE -> {
                 String image = data != null ? (String) data.get("image") : null;
@@ -625,21 +625,21 @@ public class VerifyMfaStepService {
             }
             case VOICE -> {
                 String voiceData = data != null ? (String) data.get("voiceData") : null;
-                yield (voiceData == null || voiceData.isBlank()) ? "missing_voice_data" : "voice_verification_failed";
+                yield (voiceData == null || voiceData.isBlank()) ? MfaFailureReasons.MISSING_VOICE_DATA : MfaFailureReasons.VOICE_VERIFICATION_FAILED;
             }
             case FINGERPRINT, HARDWARE_KEY -> {
                 String assertion = data != null ? (String) data.get("assertion") : null;
-                yield (assertion == null || assertion.isBlank()) ? "missing_webauthn_assertion" : "webauthn_verification_failed";
+                yield (assertion == null || assertion.isBlank()) ? MfaFailureReasons.MISSING_WEBAUTHN_ASSERTION : MfaFailureReasons.WEBAUTHN_VERIFICATION_FAILED;
             }
             case QR_CODE -> {
                 String token = data != null ? (String) data.get("token") : null;
-                yield (token == null || token.isBlank()) ? "missing_qr_token" : "invalid_qr_token";
+                yield (token == null || token.isBlank()) ? MfaFailureReasons.MISSING_QR_TOKEN : MfaFailureReasons.INVALID_QR_TOKEN;
             }
             case NFC_DOCUMENT -> {
                 String nfcData = data != null ? (String) data.get("nfcData") : null;
-                yield (nfcData == null || nfcData.isBlank()) ? "missing_nfc_data" : "nfc_card_not_found_or_not_owned";
+                yield (nfcData == null || nfcData.isBlank()) ? MfaFailureReasons.MISSING_NFC_DATA : MfaFailureReasons.NFC_CARD_NOT_FOUND_OR_NOT_OWNED;
             }
-            default -> "verification_failed";
+            default -> MfaFailureReasons.VERIFICATION_FAILED;
         };
     }
 

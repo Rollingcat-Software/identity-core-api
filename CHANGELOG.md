@@ -13,6 +13,11 @@
   `missing_face_image` (constants in `MfaFailureReasons`), and `VerifyMfaStepService`
   audits that reason. Its payload-based fallback no longer calls an embedding submission
   "missing image".
+- `MfaFailureReasons` is now the single definition of every MFA audit reason (20
+  constants). `VerifyMfaStepService.resolveFailureReason` and the legacy
+  `AuthController.resolveFailureReason` use the constants instead of string literals, so
+  the values are unchanged. Tests use the constants; `MfaFailureReasonsTest` is the one
+  place that pins the wire values (they are queried in the audit log by name).
 
 ### 2026-11-04 - Deploys pulled by the mordecai deployer; Hetzner deploy workflow removed
 
