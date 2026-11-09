@@ -137,18 +137,26 @@ public class EnrollmentHealthService {
      * <p>Connection use (identity-core-api #285): this method no longer runs as one
      * REQUIRES_NEW transaction, which held a second pooled connection on top of the
      * caller's and kept it across the biometric HTTP probe. It now reads the stored
-     * state in a short transaction (joining the caller's when there is one), asks the
-     * biometric-processor about FACE / VOICE with no transaction of its own, and
-     * revokes stale rows in a separate short transaction that commits independently
-     * of the caller, as before. Called outside a transaction (the login path), no
-     * connection is held during the HTTP call.</p>
+     * state in a short transaction of its own, asks the biometric-processor about
+     * FACE / VOICE with no transaction of its own, and revokes stale rows in a separate
+     * short transaction that commits independently of the caller, as before. Called
+     * outside a transaction (the login path), a thread holds one connection at most
+     * and none during the HTTP call.</p>
+     *
+     * <p>The read stays isolated from a caller's transaction, as the former
+     * REQUIRES_NEW was: it does not see the caller's uncommitted writes (for example
+     * the APPROVE_LOGIN row {@code UsernamelessLoginFlowService} creates first), and a
+     * failing read cannot mark the caller's transaction rollback-only. For a
+     * transactional caller this still costs a second connection during the read,
+     * though no longer during the HTTP probe; splitting those callers the same way as
+     * the login path is the open part of #285.</p>
      *
      * @param userId the user whose enrollments to validate
      * @return map of AuthMethodType to validity (true = usable, false = stale/revoked)
      */
     public Map<AuthMethodType, Boolean> validateEnrollments(UUID userId) {
         Optional<StoredEnrollmentState> stored =
-                transactionRunner.inTransaction(effects -> readStoredEnrollmentState(userId));
+                transactionRunner.inNewTransaction(effects -> readStoredEnrollmentState(userId));
         if (stored.isEmpty()) {
             return Collections.emptyMap();
         }

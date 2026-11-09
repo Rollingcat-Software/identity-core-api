@@ -97,6 +97,30 @@ class EnrollmentHealthServiceTest {
         verify(userEnrollmentRepository).save(any(UserEnrollment.class));
     }
 
+    @Test
+    void validateEnrollments_WhenCallerHoldsATransaction_ShouldReadInItsOwnIsolatedTransaction() {
+        when(userRepository.findById(userId)).thenReturn(Optional.of(User.builder().id(userId)
+                .email("u@marun.edu.tr").firstName("A").lastName("B").build()));
+        when(userJpaRepository.findTenantIdById(userId)).thenReturn(Optional.empty());
+        when(biometricServicePort.faceEnrollmentExists(userId, null)).thenReturn(Boolean.TRUE);
+        java.util.List<Integer> openDuringRead = new java.util.ArrayList<>();
+        when(userEnrollmentRepository.findAllByUserId(userId)).thenAnswer(invocation -> {
+            openDuringRead.add(transactionManager.openTransactions());
+            return List.of(UserEnrollment.builder().id(UUID.randomUUID())
+                    .authMethodType(AuthMethodType.FACE).status(EnrollmentStatus.ENROLLED).build());
+        });
+        EnrollmentHealthService service = service(true);
+
+        Map<AuthMethodType, Boolean> health = new TransactionRunner(transactionManager)
+                .inTransaction(effects -> service.validateEnrollments(userId));
+
+        assertThat(health.get(AuthMethodType.FACE)).isTrue();
+        // The read neither sees nor poisons the caller's uncommitted work: it runs in
+        // its own transaction on top of the caller's, as the former REQUIRES_NEW did.
+        assertThat(openDuringRead).containsExactly(2);
+        assertThat(transactionManager.events()).containsExactly("begin", "begin", "commit", "commit");
+    }
+
     // -- VOICE -----------------------------------------------------------------
 
     @Test
