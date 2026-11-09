@@ -14,6 +14,7 @@ import com.fivucsas.identity.entity.UserEnrollment;
 import com.fivucsas.identity.exception.DomainStateConflictException;
 import com.fivucsas.identity.exception.ResourceNotFoundException;
 import com.fivucsas.identity.repository.UserEnrollmentRepository;
+import com.fivucsas.identity.security.BiometricEnrollmentTenantResolver;
 import com.fivucsas.identity.security.RbacAuthorizationService;
 import com.fivucsas.identity.security.TenantScopeResolver;
 import io.swagger.v3.oas.annotations.Operation;
@@ -52,6 +53,8 @@ public class EnrollmentController {
     private final RbacAuthorizationService rbacService;
     private final EnrollmentHealthService enrollmentHealthService;
     private final TenantScopeResolver tenantScopeResolver;
+    // Issue #284: the one place an enroll endpoint gets its bio tenant from.
+    private final BiometricEnrollmentTenantResolver enrollmentTenantResolver;
 
     // --- /api/v1/enrollments endpoints ---
 
@@ -215,7 +218,11 @@ public class EnrollmentController {
 
         log.info("Enrollment submission for user: {}, nationalId: {}", currentUserId, nationalId);
 
-        Map<String, Object> enrollResult = biometricService.enrollFace(currentUserId, faceImage);
+        // Issue #284: store the template under the user's tenant, the partition
+        // the login enrollment probe and 1:N search look in.
+        String enrollTenantId = enrollmentTenantResolver.resolve(currentUserId, null);
+        Map<String, Object> enrollResult = biometricService.enrollFace(
+                currentUserId, faceImage, enrollTenantId, null, null);
 
         boolean success = Boolean.TRUE.equals(enrollResult.get("success"));
 

@@ -218,8 +218,8 @@ class BiometricServiceAdapterTest {
     }
 
     @Test
-    @DisplayName("Backward-compat: legacy 2-arg enrollFace omits optional parts")
-    void enrollFace_backwardCompat_noTenantOrEmbedding() {
+    @DisplayName("Tenant-less user: null tenant and no embedding omit the optional parts")
+    void enrollFace_WhenTenantAndEmbeddingNull_ShouldOmitOptionalParts() {
         mockServer.expect(requestTo(BIO_URL + "/enroll"))
                 .andExpect(method(HttpMethod.POST))
                 .andExpect(req -> {
@@ -233,8 +233,7 @@ class BiometricServiceAdapterTest {
                 })
                 .andRespond(withSuccess("{\"success\":true}", MediaType.APPLICATION_JSON));
 
-        // Use the legacy 2-arg signature (default method on the port)
-        var result = adapter.enrollFace(USER_ID, imageFile);
+        var result = adapter.enrollFace(USER_ID, imageFile, null, null, null);
 
         assertThat(result).containsEntry("success", true);
         mockServer.verify();
