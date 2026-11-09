@@ -106,7 +106,7 @@ public class LoginAccountStateGuard {
             if (user.getFailedLoginAttempts() >= MAX_FAILED_ATTEMPTS) {
                 user.lockAccount(LOCKOUT_DURATION);
                 justLocked = true;
-                log.warn("AUDIT: Account locked — email={}, failedAttempts={}, ip={}", email, MAX_FAILED_ATTEMPTS, ipAddress);
+                log.warn("AUDIT: Account locked: email={}, failedAttempts={}, ip={}", email, MAX_FAILED_ATTEMPTS, ipAddress);
                 reason = "Account locked after " + MAX_FAILED_ATTEMPTS + " failed attempts";
             } else {
                 reason = "Invalid credential (attempt " + user.getFailedLoginAttempts() + "/" + MAX_FAILED_ATTEMPTS + ")";

@@ -159,7 +159,7 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
         // the failed login (6 wrong passwords used to leave failed_login_attempts=0).
         boolean justLocked = loginAccountStateGuard.recordFailedAttempt(
                 userId, command.getEmail(), command.getIpAddress());
-        log.warn("AUDIT: Login failed — email={}, reason: invalid_password, ip={}",
+        log.warn("AUDIT: Login failed: email={}, reason: invalid_password, ip={}",
                 command.getEmail(), command.getIpAddress());
         // P0-#5: when this attempt triggered the lockout, surface AccountLocked
         // (HTTP 423) instead of "invalid credentials" on the 5th wrong try.
@@ -186,7 +186,7 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
             log.warn("AUDIT: Login refused — tenant not active, email={}, tenantId={}, tenantStatus={}, ip={}",
                     command.getEmail(), user.getTenant().getId(),
                     user.getTenant().getStatus(), command.getIpAddress());
-            String reason = "Tenant " + user.getTenant().getStatus() + " — auth refused";
+            String reason = "Tenant " + user.getTenant().getStatus() + ": auth refused";
             effects.afterCompletion(() -> auditLogPort.logAuthenticationFailed(command.getEmail(),
                     command.getIpAddress(), reason));
             throw new TenantSuspendedException(user.getTenant().getStatus());
@@ -438,7 +438,7 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
                             .build();
                         mfaSessionRepository.save(mfaSession);
 
-                        log.info("AUDIT: MFA required — userId={}, startStep={}, remainingSteps={}, nextStepType={}, availableMethods={}, ip={}",
+                        log.info("AUDIT: MFA required: userId={}, startStep={}, remainingSteps={}, nextStepType={}, availableMethods={}, ip={}",
                             user.getId(), startStep, remainingSteps.size(), nextStep.getStepType(), availableMethods.size(), command.getIpAddress());
 
                         // Return MFA pending response: NO accessToken, NO refreshToken.
@@ -452,7 +452,7 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
                 // Propagate dead-end detection to the client (login edge case #5) so
                 // GlobalExceptionHandler renders a structured 400 with method +
                 // enrollmentUrl. The password has been verified, but NO token is issued.
-                log.warn("AUDIT: Login blocked — user {} cannot complete flow (needs {} enrollment)",
+                log.warn("AUDIT: Login blocked: user {} cannot complete flow (needs {} enrollment)",
                         user.getId(), e.getMethod());
                 effects.afterCompletion(() -> auditLogPort.logAuthenticationFailed(command.getEmail(),
                         command.getIpAddress(), "needs_enrollment:" + e.getMethod()));
