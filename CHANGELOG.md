@@ -14,6 +14,10 @@
   `client_id` at all, and family `eec7942c-...` logged for the 2026-11-03 22:02:49
   exchange for `fivucsas-mobile` does not exist. The `exchangeCode` overloads are now
   write transactions; `OAuth2ServiceTransactionBoundaryTest` pins the resolved attribute.
+- `OAuth2RefreshTokenPersistenceIntegrationTest` (real PostgreSQL via Testcontainers, real
+  Redis) runs the whole path: mint a PKCE code, exchange it, then refresh with the returned
+  `refresh_token`. Without the fix it fails with 0 `refresh_tokens` rows for the user; with
+  it the row exists and the refresh grant rotates the token.
 
 ### 2026-11-04 - Deploys pulled by the mordecai deployer; Hetzner deploy workflow removed
 
