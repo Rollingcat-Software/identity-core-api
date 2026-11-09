@@ -339,7 +339,9 @@ public class VerifyMfaStepService {
         }
 
         if (!result.valid()) {
-            String reason = resolveFailureReason(methodType, data);
+            String reason = result.failureReason() != null
+                    ? result.failureReason()
+                    : resolveFailureReason(methodType, data);
             log.warn("AUDIT: MFA step failed — method: {}, reason: {}, userId={}, step: {}/{}, ip={}, userAgent={}",
                     req.method(), reason, user.getId(), session.getCurrentStep(),
                     session.getTotalSteps(), req.clientIp(), req.userAgent());
@@ -616,7 +618,10 @@ public class VerifyMfaStepService {
             }
             case FACE -> {
                 String image = data != null ? (String) data.get("image") : null;
-                yield (image == null || image.isBlank()) ? "missing_face_image" : "face_verification_failed";
+                boolean hasEmbedding = data != null && data.get("embedding") != null;
+                yield (hasEmbedding || (image != null && !image.isBlank()))
+                        ? MfaFailureReasons.FACE_VERIFICATION_FAILED
+                        : MfaFailureReasons.MISSING_FACE_IMAGE;
             }
             case VOICE -> {
                 String voiceData = data != null ? (String) data.get("voiceData") : null;

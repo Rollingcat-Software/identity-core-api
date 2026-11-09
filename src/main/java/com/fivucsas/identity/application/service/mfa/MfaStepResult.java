@@ -16,17 +16,34 @@ package com.fivucsas.identity.application.service.mfa;
  * <p>{@code challenge}-style intermediate responses (WebAuthn challenge
  * generation) are signalled via {@link #challengeResponse()} — the orchestrator
  * short-circuits and returns it as-is without advancing the session.
+ *
+ * <p>{@code failureReason} is optional: when a handler sets it, that value is
+ * the audit reason for the failed step (see {@link MfaFailureReasons}).
  */
 public record MfaStepResult(
         boolean valid,
-        java.util.Map<String, Object> challengeResponse
+        java.util.Map<String, Object> challengeResponse,
+        String failureReason
 ) {
+    public MfaStepResult(boolean valid, java.util.Map<String, Object> challengeResponse) {
+        this(valid, challengeResponse, null);
+    }
+
     public static MfaStepResult ok() {
         return new MfaStepResult(true, null);
     }
 
     public static MfaStepResult fail() {
         return new MfaStepResult(false, null);
+    }
+
+    /**
+     * A failed check whose cause only the handler knows (for example a face
+     * mismatch versus a missing capture). The orchestrator audits this reason
+     * instead of guessing one from the request payload.
+     */
+    public static MfaStepResult fail(String failureReason) {
+        return new MfaStepResult(false, null, failureReason);
     }
 
     public static MfaStepResult challenge(java.util.Map<String, Object> body) {

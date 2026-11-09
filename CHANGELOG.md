@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### 2026-11-09 - FACE step failures are audited with their real cause
+
+- A FACE step that reached the verifier and got `verified=false` was audited as
+  `missing_face_image` whenever the client sent an embedding instead of an image (the
+  reason was guessed from the request payload, which has no `image` key on the embedding
+  path). Seen on production on 2026-11-09 08:22:13. `MfaStepResult` now carries an
+  optional handler-reported reason (`MfaStepResult.fail(String)`), the FACE handler
+  reports `face_mismatch`, `face_spoof_detected`, `face_verifier_no_verdict` or
+  `missing_face_image` (constants in `MfaFailureReasons`), and `VerifyMfaStepService`
+  audits that reason. Its payload-based fallback no longer calls an embedding submission
+  "missing image".
+
 ### 2026-11-04 - Deploys pulled by the mordecai deployer; Hetzner deploy workflow removed
 
 - Removed `.github/workflows/deploy-hetzner.yml`. It deployed over SSH to the

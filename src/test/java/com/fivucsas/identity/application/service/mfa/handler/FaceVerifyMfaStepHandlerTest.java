@@ -141,6 +141,58 @@ class FaceVerifyMfaStepHandlerTest {
     }
 
     @Test
+    void verify_WhenEmbeddingPathServerRejects_ShouldReportFaceMismatchReason() {
+        when(bio.verifyEmbedding(any(), eq(USER_ID), any()))
+                .thenReturn(Map.of("verified", false));
+        FaceVerifyMfaStepHandler handler = handlerWithPolicy(true);
+
+        MfaStepResult result = handler.verify(session, user, Map.of("embedding", EMBEDDING));
+
+        assertThat(result.failureReason()).isEqualTo("face_mismatch");
+    }
+
+    @Test
+    void verify_WhenImagePathServerRejects_ShouldReportFaceMismatchReason() {
+        when(bio.verifyFace(eq(USER_ID), any())).thenReturn(Map.of("verified", false));
+        FaceVerifyMfaStepHandler handler = handlerWithPolicy(false);
+
+        MfaStepResult result = handler.verify(session, user, Map.of("image", IMAGE_B64));
+
+        assertThat(result.failureReason()).isEqualTo("face_mismatch");
+    }
+
+    @Test
+    void verify_WhenSpoofDetected_ShouldReportSpoofReason() {
+        when(bio.verifyEmbedding(any(), eq(USER_ID), any()))
+                .thenReturn(Map.of("error_code", "SPOOF_DETECTED"));
+        FaceVerifyMfaStepHandler handler = handlerWithPolicy(true);
+
+        MfaStepResult result = handler.verify(session, user, Map.of("embedding", EMBEDDING));
+
+        assertThat(result.failureReason()).isEqualTo("face_spoof_detected");
+    }
+
+    @Test
+    void verify_WhenVerifierReturnsNoVerdict_ShouldReportNoVerdictReason() {
+        when(bio.verifyEmbedding(any(), eq(USER_ID), any()))
+                .thenReturn(Map.of("distance", 0.3));
+        FaceVerifyMfaStepHandler handler = handlerWithPolicy(true);
+
+        MfaStepResult result = handler.verify(session, user, Map.of("embedding", EMBEDDING));
+
+        assertThat(result.failureReason()).isEqualTo("face_verifier_no_verdict");
+    }
+
+    @Test
+    void verify_WhenNoImageAndNoEmbedding_ShouldReportMissingFaceImage() {
+        FaceVerifyMfaStepHandler handler = handlerWithPolicy(true);
+
+        MfaStepResult result = handler.verify(session, user, Map.of());
+
+        assertThat(result.failureReason()).isEqualTo("missing_face_image");
+    }
+
+    @Test
     @DisplayName("embedding path: SPOOF_DETECTED error_code → hard fail")
     void policyOn_embeddingPath_spoof_fails() {
         when(bio.verifyEmbedding(any(), eq(USER_ID), any()))
