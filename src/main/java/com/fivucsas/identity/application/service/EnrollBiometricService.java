@@ -143,8 +143,8 @@ public class EnrollBiometricService implements EnrollBiometricUseCase {
      */
     private void enforceEmbeddingEnrollLiveness(EnrollBiometricCommand command) {
         // Decided on the principal's tenant (server-side), NOT command.getTenantId():
-        // that one can be the client's body hint, and a mismatched hint must not
-        // move a canary-ENFORCE tenant's user back to the global mode.
+        // that one is the enrolled user's tenant (the bio partition), and the mode
+        // follows the caller's tenant, as before.
         FaceEmbeddingLivenessPolicy.Mode mode = livenessPolicy.modeFor(command.getLivenessTenantId());
         switch (mode) {
             case OFF -> { /* behaviour from before the policy existed */ }

@@ -81,8 +81,9 @@ public class EnrollBiometricCommand {
     /**
      * Gap Ü2: the AUTHENTICATED principal's tenant, set by the controller from the
      * security context. The face-embedding liveness mode (including the ENFORCE
-     * canary list) is decided on THIS value, never on {@link #tenantId}, which may
-     * come from the request body as a bio scoping hint and is client-controlled.
+     * canary list) is decided on THIS value, never on {@link #tenantId}, which is the
+     * ENROLLED user's tenant (the bio partition) and differs from the principal's
+     * tenant when an administrator enrolls someone else.
      * Null (no tenant on the principal) means the global mode applies.
      */
     private String livenessTenantId;

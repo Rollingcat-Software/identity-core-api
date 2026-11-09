@@ -14,12 +14,16 @@ import com.fivucsas.identity.infrastructure.sms.SmsService;
 import com.fivucsas.identity.security.JwtAuthenticationFilter;
 import com.fivucsas.identity.security.RateLimitService;
 import com.fivucsas.identity.security.RbacAuthorizationService;
+import com.fivucsas.identity.infrastructure.multitenancy.TenantFilterBypass;
+import com.fivucsas.identity.security.BiometricEnrollmentTenantResolver;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.context.annotation.Import;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.http.MediaType;
@@ -33,6 +37,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import java.util.Optional;
+import java.util.function.Supplier;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -48,6 +53,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         })
 @ActiveProfiles("test")
 @AutoConfigureMockMvc(addFilters = false)
+@Import(BiometricEnrollmentTenantResolver.class)
 @DisplayName("Biometric Controller Tests")
 class BiometricControllerTest {
 
@@ -76,6 +82,19 @@ class BiometricControllerTest {
     @MockBean private OtpService otpService;
     @MockBean private EmailService emailService;
     @MockBean private SmsService smsService;
+    @MockBean private TenantFilterBypass tenantFilterBypass;
+
+    /** Tenant of every enrolled user unless a test says otherwise. */
+    private static final String DEFAULT_SUBJECT_TENANT = "11111111-1111-1111-1111-111111111111";
+
+    @BeforeEach
+    void resolvableSubjectsInCallersTenant() {
+        when(tenantFilterBypass.runWithoutTenantFilter(any()))
+                .thenAnswer(inv -> ((Supplier<?>) inv.getArgument(0)).get());
+        when(userRepository.findTenantIdById(any()))
+                .thenReturn(Optional.of(UUID.fromString(DEFAULT_SUBJECT_TENANT)));
+        when(rbacService.canAccessTenant(any(UUID.class))).thenReturn(true);
+    }
 
     @Test
     @DisplayName("GET /api/v1/biometric/health - Success")
@@ -191,6 +210,104 @@ class BiometricControllerTest {
         verify(biometricServicePort).searchFace(any(), eq(tenantUuid.toString()), any(), any());
     }
 
+    // --- Issue #284: enroll tenant = the enrolled user's tenant, resolved server side ---
+
+    private static final UUID SUBJECT_TENANT = UUID.fromString("44444444-4444-4444-4444-444444444444");
+
+    private static MockMultipartFile faceImage(String partName) {
+        return new MockMultipartFile(partName, "face.jpg", MediaType.IMAGE_JPEG_VALUE, "img".getBytes());
+    }
+
+    private void givenSubjectInTenant(UUID userId, UUID tenantId) {
+        when(userRepository.findTenantIdById(userId)).thenReturn(Optional.ofNullable(tenantId));
+        when(userRepository.existsById(userId)).thenReturn(true);
+    }
+
+    private org.mockito.ArgumentCaptor<com.fivucsas.identity.application.dto.command.EnrollBiometricCommand>
+            imageEnrollOk(UUID userId) {
+        when(enrollBiometricUseCase.execute(any()))
+                .thenReturn(com.fivucsas.identity.application.dto.response.BiometricResponse.builder()
+                        .success(true).message("ok").userId(userId.toString()).build());
+        return org.mockito.ArgumentCaptor.forClass(
+                com.fivucsas.identity.application.dto.command.EnrollBiometricCommand.class);
+    }
+
+    @Test
+    void enrollFace_WhenTenantIdOmitted_ShouldEnrollUnderTheEnrolledUsersTenant() throws Exception {
+        UUID userId = UUID.randomUUID();
+        givenSubjectInTenant(userId, SUBJECT_TENANT);
+        when(rbacService.getCurrentUserId()).thenReturn(Optional.of(userId));
+        var cmd = imageEnrollOk(userId);
+
+        mockMvc.perform(multipart("/api/v1/biometric/enroll/" + userId).file(faceImage("image")))
+                .andExpect(status().isOk());
+
+        verify(enrollBiometricUseCase).execute(cmd.capture());
+        org.assertj.core.api.Assertions.assertThat(cmd.getValue().getTenantId())
+                .isEqualTo(SUBJECT_TENANT.toString());
+    }
+
+    @Test
+    void enrollFace_WhenTenantIdHintNamesAnotherTenant_ShouldEnrollUnderTheEnrolledUsersTenant() throws Exception {
+        UUID userId = UUID.randomUUID();
+        givenSubjectInTenant(userId, SUBJECT_TENANT);
+        when(rbacService.getCurrentUserId()).thenReturn(Optional.of(userId));
+        var cmd = imageEnrollOk(userId);
+
+        mockMvc.perform(multipart("/api/v1/biometric/enroll/" + userId).file(faceImage("image"))
+                        .param("tenant_id", "33333333-3333-3333-3333-333333333333"))
+                .andExpect(status().isOk());
+
+        verify(enrollBiometricUseCase).execute(cmd.capture());
+        org.assertj.core.api.Assertions.assertThat(cmd.getValue().getTenantId())
+                .isEqualTo(SUBJECT_TENANT.toString());
+    }
+
+    @Test
+    void enrollFace_WhenAdminEnrollsSameTenantUser_ShouldEnrollUnderThatUsersTenant() throws Exception {
+        UUID userId = UUID.randomUUID();
+        givenSubjectInTenant(userId, SUBJECT_TENANT);
+        when(rbacService.getCurrentUserId()).thenReturn(Optional.of(UUID.randomUUID()));
+        when(rbacService.canAccessTenant(SUBJECT_TENANT)).thenReturn(true);
+        var cmd = imageEnrollOk(userId);
+
+        mockMvc.perform(multipart("/api/v1/biometric/enroll/" + userId).file(faceImage("image")))
+                .andExpect(status().isOk());
+
+        verify(enrollBiometricUseCase).execute(cmd.capture());
+        org.assertj.core.api.Assertions.assertThat(cmd.getValue().getTenantId())
+                .isEqualTo(SUBJECT_TENANT.toString());
+    }
+
+    @Test
+    void enrollFace_WhenCallerEnrollsUserOfAnotherTenant_ShouldReturn403AndNotEnroll() throws Exception {
+        UUID userId = UUID.randomUUID();
+        givenSubjectInTenant(userId, SUBJECT_TENANT);
+        when(rbacService.getCurrentUserId()).thenReturn(Optional.of(UUID.randomUUID()));
+        when(rbacService.canAccessTenant(SUBJECT_TENANT)).thenReturn(false);
+
+        mockMvc.perform(multipart("/api/v1/biometric/enroll/" + userId).file(faceImage("image")))
+                .andExpect(status().isForbidden());
+
+        verify(enrollBiometricUseCase, org.mockito.Mockito.never()).execute(any());
+    }
+
+    @Test
+    void enrollFaceMulti_WhenTenantIdOmitted_ShouldEnrollUnderTheEnrolledUsersTenant() throws Exception {
+        UUID userId = UUID.randomUUID();
+        givenSubjectInTenant(userId, SUBJECT_TENANT);
+        when(rbacService.getCurrentUserId()).thenReturn(Optional.of(userId));
+        when(enrollBiometricUseCase.enrollFaceMulti(any(), any(), any(), any(), any(), org.mockito.ArgumentMatchers.anyBoolean()))
+                .thenReturn(Map.of("success", true));
+
+        mockMvc.perform(multipart("/api/v1/biometric/enroll/multi/" + userId)
+                        .file(faceImage("files")).file(faceImage("files")))
+                .andExpect(status().isOk());
+
+        verify(enrollBiometricUseCase).enrollFaceMulti(eq(userId), any(), eq(SUBJECT_TENANT.toString()),
+                any(), any(), org.mockito.ArgumentMatchers.anyBoolean());
+    }
+
     // --- Phase 6: JSON client-side-embedding enroll endpoint ---
     // POST /api/v1/biometric/enroll-embedding/{userId} { embedding: number[512], tenant_id? }
     // (NOTE: this controller slice runs with addFilters=false, so @PreAuthorize is
@@ -244,12 +361,13 @@ class BiometricControllerTest {
     }
 
     @Test
-    @DisplayName("POST enroll-embedding - flag ON + tenant_id omitted → tenant derived from principal")
-    void enrollEmbedding_flagOn_noTenant_derivesFromPrincipal() throws Exception {
+    @DisplayName("POST enroll-embedding - flag ON + tenant_id omitted → tenant of the enrolled user")
+    void enrollEmbedding_WhenTenantIdOmitted_ShouldUseTheEnrolledUsersTenant() throws Exception {
         UUID userId = UUID.randomUUID();
         UUID tenantUuid = UUID.fromString("22222222-2222-2222-2222-222222222222");
 
-        when(rbacService.getCurrentUserTenantId()).thenReturn(Optional.of(tenantUuid));
+        givenSubjectInTenant(userId, tenantUuid);
+        when(rbacService.getCurrentUserId()).thenReturn(Optional.of(userId));
         when(clientSideEmbeddingPolicy.isEnabledForTenant(tenantUuid.toString())).thenReturn(true);
         when(enrollBiometricUseCase.execute(any()))
                 .thenReturn(com.fivucsas.identity.application.dto.response.BiometricResponse.builder()
@@ -399,8 +517,8 @@ class BiometricControllerTest {
     }
 
     @Test
-    @DisplayName("POST enroll-embedding - admin with biometric:enroll for a user it cannot manage (other tenant) → not on behalf")
-    void enrollEmbedding_adminOtherTenant_notOnBehalf() throws Exception {
+    @DisplayName("POST enroll-embedding - admin with biometric:enroll for a same-tenant user it cannot manage → not on behalf")
+    void enrollEmbedding_adminCannotManageUser_notOnBehalf() throws Exception {
         UUID userId = UUID.randomUUID();
         String tenantId = "11111111-1111-1111-1111-111111111111";
         var cmd = enrollOk(userId, tenantId);
@@ -450,8 +568,7 @@ class BiometricControllerTest {
         String[] bodyTenants = {"33333333-3333-3333-3333-333333333333", "not-a-uuid"};
         when(rbacService.getCurrentUserTenantId()).thenReturn(Optional.of(principalTenant));
         when(rbacService.getCurrentUserId()).thenReturn(Optional.of(userId));
-        var cmd = enrollOk(userId, bodyTenants[0]);
-        when(clientSideEmbeddingPolicy.isEnabledForTenant(bodyTenants[1])).thenReturn(true);
+        var cmd = enrollOk(userId, DEFAULT_SUBJECT_TENANT);
 
         for (String bodyTenant : bodyTenants) {
             mockMvc.perform(post("/api/v1/biometric/enroll-embedding/" + userId)
@@ -464,9 +581,89 @@ class BiometricControllerTest {
         org.assertj.core.api.Assertions.assertThat(cmd.getAllValues())
                 .extracting(c -> c.getLivenessTenantId())
                 .containsOnly(principalTenant.toString());
-        // The body hint still scopes the bio store (unchanged contract).
+        // Issue #284: the body hint no longer scopes the bio store; the enrolled
+        // user's tenant does.
         org.assertj.core.api.Assertions.assertThat(cmd.getAllValues())
                 .extracting(c -> c.getTenantId())
-                .containsExactly(bodyTenants[0], bodyTenants[1]);
+                .containsOnly(DEFAULT_SUBJECT_TENANT);
+    }
+
+    @Test
+    void enrollEmbedding_WhenCallerEnrollsUserOfAnotherTenant_ShouldReturn403AndNotEnroll() throws Exception {
+        UUID userId = UUID.randomUUID();
+        givenSubjectInTenant(userId, SUBJECT_TENANT);
+        when(rbacService.getCurrentUserId()).thenReturn(Optional.of(UUID.randomUUID()));
+        when(rbacService.canAccessTenant(SUBJECT_TENANT)).thenReturn(false);
+
+        mockMvc.perform(post("/api/v1/biometric/enroll-embedding/" + userId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(embeddingJson(512, SUBJECT_TENANT.toString())))
+                .andExpect(status().isForbidden());
+
+        verify(enrollBiometricUseCase, org.mockito.Mockito.never()).execute(any());
+    }
+
+    @Test
+    void enrollFace_WhenEnrolledUserDoesNotExist_ShouldReturn404AndNotEnroll() throws Exception {
+        UUID userId = UUID.randomUUID();
+        when(userRepository.findTenantIdById(userId)).thenReturn(Optional.empty());
+        when(userRepository.existsById(userId)).thenReturn(false);
+        when(rbacService.getCurrentUserId()).thenReturn(Optional.of(UUID.randomUUID()));
+
+        mockMvc.perform(multipart("/api/v1/biometric/enroll/" + userId).file(faceImage("image")))
+                .andExpect(status().isNotFound());
+
+        verify(enrollBiometricUseCase, org.mockito.Mockito.never()).execute(any());
+    }
+
+    @Test
+    void enrollFace_WhenTenantlessUserEnrollsSelf_ShouldEnrollWithoutTenant() throws Exception {
+        UUID userId = UUID.randomUUID();
+        givenSubjectInTenant(userId, null);
+        when(rbacService.getCurrentUserId()).thenReturn(Optional.of(userId));
+        var cmd = imageEnrollOk(userId);
+
+        mockMvc.perform(multipart("/api/v1/biometric/enroll/" + userId).file(faceImage("image")))
+                .andExpect(status().isOk());
+
+        verify(enrollBiometricUseCase).execute(cmd.capture());
+        org.assertj.core.api.Assertions.assertThat(cmd.getValue().getTenantId()).isNull();
+    }
+
+    @Test
+    void enrollFace_WhenNonRootEnrollsTenantlessUser_ShouldReturn403() throws Exception {
+        UUID userId = UUID.randomUUID();
+        givenSubjectInTenant(userId, null);
+        when(rbacService.getCurrentUserId()).thenReturn(Optional.of(UUID.randomUUID()));
+        when(rbacService.isRoot()).thenReturn(false);
+
+        mockMvc.perform(multipart("/api/v1/biometric/enroll/" + userId).file(faceImage("image")))
+                .andExpect(status().isForbidden());
+
+        verify(enrollBiometricUseCase, org.mockito.Mockito.never()).execute(any());
+    }
+
+    @Test
+    void enrollVoiceEmbedding_WhenTenantIdHintNamesAnotherTenant_ShouldEnrollUnderTheEnrolledUsersTenant() throws Exception {
+        UUID userId = UUID.randomUUID();
+        givenSubjectInTenant(userId, SUBJECT_TENANT);
+        when(rbacService.getCurrentUserId()).thenReturn(Optional.of(userId));
+        when(clientSideVoiceEmbeddingPolicy.isEnabledForTenant(SUBJECT_TENANT.toString())).thenReturn(true);
+        when(manageEnrollmentUseCase.getUserEnrollments(userId)).thenReturn(java.util.List.of());
+        when(biometricServicePort.enrollVoiceEmbedding(any(), any(), any(), org.mockito.ArgumentMatchers.anyBoolean()))
+                .thenReturn(Map.of("success", true));
+        StringBuilder body = new StringBuilder("{\"embedding\":[");
+        for (int i = 0; i < 256; i++) {
+            body.append(i > 0 ? "," : "").append("0.01");
+        }
+        body.append("],\"tenant_id\":\"33333333-3333-3333-3333-333333333333\"}");
+
+        mockMvc.perform(post("/api/v1/biometric/voice/enroll-embedding/" + userId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body.toString()))
+                .andExpect(status().isOk());
+
+        verify(biometricServicePort).enrollVoiceEmbedding(eq(SUBJECT_TENANT.toString()), eq(userId), any(),
+                org.mockito.ArgumentMatchers.anyBoolean());
     }
 }

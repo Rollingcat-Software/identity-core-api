@@ -317,11 +317,14 @@ public class EnrollmentHealthService {
 
         Boolean exists;
         if (biometricType == AuthMethodType.FACE) {
-            // Face verify is tenant-scoped; resolve the user's tenant so the probe
-            // queries the same partition the verify path would (null → bio default).
+            // Probe the user's tenant: the partition every enroll path stores under
+            // (BiometricEnrollmentTenantResolver uses the same lookup).
             String tenantId = userJpaRepository.findTenantIdById(userId)
                     .map(UUID::toString).orElse(null);
             exists = biometricServicePort.faceEnrollmentExists(userId, tenantId);
+            if (Boolean.FALSE.equals(exists) && tenantId != null) {
+                exists = probeTenantlessFaceTemplate(userId, tenantId);
+            }
         } else {
             // Voice verify is not tenant-scoped (probe by userId only).
             exists = biometricServicePort.voiceEnrollmentExists(userId);
@@ -340,6 +343,27 @@ public class EnrollmentHealthService {
                     biometricType, userId);
         }
         return exists;
+    }
+
+    /**
+     * Second, unscoped probe after the tenant-scoped one answered "no" (issue #284).
+     * Before #284 an image enroll without {@code tenant_id} stored the template
+     * with a NULL tenant, which bio's tenant-scoped existence query can never
+     * match. bio's 1:1 verify ({@code find_by_user_id}) is keyed on the user id
+     * only, so such a template still verifies at login and must not be revoked.
+     * User ids are globally unique, so a template found without the tenant filter
+     * is this user's. New enrollments are stored under the user's tenant
+     * ({@code BiometricEnrollmentTenantResolver}), so this branch only fires for
+     * legacy rows or a user with no template at all (one extra call, once, before
+     * the revoke). The tri-state contract is kept: {@code null} fails open.
+     */
+    private Boolean probeTenantlessFaceTemplate(UUID userId, String tenantId) {
+        Boolean anyTenant = biometricServicePort.faceEnrollmentExists(userId, null);
+        if (Boolean.TRUE.equals(anyTenant)) {
+            log.warn("FACE template of user {} is not stored under the user's tenant {} "
+                    + "(tenant-less enroll from before #284); keeping the enrollment", userId, tenantId);
+        }
+        return anyTenant;
     }
 
     /**
