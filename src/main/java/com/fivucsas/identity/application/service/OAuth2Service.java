@@ -234,6 +234,10 @@ public class OAuth2Service {
      * @return map containing access_token, token_type, expires_in, id_token, scope
      * @throws IllegalArgumentException if code is invalid, expired, or validation fails
      */
+    // Write transaction: the exchange mints and saves a refresh token. Under the
+    // class-level readOnly default the joined transaction never flushed and the
+    // refresh token row was silently dropped.
+    @Transactional
     public Map<String, Object> exchangeCode(
             String code, String clientId, String redirectUri,
             String clientSecret, String codeVerifier) {
@@ -244,6 +248,10 @@ public class OAuth2Service {
      * Code-exchange overload that records the caller IP / User-Agent on the
      * refresh token minted for the issued session (RFC 6749 §6 audit trail).
      */
+    // Write transaction: the exchange mints and saves a refresh token. Under the
+    // class-level readOnly default the joined transaction never flushed and the
+    // refresh token row was silently dropped.
+    @Transactional
     public Map<String, Object> exchangeCode(
             String code, String clientId, String redirectUri,
             String clientSecret, String codeVerifier, String ipAddress, String userAgent) {
@@ -487,6 +495,10 @@ public class OAuth2Service {
     /**
      * Backward-compatible overload without code_verifier.
      */
+    // Write transaction: the exchange mints and saves a refresh token. Under the
+    // class-level readOnly default the joined transaction never flushed and the
+    // refresh token row was silently dropped.
+    @Transactional
     public Map<String, Object> exchangeCode(String code, String clientId, String redirectUri, String clientSecret) {
         return exchangeCode(code, clientId, redirectUri, clientSecret, null);
     }
