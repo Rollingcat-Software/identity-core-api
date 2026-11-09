@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### 2026-11-09 - Public client meta reports whether a redirect_uri is registered
+
+- `GET /oauth2/clients/{clientId}/public` takes an optional `redirect_uri` and then
+  returns `redirect_uri_allowed` (`OAuth2Client.isRedirectUriAllowed`, the same check
+  `/authorize` uses). Without the parameter the response is unchanged. The hosted login
+  page (web-app `fix/hosted-login-mobile-return`) uses it so Cancel and its OAuth error
+  redirect go only to a registered URI (RFC 6749 section 4.1.2.1). The answer only says
+  whether a URI is registered for a client, which `/authorize` already reveals.
+
 ### 2026-11-04 - Deploys pulled by the mordecai deployer; Hetzner deploy workflow removed
 
 - Removed `.github/workflows/deploy-hetzner.yml`. It deployed over SSH to the
