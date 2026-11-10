@@ -18,7 +18,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
+import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.security.access.expression.method.DefaultMethodSecurityExpressionHandler;
 import org.springframework.security.access.expression.method.MethodSecurityExpressionHandler;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -63,7 +63,12 @@ class TenantAuthMethodSecurityTest {
     static final UUID TENANT_B = UUID.fromString("11111111-1111-1111-1111-111111111111");
     static final UUID AUTH_METHOD = UUID.fromString("22222222-2222-2222-2222-222222222222");
 
-    @Configuration
+    // @TestConfiguration, not @Configuration: this outer class holds only @Nested
+    // tests, so Spring Boot's TestTypeExcludeFilter does not recognise it as a test
+    // class, and a plain @Configuration would be component-scanned into every
+    // @SpringBootTest context, clashing with SecurityConfig's
+    // methodSecurityExpressionHandler (bean overriding is disabled).
+    @TestConfiguration
     @EnableMethodSecurity
     static class Config {
         @Bean UserRepository userRepository() { return mock(UserRepository.class); }
