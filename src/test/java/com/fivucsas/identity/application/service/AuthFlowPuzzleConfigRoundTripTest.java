@@ -57,7 +57,7 @@ class AuthFlowPuzzleConfigRoundTripTest {
 
     // The one accepted shape (PuzzleStepConfig): settings under "puzzleConfig".
     static final String PUZZLE_CONFIG =
-            "{\"puzzleConfig\":{\"allowedChallengeTypes\":[\"OBJECT_MATCH\",\"COUNT\"],"
+            "{\"puzzleConfig\":{\"allowedChallengeTypes\":[\"blink\",\"hand_flip\"],"
             + "\"count\":3,\"difficulty\":\"medium\",\"alsoMatchFaceIdentity\":false}}";
 
     static final String FACE_CONFIG =
