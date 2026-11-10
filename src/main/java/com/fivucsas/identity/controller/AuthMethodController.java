@@ -36,6 +36,11 @@ public class AuthMethodController {
     }
 
     // --- /api/v1/tenants/{tenantId}/auth-methods endpoints (from TenantAuthMethodController) ---
+    //
+    // hasPermission(#tenantId, ...) does NOT scope by tenant: RbacPermissionEvaluator
+    // ignores the target id, and a TENANT_ADMIN holds every tenant-scoped permission
+    // implicitly. @rbac.canAccessTenant(#tenantId) is what keeps an admin of tenant B
+    // out of tenant A (ROOT stays cross-tenant).
 
     /**
      * Login-method catalog for one tenant's flow builder: the global catalog
@@ -53,13 +58,13 @@ public class AuthMethodController {
     }
 
     @GetMapping("/api/v1/tenants/{tenantId}/auth-methods")
-    @PreAuthorize("hasPermission(#tenantId, 'Tenant', 'auth_method:read')")
+    @PreAuthorize("hasPermission(#tenantId, 'Tenant', 'auth_method:read') and @rbac.canAccessTenant(#tenantId)")
     public ResponseEntity<List<TenantAuthMethodResponse>> getTenantMethods(@PathVariable UUID tenantId) {
         return ResponseEntity.ok(manageAuthMethodUseCase.listTenantMethods(tenantId));
     }
 
     @PutMapping("/api/v1/tenants/{tenantId}/auth-methods/{authMethodId}")
-    @PreAuthorize("hasPermission(#tenantId, 'Tenant', 'auth_method:configure')")
+    @PreAuthorize("hasPermission(#tenantId, 'Tenant', 'auth_method:configure') and @rbac.canAccessTenant(#tenantId)")
     public ResponseEntity<TenantAuthMethodResponse> configureMethod(
             @PathVariable UUID tenantId,
             @PathVariable UUID authMethodId,
