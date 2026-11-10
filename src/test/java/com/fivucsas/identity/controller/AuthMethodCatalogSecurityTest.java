@@ -17,7 +17,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
+import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.security.access.expression.method.DefaultMethodSecurityExpressionHandler;
 import org.springframework.security.access.expression.method.MethodSecurityExpressionHandler;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -51,7 +51,10 @@ class AuthMethodCatalogSecurityTest {
     static final UUID TENANT_A = UUID.fromString("21069c39-ddad-495e-9e7b-da6a1e2f86fb");
     static final UUID TENANT_B = UUID.fromString("11111111-1111-1111-1111-111111111111");
 
-    @Configuration
+    // @TestConfiguration (not @Configuration): excluded from component scanning,
+    // so @SpringBootTest integration tests never pick up this second "rbac"
+    // bean and expression handler next to SecurityConfig.
+    @TestConfiguration
     @EnableMethodSecurity
     static class Config {
         @Bean UserRepository userRepository() { return mock(UserRepository.class); }
