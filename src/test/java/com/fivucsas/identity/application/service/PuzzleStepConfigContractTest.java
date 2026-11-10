@@ -86,13 +86,35 @@ class PuzzleStepConfigContractTest {
         }
 
         @Test
-        void countBelowOne_andMissingBinding_fallBackToSafeDefaults() {
+        void missingOrInvalidFields_fallBackToTheSharedFailClosedDefaults() {
+            // Same defaults as the web client (PUZZLE_CONFIG_DEFAULTS): binding ON, count 2.
             PuzzleStepConfig cfg = PuzzleStepConfig.parse(
                     "{\"puzzleConfig\":{\"allowedChallengeTypes\":[\"blink\"],\"count\":0}}").orElseThrow();
 
-            assertThat(cfg.count()).isEqualTo(1);
+            assertThat(cfg.count()).isEqualTo(PuzzleStepConfig.DEFAULT_COUNT).isEqualTo(2);
             assertThat(cfg.difficulty()).isNull();
-            assertThat(cfg.alsoMatchFaceIdentity()).isFalse();
+            assertThat(cfg.alsoMatchFaceIdentity())
+                    .isEqualTo(PuzzleStepConfig.DEFAULT_ALSO_MATCH_FACE_IDENTITY).isTrue();
+
+            PuzzleStepConfig notABoolean = PuzzleStepConfig.parse(
+                    "{\"puzzleConfig\":{\"allowedChallengeTypes\":[\"blink\"],\"alsoMatchFaceIdentity\":\"no\"}}")
+                    .orElseThrow();
+            assertThat(notABoolean.alsoMatchFaceIdentity()).isTrue();
+        }
+
+        @Test
+        void onlyAnExplicitFalse_turnsBindingOff() {
+            assertThat(PuzzleStepConfig.parse(
+                    "{\"puzzleConfig\":{\"allowedChallengeTypes\":[\"blink\"],\"alsoMatchFaceIdentity\":false}}")
+                    .orElseThrow().alsoMatchFaceIdentity()).isFalse();
+        }
+
+        @Test
+        void nonStringAllowListEntries_areDropped() {
+            PuzzleStepConfig cfg = PuzzleStepConfig.parse(
+                    "{\"puzzleConfig\":{\"allowedChallengeTypes\":[7,\"blink\",null,\" \"]}}").orElseThrow();
+
+            assertThat(cfg.allowedChallengeTypes()).containsExactly("blink");
         }
     }
 

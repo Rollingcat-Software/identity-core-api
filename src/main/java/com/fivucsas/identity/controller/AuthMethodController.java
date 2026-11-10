@@ -40,9 +40,14 @@ public class AuthMethodController {
     /**
      * Login-method catalog for one tenant's flow builder: the global catalog
      * plus PUZZLE when the PUZZLE layer is enabled for this tenant (canary).
+     *
+     * <p>{@code hasPermission(#tenantId, ...)} checks the permission only (the
+     * RBAC evaluator ignores the target id), so tenant ownership is checked
+     * explicitly: without it any tenant's admin could probe whether another
+     * tenant is on the PUZZLE canary list.
      */
     @GetMapping("/api/v1/tenants/{tenantId}/auth-methods/catalog")
-    @PreAuthorize("hasPermission(#tenantId, 'Tenant', 'auth_method:read')")
+    @PreAuthorize("hasPermission(#tenantId, 'Tenant', 'auth_method:read') and @rbac.canAccessTenant(#tenantId)")
     public ResponseEntity<List<AuthMethodResponse>> getTenantCatalog(@PathVariable UUID tenantId) {
         return ResponseEntity.ok(manageAuthMethodUseCase.listCatalogForTenant(tenantId));
     }

@@ -22,6 +22,13 @@ import java.util.Optional;
  * wrote the inner object without the {@code puzzleConfig} key, and every
  * reader failed closed).
  *
+ * <p><b>Defaults</b> (shared with the web client, `PUZZLE_CONFIG_DEFAULTS` in
+ * web-app `domain/models/AuthMethod.ts`): a missing or invalid field never
+ * weakens the step. {@code alsoMatchFaceIdentity} defaults to {@code true}
+ * (fail closed: identity binding on unless the tenant explicitly turned it
+ * off) and {@code count} to {@value #DEFAULT_COUNT} (the "standard" floor bio
+ * enforces under trace contract v2).
+ *
  * @param allowedChallengeTypes lower-cased challenge ids; may be empty, see
  *                              {@link #hasChallenges()}
  * @param count                 requested challenges, at least 1 (not clamped to
@@ -36,6 +43,12 @@ public record PuzzleStepConfig(List<String> allowedChallengeTypes,
 
     /** The key that wraps the PUZZLE settings inside the step config blob. */
     public static final String KEY = "puzzleConfig";
+
+    /** Challenges per session when {@code count} is missing or below 1. */
+    public static final int DEFAULT_COUNT = 2;
+
+    /** Identity binding when {@code alsoMatchFaceIdentity} is missing: on (fail closed). */
+    public static final boolean DEFAULT_ALSO_MATCH_FACE_IDENTITY = true;
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
@@ -74,11 +87,14 @@ public record PuzzleStepConfig(List<String> allowedChallengeTypes,
             }
         }
         JsonNode countNode = puzzle.get("count");
-        int count = (countNode != null && countNode.isInt()) ? Math.max(1, countNode.asInt()) : 1;
+        int count = (countNode != null && countNode.isInt() && countNode.asInt() >= 1)
+                ? countNode.asInt() : DEFAULT_COUNT;
         JsonNode diffNode = puzzle.get("difficulty");
         String difficulty = (diffNode != null && diffNode.isTextual()) ? diffNode.asText() : null;
         JsonNode bindNode = puzzle.get("alsoMatchFaceIdentity");
-        boolean alsoMatch = bindNode != null && bindNode.asBoolean(false);
+        // Only an explicit boolean false turns binding off.
+        boolean alsoMatch = bindNode == null || !bindNode.isBoolean()
+                ? DEFAULT_ALSO_MATCH_FACE_IDENTITY : bindNode.booleanValue();
         return Optional.of(new PuzzleStepConfig(allowed, count, difficulty, alsoMatch));
     }
 
