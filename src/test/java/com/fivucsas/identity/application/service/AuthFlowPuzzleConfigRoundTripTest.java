@@ -55,9 +55,10 @@ import static org.mockito.Mockito.when;
 @DisplayName("Task 2.4 — puzzle-layer config round-trip")
 class AuthFlowPuzzleConfigRoundTripTest {
 
+    // The one accepted shape (PuzzleStepConfig): settings under "puzzleConfig".
     static final String PUZZLE_CONFIG =
-            "{\"allowedChallengeTypes\":[\"OBJECT_MATCH\",\"COUNT\"],"
-            + "\"count\":3,\"difficulty\":\"medium\",\"alsoMatchFaceIdentity\":false}";
+            "{\"puzzleConfig\":{\"allowedChallengeTypes\":[\"OBJECT_MATCH\",\"COUNT\"],"
+            + "\"count\":3,\"difficulty\":\"medium\",\"alsoMatchFaceIdentity\":false}}";
 
     static final String FACE_CONFIG =
             "{\"requireActivePuzzleLiveness\":true}";

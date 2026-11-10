@@ -433,10 +433,27 @@ class AuthControllerPuzzleSessionProxyTest {
     }
 
     @Test
-    @DisplayName("CREATE forwards alsoMatchFaceIdentity as require_identity_binding (false when absent)")
+    @DisplayName("CREATE forwards alsoMatchFaceIdentity as require_identity_binding (TRUE when absent: fail-closed default)")
     void create_forwardsBindingFlag() throws Exception {
         liveSessionRegistered();
         stubPuzzleStepConfig();
+        stubBioCreate(Map.of("session_id", BIO_SESSION_ID, "challenges", List.of()));
+        postCreate().andExpect(status().isOk());
+        verify(biometricService).createPuzzleSession(any(), any(), any(), anyInt(), any(), eq(true));
+    }
+
+    @Test
+    @DisplayName("CREATE forwards an explicit alsoMatchFaceIdentity=false as require_identity_binding=false")
+    void create_forwardsExplicitBindingOff() throws Exception {
+        liveSessionRegistered();
+        AuthFlowStep step = mock(AuthFlowStep.class);
+        lenient().when(step.getStepOrder()).thenReturn(1);
+        lenient().when(step.getConfig()).thenReturn(
+                "{\"puzzleConfig\":{\"count\":2,\"allowedChallengeTypes\":[\"blink\",\"smile\"],"
+                        + "\"alsoMatchFaceIdentity\":false}}");
+        AuthFlow flow = mock(AuthFlow.class);
+        lenient().when(flow.getSteps()).thenReturn(List.of(step));
+        lenient().when(authFlowRepository.findById(FLOW_ID)).thenReturn(Optional.of(flow));
         stubBioCreate(Map.of("session_id", BIO_SESSION_ID, "challenges", List.of()));
         postCreate().andExpect(status().isOk());
         verify(biometricService).createPuzzleSession(any(), any(), any(), anyInt(), any(), eq(false));
