@@ -104,6 +104,7 @@ public class ManageAuthFlowService implements ManageAuthFlowUseCase {
             // login enforcement would later block that method and strand any
             // user the flow routes through it. 422 with the offending method(s).
             validateNoDisabledMethods(tenantId, command.steps());
+            validatePuzzleStepConfigs(command.steps());
             for (CreateAuthFlowCommand.FlowStepSpec stepSpec : command.steps()) {
                 AuthMethodType methodType = AuthMethodType.valueOf(stepSpec.authMethodType());
                 AuthMethod method = authMethodRepository.findByType(methodType)
@@ -379,6 +380,34 @@ public class ManageAuthFlowService implements ManageAuthFlowUseCase {
 
         log.debug("First-step structural check passed (method={}, {} step(s))",
                 firstStep.authMethodType(), steps.size());
+    }
+
+    /**
+     * A PUZZLE layer must carry its settings in the one shape every reader
+     * accepts ({@link PuzzleStepConfig}: {@code {"puzzleConfig":{...}}} with a
+     * non-empty allow-list). Rejecting anything else here (HTTP 400) keeps a
+     * mis-shaped flow from being saved and then failing closed at every login.
+     */
+    private void validatePuzzleStepConfigs(List<CreateAuthFlowCommand.FlowStepSpec> steps) {
+        List<String> badLayers = steps.stream()
+                .filter(s -> isPuzzleLayer(s))
+                .filter(s -> PuzzleStepConfig.parse(s.config())
+                        .filter(PuzzleStepConfig::hasChallenges)
+                        .isEmpty())
+                .map(s -> "Layer " + s.stepOrder())
+                .toList();
+        if (!badLayers.isEmpty()) {
+            throw new IllegalArgumentException(
+                    "PUZZLE layers need a config of the form "
+                    + "{\"puzzleConfig\":{\"allowedChallengeTypes\":[...],\"count\":N,...}} "
+                    + "with at least one challenge type: " + badLayers);
+        }
+    }
+
+    private static boolean isPuzzleLayer(CreateAuthFlowCommand.FlowStepSpec s) {
+        String puzzle = AuthMethodType.PUZZLE.name();
+        return puzzle.equals(s.authMethodType())
+                || (s.alternativeMethodTypes() != null && s.alternativeMethodTypes().contains(puzzle));
     }
 
     private void validateNoRequiredUnsupportedMethods(List<CreateAuthFlowCommand.FlowStepSpec> steps) {

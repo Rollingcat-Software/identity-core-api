@@ -37,6 +37,16 @@ public class AuthMethodController {
 
     // --- /api/v1/tenants/{tenantId}/auth-methods endpoints (from TenantAuthMethodController) ---
 
+    /**
+     * Login-method catalog for one tenant's flow builder: the global catalog
+     * plus PUZZLE when the PUZZLE layer is enabled for this tenant (canary).
+     */
+    @GetMapping("/api/v1/tenants/{tenantId}/auth-methods/catalog")
+    @PreAuthorize("hasPermission(#tenantId, 'Tenant', 'auth_method:read')")
+    public ResponseEntity<List<AuthMethodResponse>> getTenantCatalog(@PathVariable UUID tenantId) {
+        return ResponseEntity.ok(manageAuthMethodUseCase.listCatalogForTenant(tenantId));
+    }
+
     @GetMapping("/api/v1/tenants/{tenantId}/auth-methods")
     @PreAuthorize("hasPermission(#tenantId, 'Tenant', 'auth_method:read')")
     public ResponseEntity<List<TenantAuthMethodResponse>> getTenantMethods(@PathVariable UUID tenantId) {

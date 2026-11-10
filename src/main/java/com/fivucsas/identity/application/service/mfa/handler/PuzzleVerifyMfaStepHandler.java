@@ -7,6 +7,7 @@ import com.fivucsas.identity.application.port.output.PuzzleSessionGuardPort;
 import com.fivucsas.identity.application.port.output.DeviceAttestationVerifierPort;
 import com.fivucsas.identity.application.service.AttestedBindingPolicy;
 import com.fivucsas.identity.application.service.ClientSideEmbeddingPolicy;
+import com.fivucsas.identity.application.service.PuzzleStepConfig;
 import com.fivucsas.identity.application.service.attestation.AttestedBindingPayload;
 import com.fivucsas.identity.application.service.attestation.AttestedPuzzleBindingVerifier;
 import com.fivucsas.identity.application.service.mfa.LivenessEmbeddingDigest;
@@ -17,8 +18,6 @@ import com.fivucsas.identity.entity.AuthFlow;
 import com.fivucsas.identity.entity.AuthFlowStep;
 import com.fivucsas.identity.entity.MfaSession;
 import com.fivucsas.identity.entity.User;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
@@ -145,9 +144,6 @@ public class PuzzleVerifyMfaStepHandler implements VerifyMfaStepHandler {
     private final ClientSideEmbeddingPolicy clientSideEmbeddingPolicy;
     // Puzzle contract v2 (S5): the trace contract bio advertised at CREATE.
     private final PuzzleSessionGuardPort puzzleSessionGuard;
-    // Local, thread-safe mapper to parse the step `config` JSONB blob — mirrors
-    // AuthController.puzzleObjectMapper (no shared bean needed, parse is read-only).
-    private final ObjectMapper configObjectMapper = new ObjectMapper();
     // Attested binding (Android Key Attestation). Policy OFF ⇒ never consulted.
     private final AttestedBindingPolicy attestedBindingPolicy;
     private final AttestationChallengePort attestationChallenges;
@@ -468,7 +464,7 @@ public class PuzzleVerifyMfaStepHandler implements VerifyMfaStepHandler {
      * the flow/step/blob/field cannot be resolved or is unparseable, so a missing
      * config never silently engages a stronger gate — but ALSO never weakens the
      * already-passed liveness gate (this only controls whether the EXTRA identity
-     * gate runs). Mirrors {@code AuthController.resolvePuzzleStepPolicy}.
+     * gate runs). Parsed by {@link PuzzleStepConfig}, like session create.
      */
     private boolean readAlsoMatchFaceIdentity(MfaSession session) {
         AuthFlow flow = authFlowRepository.findById(session.getFlowId()).orElse(null);
@@ -483,22 +479,10 @@ public class PuzzleVerifyMfaStepHandler implements VerifyMfaStepHandler {
         if (step == null) {
             return false;
         }
-        String configJson = step.getConfig();
-        if (configJson == null || configJson.isBlank()) {
-            return false;
-        }
-        try {
-            JsonNode root = configObjectMapper.readTree(configJson);
-            JsonNode puzzle = root.get("puzzleConfig");
-            if (puzzle == null || !puzzle.isObject()) {
-                return false;
-            }
-            JsonNode flag = puzzle.get("alsoMatchFaceIdentity");
-            return flag != null && flag.asBoolean(false);
-        } catch (Exception e) {
-            log.warn("PUZZLE step config unparseable as JSON — identity-binding treated as off: {}", e.getMessage());
-            return false;
-        }
+        // Same shared definition as session create (PuzzleStepConfig).
+        return PuzzleStepConfig.parse(step.getConfig())
+                .map(PuzzleStepConfig::alsoMatchFaceIdentity)
+                .orElse(false);
     }
 
     /**

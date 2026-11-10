@@ -114,8 +114,6 @@ public class AuthController {
     private final PuzzleSessionGuardPort puzzleSessionGuard;
     private final com.fivucsas.identity.application.service.attestation.AttestationChallengeIssuer
             attestationChallengeIssuer;
-    private final com.fasterxml.jackson.databind.ObjectMapper puzzleObjectMapper =
-            new com.fasterxml.jackson.databind.ObjectMapper();
 
     private static final String EMAIL_VERIFY_OTP_PREFIX = "email-verify:";
     private static final String PHONE_VERIFY_OTP_PREFIX = "phone-verify:";
@@ -1367,51 +1365,23 @@ public class AuthController {
         if (step == null) {
             return null;
         }
-        String configJson = step.getConfig();
-        if (configJson == null || configJson.isBlank()) {
-            return null;
-        }
-        try {
-            com.fasterxml.jackson.databind.JsonNode root = puzzleObjectMapper.readTree(configJson);
-            com.fasterxml.jackson.databind.JsonNode puzzle = root.get("puzzleConfig");
-            if (puzzle == null || !puzzle.isObject()) {
-                return null;
-            }
-            List<String> allowed = new ArrayList<>();
-            com.fasterxml.jackson.databind.JsonNode typesNode = puzzle.get("allowedChallengeTypes");
-            if (typesNode != null && typesNode.isArray()) {
-                for (com.fasterxml.jackson.databind.JsonNode t : typesNode) {
-                    String v = t.asText(null);
-                    if (v != null && !v.isBlank()) {
-                        allowed.add(v.trim().toLowerCase(Locale.ROOT));
-                    }
-                }
-            }
-            if (allowed.isEmpty()) {
-                return null;
-            }
-            com.fasterxml.jackson.databind.JsonNode countNode = puzzle.get("count");
-            int count = (countNode != null && countNode.isInt()) ? countNode.asInt() : 1;
-            if (count < 1) {
-                count = 1;
-            }
-            if (count > allowed.size()) {
-                // Cannot issue more distinct challenges than the allow-list holds;
-                // clamp so bio's count<=len(allowed) constraint is satisfied.
-                count = allowed.size();
-            }
-            com.fasterxml.jackson.databind.JsonNode diffNode = puzzle.get("difficulty");
-            String difficulty = (diffNode != null && diffNode.isTextual()) ? diffNode.asText() : null;
-            // Tells bio whether the verdict may require the binding-frame check (a
-            // superset of the handler's double-gate, so windows are kept whenever
-            // the handler could require binding).
-            com.fasterxml.jackson.databind.JsonNode bindNode = puzzle.get("alsoMatchFaceIdentity");
-            boolean alsoMatch = bindNode != null && bindNode.asBoolean(false);
-            return new PuzzleStepPolicy(allowed, count, difficulty, alsoMatch);
-        } catch (Exception e) {
-            log.warn("PUZZLE step config unparseable as JSON — failing closed: {}", e.getMessage());
-            return null;
-        }
+        // One shared definition of the config shape (PuzzleStepConfig) so the
+        // flow write path and every reader agree. Empty = fail closed.
+        return com.fivucsas.identity.application.service.PuzzleStepConfig.parse(step.getConfig())
+                .filter(com.fivucsas.identity.application.service.PuzzleStepConfig::hasChallenges)
+                .map(cfg -> new PuzzleStepPolicy(
+                        cfg.allowedChallengeTypes(),
+                        // Cannot issue more distinct challenges than the allow-list
+                        // holds; clamp so bio's count<=len(allowed) constraint holds.
+                        Math.min(cfg.count(), cfg.allowedChallengeTypes().size()),
+                        cfg.difficulty(),
+                        // Tells bio whether the verdict may require the binding-frame
+                        // check (a superset of the handler's double-gate).
+                        cfg.alsoMatchFaceIdentity()))
+                .orElseGet(() -> {
+                    log.warn("PUZZLE step config missing or not of the puzzleConfig shape — failing closed");
+                    return null;
+                });
     }
 
     private static String sha256Hex(String value) {
