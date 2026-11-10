@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### 2026-11-10 - Tenant auth-method endpoints enforce tenant ownership
+
+- `GET /api/v1/tenants/{tenantId}/auth-methods` and
+  `PUT /api/v1/tenants/{tenantId}/auth-methods/{authMethodId}` were guarded only by
+  `hasPermission(#tenantId, 'Tenant', 'auth_method:read|configure')`. `RbacPermissionEvaluator`
+  ignores the target id and a TENANT_ADMIN holds every tenant-scoped permission implicitly, so an
+  admin of tenant B could list and enable/disable tenant A's auth methods. Both now also require
+  `@rbac.canAccessTenant(#tenantId)` (ROOT stays cross-tenant), as `AuthFlowController` does.
+- `TenantAuthMethodSecurityTest` exercises both endpoints through the real method-security wiring
+  (own admin 200, other tenant's admin 403 with the use case never called, member 403, ROOT 200).
+- Sweep: no other `hasPermission(#tenantId, ...)` guard lacks the tenant check.
+
 ### 2026-11-04 - Deploys pulled by the mordecai deployer; Hetzner deploy workflow removed
 
 - Removed `.github/workflows/deploy-hetzner.yml`. It deployed over SSH to the
