@@ -6,6 +6,7 @@ import com.fivucsas.identity.application.dto.response.AuthFlowResponse;
 import com.fivucsas.identity.application.port.input.ManageAuthFlowUseCase;
 import com.fivucsas.identity.domain.model.auth.AuthMethodType;
 import com.fivucsas.identity.domain.model.auth.OperationType;
+import com.fivucsas.identity.domain.model.auth.PuzzleChallengeType;
 import com.fivucsas.identity.application.port.output.AuthFlowRepositoryPort;
 import com.fivucsas.identity.application.port.output.AuthFlowStepRepositoryPort;
 import com.fivucsas.identity.application.port.output.AuthMethodRepositoryPort;
@@ -21,7 +22,10 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
@@ -179,6 +183,7 @@ public class ManageAuthFlowService implements ManageAuthFlowUseCase {
         boolean becomingActive = command.isActive() != null && command.isActive();
         if (becomingDefault || becomingActive) {
             validateExistingFlowHasNoDisabledMethods(tenantId, flow);
+            validateExistingPuzzleStepConfigs(flow);
         }
         if (becomingDefault) {
             dethroneExistingDefault(tenantId, flow.getOperationType(), flow.getId());
@@ -389,18 +394,55 @@ public class ManageAuthFlowService implements ManageAuthFlowUseCase {
      * mis-shaped flow from being saved and then failing closed at every login.
      */
     private void validatePuzzleStepConfigs(List<CreateAuthFlowCommand.FlowStepSpec> steps) {
-        List<String> badLayers = steps.stream()
-                .filter(s -> isPuzzleLayer(s))
-                .filter(s -> PuzzleStepConfig.parse(s.config())
-                        .filter(PuzzleStepConfig::hasChallenges)
-                        .isEmpty())
-                .map(s -> "Layer " + s.stepOrder())
-                .toList();
-        if (!badLayers.isEmpty()) {
+        checkPuzzleLayers(steps.stream()
+                .filter(ManageAuthFlowService::isPuzzleLayer)
+                .map(s -> new PuzzleLayer(s.stepOrder(), s.config()))
+                .toList());
+    }
+
+    /**
+     * Same check for a flow already stored (it may predate the guard) at the
+     * moment it joins the live login surface (made default or activated).
+     */
+    private void validateExistingPuzzleStepConfigs(AuthFlow flow) {
+        checkPuzzleLayers(flow.getSteps().stream()
+                .filter(step -> step.getAvailableMethods().stream()
+                        .filter(java.util.Objects::nonNull)
+                        .anyMatch(m -> m.getType() == AuthMethodType.PUZZLE))
+                .map(step -> new PuzzleLayer(step.getStepOrder(), step.getConfig()))
+                .toList());
+    }
+
+    private record PuzzleLayer(int stepOrder, String config) {}
+
+    /**
+     * Rejects (HTTP 400) a PUZZLE layer whose config has another shape, no
+     * challenge, or a challenge type bio does not know: each of these makes
+     * every login through the layer fail closed.
+     */
+    private static void checkPuzzleLayers(List<PuzzleLayer> layers) {
+        List<String> badShape = new ArrayList<>();
+        List<String> unknownTypes = new ArrayList<>();
+        for (PuzzleLayer layer : layers) {
+            Optional<PuzzleStepConfig> cfg = PuzzleStepConfig.parse(layer.config())
+                    .filter(PuzzleStepConfig::hasChallenges);
+            if (cfg.isEmpty()) {
+                badShape.add("Layer " + layer.stepOrder());
+            } else if (!cfg.get().unknownChallengeTypes().isEmpty()) {
+                unknownTypes.add("Layer " + layer.stepOrder() + " " + cfg.get().unknownChallengeTypes());
+            }
+        }
+        if (!badShape.isEmpty()) {
             throw new IllegalArgumentException(
                     "PUZZLE layers need a config of the form "
                     + "{\"puzzleConfig\":{\"allowedChallengeTypes\":[...],\"count\":N,...}} "
-                    + "with at least one challenge type: " + badLayers);
+                    + "with at least one challenge type: " + badShape);
+        }
+        if (!unknownTypes.isEmpty()) {
+            throw new IllegalArgumentException(
+                    "PUZZLE layers list unknown challenge types " + unknownTypes
+                    + "; allowed: " + Arrays.stream(PuzzleChallengeType.values())
+                            .map(PuzzleChallengeType::wireValue).toList());
         }
     }
 

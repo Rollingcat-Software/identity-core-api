@@ -2,6 +2,7 @@ package com.fivucsas.identity.application.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fivucsas.identity.domain.model.auth.PuzzleChallengeType;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -101,5 +102,16 @@ public record PuzzleStepConfig(List<String> allowedChallengeTypes,
     /** True when at least one challenge type is allowed (a session can be issued). */
     public boolean hasChallenges() {
         return !allowedChallengeTypes.isEmpty();
+    }
+
+    /**
+     * Allow-list entries bio would reject (not a {@link PuzzleChallengeType} wire
+     * value), e.g. the web registry id {@code face_blink} instead of {@code blink}.
+     * Bio refuses the whole session create for even one of them.
+     */
+    public List<String> unknownChallengeTypes() {
+        return allowedChallengeTypes.stream()
+                .filter(t -> !PuzzleChallengeType.isKnown(t))
+                .toList();
     }
 }

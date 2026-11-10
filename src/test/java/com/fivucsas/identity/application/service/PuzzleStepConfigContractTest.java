@@ -6,8 +6,13 @@ import com.fivucsas.identity.application.port.output.AuthFlowStepRepositoryPort;
 import com.fivucsas.identity.application.port.output.AuthMethodRepositoryPort;
 import com.fivucsas.identity.application.port.output.TenantAuthMethodRepositoryPort;
 import com.fivucsas.identity.application.port.output.UserEnrollmentRepositoryPort;
+import com.fivucsas.identity.application.dto.command.UpdateAuthFlowCommand;
+import com.fivucsas.identity.domain.model.auth.AuthMethodType;
 import com.fivucsas.identity.domain.model.auth.OperationType;
+import com.fivucsas.identity.domain.model.auth.PuzzleChallengeType;
 import com.fivucsas.identity.entity.AuthFlow;
+import com.fivucsas.identity.entity.AuthFlowStep;
+import com.fivucsas.identity.entity.AuthMethod;
 import com.fivucsas.identity.entity.Tenant;
 import com.fivucsas.identity.repository.JpaTenantRepository;
 import com.fivucsas.identity.repository.UserRepository;
@@ -191,6 +196,152 @@ class PuzzleStepConfigContractTest {
             assertThatThrownBy(() -> service().createFlow(tenantId,
                     flowWithPuzzleConfig("{}", List.of("PUZZLE"), "FACE")))
                     .isInstanceOf(IllegalArgumentException.class);
+        }
+
+        @Test
+        void webRegistryIds_areRejected_becauseBioWouldRefuseTheSession() {
+            // Exactly what the flow builder saved before web-app fixed B5.
+            UUID tenantId = stubTenant();
+
+            assertThatThrownBy(() -> service().createFlow(tenantId, flowWithPuzzleConfig(
+                    "{\"puzzleConfig\":{\"allowedChallengeTypes\":[\"FACE_BLINK\",\"HAND_WAVE\",\"smile\"],"
+                    + "\"count\":2}}", null, "PUZZLE")))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("unknown challenge types")
+                    .hasMessageContaining("face_blink")
+                    .hasMessageContaining("hand_wave")
+                    .hasMessageNotContaining("[smile")
+                    .hasMessageContaining("Layer 1");
+            verify(authFlowStepRepository, never()).save(any());
+        }
+
+        @Test
+        void unknownTypeInAChoiceAlternative_isRejected() {
+            UUID tenantId = stubTenant();
+
+            assertThatThrownBy(() -> service().createFlow(tenantId, flowWithPuzzleConfig(
+                    "{\"puzzleConfig\":{\"allowedChallengeTypes\":[\"object_match\"]}}",
+                    List.of("PUZZLE"), "FACE")))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("object_match");
+        }
+
+        @Test
+        void everyBioChallengeType_isAccepted() {
+            UUID tenantId = stubTenant();
+            when(authMethodRepository.findByType(AuthMethodType.PUZZLE))
+                    .thenReturn(Optional.of(AuthMethod.builder().type(AuthMethodType.PUZZLE).build()));
+            when(authFlowRepository.findById(any())).thenReturn(Optional.of(AuthFlow.builder()
+                    .id(UUID.randomUUID()).tenant(Tenant.builder().id(tenantId).name("Pilot").build())
+                    .operationType(OperationType.APP_LOGIN).build()));
+            String all = java.util.Arrays.stream(PuzzleChallengeType.values())
+                    .map(t -> "\"" + t.wireValue() + "\"")
+                    .collect(java.util.stream.Collectors.joining(","));
+
+            service().createFlow(tenantId, flowWithPuzzleConfig(
+                    "{\"puzzleConfig\":{\"allowedChallengeTypes\":[" + all + "],\"count\":2}}", null, "PUZZLE"));
+
+            verify(authFlowStepRepository).save(any());
+        }
+    }
+
+    @Nested
+    @ExtendWith(MockitoExtension.class)
+    @DisplayName("ManageAuthFlowService.updateFlow re-checks a stored flow joining the login surface")
+    class UpdateFlowGuard {
+
+        @Mock AuthFlowRepositoryPort authFlowRepository;
+        @Mock AuthFlowStepRepositoryPort authFlowStepRepository;
+        @Mock AuthMethodRepositoryPort authMethodRepository;
+        @Mock JpaTenantRepository tenantRepository;
+        @Mock TenantAuthMethodRepositoryPort tenantAuthMethodRepository;
+        @Mock UserEnrollmentRepositoryPort userEnrollmentRepository;
+        @Mock TenantAuthMethodPolicy tenantAuthMethodPolicy;
+        @Mock UserRepository userRepository;
+
+        private ManageAuthFlowService service() {
+            return new ManageAuthFlowService(
+                    authFlowRepository, authFlowStepRepository, authMethodRepository,
+                    tenantRepository, tenantAuthMethodRepository, userEnrollmentRepository,
+                    userRepository, tenantAuthMethodPolicy);
+        }
+
+        private AuthFlow storedPuzzleFlow(UUID tenantId, UUID flowId, String config) {
+            AuthFlow flow = AuthFlow.builder().id(flowId)
+                    .tenant(Tenant.builder().id(tenantId).name("Pilot").build())
+                    .operationType(OperationType.APP_LOGIN).isActive(false).build();
+            flow.getSteps().add(AuthFlowStep.builder()
+                    .authFlow(flow)
+                    .authMethod(AuthMethod.builder().type(AuthMethodType.PUZZLE).build())
+                    .stepOrder(1)
+                    .config(config)
+                    .build());
+            when(authFlowRepository.findByIdAndTenantId(flowId, tenantId)).thenReturn(Optional.of(flow));
+            return flow;
+        }
+
+        @Test
+        void activatingAStoredFlowWithRegistryIds_isRejected() {
+            UUID tenantId = UUID.randomUUID();
+            UUID flowId = UUID.randomUUID();
+            storedPuzzleFlow(tenantId, flowId,
+                    "{\"puzzleConfig\":{\"allowedChallengeTypes\":[\"FACE_BLINK\"]}}");
+
+            assertThatThrownBy(() -> service().updateFlow(tenantId, flowId,
+                    new UpdateAuthFlowCommand(null, null, null, true)))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("face_blink");
+            verify(authFlowRepository, never()).save(any());
+        }
+
+        @Test
+        void makingAStoredFlowDefault_withAValidConfig_isAllowed() {
+            UUID tenantId = UUID.randomUUID();
+            UUID flowId = UUID.randomUUID();
+            AuthFlow flow = storedPuzzleFlow(tenantId, flowId,
+                    "{\"puzzleConfig\":{\"allowedChallengeTypes\":[\"blink\",\"wave\"],\"count\":2}}");
+            when(authFlowRepository.save(flow)).thenReturn(flow);
+
+            service().updateFlow(tenantId, flowId, new UpdateAuthFlowCommand(null, null, true, null));
+
+            verify(authFlowRepository).save(flow);
+        }
+
+        @Test
+        void renamingOnly_doesNotRecheck() {
+            UUID tenantId = UUID.randomUUID();
+            UUID flowId = UUID.randomUUID();
+            AuthFlow flow = storedPuzzleFlow(tenantId, flowId,
+                    "{\"puzzleConfig\":{\"allowedChallengeTypes\":[\"FACE_BLINK\"]}}");
+            when(authFlowRepository.save(flow)).thenReturn(flow);
+
+            service().updateFlow(tenantId, flowId, new UpdateAuthFlowCommand("Renamed", null, null, null));
+
+            verify(authFlowRepository).save(flow);
+        }
+    }
+
+    @Nested
+    @DisplayName("PuzzleChallengeType (bio's ChallengeType wire values)")
+    class ChallengeTypes {
+
+        @Test
+        void matchesBiosChallengeTypeSet() {
+            // bio app/api/schemas/active_liveness.py ChallengeType, f0d1f71 / 9a86866.
+            assertThat(java.util.Arrays.stream(PuzzleChallengeType.values()).map(PuzzleChallengeType::wireValue))
+                    .containsExactlyInAnyOrder(
+                            "blink", "smile", "light", "turn_left", "turn_right", "open_mouth",
+                            "raise_eyebrows", "close_left_eye", "close_right_eye", "look_up", "look_down",
+                            "raise_left_brow", "raise_right_brow", "nod", "shake_head",
+                            "finger_count", "shape_trace", "wave", "hand_flip", "finger_tap", "pinch",
+                            "peek_a_boo", "math", "hold_position");
+        }
+
+        @Test
+        void fromWire_isTrimmedAndCaseInsensitive_andRejectsRegistryIds() {
+            assertThat(PuzzleChallengeType.fromWire(" Blink ")).contains(PuzzleChallengeType.BLINK);
+            assertThat(PuzzleChallengeType.isKnown("FACE_BLINK")).isFalse();
+            assertThat(PuzzleChallengeType.isKnown(null)).isFalse();
         }
     }
 }
