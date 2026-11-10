@@ -97,6 +97,8 @@ class SecurityConfigPermitAllPinTest {
             "/api/v1/guests/accept",
             // Biometric health (monitoring)
             "/api/v1/biometric/health",
+            // Public, write-only device benchmark intake (Paper A)
+            "/api/v1/devbench/runs",
             // Actuator health
             "/actuator/health"
     );

@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### 2026-11-10 - Public device benchmark intake (Paper A)
+
+- New public, write-only `POST /api/v1/devbench/runs` stores one anonymous run of the
+  app.fivucsas.com/devbench benchmark (Facenet512 FP16 in the browser) in `devbench_runs`
+  (V89, jsonb payload). No IP, no account id, no location is stored.
+- Abuse limits: 30 requests per hour per IP in `RateLimitFilter` (fail-closed when Redis is
+  down), 32 KiB body cap read before parsing, allow-listed top-level keys, `uid` always dropped,
+  participant name capped at 60 characters, and a global cap of accepted rows per UTC day
+  (`APP_DEVBENCH_DAILY_CAP`, default 5000). Kill-switch `APP_DEVBENCH_ENABLED` (503 when false).
+- ROOT-only `GET /api/v1/admin/devbench/runs?format=json|csv`; the CSV uses the artifact
+  column set and neutralises spreadsheet formulas.
+
 ### 2026-11-10 - Tenant auth-method endpoints enforce tenant ownership
 
 - `GET /api/v1/tenants/{tenantId}/auth-methods` and

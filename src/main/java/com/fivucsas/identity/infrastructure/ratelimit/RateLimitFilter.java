@@ -41,6 +41,18 @@ public class RateLimitFilter extends OncePerRequestFilter {
     private static final int ONBOARDING_MAX_REQUESTS = 5;
     private static final Duration ONBOARDING_WINDOW = Duration.ofHours(1);
 
+    // Public, anonymous device benchmark intake: one visit posts 3 runs, so 30/hour
+    // allows ten full visits from one address (a family on one home router) while
+    // keeping a scripted flood small. The service adds a global daily cap on top.
+    static final String DEVBENCH_RUNS_PATH = "/api/v1/devbench/runs";
+    static final int DEVBENCH_MAX_REQUESTS = 30;
+    static final Duration DEVBENCH_WINDOW = Duration.ofHours(1);
+
+    /** Per-IP request budget for one path. */
+    record Limit(int maxRequests, Duration window) {}
+
+    static final Limit DEFAULT_LIMIT = new Limit(MAX_REQUESTS, WINDOW);
+
     // Sensitive endpoints that must fail-closed
     private static final java.util.Set<String> SENSITIVE_PATHS = java.util.Set.of(
             "/api/v1/auth/login",
@@ -52,7 +64,9 @@ public class RateLimitFilter extends OncePerRequestFilter {
             // Anonymous approve-login session creation mints a cross-device
             // login challenge per call, so it fails closed (in-memory fallback)
             // when Redis is down rather than allowing unbounded prompts.
-            "/api/v1/auth/approve-login/session"
+            "/api/v1/auth/approve-login/session",
+            // Anonymous public write: fail closed when Redis is down.
+            DEVBENCH_RUNS_PATH
     );
 
     // In-memory fallback rate limiter (bounded)
@@ -77,11 +91,9 @@ public class RateLimitFilter extends OncePerRequestFilter {
         String clientId = getClientIdentifier(request);
         String key = "rate_limit:" + clientId + ":" + path;
 
-        // Per-path caps: onboarding/register is tightly throttled; everything
-        // else uses the default 100/min bucket.
-        boolean onboardingRegister = path.startsWith(ONBOARDING_REGISTER_PATH);
-        int maxRequests = onboardingRegister ? ONBOARDING_MAX_REQUESTS : MAX_REQUESTS;
-        Duration window = onboardingRegister ? ONBOARDING_WINDOW : WINDOW;
+        Limit limit = limitFor(path);
+        int maxRequests = limit.maxRequests();
+        Duration window = limit.window();
 
         try {
             Long requests = redisTemplate.opsForValue().increment(key);
@@ -148,9 +160,9 @@ public class RateLimitFilter extends OncePerRequestFilter {
             return true;
         }
 
-        boolean onboardingRegister = path.startsWith(ONBOARDING_REGISTER_PATH);
-        int maxRequests = onboardingRegister ? ONBOARDING_MAX_REQUESTS : MAX_REQUESTS;
-        long windowMs = (onboardingRegister ? ONBOARDING_WINDOW : WINDOW).toMillis();
+        Limit limit = limitFor(path);
+        int maxRequests = limit.maxRequests();
+        long windowMs = limit.window().toMillis();
 
         FallbackBucket bucket = fallbackBuckets.computeIfAbsent(key, k -> new FallbackBucket());
         return bucket.incrementAndCheck(maxRequests, windowMs);
@@ -163,6 +175,17 @@ public class RateLimitFilter extends OncePerRequestFilter {
             long cutoff = now - WINDOW.toMillis();
             fallbackBuckets.entrySet().removeIf(e -> e.getValue().windowStart < cutoff);
         }
+    }
+
+    /** Per-path caps: abuse-prone public writes are tightly throttled, everything else gets the default. */
+    static Limit limitFor(String path) {
+        if (path.startsWith(ONBOARDING_REGISTER_PATH)) {
+            return new Limit(ONBOARDING_MAX_REQUESTS, ONBOARDING_WINDOW);
+        }
+        if (path.startsWith(DEVBENCH_RUNS_PATH)) {
+            return new Limit(DEVBENCH_MAX_REQUESTS, DEVBENCH_WINDOW);
+        }
+        return DEFAULT_LIMIT;
     }
 
     private boolean isSensitivePath(String path) {
