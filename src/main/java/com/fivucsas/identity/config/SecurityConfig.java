@@ -172,6 +172,10 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/v1/onboarding/verify-email").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/onboarding/verify-email").permitAll()
 
+                        // Public, write-only device benchmark intake (Paper A). Per-IP
+                        // capped in RateLimitFilter; the ROOT export stays authenticated.
+                        .requestMatchers(HttpMethod.POST, "/api/v1/devbench/runs").permitAll()
+
                         // H2 console - restricted by profile and expose-docs flag (NEVER public)
                         .requestMatchers("/h2-console/**").access((authentication, context) ->
                                 new org.springframework.security.authorization.AuthorizationDecision(exposeDocs && !isProductionProfile()))
