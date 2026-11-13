@@ -25,6 +25,18 @@
   user read/update/delete/change-password, user-role read/assign/revoke) now runs its admin branch
   through `@rbac.canAccessUser`; the self branch (`isCurrentUser`) is unchanged.
   `GET /api/v1/users/{id}/roles` had answered 200 to an admin of another tenant.
+  `POST /api/v1/guests/{guestUserId}/revoke` and `/extend` now also require
+  `@rbac.canAccessUser(#guestUserId)`.
+- `POST /api/v1/users/{id}/enrollments` wrote the caller-supplied `?tenantId=` into the new row, so a
+  member (self branch) or a same-tenant admin could tag a tenant-A user's enrollment with tenant B,
+  exposing that user to tenant B's admins. The row's tenant now always comes from the user's own
+  `tenant_id` (new `UserTenantPort`, read with the tenant filter off); `tenantId` is optional, must be
+  a tenant the caller may act in (403 otherwise) and must equal the user's tenant (400 otherwise).
+  Biometric score recording (`recordBiometricScores`) uses the same rule, so a ROOT switched to
+  another tenant no longer tags a row with the switched tenant.
+- `GET /api/v1/users/{userId}/roles/all/{roleId}` listed every holder of a global role across
+  tenants; non-ROOT callers now get only the holders in their own tenant scope
+  (`findByRoleIdWithUserInTenant`).
 - Tests: `UserEnrollmentTenantGuardSecurityTest`, `RbacPermissionEvaluatorTargetScopeTest`,
   `TenantContextFilterOrderTest` (unit) and `CrossTenantEnrollmentHttpIT` (Testcontainers, full
   HTTP stack with real JWTs, added to the CI executed-IT gate).

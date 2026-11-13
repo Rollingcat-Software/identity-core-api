@@ -37,19 +37,19 @@ public class AuthMethodController {
 
     // --- /api/v1/tenants/{tenantId}/auth-methods endpoints (from TenantAuthMethodController) ---
     //
-    // hasPermission(#tenantId, ...) does NOT scope by tenant: RbacPermissionEvaluator
-    // ignores the target id, and a TENANT_ADMIN holds every tenant-scoped permission
-    // implicitly. @rbac.canAccessTenant(#tenantId) is what keeps an admin of tenant B
-    // out of tenant A (ROOT stays cross-tenant).
+    // hasPermission(#tenantId, 'Tenant', ...) scopes by tenant: RbacPermissionEvaluator
+    // refuses a 'Tenant' target outside the caller's tenant (canAccessTenant, ROOT stays
+    // cross-tenant). The explicit @rbac.canAccessTenant(#tenantId) below repeats that
+    // check on purpose, as defence in depth that does not depend on the evaluator.
 
     /**
      * Login-method catalog for one tenant's flow builder: the global catalog
      * plus PUZZLE when the PUZZLE layer is enabled for this tenant (canary).
      *
-     * <p>{@code hasPermission(#tenantId, ...)} checks the permission only (the
-     * RBAC evaluator ignores the target id), so tenant ownership is checked
-     * explicitly: without it any tenant's admin could probe whether another
-     * tenant is on the PUZZLE canary list.
+     * <p>{@code hasPermission(#tenantId, 'Tenant', ...)} already refuses another
+     * tenant's id; the explicit {@code @rbac.canAccessTenant(#tenantId)} is kept as
+     * defence in depth, because without a tenant check any tenant's admin could
+     * probe whether another tenant is on the PUZZLE canary list.
      */
     @GetMapping("/api/v1/tenants/{tenantId}/auth-methods/catalog")
     @PreAuthorize("hasPermission(#tenantId, 'Tenant', 'auth_method:read') and @rbac.canAccessTenant(#tenantId)")
