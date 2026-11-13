@@ -123,7 +123,9 @@ class CrossTenantEnrollmentHttpIT {
     private UUID memberA;
     private UUID victimB;
     private String adminAToken;
+    private String memberAToken;
     private String rootToken;
+    private UUID globalRole;
 
     @BeforeEach
     void setUp() {
@@ -135,13 +137,15 @@ class CrossTenantEnrollmentHttpIT {
         String adminAEmail = "admina@" + tenantA + ".test";
         seedUser(systemTenant, rootEmail, "ROOT");
         seedUser(tenantA, adminAEmail, "TENANT_ADMIN");
-        memberA = seedUser(tenantA, "member@" + tenantA + ".test", "TENANT_MEMBER");
+        String memberAEmail = "member@" + tenantA + ".test";
+        memberA = seedUser(tenantA, memberAEmail, "TENANT_MEMBER");
         victimB = seedUser(tenantB, "victim@" + tenantB + ".test", "TENANT_MEMBER");
 
         seedEnrollment(tenantA, memberA, "FACE", "PENDING");
         seedEnrollment(tenantB, victimB, "FACE", "PENDING");
 
         adminAToken = jwtService.generateAccessToken(adminAEmail);
+        memberAToken = jwtService.generateAccessToken(memberAEmail);
         rootToken = jwtService.generateAccessToken(rootEmail);
     }
 
@@ -149,6 +153,11 @@ class CrossTenantEnrollmentHttpIT {
     void tearDown() {
         TenantContext.clear();
         jdbc.update("DELETE FROM user_enrollments WHERE tenant_id IN (?, ?, ?)", systemTenant, tenantA, tenantB);
+        if (globalRole != null) {
+            jdbc.update("DELETE FROM user_roles WHERE role_id = ?", globalRole);
+            jdbc.update("DELETE FROM roles WHERE id = ?", globalRole);
+            globalRole = null;
+        }
         // The V53 trigger forbids hard DELETE of users and tenants; seeds are unique per run.
         jdbc.update("UPDATE users SET deleted_at = NOW() WHERE tenant_id IN (?, ?, ?) AND deleted_at IS NULL",
                 systemTenant, tenantA, tenantB);
@@ -282,6 +291,124 @@ class CrossTenantEnrollmentHttpIT {
             mvc.perform(asAdminAForging(get("/api/v1/users/{id}/roles", victimB), tenantB))
                     .andExpect(status().isForbidden());
         }
+    }
+
+    @Nested
+    @DisplayName("POST /users/{id}/enrollments: the row's tenant is the user's own tenant")
+    class StartEnrollmentTenant {
+
+        @Test
+        void startEnrollment_WhenSelfPassesForeignTenantId_ShouldReturn403AndWriteNothing() throws Exception {
+            List<Map<String, Object>> before = enrollmentsOf(memberA);
+
+            mvc.perform(post("/api/v1/users/{id}/enrollments", memberA)
+                            .header("Authorization", "Bearer " + memberAToken)
+                            .param("tenantId", tenantB.toString())
+                            .param("methodType", "EMAIL_OTP"))
+                    .andExpect(status().isForbidden());
+
+            assertThat(enrollmentsOf(memberA)).isEqualTo(before);
+        }
+
+        @Test
+        void startEnrollment_WhenAdminOfSameTenantPassesForeignTenantId_ShouldReturn403AndWriteNothing()
+                throws Exception {
+            List<Map<String, Object>> before = enrollmentsOf(memberA);
+
+            mvc.perform(asAdminA(post("/api/v1/users/{id}/enrollments", memberA)
+                            .param("tenantId", tenantB.toString())
+                            .param("methodType", "EMAIL_OTP")))
+                    .andExpect(status().isForbidden());
+
+            assertThat(enrollmentsOf(memberA)).isEqualTo(before);
+        }
+
+        @Test
+        void startEnrollment_WhenRootPassesTenantOtherThanTheUsers_ShouldReturn400AndWriteNothing()
+                throws Exception {
+            List<Map<String, Object>> before = enrollmentsOf(memberA);
+
+            mvc.perform(post("/api/v1/users/{id}/enrollments", memberA)
+                            .header("Authorization", "Bearer " + rootToken)
+                            .header("X-Tenant-ID", tenantB.toString())
+                            .param("tenantId", tenantB.toString())
+                            .param("methodType", "EMAIL_OTP"))
+                    .andExpect(status().isBadRequest());
+
+            assertThat(enrollmentsOf(memberA)).isEqualTo(before);
+        }
+
+        @Test
+        void startEnrollment_WhenRootSwitchedToAnotherTenantOmitsTenantId_ShouldTagTheUsersTenant()
+                throws Exception {
+            mvc.perform(post("/api/v1/users/{id}/enrollments", memberA)
+                            .header("Authorization", "Bearer " + rootToken)
+                            .header("X-Tenant-ID", tenantB.toString())
+                            .param("methodType", "EMAIL_OTP"))
+                    .andExpect(status().isCreated());
+
+            assertThat(tenantOfEnrollment(memberA, "EMAIL_OTP")).isEqualTo(tenantA);
+        }
+
+        @Test
+        void startEnrollment_WhenSelfPassesOwnTenantId_ShouldReturn201() throws Exception {
+            mvc.perform(post("/api/v1/users/{id}/enrollments", memberA)
+                            .header("Authorization", "Bearer " + memberAToken)
+                            .param("tenantId", tenantA.toString())
+                            .param("methodType", "EMAIL_OTP"))
+                    .andExpect(status().isCreated());
+
+            assertThat(tenantOfEnrollment(memberA, "EMAIL_OTP")).isEqualTo(tenantA);
+        }
+    }
+
+    @Nested
+    @DisplayName("Guest lifecycle and role-holder endpoints")
+    class GuestAndRoleHolders {
+
+        @Test
+        void revokeGuest_WhenAdminOfAnotherTenant_ShouldReturn403AndLeaveTheUserActive() throws Exception {
+            mvc.perform(asAdminA(post("/api/v1/guests/{id}/revoke", victimB)))
+                    .andExpect(status().isForbidden());
+
+            assertThat(isActive(victimB)).isTrue();
+        }
+
+        @Test
+        void extendGuest_WhenAdminOfAnotherTenant_ShouldReturn403() throws Exception {
+            mvc.perform(asAdminA(post("/api/v1/guests/{id}/extend", victimB)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"additionalHours\":24}")))
+                    .andExpect(status().isForbidden());
+        }
+
+        @Test
+        void getRoleUsers_WhenAdminUsesGlobalRoleId_ShouldListOnlyHoldersOfOwnTenant() throws Exception {
+            globalRole = UUID.randomUUID();
+            jdbc.update("INSERT INTO roles (id, tenant_id, name, description, is_active, created_at, updated_at) "
+                    + "VALUES (?, NULL, ?, 'xth global role', true, NOW(), NOW())",
+                    globalRole, "XTH_GLOBAL_" + globalRole.toString().substring(0, 8));
+            jdbc.update("INSERT INTO user_roles (user_id, role_id, assigned_at) VALUES (?, ?, NOW())",
+                    memberA, globalRole);
+            jdbc.update("INSERT INTO user_roles (user_id, role_id, assigned_at) VALUES (?, ?, NOW())",
+                    victimB, globalRole);
+
+            mvc.perform(asAdminA(get("/api/v1/users/{id}/roles/all/{roleId}", memberA, globalRole)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.length()").value(1))
+                    .andExpect(jsonPath("$[0].userId").value(memberA.toString()));
+        }
+    }
+
+    private UUID tenantOfEnrollment(UUID userId, String methodType) {
+        return jdbc.queryForObject(
+                "SELECT tenant_id FROM user_enrollments WHERE user_id = ? AND auth_method_type = ?",
+                UUID.class, userId, methodType);
+    }
+
+    private boolean isActive(UUID userId) {
+        return Boolean.TRUE.equals(jdbc.queryForObject(
+                "SELECT is_active FROM users WHERE id = ?", Boolean.class, userId));
     }
 
     private List<Map<String, Object>> enrollmentsOf(UUID userId) {
