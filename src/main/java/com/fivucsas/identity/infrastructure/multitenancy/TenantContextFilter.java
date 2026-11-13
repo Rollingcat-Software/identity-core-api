@@ -35,8 +35,15 @@ import java.util.UUID;
  * works only when this filter runs BEFORE the security chain, which Spring Boot
  * registers at {@link SecurityProperties#DEFAULT_FILTER_ORDER}. At {@code @Order(1)} it
  * ran after the chain, so the header overwrote the token tenant for every caller and
- * the rebind never took effect (AX-5 cross-tenant run). Being outermost also makes the
- * {@code finally} below the last word on clearing the context.</p>
+ * the rebind never took effect (AX-5 cross-tenant run).</p>
+ *
+ * <p><b>No tenant may outlive a request.</b> {@link TenantContext} is a thread-local on a
+ * pooled server thread. This filter therefore clears it on entry as well as in its
+ * {@code finally}, so a request never inherits a tenant a previous request left behind.
+ * It is skipped for the paths in {@link #shouldNotFilter}, while the security chain
+ * still runs there, so {@link TenantBindFromAuthFilter} restores what it found in its
+ * own {@code finally} instead of relying on this one (PF-5 review: an authenticated
+ * {@code GET /actuator/health} bound the caller's tenant and nothing cleared it).</p>
  */
 @Component
 @Order(TenantContextFilter.ORDER)
@@ -58,6 +65,8 @@ public class TenantContextFilter extends OncePerRequestFilter {
                                     FilterChain filterChain)
             throws ServletException, IOException {
 
+        // Drop anything a previous request left on this pooled thread before binding.
+        TenantContext.clear();
         try {
             UUID tenantId = extractTenantId(request);
 

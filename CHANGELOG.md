@@ -40,6 +40,15 @@
 - Tests: `UserEnrollmentTenantGuardSecurityTest`, `RbacPermissionEvaluatorTargetScopeTest`,
   `TenantContextFilterOrderTest` (unit) and `CrossTenantEnrollmentHttpIT` (Testcontainers, full
   HTTP stack with real JWTs, added to the CI executed-IT gate).
+- No tenant outlives a request on a pooled server thread. `TenantContextFilter` skips `/actuator`,
+  `/swagger`, `/v3/api-docs` and `/health`, but the security chain still runs there, so an
+  authenticated `GET /actuator/health` left the caller's tenant bound and the next anonymous request
+  on that thread (for example a public self-registration) ran in it. `TenantContextFilter` now clears
+  the context on entry, and `TenantBindFromAuthFilter` restores the tenant it found in its own
+  `finally` (`TenantContextThreadLeakTest`).
+- `startEnrollment` reads the existing row, and re-reads it after a unique-key race, with the tenant
+  filter off and refuses a row tagged with a tenant other than the user's own. A ROOT switched to
+  another tenant re-running an existing enrollment had missed the row and failed with a 500.
 
 ### 2026-11-10 - Public device benchmark intake (Paper A)
 

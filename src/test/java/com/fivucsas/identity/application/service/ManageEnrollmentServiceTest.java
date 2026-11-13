@@ -123,13 +123,13 @@ class ManageEnrollmentServiceTest {
         // re-enrolling an existing PASSWORD enrollment should call completeEnrollment("{}").
         // (TOTP and other async methods call startEnrollment() instead and wait for the
         // real flow to finish via completeEnrollment() with real data.)
-        userOfTenant();
+        Tenant ownTenant = userOfTenant().getTenant();
         UserEnrollment existing = mock(UserEnrollment.class);
         when(existing.getId()).thenReturn(UUID.randomUUID());
         when(existing.getAuthMethodType()).thenReturn(AuthMethodType.PASSWORD);
         when(existing.getStatus()).thenReturn(EnrollmentStatus.ENROLLED);
         when(existing.getUser()).thenReturn(null);
-        when(existing.getTenant()).thenReturn(null);
+        when(existing.getTenant()).thenReturn(ownTenant);
         when(userEnrollmentRepository.findByUserIdAndAuthMethodType(userId, AuthMethodType.PASSWORD))
                 .thenReturn(Optional.of(existing));
         when(userEnrollmentRepository.save(existing)).thenReturn(existing);
@@ -386,9 +386,10 @@ class ManageEnrollmentServiceTest {
         // the winner and records the scores onto it.
         TenantContext.setCurrentTenant(tenantId);
         try {
-            userOfTenant();
+            Tenant ownTenant = userOfTenant().getTenant();
 
             UserEnrollment winner = UserEnrollment.builder()
+                    .tenant(ownTenant)
                     .authMethodType(AuthMethodType.FACE)
                     .status(EnrollmentStatus.PENDING)
                     .build();
@@ -426,14 +427,14 @@ class ManageEnrollmentServiceTest {
         // (user_id, auth_method_type) unique constraint. The loser must catch the
         // DataIntegrityViolationException, re-fetch the row committed by the winner,
         // and return idempotently — never surface a 500.
-        userOfTenant();
+        Tenant ownTenant = userOfTenant().getTenant();
 
         UserEnrollment winner = mock(UserEnrollment.class);
         when(winner.getId()).thenReturn(UUID.randomUUID());
         when(winner.getAuthMethodType()).thenReturn(AuthMethodType.TOTP);
         when(winner.getStatus()).thenReturn(EnrollmentStatus.PENDING);
         when(winner.getUser()).thenReturn(null);
-        when(winner.getTenant()).thenReturn(null);
+        when(winner.getTenant()).thenReturn(ownTenant);
 
         // first findBy returns empty (loser proceeds to build new row),
         // save() throws DataIntegrityViolationException (winner already committed),
@@ -508,5 +509,68 @@ class ManageEnrollmentServiceTest {
         ArgumentCaptor<UserEnrollment> saved = forClass(UserEnrollment.class);
         verify(userEnrollmentRepository).save(saved.capture());
         assertThat(saved.getValue().getTenant().getId()).isEqualTo(tenantId);
+    }
+
+    @Test
+    void startEnrollment_WhenRootSwitchedToAnotherTenantAndRowExists_ShouldReuseTheUsersRow() {
+        // PF-5 review: a ROOT switched to another tenant (X-Tenant-ID) restarts an
+        // enrollment that already exists for a user of tenantId. Under the tenant filter
+        // the lookup missed the row, the insert hit the unique key and the filtered
+        // re-fetch was empty, so the call failed with a 500. The lookup must run with the
+        // filter off. The stub models the filter: the row is visible only when no tenant
+        // is bound, which is what the bypass guarantees.
+        Tenant ownTenant = userOfTenant().getTenant();
+        UserEnrollment existing = UserEnrollment.builder()
+                .tenant(ownTenant)
+                .authMethodType(AuthMethodType.PASSWORD)
+                .status(EnrollmentStatus.ENROLLED)
+                .build();
+        doAnswer(inv -> {
+            UUID bound = TenantContext.getCurrentTenant();
+            TenantContext.clear();
+            try {
+                return ((java.util.function.Supplier<?>) inv.getArgument(0)).get();
+            } finally {
+                TenantContext.setCurrentTenant(bound);
+            }
+        }).when(tenantFilterBypass).runWithoutTenantFilter(any());
+        when(userEnrollmentRepository.findByUserIdAndAuthMethodType(userId, AuthMethodType.PASSWORD))
+                .thenAnswer(inv -> TenantContext.getCurrentTenant() == null
+                        ? Optional.of(existing) : Optional.empty());
+        when(userEnrollmentRepository.save(any(UserEnrollment.class)))
+                .thenAnswer(inv -> inv.getArgument(0));
+
+        TenantContext.setCurrentTenant(UUID.randomUUID());
+        try {
+            service.startEnrollment(userId, null, AuthMethodType.PASSWORD);
+        } finally {
+            TenantContext.clear();
+        }
+
+        ArgumentCaptor<UserEnrollment> saved = forClass(UserEnrollment.class);
+        verify(userEnrollmentRepository).save(saved.capture());
+        assertThat(saved.getValue()).isSameAs(existing);
+        assertThat(saved.getValue().getTenant().getId()).isEqualTo(tenantId);
+    }
+
+    @Test
+    void startEnrollment_WhenExistingRowIsTaggedWithAnotherTenant_ShouldRefuseAndWriteNothing() {
+        // PF-5: a row of this user tagged with a foreign tenant (written before the fix)
+        // must not be re-used and re-saved under that tenant.
+        userOfTenant();
+        Tenant foreign = mock(Tenant.class);
+        when(foreign.getId()).thenReturn(UUID.randomUUID());
+        UserEnrollment mistagged = UserEnrollment.builder()
+                .tenant(foreign)
+                .authMethodType(AuthMethodType.PASSWORD)
+                .status(EnrollmentStatus.ENROLLED)
+                .build();
+        when(userEnrollmentRepository.findByUserIdAndAuthMethodType(userId, AuthMethodType.PASSWORD))
+                .thenReturn(Optional.of(mistagged));
+
+        assertThatThrownBy(() -> service.startEnrollment(userId, null, AuthMethodType.PASSWORD))
+                .isInstanceOf(IllegalStateException.class);
+
+        verify(userEnrollmentRepository, never()).save(any());
     }
 }

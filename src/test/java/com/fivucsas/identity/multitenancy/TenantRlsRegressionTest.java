@@ -116,15 +116,15 @@ class TenantRlsRegressionTest {
         // Simulate TenantContextFilter having honored the asserted X-Tenant-ID header (tenantB).
         TenantContext.setCurrentTenant(tenantB);
 
-        invokeFilter();
+        UUID boundTenant = invokeFilter();
 
         // Filter must have overwritten the asserted tenantId.
-        assertThat(TenantContext.getCurrentTenant()).isEqualTo(tenantA);
+        assertThat(boundTenant).isEqualTo(tenantA);
 
         // Tenant-scoped query honours TenantContext → only alice's row visible.
         List<UUID> visibleUserIds = jdbc.queryForList(
                 "SELECT id FROM users WHERE tenant_id = ?", UUID.class,
-                TenantContext.getCurrentTenant());
+                boundTenant);
         assertThat(visibleUserIds).containsExactly(aliceId);
 
         // AUDIT line emitted.
@@ -139,14 +139,14 @@ class TenantRlsRegressionTest {
         authenticateAs(aliceId, "alice@example.com", tenantA, "ROLE_ROOT");
         TenantContext.setCurrentTenant(tenantB);
 
-        invokeFilter();
+        UUID boundTenant = invokeFilter();
 
-        assertThat(TenantContext.getCurrentTenant()).isEqualTo(tenantB);
+        assertThat(boundTenant).isEqualTo(tenantB);
 
         // Tenant-scoped query reflects the (intentionally) overridden context — bob's row.
         List<UUID> visibleUserIds = jdbc.queryForList(
                 "SELECT id FROM users WHERE tenant_id = ?", UUID.class,
-                TenantContext.getCurrentTenant());
+                boundTenant);
         assertThat(visibleUserIds).containsExactly(bobId);
 
         assertThat(logCapture.list)
@@ -160,19 +160,28 @@ class TenantRlsRegressionTest {
         authenticateAs(aliceId, "alice@example.com", tenantA, "ROLE_USER");
         TenantContext.clear();   // emulate request without X-Tenant-ID
 
-        invokeFilter();
-
-        assertThat(TenantContext.getCurrentTenant()).isEqualTo(tenantA);
+        assertThat(invokeFilter()).isEqualTo(tenantA);
     }
 
     // ── helpers ─────────────────────────────────────────────────────────
 
-    private void invokeFilter() throws Exception {
+    /**
+     * Runs the filter and returns the tenant bound while the rest of the chain runs. The
+     * filter restores the tenant it found once the chain returns, so the binding is only
+     * observable from inside the chain.
+     */
+    private UUID invokeFilter() throws Exception {
         HttpServletRequest req = mock(HttpServletRequest.class);
         HttpServletResponse res = mock(HttpServletResponse.class);
         FilterChain chain = mock(FilterChain.class);
+        UUID[] bound = new UUID[1];
+        Mockito.doAnswer(inv -> {
+            bound[0] = TenantContext.getCurrentTenant();
+            return null;
+        }).when(chain).doFilter(req, res);
         filter.doFilter(req, res, chain);
         Mockito.verify(chain).doFilter(req, res);
+        return bound[0];
     }
 
     private void authenticateAs(UUID userId, String email, UUID tenantId, String role) {

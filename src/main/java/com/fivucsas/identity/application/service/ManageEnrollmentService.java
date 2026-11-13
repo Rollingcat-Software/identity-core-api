@@ -26,6 +26,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
@@ -185,8 +186,10 @@ public class ManageEnrollmentService implements ManageEnrollmentUseCase {
                     requestedTenantId, userId);
             throw new IllegalArgumentException("tenantId does not match the user's tenant");
         }
-        UserEnrollment enrollment = userEnrollmentRepository
-                .findByUserIdAndAuthMethodType(userId, methodType)
+        // The row is keyed by (user_id, auth_method_type), whatever tenant the request
+        // is bound to. A ROOT switched to another tenant (X-Tenant-ID) would otherwise
+        // miss an existing row under the tenant filter and collide on the unique key.
+        UserEnrollment enrollment = findOwnEnrollment(userId, userTenantId, methodType)
                 .orElseGet(() -> {
                     // The user and its tenant are fixed by userId, whatever tenant the
                     // request is bound to, so the user read runs with the tenant filter off.
@@ -219,11 +222,31 @@ public class ManageEnrollmentService implements ManageEnrollmentUseCase {
         } catch (DataIntegrityViolationException conflict) {
             log.info("startEnrollment race detected for user={} method={} — re-fetching winner",
                     userId, methodType);
-            UserEnrollment winner = userEnrollmentRepository
-                    .findByUserIdAndAuthMethodType(userId, methodType)
+            UserEnrollment winner = findOwnEnrollment(userId, userTenantId, methodType)
                     .orElseThrow(() -> conflict);
             return EnrollmentResponse.from(winner);
         }
+    }
+
+    /**
+     * Reads the enrollment row of {@code userId} for {@code methodType} with the Hibernate
+     * {@code tenantFilter} off, so the lookup does not depend on the tenant the request is
+     * bound to, then checks that the row belongs to the user's own tenant. A row tagged
+     * with any other tenant is refused rather than re-used (PF-5).
+     */
+    private Optional<UserEnrollment> findOwnEnrollment(UUID userId, UUID userTenantId,
+                                                       AuthMethodType methodType) {
+        Optional<UserEnrollment> row = tenantFilterBypass.runWithoutTenantFilter(
+                () -> userEnrollmentRepository.findByUserIdAndAuthMethodType(userId, methodType));
+        row.ifPresent(found -> {
+            UUID rowTenantId = found.getTenant() == null ? null : found.getTenant().getId();
+            if (!userTenantId.equals(rowTenantId)) {
+                log.warn("AUDIT: enrollment row of user {} method {} is tagged with tenant {}, not the user's tenant {}",
+                        userId, methodType, rowTenantId, userTenantId);
+                throw new IllegalStateException("Enrollment row tenant does not match the user's tenant");
+            }
+        });
+        return row;
     }
 
     @Override

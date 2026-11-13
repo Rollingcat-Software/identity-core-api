@@ -71,13 +71,24 @@ public class TenantBindFromAuthFilter extends OncePerRequestFilter {
                                     HttpServletResponse response,
                                     FilterChain filterChain)
             throws ServletException, IOException {
+        // Restore what this filter found, not merely clear: on the paths
+        // TenantContextFilter skips (/actuator, /swagger, /v3/api-docs, /health) the
+        // security chain still runs, and without this an authenticated request there
+        // left the caller's tenant bound to the pooled thread for the next request.
+        UUID tenantBefore = TenantContext.getCurrentTenant();
         try {
             rebindTenantFromAuth();
             filterChain.doFilter(request, response);
         } finally {
-            // TenantContextFilter (the earlier one) owns the clear() call in
-            // its own finally block. We do not clear here to avoid double-clear
-            // races.
+            restoreTenant(tenantBefore);
+        }
+    }
+
+    private static void restoreTenant(UUID tenantBefore) {
+        if (tenantBefore == null) {
+            TenantContext.clear();
+        } else {
+            TenantContext.setCurrentTenant(tenantBefore);
         }
     }
 
