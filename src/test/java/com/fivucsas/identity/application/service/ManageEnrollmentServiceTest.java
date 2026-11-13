@@ -11,6 +11,7 @@ import com.fivucsas.identity.domain.repository.UserRepository;
 import com.fivucsas.identity.entity.Tenant;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.entity.UserEnrollment;
+import com.fivucsas.identity.application.port.output.UserTenantPort;
 import com.fivucsas.identity.infrastructure.multitenancy.TenantContext;
 import com.fivucsas.identity.repository.JpaTenantRepository;
 import jakarta.persistence.EntityNotFoundException;
@@ -39,6 +40,7 @@ class ManageEnrollmentServiceTest {
     @Mock private UserEnrollmentRepositoryPort userEnrollmentRepository;
     @Mock private UserRepository userRepository;
     @Mock private JpaTenantRepository tenantRepository;
+    @Mock private UserTenantPort userTenantPort;
     @Mock private BiometricServicePort biometricServicePort;
     @Mock private NfcCardRepositoryPort nfcCardRepository;
     @Mock private WebAuthnCredentialRepositoryPort webAuthnCredentialRepository;
@@ -51,6 +53,27 @@ class ManageEnrollmentServiceTest {
     private final UUID userId = UUID.randomUUID();
     private final UUID tenantId = UUID.randomUUID();
 
+    @org.junit.jupiter.api.BeforeEach
+    void passThroughTenantFilterBypass() {
+        lenient().when(tenantFilterBypass.runWithoutTenantFilter(any()))
+                .thenAnswer(inv -> ((java.util.function.Supplier<?>) inv.getArgument(0)).get());
+    }
+
+    /**
+     * Stubs a user of {@link #tenantId}: the port answers the user's own tenant, and the
+     * create path loads the user and that tenant's row.
+     */
+    private User userOfTenant() {
+        User user = mock(User.class);
+        Tenant tenant = mock(Tenant.class);
+        lenient().when(tenant.getId()).thenReturn(tenantId);
+        lenient().when(user.getTenant()).thenReturn(tenant);
+        lenient().when(userTenantPort.findTenantIdOfUser(userId)).thenReturn(Optional.of(tenantId));
+        lenient().when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+        lenient().when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+        return user;
+    }
+
     @Test
     void getUserEnrollments_ShouldReturnMappedResponses() {
         // given
@@ -62,9 +85,7 @@ class ManageEnrollmentServiceTest {
         when(enrollment.getTenant()).thenReturn(null);
         when(userEnrollmentRepository.findAllByUserId(userId)).thenReturn(List.of(enrollment));
         // getUserEnrollments resolves the user-centric read with the tenant filter
-        // bypassed; the mock just executes the supplied work.
-        when(tenantFilterBypass.runWithoutTenantFilter(any()))
-                .thenAnswer(inv -> ((java.util.function.Supplier<?>) inv.getArgument(0)).get());
+        // bypassed; the pass-through stub from setUp executes the supplied work.
 
         // when
         List<EnrollmentResponse> result = service.getUserEnrollments(userId);
@@ -76,10 +97,7 @@ class ManageEnrollmentServiceTest {
     @Test
     void startEnrollment_WhenNewEnrollment_ShouldCreateAndComplete() {
         // given
-        User user = mock(User.class);
-        Tenant tenant = mock(Tenant.class);
-        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
-        when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+        userOfTenant();
         when(userEnrollmentRepository.findByUserIdAndAuthMethodType(userId, AuthMethodType.PASSWORD))
                 .thenReturn(Optional.empty());
 
@@ -105,6 +123,7 @@ class ManageEnrollmentServiceTest {
         // re-enrolling an existing PASSWORD enrollment should call completeEnrollment("{}").
         // (TOTP and other async methods call startEnrollment() instead and wait for the
         // real flow to finish via completeEnrollment() with real data.)
+        userOfTenant();
         UserEnrollment existing = mock(UserEnrollment.class);
         when(existing.getId()).thenReturn(UUID.randomUUID());
         when(existing.getAuthMethodType()).thenReturn(AuthMethodType.PASSWORD);
@@ -126,9 +145,7 @@ class ManageEnrollmentServiceTest {
     @Test
     void startEnrollment_WhenUserNotFound_ShouldThrow() {
         // given
-        when(userEnrollmentRepository.findByUserIdAndAuthMethodType(userId, AuthMethodType.PASSWORD))
-                .thenReturn(Optional.empty());
-        when(userRepository.findById(userId)).thenReturn(Optional.empty());
+        when(userTenantPort.findTenantIdOfUser(userId)).thenReturn(Optional.empty());
 
         // when/then
         assertThatThrownBy(() -> service.startEnrollment(userId, tenantId, AuthMethodType.PASSWORD))
@@ -297,10 +314,7 @@ class ManageEnrollmentServiceTest {
         // of silently dropping them.
         TenantContext.setCurrentTenant(tenantId);
         try {
-            User user = mock(User.class);
-            Tenant tenant = mock(Tenant.class);
-            when(userRepository.findById(userId)).thenReturn(Optional.of(user));
-            when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+            userOfTenant();
 
             // findBy: (1) initial upsert probe → empty; (2) startEnrollment probe →
             // empty (builds new row); (3) post-create score write → the saved row.
@@ -328,17 +342,40 @@ class ManageEnrollmentServiceTest {
     }
 
     @Test
-    void recordBiometricScores_WhenNoEnrollmentAndNoTenantContext_ShouldNoOp() {
-        // Best-effort: with no row AND no active tenant to anchor the row to, the
-        // writer must not throw and must not persist anything.
-        TenantContext.clear();
+    void recordBiometricScores_WhenNoEnrollmentAndUserUnknown_ShouldNoOp() {
+        // Best-effort: with no row AND no user to anchor the row to, the writer
+        // must not throw and must not persist anything.
         when(userEnrollmentRepository.findByUserIdAndAuthMethodType(userId, AuthMethodType.FACE))
                 .thenReturn(Optional.empty());
+        when(userTenantPort.findTenantIdOfUser(userId)).thenReturn(Optional.empty());
 
         service.recordBiometricScores(userId, AuthMethodType.FACE,
                 new BigDecimal("0.5"), new BigDecimal("0.5"));
 
         verify(userEnrollmentRepository, never()).save(any());
+    }
+
+    @Test
+    void recordBiometricScores_WhenRequestBoundToAnotherTenant_ShouldTagRowWithUsersTenant() {
+        // PF-5: a ROOT switched to another tenant (X-Tenant-ID) enrolling a user of
+        // tenantId must not create a row tagged with the switched tenant.
+        TenantContext.setCurrentTenant(UUID.randomUUID());
+        try {
+            userOfTenant();
+            when(userEnrollmentRepository.findByUserIdAndAuthMethodType(userId, AuthMethodType.FACE))
+                    .thenReturn(Optional.empty());
+            when(userEnrollmentRepository.save(any(UserEnrollment.class)))
+                    .thenAnswer(inv -> inv.getArgument(0));
+
+            service.recordBiometricScores(userId, AuthMethodType.FACE,
+                    new BigDecimal("0.5"), new BigDecimal("0.5"));
+
+            ArgumentCaptor<UserEnrollment> saved = forClass(UserEnrollment.class);
+            verify(userEnrollmentRepository).save(saved.capture());
+            assertThat(saved.getValue().getTenant().getId()).isEqualTo(tenantId);
+        } finally {
+            TenantContext.clear();
+        }
     }
 
     @Test
@@ -349,10 +386,7 @@ class ManageEnrollmentServiceTest {
         // the winner and records the scores onto it.
         TenantContext.setCurrentTenant(tenantId);
         try {
-            User user = mock(User.class);
-            Tenant tenant = mock(Tenant.class);
-            when(userRepository.findById(userId)).thenReturn(Optional.of(user));
-            when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+            userOfTenant();
 
             UserEnrollment winner = UserEnrollment.builder()
                     .authMethodType(AuthMethodType.FACE)
@@ -392,10 +426,7 @@ class ManageEnrollmentServiceTest {
         // (user_id, auth_method_type) unique constraint. The loser must catch the
         // DataIntegrityViolationException, re-fetch the row committed by the winner,
         // and return idempotently — never surface a 500.
-        User user = mock(User.class);
-        Tenant tenant = mock(Tenant.class);
-        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
-        when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+        userOfTenant();
 
         UserEnrollment winner = mock(UserEnrollment.class);
         when(winner.getId()).thenReturn(UUID.randomUUID());
@@ -427,10 +458,7 @@ class ManageEnrollmentServiceTest {
         // Defensive: if the constraint fires but no row is then visible (e.g. row
         // was created and rolled back, or repo bug), we must NOT swallow the
         // exception — surface it so the operator sees a real 500 they can debug.
-        User user = mock(User.class);
-        Tenant tenant = mock(Tenant.class);
-        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
-        when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+        userOfTenant();
 
         when(userEnrollmentRepository.findByUserIdAndAuthMethodType(userId, AuthMethodType.TOTP))
                 .thenReturn(Optional.empty())
@@ -452,5 +480,33 @@ class ManageEnrollmentServiceTest {
         // when/then
         assertThatThrownBy(() -> service.revokeEnrollment(userId, AuthMethodType.PASSWORD))
                 .isInstanceOf(EntityNotFoundException.class);
+    }
+
+    @Test
+    void startEnrollment_WhenRequestedTenantDiffersFromUsersTenant_ShouldRefuseAndWriteNothing() {
+        // PF-5: a caller-supplied ?tenantId= of another tenant must never tag the
+        // user's enrollment row with that tenant.
+        userOfTenant();
+
+        assertThatThrownBy(() -> service.startEnrollment(userId, UUID.randomUUID(), AuthMethodType.EMAIL_OTP))
+                .isInstanceOf(IllegalArgumentException.class);
+
+        verify(userEnrollmentRepository, never()).save(any());
+        verify(userEnrollmentRepository, never()).findByUserIdAndAuthMethodType(any(), any());
+    }
+
+    @Test
+    void startEnrollment_WhenTenantIdOmitted_ShouldTagRowWithUsersTenant() {
+        userOfTenant();
+        when(userEnrollmentRepository.findByUserIdAndAuthMethodType(userId, AuthMethodType.EMAIL_OTP))
+                .thenReturn(Optional.empty());
+        when(userEnrollmentRepository.save(any(UserEnrollment.class)))
+                .thenAnswer(inv -> inv.getArgument(0));
+
+        service.startEnrollment(userId, null, AuthMethodType.EMAIL_OTP);
+
+        ArgumentCaptor<UserEnrollment> saved = forClass(UserEnrollment.class);
+        verify(userEnrollmentRepository).save(saved.capture());
+        assertThat(saved.getValue().getTenant().getId()).isEqualTo(tenantId);
     }
 }

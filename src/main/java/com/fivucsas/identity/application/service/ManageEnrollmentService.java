@@ -5,13 +5,13 @@ import com.fivucsas.identity.application.port.input.ManageEnrollmentUseCase;
 import com.fivucsas.identity.application.port.output.BiometricServicePort;
 import com.fivucsas.identity.application.port.output.NfcCardRepositoryPort;
 import com.fivucsas.identity.application.port.output.UserDeviceRepositoryPort;
+import com.fivucsas.identity.application.port.output.UserTenantPort;
 import com.fivucsas.identity.application.port.output.WebAuthnCredentialRepositoryPort;
 import com.fivucsas.identity.domain.model.auth.AuthMethodType;
 import com.fivucsas.identity.entity.NfcCard;
 import com.fivucsas.identity.entity.Tenant;
 import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.entity.UserEnrollment;
-import com.fivucsas.identity.infrastructure.multitenancy.TenantContext;
 import com.fivucsas.identity.infrastructure.multitenancy.TenantFilterBypass;
 import com.fivucsas.identity.repository.JpaTenantRepository;
 import com.fivucsas.identity.application.port.output.UserEnrollmentRepositoryPort;
@@ -41,6 +41,7 @@ public class ManageEnrollmentService implements ManageEnrollmentUseCase {
     private final UserEnrollmentRepositoryPort userEnrollmentRepository;
     private final UserRepository userRepository;
     private final JpaTenantRepository tenantRepository;
+    private final UserTenantPort userTenantPort;
     private final BiometricServicePort biometricServicePort;
     private final NfcCardRepositoryPort nfcCardRepository;
     private final WebAuthnCredentialRepositoryPort webAuthnCredentialRepository;
@@ -163,16 +164,36 @@ public class ManageEnrollmentService implements ManageEnrollmentUseCase {
         });
     }
 
+    /**
+     * Starts (or re-runs) an enrollment of {@code methodType} for {@code userId}.
+     *
+     * <p>PF-5: the new row's tenant is the target user's own tenant, read with the
+     * Hibernate {@code tenantFilter} disabled, never a caller-supplied value. A
+     * caller-supplied {@code requestedTenantId} is accepted only as an assertion: when
+     * it is present and differs from the user's tenant the call is refused with an
+     * {@link IllegalArgumentException} (HTTP 400) before any row is read or written.
+     * Without this, {@code ?tenantId=<other tenant>} tagged a user's enrollment row with
+     * a foreign tenant, which exposed the user to that tenant's admins.</p>
+     */
     @Override
     @Transactional
-    public EnrollmentResponse startEnrollment(UUID userId, UUID tenantId, AuthMethodType methodType) {
+    public EnrollmentResponse startEnrollment(UUID userId, UUID requestedTenantId, AuthMethodType methodType) {
+        UUID userTenantId = userTenantPort.findTenantIdOfUser(userId)
+                .orElseThrow(() -> new EntityNotFoundException("User not found: " + userId));
+        if (requestedTenantId != null && !requestedTenantId.equals(userTenantId)) {
+            log.warn("AUDIT: enrollment start refused, tenantId {} does not match the tenant of user {}",
+                    requestedTenantId, userId);
+            throw new IllegalArgumentException("tenantId does not match the user's tenant");
+        }
         UserEnrollment enrollment = userEnrollmentRepository
                 .findByUserIdAndAuthMethodType(userId, methodType)
                 .orElseGet(() -> {
-                    User user = userRepository.findById(userId)
+                    // The user and its tenant are fixed by userId, whatever tenant the
+                    // request is bound to, so the user read runs with the tenant filter off.
+                    User user = tenantFilterBypass.runWithoutTenantFilter(() -> userRepository.findById(userId))
                             .orElseThrow(() -> new EntityNotFoundException("User not found: " + userId));
-                    Tenant tenant = tenantRepository.findById(tenantId)
-                            .orElseThrow(() -> new EntityNotFoundException("Tenant not found: " + tenantId));
+                    Tenant tenant = tenantRepository.findById(userTenantId)
+                            .orElseThrow(() -> new EntityNotFoundException("Tenant not found: " + userTenantId));
                     return UserEnrollment.builder()
                             .user(user)
                             .tenant(tenant)
@@ -259,10 +280,9 @@ public class ManageEnrollmentService implements ManageEnrollmentUseCase {
      * BigDecimal)} which no longer nulls existing scores).
      *
      * <p>Best-effort throughout: never throws so the biometric upload itself is
-     * not failed by admin bookkeeping. The created row's tenant == the owning
-     * user's tenant, which equals the active {@code TenantContext} for the
-     * enrolling user — so the Hibernate {@code tenantFilter} read + insert stay
-     * consistent (P0-1). The {@link DataIntegrityViolationException} catch
+     * not failed by admin bookkeeping. The created row's tenant is the owning
+     * user's own tenant (see {@link #startEnrollment}), whatever tenant the
+     * request is bound to. The {@link DataIntegrityViolationException} catch
      * mirrors {@link #startEnrollment}'s race handling.
      */
     @Override
@@ -276,26 +296,21 @@ public class ManageEnrollmentService implements ManageEnrollmentUseCase {
         }
 
         if (userEnrollmentRepository.findByUserIdAndAuthMethodType(userId, methodType).isEmpty()) {
-            // Row not created yet — the web enrolls the biometric BEFORE creating
+            // Row not created yet: the web enrolls the biometric BEFORE creating
             // the enrollment row (createEnrollment runs afterwards). Stage the row
             // now so the scores have somewhere to live. We delegate to
-            // startEnrollment(), the existing sanctioned row-constructor (it owns
-            // user/tenant resolution + the unique-constraint race handling), using
-            // the active TenantContext tenant — which equals the enrolling user's
-            // tenant (set by TenantBindFromAuthFilter) and the row's tenant, so the
-            // Hibernate tenantFilter read + insert stay consistent (P0-1). For FACE/
-            // VOICE (not AUTO_COMPLETE_TYPES) startEnrollment lands a PENDING row
-            // without scores; we record them in the second step below.
-            UUID tenantId = TenantContext.getCurrentTenant();
-            if (tenantId == null) {
-                return; // best-effort: no active tenant to anchor the row to
-            }
+            // startEnrollment(), the sanctioned row-constructor, which anchors the
+            // row to the target user's own tenant (PF-5), not to the request's
+            // TenantContext: a ROOT switched to another tenant with X-Tenant-ID must
+            // not create a row tagged with that tenant for a user of a different one.
+            // For FACE/VOICE (not AUTO_COMPLETE_TYPES) startEnrollment lands a
+            // PENDING row without scores; we record them in the second step below.
             try {
-                startEnrollment(userId, tenantId, methodType);
+                startEnrollment(userId, null, methodType);
             } catch (RuntimeException e) {
-                // User/tenant unresolved, or a concurrent writer won the race.
+                // User unresolved, or a concurrent writer won the race.
                 // Either way, fall through to the score write which no-ops if the
-                // row still isn't visible — never fail the biometric upload.
+                // row still isn't visible; never fail the biometric upload.
                 log.debug("recordBiometricScores could not pre-create row for user={} method={}: {}",
                         userId, methodType, e.getMessage());
             }

@@ -255,6 +255,56 @@ class UserEnrollmentTenantGuardSecurityTest {
                             .param("methodType", "FACE"))
                     .andExpect(status().isCreated());
         }
+
+        @Test
+        void startEnrollment_WhenAdminOfSameTenantPassesForeignTenantId_ShouldReturn403AndWriteNothing()
+                throws Exception {
+            signedInAsTenantAdminOfA();
+
+            mvc.perform(post("/api/v1/users/{id}/enrollments", USER_IN_A)
+                            .param("tenantId", TENANT_B.toString())
+                            .param("methodType", "EMAIL_OTP"))
+                    .andExpect(status().isForbidden());
+            verify(useCase, never()).startEnrollment(any(), any(), any());
+        }
+
+        @Test
+        void startEnrollment_WhenSelfPassesForeignTenantId_ShouldReturn403AndWriteNothing() throws Exception {
+            User self = user(USER_IN_A, "member-a@example.test", UserType.TENANT_MEMBER, TENANT_A);
+            when(userRepository.findByEmail("member-a@example.test")).thenReturn(Optional.of(self));
+            SecurityContextHolder.getContext().setAuthentication(
+                    new UsernamePasswordAuthenticationToken("member-a@example.test", "n/a", List.of()));
+
+            mvc.perform(post("/api/v1/users/{id}/enrollments", USER_IN_A)
+                            .param("tenantId", TENANT_B.toString())
+                            .param("methodType", "EMAIL_OTP"))
+                    .andExpect(status().isForbidden());
+            verify(useCase, never()).startEnrollment(any(), any(), any());
+        }
+
+        @Test
+        void startEnrollment_WhenSelfPassesOwnTenantId_ShouldReturn201() throws Exception {
+            User self = user(USER_IN_A, "member-a@example.test", UserType.TENANT_MEMBER, TENANT_A);
+            when(userRepository.findByEmail("member-a@example.test")).thenReturn(Optional.of(self));
+            SecurityContextHolder.getContext().setAuthentication(
+                    new UsernamePasswordAuthenticationToken("member-a@example.test", "n/a", List.of()));
+
+            mvc.perform(post("/api/v1/users/{id}/enrollments", USER_IN_A)
+                            .param("tenantId", TENANT_A.toString())
+                            .param("methodType", "EMAIL_OTP"))
+                    .andExpect(status().isCreated());
+        }
+
+        @Test
+        void startEnrollment_WhenTenantIdOmitted_ShouldReachUseCaseWithNullTenant() throws Exception {
+            signedInAsTenantAdminOfA();
+
+            mvc.perform(post("/api/v1/users/{id}/enrollments", USER_IN_A)
+                            .param("methodType", "EMAIL_OTP"))
+                    .andExpect(status().isCreated());
+            verify(useCase).startEnrollment(USER_IN_A, null,
+                    com.fivucsas.identity.domain.model.auth.AuthMethodType.EMAIL_OTP);
+        }
     }
 
     @Nested
