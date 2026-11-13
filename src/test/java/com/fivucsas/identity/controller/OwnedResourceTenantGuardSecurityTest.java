@@ -172,13 +172,15 @@ class OwnedResourceTenantGuardSecurityTest {
     @Autowired UserDeviceRepositoryPort deviceRepository;
     @Autowired GuestInvitationRepositoryPort invitationRepository;
     @Autowired GuestLifecycleService guestLifecycleService;
+    @Autowired WebAuthnService webAuthnService;
 
     private MockMvc mvc;
 
     @BeforeEach
     void setUp() {
         Mockito.reset(userRepository, domainUserRepository, tenantRepository, userTenantPort,
-                credentialRepository, deviceRepository, invitationRepository, guestLifecycleService);
+                credentialRepository, deviceRepository, invitationRepository, guestLifecycleService,
+                webAuthnService);
 
         User memberA = user(USER_IN_A, "member-a@example.test", UserType.TENANT_MEMBER, TENANT_A);
         User otherMemberA = user(OTHER_USER_IN_A, "member2-a@example.test", UserType.TENANT_MEMBER, TENANT_A);
@@ -414,6 +416,98 @@ class OwnedResourceTenantGuardSecurityTest {
                             .content(BODY))
                     .andExpect(status().isCreated());
             verify(deviceRepository).save(any());
+        }
+    }
+
+    @Nested
+    @DisplayName("POST /api/v1/webauthn/register/verify")
+    class RegisterVerify {
+
+        private static final UUID SESSION = UUID.fromString("5e000000-0000-4000-8000-00000000005e");
+
+        private String body(UUID targetUserId) {
+            return "{\"userId\":\"" + targetUserId + "\",\"sessionId\":\"" + SESSION + "\","
+                    + "\"credentialId\":\"attacker-cred\",\"publicKey\":\"attacker-key\","
+                    + "\"clientDataJSON\":\"cdj\"}";
+        }
+
+        @BeforeEach
+        void aValidChallengeForTheSession() {
+            // Even with a challenge that validates, a caller who may not act on the
+            // target user must not get a credential stored on that user.
+            when(webAuthnService.validateRegistrationChallenge(any(UUID.class), anyString())).thenReturn(true);
+        }
+
+        @Test
+        void registerVerify_WhenMemberOfAnotherTenant_ShouldReturn403AndStoreNothing() throws Exception {
+            signedInAsMemberOfA();
+
+            mvc.perform(post("/api/v1/webauthn/register/verify")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(body(USER_IN_B)))
+                    .andExpect(status().isForbidden());
+            verify(credentialRepository, never()).save(any());
+        }
+
+        @Test
+        void registerVerify_WhenAdminOfAnotherTenant_ShouldReturn403AndStoreNothing() throws Exception {
+            signedInAsTenantAdminOfA();
+
+            mvc.perform(post("/api/v1/webauthn/register/verify")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(body(USER_IN_B)))
+                    .andExpect(status().isForbidden());
+            verify(credentialRepository, never()).save(any());
+        }
+
+        @Test
+        void registerVerify_WhenSelfWithASessionBoundToSelf_ShouldReturn201() throws Exception {
+            signedInAsMemberOfA();
+            when(webAuthnService.validateRegistrationChallenge(SESSION, USER_IN_A, "cdj")).thenReturn(true);
+            when(credentialRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+            mvc.perform(post("/api/v1/webauthn/register/verify")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(body(USER_IN_A)))
+                    .andExpect(status().isCreated());
+            verify(credentialRepository).save(any());
+        }
+
+        @Test
+        void registerVerify_WhenSelfWithASessionBoundToSomeoneElse_ShouldReturn400AndStoreNothing()
+                throws Exception {
+            signedInAsMemberOfA();
+            when(webAuthnService.validateRegistrationChallenge(SESSION, USER_IN_A, "cdj")).thenReturn(false);
+
+            mvc.perform(post("/api/v1/webauthn/register/verify")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(body(USER_IN_A)))
+                    .andExpect(status().isBadRequest());
+            verify(credentialRepository, never()).save(any());
+        }
+
+        @Test
+        void registerVerify_WhenRoot_ShouldReturn201ForAnyTenant() throws Exception {
+            signedInAsRoot();
+            when(webAuthnService.validateRegistrationChallenge(SESSION, USER_IN_B, "cdj")).thenReturn(true);
+            when(credentialRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+            mvc.perform(post("/api/v1/webauthn/register/verify")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(body(USER_IN_B)))
+                    .andExpect(status().isCreated());
+            verify(credentialRepository).save(any());
+        }
+
+        @Test
+        void registerVerify_WhenOtherMemberOfSameTenant_ShouldReturn403AndStoreNothing() throws Exception {
+            signedInAs(OTHER_USER_IN_A, "member2-a@example.test", UserType.TENANT_MEMBER, TENANT_A);
+
+            mvc.perform(post("/api/v1/webauthn/register/verify")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(body(USER_IN_A)))
+                    .andExpect(status().isForbidden());
+            verify(credentialRepository, never()).save(any());
         }
     }
 

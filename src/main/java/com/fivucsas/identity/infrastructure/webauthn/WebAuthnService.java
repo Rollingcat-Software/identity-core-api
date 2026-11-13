@@ -64,6 +64,38 @@ public class WebAuthnService {
     }
 
     /**
+     * Generates a registration challenge bound to the user it was issued for (PF-5).
+     * {@link #validateRegistrationChallenge(UUID, UUID, String)} accepts the session
+     * only for that same user, so a challenge a caller obtained for themselves cannot
+     * be spent registering a credential on somebody else.
+     */
+    public String generateRegistrationChallenge(UUID sessionId, UUID userId) {
+        String challenge = generateChallenge(sessionId);
+        redisTemplate.opsForValue().set(buildRegistrationUserKey(sessionId), userId.toString(), CHALLENGE_TTL);
+        return challenge;
+    }
+
+    /**
+     * Validates a user-bound registration challenge: the session must have been issued
+     * by {@link #generateRegistrationChallenge(UUID, UUID)} for {@code expectedUserId},
+     * and the clientDataJSON must pass {@link #validateRegistrationChallenge(UUID, String)}.
+     * A missing or different binding is refused without consuming the challenge.
+     */
+    public boolean validateRegistrationChallenge(UUID sessionId, UUID expectedUserId, String clientDataJsonB64) {
+        String bindingKey = buildRegistrationUserKey(sessionId);
+        String boundUserId = redisTemplate.opsForValue().get(bindingKey);
+        if (expectedUserId == null || !expectedUserId.toString().equals(boundUserId)) {
+            log.warn("WebAuthn registration session {} is not bound to the requested user", sessionId);
+            return false;
+        }
+        if (!validateRegistrationChallenge(sessionId, clientDataJsonB64)) {
+            return false;
+        }
+        redisTemplate.delete(bindingKey);
+        return true;
+    }
+
+    /**
      * Validates a registration challenge by checking that the clientDataJSON
      * contains the expected challenge and type "webauthn.create".
      */
@@ -364,6 +396,10 @@ public class WebAuthnService {
 
     private String buildChallengeKey(UUID sessionId) {
         return "webauthn:challenge:" + sessionId;
+    }
+
+    private String buildRegistrationUserKey(UUID sessionId) {
+        return "webauthn:reg-user:" + sessionId;
     }
 
     /**

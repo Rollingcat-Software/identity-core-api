@@ -451,6 +451,26 @@ class CrossTenantEnrollmentHttpIT {
         }
 
         @Test
+        void registerVerify_WhenMemberPostsForUserOfAnotherTenant_ShouldReturn403AndStoreNoCredential()
+                throws Exception {
+            // The guard runs before the challenge is read, so no Redis session is needed
+            // to show that a tenant-A caller cannot plant an authenticator on tenant B.
+            String credentialId = "xth-planted-" + UUID.randomUUID();
+            String body = "{\"userId\":\"" + victimB + "\",\"sessionId\":\"" + UUID.randomUUID() + "\","
+                    + "\"credentialId\":\"" + credentialId + "\",\"publicKey\":\"attacker-key\","
+                    + "\"clientDataJSON\":\"e30\"}";
+
+            mvc.perform(post("/api/v1/webauthn/register/verify")
+                            .header("Authorization", "Bearer " + memberAToken)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(body))
+                    .andExpect(status().isForbidden());
+
+            assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM webauthn_credentials WHERE credential_id = ?",
+                    Integer.class, credentialId)).isZero();
+        }
+
+        @Test
         void removeDevice_WhenAdminOfAnotherTenant_ShouldReturn404AndKeepTheDevice() throws Exception {
             UUID device = seedDevice(tenantB, victimB);
 

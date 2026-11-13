@@ -9,6 +9,7 @@ import com.fivucsas.identity.entity.User;
 import com.fivucsas.identity.entity.UserStatus;
 import com.fivucsas.identity.entity.WebAuthnCredential;
 import com.fivucsas.identity.infrastructure.webauthn.WebAuthnService;
+import com.fivucsas.identity.security.RbacAuthorizationService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -40,6 +41,7 @@ class WebAuthnControllerTest {
     @Mock private WebAuthnCredentialRepositoryPort credentialRepository;
     @Mock private WebAuthnCredentialService webAuthnCredentialService;
     @Mock private UserRepository userRepository;
+    @Mock private RbacAuthorizationService rbac;
 
     @InjectMocks
     private DeviceController webAuthnController;
@@ -68,7 +70,7 @@ class WebAuthnControllerTest {
         @DisplayName("Should return registration options with challenge")
         void shouldReturnRegistrationOptions() {
             when(userRepository.findById(userId)).thenReturn(Optional.of(testUser));
-            when(webAuthnService.generateChallenge(any(UUID.class))).thenReturn("challengeBase64");
+            when(webAuthnService.generateRegistrationChallenge(any(UUID.class), eq(userId))).thenReturn("challengeBase64");
             when(webAuthnService.getRpId()).thenReturn("fivucsas.com");
             when(credentialRepository.findAllByUserId(userId)).thenReturn(List.of());
 
@@ -105,7 +107,8 @@ class WebAuthnControllerTest {
             request.put("publicKey", "publicKeyBase64");
             request.put("clientDataJSON", "clientDataB64");
 
-            when(webAuthnService.validateRegistrationChallenge(sessionId, "clientDataB64")).thenReturn(true);
+            when(rbac.canActOnUserOwnedResource(userId, "webauthn:register")).thenReturn(true);
+            when(webAuthnService.validateRegistrationChallenge(sessionId, userId, "clientDataB64")).thenReturn(true);
             when(credentialRepository.existsByCredentialId("credId123")).thenReturn(false);
             when(userRepository.findById(userId)).thenReturn(Optional.of(testUser));
 
@@ -128,7 +131,8 @@ class WebAuthnControllerTest {
             request.put("publicKey", "publicKeyBase64");
             request.put("clientDataJSON", "clientDataB64");
 
-            when(webAuthnService.validateRegistrationChallenge(sessionId, "clientDataB64")).thenReturn(true);
+            when(rbac.canActOnUserOwnedResource(userId, "webauthn:register")).thenReturn(true);
+            when(webAuthnService.validateRegistrationChallenge(sessionId, userId, "clientDataB64")).thenReturn(true);
             when(credentialRepository.existsByCredentialId("credId123")).thenReturn(true);
 
             ResponseEntity<Map<String, Object>> response = webAuthnController.verifyRegistration(request);
@@ -147,7 +151,8 @@ class WebAuthnControllerTest {
             request.put("publicKey", "publicKeyBase64");
             request.put("clientDataJSON", "invalidClientData");
 
-            when(webAuthnService.validateRegistrationChallenge(sessionId, "invalidClientData")).thenReturn(false);
+            when(rbac.canActOnUserOwnedResource(userId, "webauthn:register")).thenReturn(true);
+            when(webAuthnService.validateRegistrationChallenge(sessionId, userId, "invalidClientData")).thenReturn(false);
 
             ResponseEntity<Map<String, Object>> response = webAuthnController.verifyRegistration(request);
 
@@ -161,6 +166,7 @@ class WebAuthnControllerTest {
             Map<String, Object> request = new HashMap<>();
             request.put("userId", userId.toString());
             request.put("sessionId", UUID.randomUUID().toString());
+            when(rbac.canActOnUserOwnedResource(userId, "webauthn:register")).thenReturn(true);
 
             ResponseEntity<Map<String, Object>> response = webAuthnController.verifyRegistration(request);
 

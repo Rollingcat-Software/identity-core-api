@@ -28,6 +28,7 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
@@ -52,6 +53,9 @@ public class DeviceController {
 
     /** Lets an admin delete another user's WebAuthn credential (TENANT_ADMIN holds it implicitly). */
     static final String WEBAUTHN_DELETE = "webauthn:delete";
+
+    /** Lets an admin register a WebAuthn credential for another user of their tenant. */
+    static final String WEBAUTHN_REGISTER = "webauthn:register";
 
     private final ManageDeviceUseCase manageDeviceUseCase;
     private final WebAuthnService webAuthnService;
@@ -135,8 +139,9 @@ public class DeviceController {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new UserNotFoundException(userId.toString()));
 
+        // PF-5: bind the session to this user so /register/verify accepts it only for them.
         UUID sessionId = UUID.randomUUID();
-        String challenge = webAuthnService.generateChallenge(sessionId);
+        String challenge = webAuthnService.generateRegistrationChallenge(sessionId, userId);
 
         List<String> existingCredentialIds = credentialRepository.findAllByUserId(userId).stream()
                 .map(WebAuthnCredential::getCredentialId)
@@ -159,11 +164,18 @@ public class DeviceController {
         ));
     }
 
+    // PF-5: the target user comes from the body, so the guard runs in code: the caller
+    // must be that user, or hold webauthn:register in the user's tenant (ROOT: any).
+    // The session must also have been issued by /register/options/{userId} for that same
+    // user, so a challenge obtained for oneself cannot plant a key on someone else.
     @PostMapping("/api/v1/webauthn/register/verify")
     @Operation(summary = "Verify WebAuthn registration (attestation) and store credential")
     @PreAuthorize("isAuthenticated()")
     public ResponseEntity<Map<String, Object>> verifyRegistration(@RequestBody Map<String, Object> request) {
         UUID userId = UUID.fromString((String) request.get("userId"));
+        if (!rbac.canActOnUserOwnedResource(userId, WEBAUTHN_REGISTER)) {
+            throw new AccessDeniedException("Not allowed to register a credential for this user");
+        }
         UUID sessionId = UUID.fromString((String) request.get("sessionId"));
         String credentialId = (String) request.get("credentialId");
         String publicKey = (String) request.get("publicKey");
@@ -180,7 +192,7 @@ public class DeviceController {
             ));
         }
 
-        boolean challengeValid = webAuthnService.validateRegistrationChallenge(sessionId, clientDataJson);
+        boolean challengeValid = webAuthnService.validateRegistrationChallenge(sessionId, userId, clientDataJson);
         if (!challengeValid) {
             return ResponseEntity.badRequest().body(Map.of(
                     "success", false,
