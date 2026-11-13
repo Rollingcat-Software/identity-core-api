@@ -120,7 +120,7 @@ public class UserController {
 
     @GetMapping("/api/v1/users/{id}")
     @Operation(summary = "Get user by ID")
-    @PreAuthorize("@rbac.hasPermission('user:read') or @userSecurityService.isCurrentUser(#id)")
+    @PreAuthorize("(@rbac.hasPermission('user:read') and @rbac.canAccessUser(#id)) or @userSecurityService.isCurrentUser(#id)")
     public ResponseEntity<UserResponse> getUserById(@PathVariable String id) {
         log.info("GET /api/v1/users/{} - Get user by ID", id);
 
@@ -156,7 +156,7 @@ public class UserController {
 
     @PutMapping("/api/v1/users/{id}")
     @Operation(summary = "Update user")
-    @PreAuthorize("@rbac.hasPermission('user:update') or @userSecurityService.isCurrentUser(#id)")
+    @PreAuthorize("(@rbac.hasPermission('user:update') and @rbac.canAccessUser(#id)) or @userSecurityService.isCurrentUser(#id)")
     public ResponseEntity<UserResponse> updateUser(
             @PathVariable String id,
             @Valid @RequestBody UpdateUserRequest request) {
@@ -178,7 +178,7 @@ public class UserController {
 
     @DeleteMapping("/api/v1/users/{id}")
     @Operation(summary = "Delete user")
-    @PreAuthorize("@rbac.hasPermission('user:delete')")
+    @PreAuthorize("@rbac.hasPermission('user:delete') and @rbac.canAccessUser(#id)")
     public ResponseEntity<Void> deleteUser(@PathVariable String id) {
         log.info("DELETE /api/v1/users/{} - Delete user", id);
         manageUserUseCase.deleteUser(id);
@@ -187,7 +187,7 @@ public class UserController {
 
     @PostMapping("/api/v1/users/{id}/change-password")
     @Operation(summary = "Change user password")
-    @PreAuthorize("hasAuthority('user:update') or @userSecurityService.isCurrentUser(#id)")
+    @PreAuthorize("(hasAuthority('user:update') and @rbac.canAccessUser(#id)) or @userSecurityService.isCurrentUser(#id)")
     public ResponseEntity<Void> changePassword(
             @PathVariable String id,
             @Valid @RequestBody ChangePasswordRequest request) {

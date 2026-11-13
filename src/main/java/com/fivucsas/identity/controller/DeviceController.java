@@ -122,7 +122,7 @@ public class DeviceController {
 
     @PostMapping("/api/v1/webauthn/register/options/{userId}")
     @Operation(summary = "Generate WebAuthn registration options (challenge) for credential creation")
-    @PreAuthorize("hasAuthority('webauthn:register') or @userSecurityService.isCurrentUser(#userId)")
+    @PreAuthorize("(hasAuthority('webauthn:register') and @rbac.canAccessUser(#userId)) or @userSecurityService.isCurrentUser(#userId)")
     public ResponseEntity<Map<String, Object>> getRegistrationOptions(@PathVariable UUID userId) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new UserNotFoundException(userId.toString()));
@@ -211,7 +211,7 @@ public class DeviceController {
 
     @GetMapping("/api/v1/webauthn/credentials/{userId}")
     @Operation(summary = "List all WebAuthn credentials for a user")
-    @PreAuthorize("hasAuthority('webauthn:read') or @userSecurityService.isCurrentUser(#userId)")
+    @PreAuthorize("(hasAuthority('webauthn:read') and @rbac.canAccessUser(#userId)) or @userSecurityService.isCurrentUser(#userId)")
     public ResponseEntity<List<Map<String, Object>>> listCredentials(@PathVariable UUID userId) {
         List<Map<String, Object>> credentials = credentialRepository.findAllByUserId(userId).stream()
                 .map(c -> {

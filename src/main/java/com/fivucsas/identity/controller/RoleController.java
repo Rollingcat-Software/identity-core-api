@@ -178,7 +178,7 @@ public class RoleController {
 
     @GetMapping("/api/v1/users/{userId}/roles")
     @Operation(summary = "Get all roles for a user")
-    @PreAuthorize("@rbac.hasPermission('user_role:read') or @userSecurityService.isCurrentUser(#userId)")
+    @PreAuthorize("(@rbac.hasPermission('user_role:read') and @rbac.canAccessUser(#userId)) or @userSecurityService.isCurrentUser(#userId)")
     public ResponseEntity<List<UserRoleResponse>> getUserRoles(@PathVariable String userId) {
         log.info("GET /api/v1/users/{}/roles - Get user roles", userId);
 
@@ -195,7 +195,7 @@ public class RoleController {
     // — which a TENANT_ADMIN holds implicitly with NO role-id ceiling, so they could
     // assign the global ROOT role and escalate. canAssignRole enforces the real ceiling
     // (own-tenant roles only for non-ROOT; global ROOT/SYSTEM are ROOT-only).
-    @PreAuthorize("@rbac.canAssignRole(#roleId)")
+    @PreAuthorize("@rbac.canAssignRole(#roleId) and @rbac.canAccessUser(#userId)")
     public ResponseEntity<Void> assignRole(
             @PathVariable String userId,
             @PathVariable String roleId,
@@ -218,7 +218,7 @@ public class RoleController {
 
     @DeleteMapping("/api/v1/users/{userId}/roles/{roleId}")
     @Operation(summary = "Revoke a role from a user")
-    @PreAuthorize("@rbac.hasPermission('user_role:revoke')")
+    @PreAuthorize("@rbac.hasPermission('user_role:revoke') and @rbac.canAccessUser(#userId)")
     public ResponseEntity<Void> revokeRole(
             @PathVariable String userId,
             @PathVariable String roleId) {

@@ -265,6 +265,23 @@ class CrossTenantEnrollmentHttpIT {
             mvc.perform(asAdminA(get("/api/v1/devices").param("userId", memberA.toString())))
                     .andExpect(status().isOk());
         }
+
+        @Test
+        void getUserRoles_WhenAdminOfSameTenant_ShouldReturn200() throws Exception {
+            mvc.perform(asAdminA(get("/api/v1/users/{id}/roles", memberA)))
+                    .andExpect(status().isOk());
+        }
+    }
+
+    @Nested
+    @DisplayName("Other user-id endpoints share the same guard")
+    class SharedUserGuard {
+
+        @Test
+        void getUserRoles_WhenAdminOfAnotherTenantForgesHeader_ShouldReturn403() throws Exception {
+            mvc.perform(asAdminAForging(get("/api/v1/users/{id}/roles", victimB), tenantB))
+                    .andExpect(status().isForbidden());
+        }
     }
 
     private List<Map<String, Object>> enrollmentsOf(UUID userId) {
