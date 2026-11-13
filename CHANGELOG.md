@@ -49,6 +49,29 @@
 - `startEnrollment` reads the existing row, and re-reads it after a unique-key race, with the tenant
   filter off and refuses a row tagged with a tenant other than the user's own. A ROOT switched to
   another tenant re-running an existing enrollment had missed the row and failed with a 500.
+- Resources named by their own id, not by a user id, were outside the user guard (PF-5 review):
+  - `DELETE /api/v1/webauthn/credentials/by-id/{id}` and `/credentials/{credentialId}` were open to any
+    authenticated caller of any tenant, a guest included, and also auto-revoked the victim's
+    FINGERPRINT or HARDWARE_KEY enrollment. Only the owner, or a caller holding `webauthn:delete`
+    whose tenant holds the owner (ROOT: any), may delete now.
+  - `DELETE /api/v1/devices/{deviceId}` let a tenant-A admin delete a tenant-B device by UUID.
+  - Both go through one new guard, `RbacAuthorizationService.canActOnUserOwnedResource(owner, permission)`
+    (owner, or permission plus `canAccessUser`). The service asks it about the row's owner before
+    deleting, and a refusal answers 404 like an unknown id, so the response does not reveal the id.
+  - `POST /api/v1/guests/{invitationId}/resend` now has the same tenant check as the pending-invitation
+    revoke (one shared `requireInvitationInScope`, 404 outside the caller's scope).
+  - `POST /api/v1/devices` refuses a `tenantId` other than the user's own tenant (400), so a ROOT can no
+    longer tag a tenant-Y user's device with tenant X.
+- The domain-layer `ResourceNotFoundException` is now mapped to 404; an unknown credential id had
+  answered 500.
+- An enrollment row tagged with a tenant other than its user's answers 409 instead of 500, and
+  `recordBiometricScores` reads the row with the tenant filter off, so a ROOT switched to another
+  tenant no longer re-starts an ENROLLED row and drops the scores.
+- `TenantRlsRegressionTest` is now `TenantRlsRegressionIT`, so the CI Testcontainers lane runs it (it
+  was skipped everywhere), and is in the executed-IT gate. Its teardown soft-deletes users (the V53
+  trigger refuses a hard DELETE) and its tenant slugs are unique per test.
+- Tests: `OwnedResourceTenantGuardSecurityTest` (real method security and services) and an
+  `OwnedResources` group in `CrossTenantEnrollmentHttpIT`.
 
 ### 2026-11-10 - Public device benchmark intake (Paper A)
 

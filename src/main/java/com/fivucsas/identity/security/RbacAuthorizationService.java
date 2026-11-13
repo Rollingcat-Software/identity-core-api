@@ -127,6 +127,23 @@ public class RbacAuthorizationService {
     }
 
     /**
+     * The guard for a resource owned by one user and named by its own id (a passkey, a
+     * device): true when the caller is the owner, or holds {@code adminPermission} and
+     * passes the tenant guard {@link #canAccessUser(UUID)} for the owner. An unknown
+     * owner is refused (PF-5).
+     *
+     * <p>Callers resolve the owner from the resource row and refuse with 404, not 403,
+     * so a refusal does not reveal that the id exists in another tenant.</p>
+     */
+    public boolean canActOnUserOwnedResource(UUID ownerUserId, String adminPermission) {
+        if (ownerUserId == null) return false;
+        User currentUser = getCurrentUser().orElse(null);
+        if (currentUser == null) return false;
+        if (ownerUserId.equals(currentUser.getId())) return true;
+        return hasPermission(currentUser, adminPermission) && canAccessUser(ownerUserId);
+    }
+
+    /**
      * String-typed overload of {@link #canAccessUser(UUID)} for SpEL expressions and
      * the permission evaluator. Fail-closed on null, blank or malformed input.
      */

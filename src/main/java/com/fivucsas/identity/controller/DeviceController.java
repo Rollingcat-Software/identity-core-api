@@ -18,6 +18,7 @@ import com.fivucsas.identity.application.port.output.TokenGenerationPort;
 import com.fivucsas.identity.entity.RefreshToken;
 import com.fivucsas.identity.infrastructure.webauthn.WebAuthnService;
 import com.fivucsas.identity.infrastructure.webauthn.WebAuthnUserHandle;
+import com.fivucsas.identity.security.RbacAuthorizationService;
 import com.fivucsas.identity.security.TenantScopeResolver;
 import com.fivucsas.identity.service.RefreshTokenService;
 import jakarta.servlet.http.HttpServletRequest;
@@ -49,6 +50,9 @@ import java.util.UUID;
 @Tag(name = "Devices", description = "Device and WebAuthn/FIDO2 credential management")
 public class DeviceController {
 
+    /** Lets an admin delete another user's WebAuthn credential (TENANT_ADMIN holds it implicitly). */
+    static final String WEBAUTHN_DELETE = "webauthn:delete";
+
     private final ManageDeviceUseCase manageDeviceUseCase;
     private final WebAuthnService webAuthnService;
     private final WebAuthnCredentialRepositoryPort credentialRepository;
@@ -58,6 +62,7 @@ public class DeviceController {
     private final TokenGenerationPort tokenGenerator;
     private final RefreshTokenService refreshTokenService;
     private final UsernamelessLoginFlowService usernamelessLoginFlowService;
+    private final RbacAuthorizationService rbac;
 
     // --- /api/v1/devices endpoints ---
 
@@ -111,10 +116,13 @@ public class DeviceController {
                 .body(manageDeviceUseCase.registerDevice(userId, tenantId, command));
     }
 
+    // PF-5: the device id alone names no tenant, so the service checks the device's
+    // owner against the caller before deleting (404 for another tenant's device).
     @DeleteMapping("/api/v1/devices/{deviceId}")
     @PreAuthorize("hasPermission(null, 'Device', 'device:delete')")
     public ResponseEntity<Void> removeDevice(@PathVariable UUID deviceId) {
-        manageDeviceUseCase.removeDevice(deviceId);
+        manageDeviceUseCase.removeDevice(deviceId,
+                owner -> rbac.canActOnUserOwnedResource(owner, "device:delete"));
         return ResponseEntity.noContent().build();
     }
 
@@ -229,11 +237,15 @@ public class DeviceController {
         return ResponseEntity.ok(credentials);
     }
 
+    // PF-5: the owner of a passkey or hardware key may delete it, and so may an admin
+    // holding webauthn:delete whose tenant holds the owner (ROOT: any). Everyone else,
+    // including callers of another tenant, gets 404 and the credential stays.
     @DeleteMapping("/api/v1/webauthn/credentials/by-id/{id}")
     @Operation(summary = "Delete a WebAuthn credential by database ID")
     @PreAuthorize("isAuthenticated()")
     public ResponseEntity<Void> deleteCredentialById(@PathVariable UUID id) {
-        webAuthnCredentialService.deleteById(id);
+        webAuthnCredentialService.deleteById(id,
+                owner -> rbac.canActOnUserOwnedResource(owner, WEBAUTHN_DELETE));
         return ResponseEntity.noContent().build();
     }
 
@@ -241,7 +253,8 @@ public class DeviceController {
     @Operation(summary = "Delete a WebAuthn credential")
     @PreAuthorize("isAuthenticated()")
     public ResponseEntity<Void> deleteCredential(@PathVariable String credentialId) {
-        webAuthnCredentialService.deleteByCredentialId(credentialId);
+        webAuthnCredentialService.deleteByCredentialId(credentialId,
+                owner -> rbac.canActOnUserOwnedResource(owner, WEBAUTHN_DELETE));
         return ResponseEntity.noContent().build();
     }
 

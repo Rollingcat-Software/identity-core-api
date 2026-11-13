@@ -77,6 +77,14 @@ public class WebAuthnCredential {
     @Column(name = "last_used_at")
     private Instant lastUsedAt;
 
+    /**
+     * Id of the owning user, so application code can check ownership without touching
+     * {@code entity.User} (hexagonal boundary, {@code UserDomainBoundaryTest}).
+     */
+    public UUID ownerId() {
+        return user == null ? null : user.getId();
+    }
+
     public void updateSignCount(long newSignCount) {
         this.signCount = newSignCount;
         this.lastUsedAt = Instant.now();

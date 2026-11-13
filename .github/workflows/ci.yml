@@ -151,6 +151,7 @@ jobs:
           scripts/ci/assert-its-executed.sh target/surefire-reports \
             CrossTenantIsolationIT \
             CrossTenantEnrollmentHttpIT \
+            TenantRlsRegressionIT \
             TenantSwitcherIsolationIT \
             IdentityBiometricConsentIT \
             IdentityBackfillIT \

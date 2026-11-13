@@ -4,7 +4,9 @@ import com.fivucsas.identity.application.dto.command.RegisterDeviceCommand;
 import com.fivucsas.identity.application.dto.response.DeviceResponse;
 import com.fivucsas.identity.application.port.input.ManageDeviceUseCase;
 import com.fivucsas.identity.application.port.output.UserDeviceRepositoryPort;
+import com.fivucsas.identity.application.port.output.UserTenantPort;
 import com.fivucsas.identity.domain.exception.DeviceLimitExceededException;
+import com.fivucsas.identity.domain.exception.ResourceNotFoundException;
 import com.fivucsas.identity.domain.model.auth.DevicePlatform;
 import com.fivucsas.identity.domain.repository.UserRepository;
 import com.fivucsas.identity.entity.Tenant;
@@ -22,6 +24,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
+import java.util.function.Predicate;
 
 @Service
 @RequiredArgsConstructor
@@ -32,6 +35,7 @@ public class ManageDeviceService implements ManageDeviceUseCase {
     private final UserDeviceRepositoryPort userDeviceRepository;
     private final UserRepository userRepository;
     private final JpaTenantRepository tenantRepository;
+    private final UserTenantPort userTenantPort;
 
     /**
      * Hard cap on per-user active devices. INVESTIGATION_MASTER_2026-05-07
@@ -41,9 +45,23 @@ public class ManageDeviceService implements ManageDeviceUseCase {
     @Value("${app.security.max-devices-per-user:10}")
     private int maxDevicesPerUser;
 
+    /**
+     * PF-5: the device row is tagged with the user's own tenant. {@code tenantId} is
+     * accepted only as an assertion of that tenant; a different value is refused with
+     * {@link IllegalArgumentException} (HTTP 400) before anything is read or written.
+     * Without this, a ROOT could tag a tenant-Y user's device with tenant X, which then
+     * showed up in tenant X's device list (the same mismatched-row bug as enrollments).
+     */
     @Override
     @Transactional
     public DeviceResponse registerDevice(UUID userId, UUID tenantId, RegisterDeviceCommand command) {
+        UUID userTenantId = userTenantPort.findTenantIdOfUser(userId)
+                .orElseThrow(() -> new EntityNotFoundException("User not found: " + userId));
+        if (!userTenantId.equals(tenantId)) {
+            log.warn("AUDIT: device registration refused, tenantId {} does not match the tenant of user {}",
+                    tenantId, userId);
+            throw new IllegalArgumentException("tenantId does not match the user's tenant");
+        }
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new EntityNotFoundException("User not found: " + userId));
         Tenant tenant = tenantRepository.findById(tenantId)
@@ -302,9 +320,10 @@ public class ManageDeviceService implements ManageDeviceUseCase {
 
     @Override
     @Transactional
-    public void removeDevice(UUID deviceId) {
+    public void removeDevice(UUID deviceId, Predicate<UUID> mayActOnOwner) {
         UserDevice device = userDeviceRepository.findById(deviceId)
-                .orElseThrow(() -> new EntityNotFoundException("Device not found: " + deviceId));
+                .filter(found -> mayActOnOwner.test(found.ownerId()))
+                .orElseThrow(() -> new ResourceNotFoundException("Device", deviceId.toString()));
         userDeviceRepository.delete(device);
     }
 }

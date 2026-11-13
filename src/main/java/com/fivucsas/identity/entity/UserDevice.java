@@ -72,6 +72,14 @@ public class UserDevice {
     @Column(name = "step_up_registered_at")
     private Instant stepUpRegisteredAt;
 
+    /**
+     * Id of the owning user, so application code can check ownership without touching
+     * {@code entity.User} (hexagonal boundary, {@code UserDomainBoundaryTest}).
+     */
+    public UUID ownerId() {
+        return user == null ? null : user.getId();
+    }
+
     public void registerStepUpKey(String publicKey, String algorithm) {
         this.publicKey = publicKey;
         this.publicKeyAlgorithm = algorithm != null ? algorithm : "EC_P256";

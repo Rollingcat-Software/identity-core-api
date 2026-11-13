@@ -49,13 +49,16 @@ import static org.mockito.Mockito.mock;
  * {@code instanceof} check therefore short-circuits in real flow (separate
  * audit-tracked bug). This test covers the contract as specified by javadoc;
  * a follow-up wires {@code CustomUserDetails} through the JWT filter.</p>
+ *
+ * <p>Named {@code *IT} so the CI Testcontainers lane ({@code -Dtest='*IntegrationTest,*IT'})
+ * runs it; as {@code TenantRlsRegressionTest} it was skipped everywhere (PF-5 review).</p>
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
 @Testcontainers
 @EnabledIfEnvironmentVariable(named = "RUN_INTEGRATION", matches = "true")
 @ActiveProfiles("integration")
 @DisplayName("F4 — TenantBindFromAuthFilter cross-tenant rebind regression")
-class TenantRlsRegressionTest {
+class TenantRlsRegressionIT {
 
     @Container
     static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine")
@@ -103,8 +106,10 @@ class TenantRlsRegressionTest {
         TenantContext.clear();
         Logger filterLogger = (Logger) LoggerFactory.getLogger(TenantBindFromAuthFilter.class);
         filterLogger.detachAppender(logCapture);
-        // Best-effort cleanup so the container can be reused across tests.
-        jdbc.update("DELETE FROM users WHERE id IN (?, ?)", aliceId, bobId);
+        // Soft-delete only: the V53 trigger refuses a hard DELETE on users, which used to
+        // fail this teardown and leave the next setUp to collide on the tenant rows.
+        jdbc.update("UPDATE users SET deleted_at = NOW() WHERE id IN (?, ?) AND deleted_at IS NULL",
+                aliceId, bobId);
         jdbc.update("UPDATE tenants SET deleted_at = NOW() WHERE id IN (?, ?)", tenantA, tenantB);
     }
 
@@ -193,8 +198,11 @@ class TenantRlsRegressionTest {
         SecurityContextHolder.getContext().setAuthentication(auth);
     }
 
-    private UUID seedTenant(String slug) {
+    private UUID seedTenant(String slugPrefix) {
         UUID id = UUID.randomUUID();
+        // Unique per call: soft-deleted tenants keep their name and slug, so a fixed value
+        // would collide on the second test of the class.
+        String slug = slugPrefix + "-" + id.toString().substring(0, 8);
         jdbc.update(
                 "INSERT INTO tenants (id, name, slug, contact_email, status, max_users, " +
                 "biometric_enabled, session_timeout_minutes, refresh_token_validity_days, " +

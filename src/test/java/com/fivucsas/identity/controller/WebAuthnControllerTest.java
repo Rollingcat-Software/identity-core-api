@@ -28,6 +28,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -197,14 +198,14 @@ class WebAuthnControllerTest {
             ResponseEntity<Void> response = webAuthnController.deleteCredential("credId");
 
             assertThat(response.getStatusCode().value()).isEqualTo(204);
-            verify(webAuthnCredentialService).deleteByCredentialId("credId");
+            verify(webAuthnCredentialService).deleteByCredentialId(eq("credId"), any());
         }
 
         @Test
         @DisplayName("Should propagate ResourceNotFoundException from the service for unknown credentialId")
         void shouldThrowWhenDeletingNonExistent() {
             doThrow(new ResourceNotFoundException("Credential", "unknownCred"))
-                    .when(webAuthnCredentialService).deleteByCredentialId("unknownCred");
+                    .when(webAuthnCredentialService).deleteByCredentialId(eq("unknownCred"), any());
 
             assertThatThrownBy(() -> webAuthnController.deleteCredential("unknownCred"))
                     .isInstanceOf(ResourceNotFoundException.class);

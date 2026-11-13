@@ -51,7 +51,7 @@ See `CHANGELOG.md` 2026-06-07 for the authz-IDOR / test / security details.
 `mvn -o test` (JDK 21 — the default `java` on PATH is JDK 8 and will fail) is **GREEN:
 1670 run, 0 failures, 0 errors, 67 skipped** (post-#211; the #210 session reported 1648
 before #211's tests landed). The 67 skipped are Testcontainers/DB
-integration tests (`*IntegrationTest`, `*MigrationTest`, `TenantRlsRegressionTest`,
+integration tests (`*IntegrationTest`, `*MigrationTest`, `TenantRlsRegressionIT`,
 `SoftDeletePurgeJobConcurrencyTest`, DB-gated `AuthControllerTest` cases) — **not
 runnable without Docker**; verify them in CI (self-hosted runner), not on a Docker-off
 box. ArchUnit boundary tests run as ordinary unit tests (no DB) and are green.

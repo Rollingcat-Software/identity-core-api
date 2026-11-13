@@ -145,12 +145,12 @@ class WebAuthnCredentialServiceTest {
         void revokesEnrollmentWhenLastPlatformCredentialRemoved() {
             UUID id = UUID.randomUUID();
             WebAuthnCredential c = mock(WebAuthnCredential.class);
-            when(c.getUser()).thenReturn(user);
+            when(c.ownerId()).thenReturn(userId);
             when(c.getTransports()).thenReturn("internal");
             when(credentialRepository.findById(id)).thenReturn(Optional.of(c));
             when(credentialRepository.findAllByUserId(userId)).thenReturn(List.of());
 
-            service.deleteById(id);
+            service.deleteById(id, owner -> true);
 
             verify(credentialRepository).deleteById(id);
             verify(manageEnrollmentUseCase).revokeEnrollment(userId, AuthMethodType.FINGERPRINT);
@@ -161,7 +161,7 @@ class WebAuthnCredentialServiceTest {
         void keepsEnrollmentWhenOtherPlatformCredentialRemains() {
             UUID id = UUID.randomUUID();
             WebAuthnCredential deleted = mock(WebAuthnCredential.class);
-            when(deleted.getUser()).thenReturn(user);
+            when(deleted.ownerId()).thenReturn(userId);
             when(deleted.getTransports()).thenReturn("internal");
 
             WebAuthnCredential remaining = mock(WebAuthnCredential.class);
@@ -170,7 +170,7 @@ class WebAuthnCredentialServiceTest {
             when(credentialRepository.findById(id)).thenReturn(Optional.of(deleted));
             when(credentialRepository.findAllByUserId(userId)).thenReturn(List.of(remaining));
 
-            service.deleteById(id);
+            service.deleteById(id, owner -> true);
 
             verify(credentialRepository).deleteById(id);
             verify(manageEnrollmentUseCase, never()).revokeEnrollment(any(), any());
@@ -182,8 +182,22 @@ class WebAuthnCredentialServiceTest {
             UUID id = UUID.randomUUID();
             when(credentialRepository.findById(id)).thenReturn(Optional.empty());
 
-            assertThatThrownBy(() -> service.deleteById(id))
+            assertThatThrownBy(() -> service.deleteById(id, owner -> true))
                     .isInstanceOf(ResourceNotFoundException.class);
+        }
+
+        @Test
+        @DisplayName("PF-5: refuses like an unknown id when the owner guard says no, and deletes nothing")
+        void throwsNotFoundAndKeepsCredentialWhenOwnerGuardRefuses() {
+            UUID id = UUID.randomUUID();
+            WebAuthnCredential c = mock(WebAuthnCredential.class);
+            when(c.ownerId()).thenReturn(userId);
+            when(credentialRepository.findById(id)).thenReturn(Optional.of(c));
+
+            assertThatThrownBy(() -> service.deleteById(id, owner -> false))
+                    .isInstanceOf(ResourceNotFoundException.class);
+            verify(credentialRepository, never()).deleteById(any());
+            verify(manageEnrollmentUseCase, never()).revokeEnrollment(any(), any());
         }
     }
 
@@ -197,12 +211,12 @@ class WebAuthnCredentialServiceTest {
             // Copilot review on PR #66: deleteByCredentialId previously skipped
             // revokeWebAuthnEnrollmentIfNeeded, leaving stale ENROLLED rows.
             WebAuthnCredential c = mock(WebAuthnCredential.class);
-            when(c.getUser()).thenReturn(user);
+            when(c.ownerId()).thenReturn(userId);
             when(c.getTransports()).thenReturn("internal");
             when(credentialRepository.findByCredentialId("credId")).thenReturn(Optional.of(c));
             when(credentialRepository.findAllByUserId(userId)).thenReturn(List.of());
 
-            service.deleteByCredentialId("credId");
+            service.deleteByCredentialId("credId", owner -> true);
 
             verify(credentialRepository).deleteByCredentialId("credId");
             verify(manageEnrollmentUseCase).revokeEnrollment(userId, AuthMethodType.FINGERPRINT);
@@ -212,7 +226,7 @@ class WebAuthnCredentialServiceTest {
         @DisplayName("keeps enrollment when another platform credential remains")
         void keepsEnrollmentWhenOtherPlatformCredentialRemains() {
             WebAuthnCredential deleted = mock(WebAuthnCredential.class);
-            when(deleted.getUser()).thenReturn(user);
+            when(deleted.ownerId()).thenReturn(userId);
             when(deleted.getTransports()).thenReturn("internal");
 
             WebAuthnCredential remaining = mock(WebAuthnCredential.class);
@@ -221,7 +235,7 @@ class WebAuthnCredentialServiceTest {
             when(credentialRepository.findByCredentialId("credId")).thenReturn(Optional.of(deleted));
             when(credentialRepository.findAllByUserId(userId)).thenReturn(List.of(remaining));
 
-            service.deleteByCredentialId("credId");
+            service.deleteByCredentialId("credId", owner -> true);
 
             verify(credentialRepository).deleteByCredentialId("credId");
             verify(manageEnrollmentUseCase, never()).revokeEnrollment(any(), any());
@@ -232,7 +246,7 @@ class WebAuthnCredentialServiceTest {
         void throwsWhenUnknown() {
             when(credentialRepository.findByCredentialId("missing")).thenReturn(Optional.empty());
 
-            assertThatThrownBy(() -> service.deleteByCredentialId("missing"))
+            assertThatThrownBy(() -> service.deleteByCredentialId("missing", owner -> true))
                     .isInstanceOf(ResourceNotFoundException.class);
             verify(credentialRepository, never()).deleteByCredentialId(eq("missing"));
         }

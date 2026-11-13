@@ -568,9 +568,50 @@ class ManageEnrollmentServiceTest {
         when(userEnrollmentRepository.findByUserIdAndAuthMethodType(userId, AuthMethodType.PASSWORD))
                 .thenReturn(Optional.of(mistagged));
 
+        // 409, not a 500: this is a data conflict on the user's row, not a server fault.
         assertThatThrownBy(() -> service.startEnrollment(userId, null, AuthMethodType.PASSWORD))
-                .isInstanceOf(IllegalStateException.class);
+                .isInstanceOf(com.fivucsas.identity.exception.DomainStateConflictException.class);
 
         verify(userEnrollmentRepository, never()).save(any());
+    }
+
+    @Test
+    void recordBiometricScores_WhenRootSwitchedToAnotherTenantAndRowExists_ShouldRecordScoresOnTheUsersRow() {
+        // PF-5 review: the existence check and the score write ran under the tenant
+        // filter, so for a ROOT switched to another tenant the user's existing row was
+        // invisible and the scores were silently dropped. The stub models the filter: the
+        // row is visible only when no tenant is bound, which is what the bypass guarantees.
+        Tenant ownTenant = userOfTenant().getTenant();
+        UserEnrollment existing = UserEnrollment.builder()
+                .tenant(ownTenant)
+                .authMethodType(AuthMethodType.FACE)
+                .status(EnrollmentStatus.ENROLLED)
+                .build();
+        doAnswer(inv -> {
+            UUID bound = TenantContext.getCurrentTenant();
+            TenantContext.clear();
+            try {
+                return ((java.util.function.Supplier<?>) inv.getArgument(0)).get();
+            } finally {
+                TenantContext.setCurrentTenant(bound);
+            }
+        }).when(tenantFilterBypass).runWithoutTenantFilter(any());
+        when(userEnrollmentRepository.findByUserIdAndAuthMethodType(userId, AuthMethodType.FACE))
+                .thenAnswer(inv -> TenantContext.getCurrentTenant() == null
+                        ? Optional.of(existing) : Optional.empty());
+        lenient().when(userEnrollmentRepository.save(any(UserEnrollment.class)))
+                .thenAnswer(inv -> inv.getArgument(0));
+
+        TenantContext.setCurrentTenant(UUID.randomUUID());
+        try {
+            service.recordBiometricScores(userId, AuthMethodType.FACE,
+                    new BigDecimal("0.7000"), new BigDecimal("0.6000"));
+        } finally {
+            TenantContext.clear();
+        }
+
+        assertThat(existing.getQualityScore()).isEqualByComparingTo(new BigDecimal("0.7000"));
+        assertThat(existing.getLivenessScore()).isEqualByComparingTo(new BigDecimal("0.6000"));
+        assertThat(existing.getStatus()).isEqualTo(EnrollmentStatus.ENROLLED);
     }
 }

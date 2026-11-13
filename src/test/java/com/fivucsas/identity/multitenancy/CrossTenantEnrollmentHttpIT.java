@@ -36,6 +36,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -153,6 +154,9 @@ class CrossTenantEnrollmentHttpIT {
     void tearDown() {
         TenantContext.clear();
         jdbc.update("DELETE FROM user_enrollments WHERE tenant_id IN (?, ?, ?)", systemTenant, tenantA, tenantB);
+        jdbc.update("DELETE FROM user_devices WHERE tenant_id IN (?, ?, ?)", systemTenant, tenantA, tenantB);
+        jdbc.update("DELETE FROM webauthn_credentials WHERE user_id IN "
+                + "(SELECT id FROM users WHERE tenant_id IN (?, ?, ?))", systemTenant, tenantA, tenantB);
         if (globalRole != null) {
             jdbc.update("DELETE FROM user_roles WHERE role_id = ?", globalRole);
             jdbc.update("DELETE FROM roles WHERE id = ?", globalRole);
@@ -398,6 +402,82 @@ class CrossTenantEnrollmentHttpIT {
                     .andExpect(jsonPath("$.length()").value(1))
                     .andExpect(jsonPath("$[0].userId").value(memberA.toString()));
         }
+    }
+
+    /**
+     * Endpoints that name a resource by its own id, not by a user id (PF-5 review). The
+     * services loaded the row with {@code findById}, which ignores the tenant filter, and
+     * acted on it with no owner or tenant check.
+     */
+    @Nested
+    @DisplayName("Resources named by their own id")
+    class OwnedResources {
+
+        @Test
+        void deleteCredentialById_WhenMemberOfAnotherTenant_ShouldReturn404AndKeepTheCredential() throws Exception {
+            UUID credential = seedCredential(victimB, "xth-cred-" + UUID.randomUUID());
+
+            mvc.perform(delete("/api/v1/webauthn/credentials/by-id/{id}", credential)
+                            .header("Authorization", "Bearer " + memberAToken))
+                    .andExpect(status().isNotFound());
+
+            assertThat(credentialExists(credential)).isTrue();
+        }
+
+        @Test
+        void deleteCredentialByCredentialId_WhenAdminOfAnotherTenant_ShouldReturn404AndKeepTheCredential()
+                throws Exception {
+            String credentialId = "xth-cred-" + UUID.randomUUID();
+            UUID credential = seedCredential(victimB, credentialId);
+
+            mvc.perform(asAdminA(delete("/api/v1/webauthn/credentials/{credentialId}", credentialId)))
+                    .andExpect(status().isNotFound());
+
+            assertThat(credentialExists(credential)).isTrue();
+        }
+
+        @Test
+        void deleteCredentialById_WhenOwner_ShouldReturn204AndDeleteTheCredential() throws Exception {
+            // A platform passkey comes with its FINGERPRINT enrollment, which the delete
+            // auto-revokes once the last platform credential is gone.
+            seedEnrollment(tenantA, memberA, "FINGERPRINT", "ENROLLED");
+            UUID credential = seedCredential(memberA, "xth-cred-" + UUID.randomUUID());
+
+            mvc.perform(delete("/api/v1/webauthn/credentials/by-id/{id}", credential)
+                            .header("Authorization", "Bearer " + memberAToken))
+                    .andExpect(status().isNoContent());
+
+            assertThat(credentialExists(credential)).isFalse();
+        }
+
+        @Test
+        void removeDevice_WhenAdminOfAnotherTenant_ShouldReturn404AndKeepTheDevice() throws Exception {
+            UUID device = seedDevice(tenantB, victimB);
+
+            mvc.perform(asAdminA(delete("/api/v1/devices/{id}", device)))
+                    .andExpect(status().isNotFound());
+
+            assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM user_devices WHERE id = ?", Integer.class, device))
+                    .isEqualTo(1);
+        }
+    }
+
+    private UUID seedCredential(UUID userId, String credentialId) {
+        UUID id = UUID.randomUUID();
+        jdbc.update("INSERT INTO webauthn_credentials (id, user_id, credential_id, public_key, transports) "
+                + "VALUES (?, ?, ?, 'xth-public-key', 'internal')", id, userId, credentialId);
+        return id;
+    }
+
+    private boolean credentialExists(UUID id) {
+        return jdbc.queryForObject("SELECT COUNT(*) FROM webauthn_credentials WHERE id = ?", Integer.class, id) == 1;
+    }
+
+    private UUID seedDevice(UUID tenantId, UUID userId) {
+        UUID id = UUID.randomUUID();
+        jdbc.update("INSERT INTO user_devices (id, user_id, tenant_id, platform, device_fingerprint) "
+                + "VALUES (?, ?, ?, 'ANDROID', ?)", id, userId, tenantId, "xth-fp-" + id);
+        return id;
     }
 
     private UUID tenantOfEnrollment(UUID userId, String methodType) {

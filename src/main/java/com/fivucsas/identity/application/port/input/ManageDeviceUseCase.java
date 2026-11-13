@@ -5,6 +5,7 @@ import com.fivucsas.identity.application.dto.response.DeviceResponse;
 
 import java.util.List;
 import java.util.UUID;
+import java.util.function.Predicate;
 
 public interface ManageDeviceUseCase {
     DeviceResponse registerDevice(UUID userId, UUID tenantId, RegisterDeviceCommand command);
@@ -48,5 +49,10 @@ public interface ManageDeviceUseCase {
      */
     void recordLoginDevice(UUID userId, String userAgent);
 
-    void removeDevice(UUID deviceId);
+    /**
+     * Removes a device. {@code mayActOnOwner} is asked about the device's owner first;
+     * when it refuses, the call fails like an unknown id (404), so a caller cannot tell
+     * a device of another tenant from one that does not exist (PF-5).
+     */
+    void removeDevice(UUID deviceId, Predicate<UUID> mayActOnOwner);
 }

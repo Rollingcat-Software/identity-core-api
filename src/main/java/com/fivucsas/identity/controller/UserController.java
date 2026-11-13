@@ -385,6 +385,9 @@ public class UserController {
     @Operation(summary = "Resend a pending guest invitation email")
     @PreAuthorize("@rbac.isTenantAdmin() or @rbac.hasPermission('guest:invite')")
     public ResponseEntity<Void> resendInvitation(@PathVariable UUID invitationId) {
+        // PF-5: same tenant guard as revokePendingInvitation. Without it a tenant-A admin
+        // could re-send tenant B's invitation e-mail and probe its state through the 409s.
+        requireInvitationInScope(invitationId);
         log.info("POST /api/v1/guests/{}/resend - Resending guest invitation", invitationId);
         guestLifecycleService.resendInvitation(invitationId);
         return ResponseEntity.noContent().build();
@@ -505,6 +508,20 @@ public class UserController {
         return ResponseEntity.noContent().build();
     }
 
+    /**
+     * The tenant guard for an endpoint that names a guest invitation by id: the
+     * invitation must belong to a tenant the caller can access (ROOT: any). An unknown
+     * id and an invitation of another tenant both give 404, so the response does not
+     * reveal that the id exists.
+     */
+    private void requireInvitationInScope(UUID invitationId) {
+        GuestInvitation invitation = invitationRepository.findById(invitationId).orElse(null);
+        if (invitation == null
+                || !tenantScopeResolver.canAccessTenant(invitation.getTenant().getId())) {
+            throw new ResourceNotFoundException("Guest invitation not found: " + invitationId);
+        }
+    }
+
     @PostMapping("/api/v1/guests/invitations/{invitationId}/revoke")
     @Operation(summary = "Revoke a PENDING (un-accepted) guest invitation")
     @PreAuthorize("@rbac.isTenantAdmin() or @rbac.hasPermission('guest:revoke')")
@@ -520,11 +537,7 @@ public class UserController {
         // invitation must belong to the selected tenant. 404 (not 403) when the
         // invitation isn't visible to the caller — don't leak existence across
         // tenants.
-        GuestInvitation invitation = invitationRepository.findById(invitationId).orElse(null);
-        if (invitation == null
-                || !tenantScopeResolver.canAccessTenant(invitation.getTenant().getId())) {
-            throw new ResourceNotFoundException("Guest invitation not found: " + invitationId);
-        }
+        requireInvitationInScope(invitationId);
 
         log.info("POST /api/v1/guests/invitations/{}/revoke - Revoking pending invitation by actor {}",
                 invitationId, actorUserId);

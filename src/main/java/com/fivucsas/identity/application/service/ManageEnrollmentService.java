@@ -16,6 +16,7 @@ import com.fivucsas.identity.infrastructure.multitenancy.TenantFilterBypass;
 import com.fivucsas.identity.repository.JpaTenantRepository;
 import com.fivucsas.identity.application.port.output.UserEnrollmentRepositoryPort;
 import com.fivucsas.identity.domain.repository.UserRepository;
+import com.fivucsas.identity.exception.DomainStateConflictException;
 import jakarta.persistence.EntityNotFoundException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -236,17 +237,22 @@ public class ManageEnrollmentService implements ManageEnrollmentUseCase {
      */
     private Optional<UserEnrollment> findOwnEnrollment(UUID userId, UUID userTenantId,
                                                        AuthMethodType methodType) {
-        Optional<UserEnrollment> row = tenantFilterBypass.runWithoutTenantFilter(
-                () -> userEnrollmentRepository.findByUserIdAndAuthMethodType(userId, methodType));
+        Optional<UserEnrollment> row = findEnrollmentUnfiltered(userId, methodType);
         row.ifPresent(found -> {
             UUID rowTenantId = found.getTenant() == null ? null : found.getTenant().getId();
             if (!userTenantId.equals(rowTenantId)) {
                 log.warn("AUDIT: enrollment row of user {} method {} is tagged with tenant {}, not the user's tenant {}",
                         userId, methodType, rowTenantId, userTenantId);
-                throw new IllegalStateException("Enrollment row tenant does not match the user's tenant");
+                throw new DomainStateConflictException("Enrollment row tenant does not match the user's tenant");
             }
         });
         return row;
+    }
+
+    /** The user's row for {@code methodType}, read with the Hibernate {@code tenantFilter} off. */
+    private Optional<UserEnrollment> findEnrollmentUnfiltered(UUID userId, AuthMethodType methodType) {
+        return tenantFilterBypass.runWithoutTenantFilter(
+                () -> userEnrollmentRepository.findByUserIdAndAuthMethodType(userId, methodType));
     }
 
     @Override
@@ -318,7 +324,10 @@ public class ManageEnrollmentService implements ManageEnrollmentUseCase {
             return;
         }
 
-        if (userEnrollmentRepository.findByUserIdAndAuthMethodType(userId, methodType).isEmpty()) {
+        // Both lookups run with the tenant filter off: the row belongs to the user, not to
+        // the tenant the request is bound to (a ROOT switched with X-Tenant-ID would
+        // otherwise miss an existing row, re-start it and drop the scores; PF-5).
+        if (findEnrollmentUnfiltered(userId, methodType).isEmpty()) {
             // Row not created yet: the web enrolls the biometric BEFORE creating
             // the enrollment row (createEnrollment runs afterwards). Stage the row
             // now so the scores have somewhere to live. We delegate to
@@ -339,7 +348,7 @@ public class ManageEnrollmentService implements ManageEnrollmentUseCase {
             }
         }
 
-        userEnrollmentRepository.findByUserIdAndAuthMethodType(userId, methodType)
+        findEnrollmentUnfiltered(userId, methodType)
                 .ifPresent(enrollment -> {
                     enrollment.recordScores(qualityScore, livenessScore);
                     userEnrollmentRepository.save(enrollment);
