@@ -241,11 +241,12 @@ public class SecurityConfig {
                 // emitted by JwtAuthenticationFilter carry the requestId MDC.
                 .addFilterBefore(requestIdFilter, JwtAuthenticationFilter.class)
                 // P0-SEC-1 (SECURITY_REVIEW_2026-05-01): TenantContextFilter
-                // (Order(1)) trusts X-Tenant-ID at face value. Right after the
-                // JWT auth filter has populated SecurityContextHolder, rebind
-                // TenantContext to the JWT-derived tenantId so a forged header
-                // can no longer swap tenants for an authenticated user.
-                // ROOT keeps the legitimate cross-tenant override.
+                // trusts X-Tenant-ID at face value and runs BEFORE this chain
+                // (TenantContextFilter.ORDER). Right after the JWT auth filter
+                // has populated SecurityContextHolder, rebind TenantContext to
+                // the JWT-derived tenantId so a forged header cannot swap
+                // tenants for an authenticated user. ROOT keeps the legitimate
+                // cross-tenant override.
                 .addFilterAfter(tenantBindFromAuthFilter, JwtAuthenticationFilter.class);
 
         // Only disable frame options for H2 console in non-prod profiles

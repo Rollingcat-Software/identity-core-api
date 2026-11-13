@@ -150,6 +150,7 @@ jobs:
         run: |
           scripts/ci/assert-its-executed.sh target/surefire-reports \
             CrossTenantIsolationIT \
+            CrossTenantEnrollmentHttpIT \
             TenantSwitcherIsolationIT \
             IdentityBiometricConsentIT \
             IdentityBackfillIT \

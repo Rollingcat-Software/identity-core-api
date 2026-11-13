@@ -2,6 +2,29 @@
 
 ## [Unreleased]
 
+### 2026-11-13 - Cross-tenant isolation of user-scoped enrollment endpoints (security)
+
+- A TENANT_ADMIN of tenant A could read `GET /api/v1/users/{id}/enrollments` of a tenant-B user
+  (with or without a forged `X-Tenant-ID`), and with a forged `X-Tenant-ID: <tenant B>` also read
+  `GET .../enrollments/health` and write `POST .../enrollments` and
+  `PUT .../enrollments/{methodType}/complete` (external cross-tenant run at `2a0d087`).
+- Root cause 1: `RbacPermissionEvaluator.hasPermission(targetId, type, perm)` ignored the target id,
+  and a TENANT_ADMIN holds every tenant-scoped permission implicitly. A non-null target id now must
+  sit in the caller's tenant: `User`/`user_settings` targets go through the new single guard
+  `RbacAuthorizationService.canAccessUser`, `Tenant` targets through `canAccessTenant`, and any other
+  target type is refused (fail closed). ROOT stays cross-tenant.
+- Root cause 2: `TenantContextFilter` was `@Order(1)`, which is after the Spring Security chain
+  (`SecurityProperties.DEFAULT_FILTER_ORDER`), so the client header overwrote the tenant that
+  `TenantBindFromAuthFilter` had bound from the token. It now runs before the chain
+  (`TenantContextFilter.ORDER`), so the token tenant wins for every non-ROOT caller; the bind filter
+  is registered only inside the security chain and logs user ids instead of emails.
+- Query-parameter selectors: `GET /api/v1/devices?userId=` and `POST /api/v1/devices?userId=` now
+  require `@rbac.canAccessUser(#userId)`. The `?tenantId=` selectors of devices, auth sessions,
+  guests and verification were already coerced to the caller's scope for non-ROOT callers.
+- Tests: `UserEnrollmentTenantGuardSecurityTest`, `RbacPermissionEvaluatorTargetScopeTest`,
+  `TenantContextFilterOrderTest` (unit) and `CrossTenantEnrollmentHttpIT` (Testcontainers, full
+  HTTP stack with real JWTs, added to the CI executed-IT gate).
+
 ### 2026-11-10 - Public device benchmark intake (Paper A)
 
 - New public, write-only `POST /api/v1/devbench/runs` stores one anonymous run of the

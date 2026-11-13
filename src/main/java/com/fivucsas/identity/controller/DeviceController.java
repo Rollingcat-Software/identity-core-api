@@ -61,8 +61,11 @@ public class DeviceController {
 
     // --- /api/v1/devices endpoints ---
 
+    // A ?userId= selector names a user directly, so it gets the same tenant guard as
+    // a /users/{userId} path: the user must be in the caller's tenant (ROOT: any).
     @GetMapping("/api/v1/devices")
-    @PreAuthorize("@rbac.isTenantAdmin() or hasAuthority('device:read')")
+    @PreAuthorize("(@rbac.isTenantAdmin() or hasAuthority('device:read'))"
+            + " and (#userId == null or @rbac.canAccessUser(#userId))")
     public ResponseEntity<List<DeviceResponse>> getDevices(
             @RequestParam(required = false) UUID userId,
             @RequestParam(required = false) UUID tenantId) {
@@ -98,7 +101,8 @@ public class DeviceController {
     }
 
     @PostMapping("/api/v1/devices")
-    @PreAuthorize("hasPermission(null, 'Device', 'device:register') and @rbac.canAccessTenant(#tenantId)")
+    @PreAuthorize("hasPermission(null, 'Device', 'device:register') and @rbac.canAccessTenant(#tenantId)"
+            + " and @rbac.canAccessUser(#userId)")
     public ResponseEntity<DeviceResponse> registerDevice(
             @RequestParam UUID userId,
             @RequestParam UUID tenantId,

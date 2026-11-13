@@ -8,6 +8,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.autoconfigure.security.SecurityProperties;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
@@ -27,12 +28,24 @@ import java.util.UUID;
  * Following principles:
  * - Single Responsibility: Only handles tenant extraction
  * - Open/Closed: Can add new extraction methods
+ *
+ * <p><b>Ordering is a security invariant.</b> This filter only records the tenant a
+ * client ASSERTS. {@link TenantBindFromAuthFilter}, inside the Spring Security chain,
+ * then rebinds it to the tenant of the verified token for every non-ROOT caller. That
+ * works only when this filter runs BEFORE the security chain, which Spring Boot
+ * registers at {@link SecurityProperties#DEFAULT_FILTER_ORDER}. At {@code @Order(1)} it
+ * ran after the chain, so the header overwrote the token tenant for every caller and
+ * the rebind never took effect (AX-5 cross-tenant run). Being outermost also makes the
+ * {@code finally} below the last word on clearing the context.</p>
  */
 @Component
-@Order(1) // Run early in filter chain
+@Order(TenantContextFilter.ORDER)
 @RequiredArgsConstructor
 @Slf4j
 public class TenantContextFilter extends OncePerRequestFilter {
+
+    /** Runs before the Spring Security filter chain; see the class comment. */
+    public static final int ORDER = SecurityProperties.DEFAULT_FILTER_ORDER - 10;
 
     private static final String TENANT_ID_HEADER = "X-Tenant-ID";
     private static final String TENANT_SLUG_HEADER = "X-Tenant-Slug";
