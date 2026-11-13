@@ -12,6 +12,7 @@ import com.fivucsas.identity.dto.AssignRoleRequest;
 import com.fivucsas.identity.dto.CreateRoleRequest;
 import com.fivucsas.identity.dto.UpdateRoleRequest;
 import com.fivucsas.identity.security.RbacAuthorizationService;
+import com.fivucsas.identity.security.TenantScopeResolver;
 import com.fivucsas.identity.security.UserSecurityService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -41,6 +42,7 @@ public class RoleController {
     private final ManagePermissionUseCase managePermissionUseCase;
     private final UserSecurityService userSecurityService;
     private final RbacAuthorizationService rbacService;
+    private final TenantScopeResolver tenantScopeResolver;
 
     @GetMapping("/api/v1/roles")
     @Operation(summary = "Get all roles")
@@ -178,7 +180,7 @@ public class RoleController {
 
     @GetMapping("/api/v1/users/{userId}/roles")
     @Operation(summary = "Get all roles for a user")
-    @PreAuthorize("@rbac.hasPermission('user_role:read') or @userSecurityService.isCurrentUser(#userId)")
+    @PreAuthorize("(@rbac.hasPermission('user_role:read') and @rbac.canAccessUser(#userId)) or @userSecurityService.isCurrentUser(#userId)")
     public ResponseEntity<List<UserRoleResponse>> getUserRoles(@PathVariable String userId) {
         log.info("GET /api/v1/users/{}/roles - Get user roles", userId);
 
@@ -195,7 +197,7 @@ public class RoleController {
     // — which a TENANT_ADMIN holds implicitly with NO role-id ceiling, so they could
     // assign the global ROOT role and escalate. canAssignRole enforces the real ceiling
     // (own-tenant roles only for non-ROOT; global ROOT/SYSTEM are ROOT-only).
-    @PreAuthorize("@rbac.canAssignRole(#roleId)")
+    @PreAuthorize("@rbac.canAssignRole(#roleId) and @rbac.canAccessUser(#userId)")
     public ResponseEntity<Void> assignRole(
             @PathVariable String userId,
             @PathVariable String roleId,
@@ -218,7 +220,7 @@ public class RoleController {
 
     @DeleteMapping("/api/v1/users/{userId}/roles/{roleId}")
     @Operation(summary = "Revoke a role from a user")
-    @PreAuthorize("@rbac.hasPermission('user_role:revoke')")
+    @PreAuthorize("@rbac.hasPermission('user_role:revoke') and @rbac.canAccessUser(#userId)")
     public ResponseEntity<Void> revokeRole(
             @PathVariable String userId,
             @PathVariable String roleId) {
@@ -240,8 +242,12 @@ public class RoleController {
     public ResponseEntity<List<UserRoleResponse>> getRoleUsers(@PathVariable String roleId) {
         log.info("GET /api/v1/users/*/roles/all/{} - Get role users", roleId);
 
+        // Holders are limited to the caller's tenant scope (ROOT: unrestricted, or the
+        // tenant it switched to); a non-ROOT caller without a tenant gets the fail-closed
+        // empty scope, so a global role id never lists another tenant's users.
         GetRoleUsersQuery query = GetRoleUsersQuery.builder()
                 .roleId(roleId)
+                .tenantScope(tenantScopeResolver.currentScope())
                 .build();
 
         return ResponseEntity.ok(manageUserRoleUseCase.getRoleUsers(query));

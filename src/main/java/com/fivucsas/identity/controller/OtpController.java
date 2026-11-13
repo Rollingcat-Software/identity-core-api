@@ -77,7 +77,7 @@ public class OtpController {
 
     @PostMapping("/api/v1/otp/email/send/{userId}")
     @Operation(summary = "Send an OTP code via email to the user")
-    @PreAuthorize("hasAuthority('otp:send') or @userSecurityService.isCurrentUser(#userId)")
+    @PreAuthorize("(hasAuthority('otp:send') and @rbac.canAccessUser(#userId)) or @userSecurityService.isCurrentUser(#userId)")
     public ResponseEntity<Map<String, Object>> sendEmailOtp(@PathVariable UUID userId) {
         log.info("Email OTP send request for user: {}", userId);
 
@@ -96,7 +96,7 @@ public class OtpController {
 
     @PostMapping("/api/v1/otp/email/verify/{userId}")
     @Operation(summary = "Verify an email OTP code")
-    @PreAuthorize("hasAuthority('otp:verify') or @userSecurityService.isCurrentUser(#userId)")
+    @PreAuthorize("(hasAuthority('otp:verify') and @rbac.canAccessUser(#userId)) or @userSecurityService.isCurrentUser(#userId)")
     public ResponseEntity<Map<String, Object>> verifyEmailOtp(
             @PathVariable UUID userId,
             @RequestBody Map<String, String> request) {
@@ -152,7 +152,7 @@ public class OtpController {
 
     @PostMapping("/api/v1/otp/sms/send/{userId}")
     @Operation(summary = "Send an OTP code via SMS to the user")
-    @PreAuthorize("hasAuthority('otp:send') or @userSecurityService.isCurrentUser(#userId)")
+    @PreAuthorize("(hasAuthority('otp:send') and @rbac.canAccessUser(#userId)) or @userSecurityService.isCurrentUser(#userId)")
     public ResponseEntity<Map<String, Object>> sendSmsOtp(@PathVariable UUID userId) {
         log.info("SMS OTP send request for user: {}", userId);
 
@@ -190,7 +190,7 @@ public class OtpController {
 
     @PostMapping("/api/v1/otp/sms/verify/{userId}")
     @Operation(summary = "Verify an SMS OTP code")
-    @PreAuthorize("hasAuthority('otp:verify') or @userSecurityService.isCurrentUser(#userId)")
+    @PreAuthorize("(hasAuthority('otp:verify') and @rbac.canAccessUser(#userId)) or @userSecurityService.isCurrentUser(#userId)")
     public ResponseEntity<Map<String, Object>> verifySmsOtp(
             @PathVariable UUID userId,
             @RequestBody Map<String, String> request) {
@@ -271,7 +271,7 @@ public class OtpController {
 
     @PostMapping("/api/v1/totp/setup/{userId}")
     @Operation(summary = "Set up TOTP for a user - generates secret and OTP auth URI")
-    @PreAuthorize("hasAuthority('totp:setup') or @userSecurityService.isCurrentUser(#userId)")
+    @PreAuthorize("(hasAuthority('totp:setup') and @rbac.canAccessUser(#userId)) or @userSecurityService.isCurrentUser(#userId)")
     public ResponseEntity<Map<String, Object>> setupTotp(@PathVariable UUID userId) {
         log.info("TOTP setup request for user: {}", userId);
 
@@ -293,7 +293,7 @@ public class OtpController {
 
     @PostMapping("/api/v1/totp/verify-setup/{userId}")
     @Operation(summary = "Verify TOTP setup by providing an initial code from authenticator app")
-    @PreAuthorize("hasAuthority('totp:setup') or @userSecurityService.isCurrentUser(#userId)")
+    @PreAuthorize("(hasAuthority('totp:setup') and @rbac.canAccessUser(#userId)) or @userSecurityService.isCurrentUser(#userId)")
     public ResponseEntity<Map<String, Object>> verifyTotpSetup(
             @PathVariable UUID userId,
             @RequestBody Map<String, String> request) {
@@ -346,7 +346,7 @@ public class OtpController {
 
     @GetMapping("/api/v1/totp/status/{userId}")
     @Operation(summary = "Check if TOTP is configured for a user")
-    @PreAuthorize("hasAuthority('totp:read') or @userSecurityService.isCurrentUser(#userId)")
+    @PreAuthorize("(hasAuthority('totp:read') and @rbac.canAccessUser(#userId)) or @userSecurityService.isCurrentUser(#userId)")
     public ResponseEntity<Map<String, Object>> getTotpStatus(@PathVariable UUID userId) {
         // Check Redis first (fast path), then fall back to PostgreSQL (source of truth)
         String activeKey = TOTP_KEY_PREFIX + userId;
@@ -372,7 +372,7 @@ public class OtpController {
 
     @DeleteMapping("/api/v1/totp/{userId}")
     @Operation(summary = "Revoke/disable TOTP for a user")
-    @PreAuthorize("hasAuthority('totp:delete') or @userSecurityService.isCurrentUser(#userId)")
+    @PreAuthorize("(hasAuthority('totp:delete') and @rbac.canAccessUser(#userId)) or @userSecurityService.isCurrentUser(#userId)")
     public ResponseEntity<Map<String, Object>> revokeTotp(@PathVariable UUID userId) {
         log.info("TOTP revocation request for user: {}", userId);
 

@@ -39,7 +39,7 @@ public class QrController {
 
     @PostMapping("/api/v1/qr/generate/{userId}")
     @Operation(summary = "Generate a QR authentication token for the user")
-    @PreAuthorize("hasAuthority('qr:generate') or @userSecurityService.isCurrentUser(#userId)")
+    @PreAuthorize("(hasAuthority('qr:generate') and @rbac.canAccessUser(#userId)) or @userSecurityService.isCurrentUser(#userId)")
     public ResponseEntity<Map<String, Object>> generateQrToken(@PathVariable UUID userId) {
         log.info("QR token generation request for user: {}", userId);
 

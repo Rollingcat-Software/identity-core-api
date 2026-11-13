@@ -6,6 +6,9 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.web.servlet.FilterRegistrationBean;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -22,8 +25,8 @@ import java.util.UUID;
  * earlier in the chain.
  *
  * <p><b>Why a second filter:</b> the original {@code TenantContextFilter}
- * runs at {@code @Order(1)} — BEFORE Spring Security has populated the
- * {@link SecurityContextHolder} — and trusts the {@code X-Tenant-ID} header
+ * runs BEFORE the Spring Security chain ({@link TenantContextFilter#ORDER}), so
+ * before the {@link SecurityContextHolder} is populated, and trusts the {@code X-Tenant-ID} header
  * after only verifying the tenant exists. That is a cross-tenant
  * confidentiality + integrity breach: any authenticated user can ask the
  * server to swap tenants by sending one extra header, and combined with the
@@ -68,13 +71,24 @@ public class TenantBindFromAuthFilter extends OncePerRequestFilter {
                                     HttpServletResponse response,
                                     FilterChain filterChain)
             throws ServletException, IOException {
+        // Restore what this filter found, not merely clear: on the paths
+        // TenantContextFilter skips (/actuator, /swagger, /v3/api-docs, /health) the
+        // security chain still runs, and without this an authenticated request there
+        // left the caller's tenant bound to the pooled thread for the next request.
+        UUID tenantBefore = TenantContext.getCurrentTenant();
         try {
             rebindTenantFromAuth();
             filterChain.doFilter(request, response);
         } finally {
-            // TenantContextFilter (the earlier one) owns the clear() call in
-            // its own finally block. We do not clear here to avoid double-clear
-            // races.
+            restoreTenant(tenantBefore);
+        }
+    }
+
+    private static void restoreTenant(UUID tenantBefore) {
+        if (tenantBefore == null) {
+            TenantContext.clear();
+        } else {
+            TenantContext.setCurrentTenant(tenantBefore);
         }
     }
 
@@ -97,8 +111,8 @@ public class TenantBindFromAuthFilter extends OncePerRequestFilter {
             // Pathological — JWT-loaded user has no tenant. Don't trust the
             // header either. Clear and let downstream code handle.
             if (assertedTenantId != null) {
-                log.warn("AUDIT: tenant-rebind cleared header-asserted tenantId={} for user {} with no JWT tenant",
-                        assertedTenantId, details.getEmail());
+                log.warn("AUDIT: tenant-rebind cleared header-asserted tenantId={} for userId={} with no JWT tenant",
+                        assertedTenantId, details.getUserId());
                 TenantContext.clear();
             }
             return;
@@ -118,17 +132,36 @@ public class TenantBindFromAuthFilter extends OncePerRequestFilter {
 
         // Mismatch — only ROOT may assert a foreign tenantId.
         if (isRoot(auth)) {
-            log.info("AUDIT: ROOT tenant override accepted — user={}, jwtTenant={}, assertedTenant={}",
-                    details.getEmail(), jwtTenantId, assertedTenantId);
+            log.info("AUDIT: ROOT tenant override accepted, userId={}, jwtTenant={}, assertedTenant={}",
+                    details.getUserId(), jwtTenantId, assertedTenantId);
             // Leave TenantContext as TenantContextFilter set it.
             return;
         }
 
         // Non-ROOT attempting cross-tenant access — overwrite to the
         // JWT-derived tenantId and emit a warning for ops/security review.
-        log.warn("AUDIT: tenant-rebind rejected cross-tenant assertion — user={}, jwtTenant={}, assertedTenant={}, role-set={}",
-                details.getEmail(), jwtTenantId, assertedTenantId, auth.getAuthorities());
+        log.warn("AUDIT: tenant-rebind rejected cross-tenant assertion, userId={}, jwtTenant={}, assertedTenant={}, role-set={}",
+                details.getUserId(), jwtTenantId, assertedTenantId, auth.getAuthorities());
         TenantContext.setCurrentTenant(jwtTenantId);
+    }
+
+    /**
+     * Keeps this filter out of Spring Boot's automatic servlet-filter registration: it
+     * belongs only inside the security chain, right after the JWT filter (see
+     * {@code SecurityConfig}). A second, servlet-level registration would run after the
+     * chain and depend on {@link OncePerRequestFilter}'s already-filtered marker to be
+     * skipped.
+     */
+    @Configuration
+    static class Registration {
+
+        @Bean
+        public FilterRegistrationBean<TenantBindFromAuthFilter> disableTenantBindAutoRegistration(
+                TenantBindFromAuthFilter filter) {
+            FilterRegistrationBean<TenantBindFromAuthFilter> registration = new FilterRegistrationBean<>(filter);
+            registration.setEnabled(false);
+            return registration;
+        }
     }
 
     private static boolean isRoot(Authentication auth) {

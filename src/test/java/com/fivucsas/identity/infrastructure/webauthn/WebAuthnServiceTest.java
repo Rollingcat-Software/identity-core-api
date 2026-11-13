@@ -61,6 +61,70 @@ class WebAuthnServiceTest {
     }
 
     @Nested
+    @DisplayName("Registration challenge bound to a user (PF-5)")
+    class UserBoundRegistrationChallenge {
+
+        private static final String ORIGIN = "https://app.fivucsas.com";
+
+        @Test
+        @DisplayName("stores the user the challenge was issued for, with the challenge's TTL")
+        void storesTheBoundUser() {
+            UUID sessionId = UUID.randomUUID();
+            UUID userId = UUID.randomUUID();
+
+            webAuthnService.generateRegistrationChallenge(sessionId, userId);
+
+            org.mockito.Mockito.verify(valueOps).set(
+                    org.mockito.ArgumentMatchers.eq("webauthn:reg-user:" + sessionId),
+                    org.mockito.ArgumentMatchers.eq(userId.toString()),
+                    any(java.time.Duration.class));
+        }
+
+        @Test
+        @DisplayName("accepts the user the challenge was issued for and consumes both keys")
+        void acceptsTheBoundUser() {
+            UUID sessionId = UUID.randomUUID();
+            UUID userId = UUID.randomUUID();
+            when(valueOps.get("webauthn:reg-user:" + sessionId)).thenReturn(userId.toString());
+            when(valueOps.get("webauthn:challenge:" + sessionId)).thenReturn("chal");
+
+            boolean ok = webAuthnService.validateRegistrationChallenge(
+                    sessionId, userId, clientDataJsonB64("webauthn.create", "chal", ORIGIN));
+
+            assertThat(ok).isTrue();
+            org.mockito.Mockito.verify(redisTemplate).delete("webauthn:challenge:" + sessionId);
+            org.mockito.Mockito.verify(redisTemplate).delete("webauthn:reg-user:" + sessionId);
+        }
+
+        @Test
+        @DisplayName("rejects another user and leaves the challenge unconsumed")
+        void rejectsAnotherUser() {
+            UUID sessionId = UUID.randomUUID();
+            when(valueOps.get("webauthn:reg-user:" + sessionId)).thenReturn(UUID.randomUUID().toString());
+            lenient().when(valueOps.get("webauthn:challenge:" + sessionId)).thenReturn("chal");
+
+            boolean ok = webAuthnService.validateRegistrationChallenge(
+                    sessionId, UUID.randomUUID(), clientDataJsonB64("webauthn.create", "chal", ORIGIN));
+
+            assertThat(ok).isFalse();
+            org.mockito.Mockito.verify(redisTemplate, org.mockito.Mockito.never()).delete(anyString());
+        }
+
+        @Test
+        @DisplayName("rejects a session that was issued without a user binding")
+        void rejectsAnUnboundSession() {
+            UUID sessionId = UUID.randomUUID();
+            when(valueOps.get("webauthn:reg-user:" + sessionId)).thenReturn(null);
+            lenient().when(valueOps.get("webauthn:challenge:" + sessionId)).thenReturn("chal");
+
+            boolean ok = webAuthnService.validateRegistrationChallenge(
+                    sessionId, UUID.randomUUID(), clientDataJsonB64("webauthn.create", "chal", ORIGIN));
+
+            assertThat(ok).isFalse();
+        }
+    }
+
+    @Nested
     @DisplayName("Registration challenge (P1-3 + P1-2 origin allowlist)")
     class RegistrationChallenge {
 

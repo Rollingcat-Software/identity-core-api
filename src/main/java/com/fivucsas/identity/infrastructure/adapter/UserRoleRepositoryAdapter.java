@@ -42,6 +42,11 @@ public class UserRoleRepositoryAdapter implements UserRoleRepositoryPort {
     }
 
     @Override
+    public List<UserRole> findByRoleIdWithUserInTenant(UUID roleId, UUID tenantId) {
+        return jpaRepository.findByRoleIdWithUserInTenant(roleId, tenantId);
+    }
+
+    @Override
     public boolean existsByIdUserIdAndIdRoleId(UUID userId, UUID roleId) {
         return jpaRepository.existsByIdUserIdAndIdRoleId(userId, roleId);
     }

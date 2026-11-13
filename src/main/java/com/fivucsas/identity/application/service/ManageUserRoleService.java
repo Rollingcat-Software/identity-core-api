@@ -137,7 +137,12 @@ public class ManageUserRoleService implements ManageUserRoleUseCase {
             throw new RoleNotFoundException(query.getRoleId());
         }
 
-        List<UserRole> userRoles = userRoleRepository.findByRoleIdWithUser(roleId);
+        // A role id can name a global (system) role held across tenants, so a scoped
+        // caller only sees the holders of its own tenant (null scope: ROOT, unrestricted).
+        UUID scope = query.getTenantScope();
+        List<UserRole> userRoles = scope == null
+                ? userRoleRepository.findByRoleIdWithUser(roleId)
+                : userRoleRepository.findByRoleIdWithUserInTenant(roleId, scope);
 
         return userRoles.stream()
                 .map(this::mapToUserRoleResponse)

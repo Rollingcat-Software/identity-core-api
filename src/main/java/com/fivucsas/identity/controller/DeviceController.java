@@ -18,6 +18,7 @@ import com.fivucsas.identity.application.port.output.TokenGenerationPort;
 import com.fivucsas.identity.entity.RefreshToken;
 import com.fivucsas.identity.infrastructure.webauthn.WebAuthnService;
 import com.fivucsas.identity.infrastructure.webauthn.WebAuthnUserHandle;
+import com.fivucsas.identity.security.RbacAuthorizationService;
 import com.fivucsas.identity.security.TenantScopeResolver;
 import com.fivucsas.identity.service.RefreshTokenService;
 import jakarta.servlet.http.HttpServletRequest;
@@ -27,6 +28,7 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
@@ -49,6 +51,12 @@ import java.util.UUID;
 @Tag(name = "Devices", description = "Device and WebAuthn/FIDO2 credential management")
 public class DeviceController {
 
+    /** Lets an admin delete another user's WebAuthn credential (TENANT_ADMIN holds it implicitly). */
+    static final String WEBAUTHN_DELETE = "webauthn:delete";
+
+    /** Lets an admin register a WebAuthn credential for another user of their tenant. */
+    static final String WEBAUTHN_REGISTER = "webauthn:register";
+
     private final ManageDeviceUseCase manageDeviceUseCase;
     private final WebAuthnService webAuthnService;
     private final WebAuthnCredentialRepositoryPort credentialRepository;
@@ -58,11 +66,15 @@ public class DeviceController {
     private final TokenGenerationPort tokenGenerator;
     private final RefreshTokenService refreshTokenService;
     private final UsernamelessLoginFlowService usernamelessLoginFlowService;
+    private final RbacAuthorizationService rbac;
 
     // --- /api/v1/devices endpoints ---
 
+    // A ?userId= selector names a user directly, so it gets the same tenant guard as
+    // a /users/{userId} path: the user must be in the caller's tenant (ROOT: any).
     @GetMapping("/api/v1/devices")
-    @PreAuthorize("@rbac.isTenantAdmin() or hasAuthority('device:read')")
+    @PreAuthorize("(@rbac.isTenantAdmin() or hasAuthority('device:read'))"
+            + " and (#userId == null or @rbac.canAccessUser(#userId))")
     public ResponseEntity<List<DeviceResponse>> getDevices(
             @RequestParam(required = false) UUID userId,
             @RequestParam(required = false) UUID tenantId) {
@@ -98,7 +110,8 @@ public class DeviceController {
     }
 
     @PostMapping("/api/v1/devices")
-    @PreAuthorize("hasPermission(null, 'Device', 'device:register') and @rbac.canAccessTenant(#tenantId)")
+    @PreAuthorize("hasPermission(null, 'Device', 'device:register') and @rbac.canAccessTenant(#tenantId)"
+            + " and @rbac.canAccessUser(#userId)")
     public ResponseEntity<DeviceResponse> registerDevice(
             @RequestParam UUID userId,
             @RequestParam UUID tenantId,
@@ -107,10 +120,13 @@ public class DeviceController {
                 .body(manageDeviceUseCase.registerDevice(userId, tenantId, command));
     }
 
+    // PF-5: the device id alone names no tenant, so the service checks the device's
+    // owner against the caller before deleting (404 for another tenant's device).
     @DeleteMapping("/api/v1/devices/{deviceId}")
     @PreAuthorize("hasPermission(null, 'Device', 'device:delete')")
     public ResponseEntity<Void> removeDevice(@PathVariable UUID deviceId) {
-        manageDeviceUseCase.removeDevice(deviceId);
+        manageDeviceUseCase.removeDevice(deviceId,
+                owner -> rbac.canActOnUserOwnedResource(owner, "device:delete"));
         return ResponseEntity.noContent().build();
     }
 
@@ -118,13 +134,14 @@ public class DeviceController {
 
     @PostMapping("/api/v1/webauthn/register/options/{userId}")
     @Operation(summary = "Generate WebAuthn registration options (challenge) for credential creation")
-    @PreAuthorize("hasAuthority('webauthn:register') or @userSecurityService.isCurrentUser(#userId)")
+    @PreAuthorize("(hasAuthority('webauthn:register') and @rbac.canAccessUser(#userId)) or @userSecurityService.isCurrentUser(#userId)")
     public ResponseEntity<Map<String, Object>> getRegistrationOptions(@PathVariable UUID userId) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new UserNotFoundException(userId.toString()));
 
+        // PF-5: bind the session to this user so /register/verify accepts it only for them.
         UUID sessionId = UUID.randomUUID();
-        String challenge = webAuthnService.generateChallenge(sessionId);
+        String challenge = webAuthnService.generateRegistrationChallenge(sessionId, userId);
 
         List<String> existingCredentialIds = credentialRepository.findAllByUserId(userId).stream()
                 .map(WebAuthnCredential::getCredentialId)
@@ -147,11 +164,18 @@ public class DeviceController {
         ));
     }
 
+    // PF-5: the target user comes from the body, so the guard runs in code: the caller
+    // must be that user, or hold webauthn:register in the user's tenant (ROOT: any).
+    // The session must also have been issued by /register/options/{userId} for that same
+    // user, so a challenge obtained for oneself cannot plant a key on someone else.
     @PostMapping("/api/v1/webauthn/register/verify")
     @Operation(summary = "Verify WebAuthn registration (attestation) and store credential")
     @PreAuthorize("isAuthenticated()")
     public ResponseEntity<Map<String, Object>> verifyRegistration(@RequestBody Map<String, Object> request) {
         UUID userId = UUID.fromString((String) request.get("userId"));
+        if (!rbac.canActOnUserOwnedResource(userId, WEBAUTHN_REGISTER)) {
+            throw new AccessDeniedException("Not allowed to register a credential for this user");
+        }
         UUID sessionId = UUID.fromString((String) request.get("sessionId"));
         String credentialId = (String) request.get("credentialId");
         String publicKey = (String) request.get("publicKey");
@@ -168,7 +192,7 @@ public class DeviceController {
             ));
         }
 
-        boolean challengeValid = webAuthnService.validateRegistrationChallenge(sessionId, clientDataJson);
+        boolean challengeValid = webAuthnService.validateRegistrationChallenge(sessionId, userId, clientDataJson);
         if (!challengeValid) {
             return ResponseEntity.badRequest().body(Map.of(
                     "success", false,
@@ -207,7 +231,7 @@ public class DeviceController {
 
     @GetMapping("/api/v1/webauthn/credentials/{userId}")
     @Operation(summary = "List all WebAuthn credentials for a user")
-    @PreAuthorize("hasAuthority('webauthn:read') or @userSecurityService.isCurrentUser(#userId)")
+    @PreAuthorize("(hasAuthority('webauthn:read') and @rbac.canAccessUser(#userId)) or @userSecurityService.isCurrentUser(#userId)")
     public ResponseEntity<List<Map<String, Object>>> listCredentials(@PathVariable UUID userId) {
         List<Map<String, Object>> credentials = credentialRepository.findAllByUserId(userId).stream()
                 .map(c -> {
@@ -225,11 +249,15 @@ public class DeviceController {
         return ResponseEntity.ok(credentials);
     }
 
+    // PF-5: the owner of a passkey or hardware key may delete it, and so may an admin
+    // holding webauthn:delete whose tenant holds the owner (ROOT: any). Everyone else,
+    // including callers of another tenant, gets 404 and the credential stays.
     @DeleteMapping("/api/v1/webauthn/credentials/by-id/{id}")
     @Operation(summary = "Delete a WebAuthn credential by database ID")
     @PreAuthorize("isAuthenticated()")
     public ResponseEntity<Void> deleteCredentialById(@PathVariable UUID id) {
-        webAuthnCredentialService.deleteById(id);
+        webAuthnCredentialService.deleteById(id,
+                owner -> rbac.canActOnUserOwnedResource(owner, WEBAUTHN_DELETE));
         return ResponseEntity.noContent().build();
     }
 
@@ -237,7 +265,8 @@ public class DeviceController {
     @Operation(summary = "Delete a WebAuthn credential")
     @PreAuthorize("isAuthenticated()")
     public ResponseEntity<Void> deleteCredential(@PathVariable String credentialId) {
-        webAuthnCredentialService.deleteByCredentialId(credentialId);
+        webAuthnCredentialService.deleteByCredentialId(credentialId,
+                owner -> rbac.canActOnUserOwnedResource(owner, WEBAUTHN_DELETE));
         return ResponseEntity.noContent().build();
     }
 

@@ -102,7 +102,7 @@ public class BiometricController {
 
     @PostMapping(value = "/api/v1/biometric/enroll/{userId}", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @Operation(summary = "Enroll user's face biometric data")
-    @PreAuthorize("hasAuthority('biometric:enroll') or @userSecurityService.isCurrentUser(#userId)")
+    @PreAuthorize("(hasAuthority('biometric:enroll') and @rbac.canAccessUser(#userId)) or @userSecurityService.isCurrentUser(#userId)")
     public ResponseEntity<BiometricVerificationResponse> enrollFace(
             @PathVariable UUID userId,
             @RequestParam("image") MultipartFile image,
@@ -168,7 +168,7 @@ public class BiometricController {
     @PostMapping(value = "/api/v1/biometric/enroll-embedding/{userId}",
             consumes = MediaType.APPLICATION_JSON_VALUE)
     @Operation(summary = "Enroll a client-computed 512-dim face embedding (privacy: image stays on device)")
-    @PreAuthorize("hasAuthority('biometric:enroll') or @userSecurityService.isCurrentUser(#userId)")
+    @PreAuthorize("(hasAuthority('biometric:enroll') and @rbac.canAccessUser(#userId)) or @userSecurityService.isCurrentUser(#userId)")
     public ResponseEntity<BiometricVerificationResponse> enrollFaceEmbedding(
             @PathVariable UUID userId,
             @Valid @RequestBody EnrollEmbeddingRequest request) {
@@ -211,7 +211,7 @@ public class BiometricController {
 
     @PostMapping(value = "/api/v1/biometric/enroll/multi/{userId}", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @Operation(summary = "Multi-image face enrollment (2-5 images for stronger template)")
-    @PreAuthorize("hasAuthority('biometric:enroll') or @userSecurityService.isCurrentUser(#userId)")
+    @PreAuthorize("(hasAuthority('biometric:enroll') and @rbac.canAccessUser(#userId)) or @userSecurityService.isCurrentUser(#userId)")
     public ResponseEntity<Map<String, Object>> enrollFaceMulti(
             @PathVariable UUID userId,
             @RequestParam("files") List<MultipartFile> files,
@@ -237,7 +237,7 @@ public class BiometricController {
 
     @PostMapping(value = "/api/v1/biometric/verify/{userId}", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @Operation(summary = "Verify user's face against enrolled biometric data")
-    @PreAuthorize("hasAuthority('biometric:verify') or @userSecurityService.isCurrentUser(#userId)")
+    @PreAuthorize("(hasAuthority('biometric:verify') and @rbac.canAccessUser(#userId)) or @userSecurityService.isCurrentUser(#userId)")
     public ResponseEntity<BiometricVerificationResponse> verifyFace(
             @PathVariable UUID userId,
             @RequestParam("image") MultipartFile image,
@@ -268,7 +268,7 @@ public class BiometricController {
 
     @PostMapping("/api/v1/biometric/voice/enroll/{userId}")
     @Operation(summary = "Enroll user's voice biometric data")
-    @PreAuthorize("hasAuthority('biometric:enroll') or @userSecurityService.isCurrentUser(#userId)")
+    @PreAuthorize("(hasAuthority('biometric:enroll') and @rbac.canAccessUser(#userId)) or @userSecurityService.isCurrentUser(#userId)")
     public ResponseEntity<BiometricVerificationResponse> enrollVoice(
             @PathVariable UUID userId,
             @RequestBody Map<String, String> request) {
@@ -344,7 +344,7 @@ public class BiometricController {
     @PostMapping(value = "/api/v1/biometric/voice/enroll-embedding/{userId}",
             consumes = MediaType.APPLICATION_JSON_VALUE)
     @Operation(summary = "Enroll a client-computed 256-dim voice embedding (privacy: audio stays on device)")
-    @PreAuthorize("hasAuthority('biometric:enroll') or @userSecurityService.isCurrentUser(#userId)")
+    @PreAuthorize("(hasAuthority('biometric:enroll') and @rbac.canAccessUser(#userId)) or @userSecurityService.isCurrentUser(#userId)")
     public ResponseEntity<BiometricVerificationResponse> enrollVoiceEmbedding(
             @PathVariable UUID userId,
             @Valid @RequestBody VoiceEnrollEmbeddingRequest request) {
@@ -395,7 +395,7 @@ public class BiometricController {
 
     @PostMapping("/api/v1/biometric/voice/verify/{userId}")
     @Operation(summary = "Verify user's voice against enrolled biometric data")
-    @PreAuthorize("hasAuthority('biometric:verify') or @userSecurityService.isCurrentUser(#userId)")
+    @PreAuthorize("(hasAuthority('biometric:verify') and @rbac.canAccessUser(#userId)) or @userSecurityService.isCurrentUser(#userId)")
     public ResponseEntity<BiometricVerificationResponse> verifyVoice(
             @PathVariable UUID userId,
             @RequestBody Map<String, String> request) {
@@ -423,7 +423,7 @@ public class BiometricController {
 
     @DeleteMapping("/api/v1/biometric/face/{userId}")
     @Operation(summary = "Delete user's enrolled face biometric data")
-    @PreAuthorize("hasAuthority('biometric:delete') or @userSecurityService.isCurrentUser(#userId)")
+    @PreAuthorize("(hasAuthority('biometric:delete') and @rbac.canAccessUser(#userId)) or @userSecurityService.isCurrentUser(#userId)")
     public ResponseEntity<BiometricVerificationResponse> deleteFace(@PathVariable UUID userId) {
         log.info("Face deletion request for user: {}", userId);
 
@@ -444,7 +444,7 @@ public class BiometricController {
 
     @DeleteMapping("/api/v1/biometric/voice/{userId}")
     @Operation(summary = "Delete user's enrolled voice biometric data")
-    @PreAuthorize("hasAuthority('biometric:delete') or @userSecurityService.isCurrentUser(#userId)")
+    @PreAuthorize("(hasAuthority('biometric:delete') and @rbac.canAccessUser(#userId)) or @userSecurityService.isCurrentUser(#userId)")
     public ResponseEntity<BiometricVerificationResponse> deleteVoice(@PathVariable UUID userId) {
         log.info("Voice deletion request for user: {}", userId);
 

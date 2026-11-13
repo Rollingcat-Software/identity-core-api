@@ -2,6 +2,96 @@
 
 ## [Unreleased]
 
+### 2026-11-13 - Cross-tenant isolation of user-scoped enrollment endpoints (security)
+
+- A TENANT_ADMIN of tenant A could read `GET /api/v1/users/{id}/enrollments` of a tenant-B user
+  (with or without a forged `X-Tenant-ID`), and with a forged `X-Tenant-ID: <tenant B>` also read
+  `GET .../enrollments/health` and write `POST .../enrollments` and
+  `PUT .../enrollments/{methodType}/complete` (external cross-tenant run at `2a0d087`).
+- Root cause 1: `RbacPermissionEvaluator.hasPermission(targetId, type, perm)` ignored the target id,
+  and a TENANT_ADMIN holds every tenant-scoped permission implicitly. A non-null target id now must
+  sit in the caller's tenant: `User`/`user_settings` targets go through the new single guard
+  `RbacAuthorizationService.canAccessUser`, `Tenant` targets through `canAccessTenant`, and any other
+  target type is refused (fail closed). ROOT stays cross-tenant.
+- Root cause 2: `TenantContextFilter` was `@Order(1)`, which is after the Spring Security chain
+  (`SecurityProperties.DEFAULT_FILTER_ORDER`), so the client header overwrote the tenant that
+  `TenantBindFromAuthFilter` had bound from the token. It now runs before the chain
+  (`TenantContextFilter.ORDER`), so the token tenant wins for every non-ROOT caller; the bind filter
+  is registered only inside the security chain and logs user ids instead of emails.
+- Query-parameter selectors: `GET /api/v1/devices?userId=` and `POST /api/v1/devices?userId=` now
+  require `@rbac.canAccessUser(#userId)`. The `?tenantId=` selectors of devices, auth sessions,
+  guests and verification were already coerced to the caller's scope for non-ROOT callers.
+- Every other `@PreAuthorize` that names a user by id (biometric, OTP/TOTP, QR, WebAuthn,
+  user read/update/delete/change-password, user-role read/assign/revoke) now runs its admin branch
+  through `@rbac.canAccessUser`; the self branch (`isCurrentUser`) is unchanged.
+  `GET /api/v1/users/{id}/roles` had answered 200 to an admin of another tenant.
+  `POST /api/v1/guests/{guestUserId}/revoke` and `/extend` now also require
+  `@rbac.canAccessUser(#guestUserId)`.
+- `POST /api/v1/users/{id}/enrollments` wrote the caller-supplied `?tenantId=` into the new row, so a
+  member (self branch) or a same-tenant admin could tag a tenant-A user's enrollment with tenant B,
+  exposing that user to tenant B's admins. The row's tenant now always comes from the user's own
+  `tenant_id` (new `UserTenantPort`, read with the tenant filter off); `tenantId` is optional, must be
+  a tenant the caller may act in (403 otherwise) and must equal the user's tenant (400 otherwise).
+  Biometric score recording (`recordBiometricScores`) uses the same rule, so a ROOT switched to
+  another tenant no longer tags a row with the switched tenant.
+- `GET /api/v1/users/{userId}/roles/all/{roleId}` listed every holder of a global role across
+  tenants; non-ROOT callers now get only the holders in their own tenant scope
+  (`findByRoleIdWithUserInTenant`).
+- Tests: `UserEnrollmentTenantGuardSecurityTest`, `RbacPermissionEvaluatorTargetScopeTest`,
+  `TenantContextFilterOrderTest` (unit) and `CrossTenantEnrollmentHttpIT` (Testcontainers, full
+  HTTP stack with real JWTs, added to the CI executed-IT gate).
+- No tenant outlives a request on a pooled server thread. `TenantContextFilter` skips `/actuator`,
+  `/swagger`, `/v3/api-docs` and `/health`, but the security chain still runs there, so an
+  authenticated `GET /actuator/health` left the caller's tenant bound and the next anonymous request
+  on that thread (for example a public self-registration) ran in it. `TenantContextFilter` now clears
+  the context on entry, and `TenantBindFromAuthFilter` restores the tenant it found in its own
+  `finally` (`TenantContextThreadLeakTest`).
+- `startEnrollment` reads the existing row, and re-reads it after a unique-key race, with the tenant
+  filter off and refuses a row tagged with a tenant other than the user's own. A ROOT switched to
+  another tenant re-running an existing enrollment had missed the row and failed with a 500.
+- Resources named by their own id, not by a user id, were outside the user guard (PF-5 review):
+  - `DELETE /api/v1/webauthn/credentials/by-id/{id}` and `/credentials/{credentialId}` were open to any
+    authenticated caller of any tenant, a guest included, and also auto-revoked the victim's
+    FINGERPRINT or HARDWARE_KEY enrollment. Only the owner, or a caller holding `webauthn:delete`
+    whose tenant holds the owner (ROOT: any), may delete now.
+  - `DELETE /api/v1/devices/{deviceId}` let a tenant-A admin delete a tenant-B device by UUID.
+  - Both go through one new guard, `RbacAuthorizationService.canActOnUserOwnedResource(owner, permission)`
+    (owner, or permission plus `canAccessUser`). The service asks it about the row's owner before
+    deleting, and a refusal answers 404 like an unknown id, so the response does not reveal the id.
+  - `POST /api/v1/guests/{invitationId}/resend` now has the same tenant check as the pending-invitation
+    revoke (one shared `requireInvitationInScope`, 404 outside the caller's scope).
+  - `POST /api/v1/devices` refuses a `tenantId` other than the user's own tenant (400), so a ROOT can no
+    longer tag a tenant-Y user's device with tenant X.
+- The domain-layer `ResourceNotFoundException` is now mapped to 404; an unknown credential id had
+  answered 500. The mapping is global, not credential-only: `GuestLifecycleService` (unknown
+  invitation), `RevokeSessionService` (unknown session), `SwitchMembershipService` (unknown
+  membership), `IdentityLinkService` (unknown user, membership or identity), `ManageDeviceService` and
+  `WebAuthnCredentialService` all answer 404 where they used to answer 500.
+- `POST /api/v1/webauthn/register/verify` took the target user from the request body and stored the
+  credential with no owner or tenant check, so a tenant-A user could plant their own public key on a
+  tenant-B account with a challenge issued to themselves. It now goes through the same
+  `canActOnUserOwnedResource(user, "webauthn:register")` guard (403 otherwise), and
+  `POST /api/v1/webauthn/register/options/{userId}` binds the session to that user in Redis
+  (`webauthn:reg-user:{sessionId}`, same 5-minute TTL); verify refuses a session bound to anyone else
+  without consuming the challenge. A session from the self-service `/register-options` is not bound, so
+  it is accepted only by `/register`, as both clients already do.
+- Credential delete behaviour change: a caller who is neither the owner nor an admin holding
+  `webauthn:delete` in the owner's tenant now gets 404 where it used to get 204, a same-tenant member
+  included. Client check (web-app origin/main 6a1b3f1, client-apps origin/main 32085d75): the web-app
+  deletes and registers passkeys only for the signed-in user (`WebAuthnEnrollment` from the settings
+  and enrollment pages), and its admin `DevicesPage` deletes devices of the admin's own tenant (ROOT:
+  any), which the guard still allows. In the mobile client, `DevicesScreen` (not referenced by any
+  navigation on origin/main) removes devices from a per-user list, and passkey registration pairs
+  `/register/options/{userId}` with `/register/verify` for the same user.
+- An enrollment row tagged with a tenant other than its user's answers 409 instead of 500, and
+  `recordBiometricScores` reads the row with the tenant filter off, so a ROOT switched to another
+  tenant no longer re-starts an ENROLLED row and drops the scores.
+- `TenantRlsRegressionTest` is now `TenantRlsRegressionIT`, so the CI Testcontainers lane runs it (it
+  was skipped everywhere), and is in the executed-IT gate. Its teardown soft-deletes users (the V53
+  trigger refuses a hard DELETE) and its tenant slugs are unique per test.
+- Tests: `OwnedResourceTenantGuardSecurityTest` (real method security and services) and an
+  `OwnedResources` group in `CrossTenantEnrollmentHttpIT`.
+
 ### 2026-11-10 - Public device benchmark intake (Paper A)
 
 - New public, write-only `POST /api/v1/devbench/runs` stores one anonymous run of the

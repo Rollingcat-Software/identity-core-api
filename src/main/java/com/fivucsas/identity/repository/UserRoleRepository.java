@@ -60,6 +60,15 @@ public interface UserRoleRepository extends JpaRepository<UserRole, UserRoleId> 
     List<UserRole> findByRoleIdWithUser(@Param("roleId") UUID roleId);
 
     /**
+     * Holders of a role whose own tenant is {@code tenantId}. A role id can name a global
+     * role held in several tenants, so a tenant-scoped caller must use this one.
+     */
+    @Query("SELECT ur FROM UserRole ur " +
+           "JOIN FETCH ur.user u " +
+           "WHERE ur.id.roleId = :roleId AND u.tenant.id = :tenantId")
+    List<UserRole> findByRoleIdWithUserInTenant(@Param("roleId") UUID roleId, @Param("tenantId") UUID tenantId);
+
+    /**
      * Check if a user-role assignment exists.
      */
     boolean existsByIdUserIdAndIdRoleId(UUID userId, UUID roleId);

@@ -150,11 +150,18 @@ public class EnrollmentController {
         return ResponseEntity.ok(manageEnrollmentUseCase.getUserEnrollments(userId));
     }
 
+    /**
+     * The new row's tenant is always the target user's own tenant (see
+     * {@code ManageEnrollmentService.startEnrollment}). {@code tenantId} is optional and
+     * kept for existing clients: when present it must be a tenant the caller may act in,
+     * and the service refuses it with 400 unless it equals the user's tenant (PF-5).
+     */
     @PostMapping("/api/v1/users/{userId}/enrollments")
-    @PreAuthorize("hasPermission(#userId, 'User', 'enrollment:create') or @userSecurityService.isCurrentUser(#userId)")
+    @PreAuthorize("(hasPermission(#userId, 'User', 'enrollment:create') or @userSecurityService.isCurrentUser(#userId))"
+            + " and (#tenantId == null or @rbac.canAccessTenant(#tenantId))")
     public ResponseEntity<EnrollmentResponse> startEnrollment(
             @PathVariable UUID userId,
-            @RequestParam UUID tenantId,
+            @RequestParam(required = false) UUID tenantId,
             @RequestParam AuthMethodType methodType) {
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(manageEnrollmentUseCase.startEnrollment(userId, tenantId, methodType));

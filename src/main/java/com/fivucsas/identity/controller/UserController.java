@@ -120,7 +120,7 @@ public class UserController {
 
     @GetMapping("/api/v1/users/{id}")
     @Operation(summary = "Get user by ID")
-    @PreAuthorize("@rbac.hasPermission('user:read') or @userSecurityService.isCurrentUser(#id)")
+    @PreAuthorize("(@rbac.hasPermission('user:read') and @rbac.canAccessUser(#id)) or @userSecurityService.isCurrentUser(#id)")
     public ResponseEntity<UserResponse> getUserById(@PathVariable String id) {
         log.info("GET /api/v1/users/{} - Get user by ID", id);
 
@@ -156,7 +156,7 @@ public class UserController {
 
     @PutMapping("/api/v1/users/{id}")
     @Operation(summary = "Update user")
-    @PreAuthorize("@rbac.hasPermission('user:update') or @userSecurityService.isCurrentUser(#id)")
+    @PreAuthorize("(@rbac.hasPermission('user:update') and @rbac.canAccessUser(#id)) or @userSecurityService.isCurrentUser(#id)")
     public ResponseEntity<UserResponse> updateUser(
             @PathVariable String id,
             @Valid @RequestBody UpdateUserRequest request) {
@@ -178,7 +178,7 @@ public class UserController {
 
     @DeleteMapping("/api/v1/users/{id}")
     @Operation(summary = "Delete user")
-    @PreAuthorize("@rbac.hasPermission('user:delete')")
+    @PreAuthorize("@rbac.hasPermission('user:delete') and @rbac.canAccessUser(#id)")
     public ResponseEntity<Void> deleteUser(@PathVariable String id) {
         log.info("DELETE /api/v1/users/{} - Delete user", id);
         manageUserUseCase.deleteUser(id);
@@ -187,7 +187,7 @@ public class UserController {
 
     @PostMapping("/api/v1/users/{id}/change-password")
     @Operation(summary = "Change user password")
-    @PreAuthorize("hasAuthority('user:update') or @userSecurityService.isCurrentUser(#id)")
+    @PreAuthorize("(hasAuthority('user:update') and @rbac.canAccessUser(#id)) or @userSecurityService.isCurrentUser(#id)")
     public ResponseEntity<Void> changePassword(
             @PathVariable String id,
             @Valid @RequestBody ChangePasswordRequest request) {
@@ -385,6 +385,9 @@ public class UserController {
     @Operation(summary = "Resend a pending guest invitation email")
     @PreAuthorize("@rbac.isTenantAdmin() or @rbac.hasPermission('guest:invite')")
     public ResponseEntity<Void> resendInvitation(@PathVariable UUID invitationId) {
+        // PF-5: same tenant guard as revokePendingInvitation. Without it a tenant-A admin
+        // could re-send tenant B's invitation e-mail and probe its state through the 409s.
+        requireInvitationInScope(invitationId);
         log.info("POST /api/v1/guests/{}/resend - Resending guest invitation", invitationId);
         guestLifecycleService.resendInvitation(invitationId);
         return ResponseEntity.noContent().build();
@@ -492,7 +495,7 @@ public class UserController {
 
     @PostMapping("/api/v1/guests/{guestUserId}/revoke")
     @Operation(summary = "Revoke guest access")
-    @PreAuthorize("@rbac.hasPermission('guest:revoke')")
+    @PreAuthorize("@rbac.hasPermission('guest:revoke') and @rbac.canAccessUser(#guestUserId)")
     public ResponseEntity<Void> revokeGuestAccess(@PathVariable UUID guestUserId) {
         User currentUser = rbacService.getCurrentUser()
                 .orElseThrow(() -> new UnauthorizedException());
@@ -503,6 +506,20 @@ public class UserController {
         guestLifecycleService.revokeGuestAccess(guestUserId, currentUser);
 
         return ResponseEntity.noContent().build();
+    }
+
+    /**
+     * The tenant guard for an endpoint that names a guest invitation by id: the
+     * invitation must belong to a tenant the caller can access (ROOT: any). An unknown
+     * id and an invitation of another tenant both give 404, so the response does not
+     * reveal that the id exists.
+     */
+    private void requireInvitationInScope(UUID invitationId) {
+        GuestInvitation invitation = invitationRepository.findById(invitationId).orElse(null);
+        if (invitation == null
+                || !tenantScopeResolver.canAccessTenant(invitation.getTenant().getId())) {
+            throw new ResourceNotFoundException("Guest invitation not found: " + invitationId);
+        }
     }
 
     @PostMapping("/api/v1/guests/invitations/{invitationId}/revoke")
@@ -520,11 +537,7 @@ public class UserController {
         // invitation must belong to the selected tenant. 404 (not 403) when the
         // invitation isn't visible to the caller — don't leak existence across
         // tenants.
-        GuestInvitation invitation = invitationRepository.findById(invitationId).orElse(null);
-        if (invitation == null
-                || !tenantScopeResolver.canAccessTenant(invitation.getTenant().getId())) {
-            throw new ResourceNotFoundException("Guest invitation not found: " + invitationId);
-        }
+        requireInvitationInScope(invitationId);
 
         log.info("POST /api/v1/guests/invitations/{}/revoke - Revoking pending invitation by actor {}",
                 invitationId, actorUserId);
@@ -536,7 +549,7 @@ public class UserController {
 
     @PostMapping("/api/v1/guests/{guestUserId}/extend")
     @Operation(summary = "Extend guest access duration")
-    @PreAuthorize("@rbac.hasPermission('guest:extend')")
+    @PreAuthorize("@rbac.hasPermission('guest:extend') and @rbac.canAccessUser(#guestUserId)")
     public ResponseEntity<Void> extendGuestAccess(
             @PathVariable UUID guestUserId,
             @Valid @RequestBody ExtendGuestAccessRequest request) {

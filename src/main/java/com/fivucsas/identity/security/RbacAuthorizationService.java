@@ -97,6 +97,66 @@ public class RbacAuthorizationService {
     }
 
     /**
+     * The single tenant guard for a request that names a user by id (path variable or
+     * query parameter): true when the target user belongs to the caller's tenant, or the
+     * caller is ROOT. Unlike {@link #canManageUser(UUID)} it does not apply the user-type
+     * hierarchy, only tenant membership. An unknown target is refused.
+     *
+     * <p>The lookup runs with the Hibernate {@code tenantFilter} disabled so the verdict
+     * comes from the target row's own {@code tenant_id}, never from whichever tenant the
+     * request happens to be bound to.</p>
+     */
+    public boolean canAccessUser(UUID targetUserId) {
+        if (targetUserId == null) return false;
+        User currentUser = getCurrentUser().orElse(null);
+        if (currentUser == null) return false;
+
+        if (currentUser.getUserType() == UserType.ROOT) return true;
+
+        UUID callerTenantId = currentUser.getTenant() != null ? currentUser.getTenant().getId() : null;
+        UUID targetTenantId = tenantFilterBypass.runWithoutTenantFilter(() -> userRepository.findById(targetUserId))
+                .map(User::getTenant)
+                .map(t -> t.getId())
+                .orElse(null);
+        boolean sameTenant = callerTenantId != null && callerTenantId.equals(targetTenantId);
+        if (!sameTenant) {
+            log.warn("AUDIT: cross-tenant user access refused, caller={} callerTenant={} targetUser={} targetTenant={}",
+                    currentUser.getId(), callerTenantId, targetUserId, targetTenantId);
+        }
+        return sameTenant;
+    }
+
+    /**
+     * The guard for a resource owned by one user and named by its own id (a passkey, a
+     * device): true when the caller is the owner, or holds {@code adminPermission} and
+     * passes the tenant guard {@link #canAccessUser(UUID)} for the owner. An unknown
+     * owner is refused (PF-5).
+     *
+     * <p>Callers resolve the owner from the resource row and refuse with 404, not 403,
+     * so a refusal does not reveal that the id exists in another tenant.</p>
+     */
+    public boolean canActOnUserOwnedResource(UUID ownerUserId, String adminPermission) {
+        if (ownerUserId == null) return false;
+        User currentUser = getCurrentUser().orElse(null);
+        if (currentUser == null) return false;
+        if (ownerUserId.equals(currentUser.getId())) return true;
+        return hasPermission(currentUser, adminPermission) && canAccessUser(ownerUserId);
+    }
+
+    /**
+     * String-typed overload of {@link #canAccessUser(UUID)} for SpEL expressions and
+     * the permission evaluator. Fail-closed on null, blank or malformed input.
+     */
+    public boolean canAccessUser(String targetUserId) {
+        if (targetUserId == null || targetUserId.isBlank()) return false;
+        try {
+            return canAccessUser(UUID.fromString(targetUserId.trim()));
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
+    }
+
+    /**
      * Checks if the current user can access resources within the given tenant.
      */
     public boolean canAccessTenant(UUID tenantId) {

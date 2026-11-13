@@ -12,6 +12,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.UUID;
+import java.util.function.Predicate;
 
 /**
  * Application service for WebAuthn credential lifecycle.
@@ -71,12 +72,18 @@ public class WebAuthnCredentialService {
      * Delete a credential by primary key. Auto-revokes the matching
      * {@link AuthMethodType} (FINGERPRINT for platform, HARDWARE_KEY for
      * roaming) when the last credential of that transport class is removed.
+     *
+     * <p>PF-5: {@code mayActOnOwner} is asked about the credential's owner before
+     * anything is deleted. When it refuses, the call fails exactly like an unknown id
+     * ({@link ResourceNotFoundException}, HTTP 404), so a caller cannot tell a
+     * credential of another tenant from one that does not exist.</p>
      */
     @Transactional
-    public void deleteById(UUID id) {
+    public void deleteById(UUID id, Predicate<UUID> mayActOnOwner) {
         WebAuthnCredential credential = credentialRepository.findById(id)
+                .filter(found -> mayActOnOwner.test(found.ownerId()))
                 .orElseThrow(() -> new ResourceNotFoundException("Credential", id.toString()));
-        UUID userId = credential.getUser().getId();
+        UUID userId = credential.ownerId();
         String transports = credential.getTransports();
 
         credentialRepository.deleteById(id);
@@ -88,7 +95,7 @@ public class WebAuthnCredentialService {
      * Delete a credential by its WebAuthn credentialId. Throws
      * {@link ResourceNotFoundException} if the credentialId is unknown.
      *
-     * <p>Mirrors {@link #deleteById(UUID)} semantics: when the last credential
+     * <p>Mirrors {@link #deleteById(UUID, Predicate)} semantics, the owner guard included: when the last credential
      * of a given transport class disappears, the corresponding enrollment
      * (FINGERPRINT for platform, HARDWARE_KEY for roaming) is auto-revoked.
      * Without this, calls through {@code DELETE /api/v1/webauthn/credentials/{credentialId}}
@@ -96,10 +103,11 @@ public class WebAuthnCredentialService {
      * (Copilot review on PR #66).</p>
      */
     @Transactional
-    public void deleteByCredentialId(String credentialId) {
+    public void deleteByCredentialId(String credentialId, Predicate<UUID> mayActOnOwner) {
         WebAuthnCredential credential = credentialRepository.findByCredentialId(credentialId)
+                .filter(found -> mayActOnOwner.test(found.ownerId()))
                 .orElseThrow(() -> new ResourceNotFoundException("Credential", credentialId));
-        UUID userId = credential.getUser().getId();
+        UUID userId = credential.ownerId();
         String transports = credential.getTransports();
 
         credentialRepository.deleteByCredentialId(credentialId);

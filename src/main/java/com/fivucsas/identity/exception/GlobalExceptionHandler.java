@@ -711,6 +711,35 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(error);
     }
 
+    /**
+     * The domain-layer {@code ResourceNotFoundException} (thrown by application services
+     * such as {@code WebAuthnCredentialService}) is a different class from the one below,
+     * which is the only one this handler resolves by simple name. Without this mapping an
+     * unknown or refused credential id surfaced as a 500 instead of a 404 (PF-5).
+     *
+     * <p>The mapping is global: every service that throws the domain exception now answers
+     * 404 where it used to fall through to the catch-all 500. Throwers at the time of PF-5:
+     * {@code WebAuthnCredentialService}, {@code ManageDeviceService}, {@code GuestLifecycleService}
+     * (unknown invitation), {@code RevokeSessionService} (unknown session),
+     * {@code SwitchMembershipService} (unknown membership) and {@code IdentityLinkService}
+     * (unknown user, membership or identity).</p>
+     */
+    @ExceptionHandler(com.fivucsas.identity.domain.exception.ResourceNotFoundException.class)
+    public ResponseEntity<ErrorResponse> handleDomainResourceNotFound(
+            com.fivucsas.identity.domain.exception.ResourceNotFoundException ex,
+            HttpServletRequest request) {
+        log.warn("Resource not found: {}", ex.getMessage());
+
+        ErrorResponse error = ErrorResponse.of(
+                HttpStatus.NOT_FOUND.value(),
+                "Not Found",
+                ex.getMessage(),
+                request.getRequestURI()
+        );
+
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(error);
+    }
+
     @ExceptionHandler(ResourceNotFoundException.class)
     public ResponseEntity<ErrorResponse> handleResourceNotFound(
             ResourceNotFoundException ex,

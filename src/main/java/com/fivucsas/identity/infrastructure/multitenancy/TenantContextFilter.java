@@ -8,6 +8,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.autoconfigure.security.SecurityProperties;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
@@ -27,12 +28,31 @@ import java.util.UUID;
  * Following principles:
  * - Single Responsibility: Only handles tenant extraction
  * - Open/Closed: Can add new extraction methods
+ *
+ * <p><b>Ordering is a security invariant.</b> This filter only records the tenant a
+ * client ASSERTS. {@link TenantBindFromAuthFilter}, inside the Spring Security chain,
+ * then rebinds it to the tenant of the verified token for every non-ROOT caller. That
+ * works only when this filter runs BEFORE the security chain, which Spring Boot
+ * registers at {@link SecurityProperties#DEFAULT_FILTER_ORDER}. At {@code @Order(1)} it
+ * ran after the chain, so the header overwrote the token tenant for every caller and
+ * the rebind never took effect (AX-5 cross-tenant run).</p>
+ *
+ * <p><b>No tenant may outlive a request.</b> {@link TenantContext} is a thread-local on a
+ * pooled server thread. This filter therefore clears it on entry as well as in its
+ * {@code finally}, so a request never inherits a tenant a previous request left behind.
+ * It is skipped for the paths in {@link #shouldNotFilter}, while the security chain
+ * still runs there, so {@link TenantBindFromAuthFilter} restores what it found in its
+ * own {@code finally} instead of relying on this one (PF-5 review: an authenticated
+ * {@code GET /actuator/health} bound the caller's tenant and nothing cleared it).</p>
  */
 @Component
-@Order(1) // Run early in filter chain
+@Order(TenantContextFilter.ORDER)
 @RequiredArgsConstructor
 @Slf4j
 public class TenantContextFilter extends OncePerRequestFilter {
+
+    /** Runs before the Spring Security filter chain; see the class comment. */
+    public static final int ORDER = SecurityProperties.DEFAULT_FILTER_ORDER - 10;
 
     private static final String TENANT_ID_HEADER = "X-Tenant-ID";
     private static final String TENANT_SLUG_HEADER = "X-Tenant-Slug";
@@ -45,6 +65,8 @@ public class TenantContextFilter extends OncePerRequestFilter {
                                     FilterChain filterChain)
             throws ServletException, IOException {
 
+        // Drop anything a previous request left on this pooled thread before binding.
+        TenantContext.clear();
         try {
             UUID tenantId = extractTenantId(request);
 

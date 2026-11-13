@@ -49,13 +49,16 @@ import static org.mockito.Mockito.mock;
  * {@code instanceof} check therefore short-circuits in real flow (separate
  * audit-tracked bug). This test covers the contract as specified by javadoc;
  * a follow-up wires {@code CustomUserDetails} through the JWT filter.</p>
+ *
+ * <p>Named {@code *IT} so the CI Testcontainers lane ({@code -Dtest='*IntegrationTest,*IT'})
+ * runs it; as {@code TenantRlsRegressionTest} it was skipped everywhere (PF-5 review).</p>
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
 @Testcontainers
 @EnabledIfEnvironmentVariable(named = "RUN_INTEGRATION", matches = "true")
 @ActiveProfiles("integration")
 @DisplayName("F4 — TenantBindFromAuthFilter cross-tenant rebind regression")
-class TenantRlsRegressionTest {
+class TenantRlsRegressionIT {
 
     @Container
     static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine")
@@ -103,8 +106,10 @@ class TenantRlsRegressionTest {
         TenantContext.clear();
         Logger filterLogger = (Logger) LoggerFactory.getLogger(TenantBindFromAuthFilter.class);
         filterLogger.detachAppender(logCapture);
-        // Best-effort cleanup so the container can be reused across tests.
-        jdbc.update("DELETE FROM users WHERE id IN (?, ?)", aliceId, bobId);
+        // Soft-delete only: the V53 trigger refuses a hard DELETE on users, which used to
+        // fail this teardown and leave the next setUp to collide on the tenant rows.
+        jdbc.update("UPDATE users SET deleted_at = NOW() WHERE id IN (?, ?) AND deleted_at IS NULL",
+                aliceId, bobId);
         jdbc.update("UPDATE tenants SET deleted_at = NOW() WHERE id IN (?, ?)", tenantA, tenantB);
     }
 
@@ -116,15 +121,15 @@ class TenantRlsRegressionTest {
         // Simulate TenantContextFilter having honored the asserted X-Tenant-ID header (tenantB).
         TenantContext.setCurrentTenant(tenantB);
 
-        invokeFilter();
+        UUID boundTenant = invokeFilter();
 
         // Filter must have overwritten the asserted tenantId.
-        assertThat(TenantContext.getCurrentTenant()).isEqualTo(tenantA);
+        assertThat(boundTenant).isEqualTo(tenantA);
 
         // Tenant-scoped query honours TenantContext → only alice's row visible.
         List<UUID> visibleUserIds = jdbc.queryForList(
                 "SELECT id FROM users WHERE tenant_id = ?", UUID.class,
-                TenantContext.getCurrentTenant());
+                boundTenant);
         assertThat(visibleUserIds).containsExactly(aliceId);
 
         // AUDIT line emitted.
@@ -139,14 +144,14 @@ class TenantRlsRegressionTest {
         authenticateAs(aliceId, "alice@example.com", tenantA, "ROLE_ROOT");
         TenantContext.setCurrentTenant(tenantB);
 
-        invokeFilter();
+        UUID boundTenant = invokeFilter();
 
-        assertThat(TenantContext.getCurrentTenant()).isEqualTo(tenantB);
+        assertThat(boundTenant).isEqualTo(tenantB);
 
         // Tenant-scoped query reflects the (intentionally) overridden context — bob's row.
         List<UUID> visibleUserIds = jdbc.queryForList(
                 "SELECT id FROM users WHERE tenant_id = ?", UUID.class,
-                TenantContext.getCurrentTenant());
+                boundTenant);
         assertThat(visibleUserIds).containsExactly(bobId);
 
         assertThat(logCapture.list)
@@ -160,19 +165,28 @@ class TenantRlsRegressionTest {
         authenticateAs(aliceId, "alice@example.com", tenantA, "ROLE_USER");
         TenantContext.clear();   // emulate request without X-Tenant-ID
 
-        invokeFilter();
-
-        assertThat(TenantContext.getCurrentTenant()).isEqualTo(tenantA);
+        assertThat(invokeFilter()).isEqualTo(tenantA);
     }
 
     // ── helpers ─────────────────────────────────────────────────────────
 
-    private void invokeFilter() throws Exception {
+    /**
+     * Runs the filter and returns the tenant bound while the rest of the chain runs. The
+     * filter restores the tenant it found once the chain returns, so the binding is only
+     * observable from inside the chain.
+     */
+    private UUID invokeFilter() throws Exception {
         HttpServletRequest req = mock(HttpServletRequest.class);
         HttpServletResponse res = mock(HttpServletResponse.class);
         FilterChain chain = mock(FilterChain.class);
+        UUID[] bound = new UUID[1];
+        Mockito.doAnswer(inv -> {
+            bound[0] = TenantContext.getCurrentTenant();
+            return null;
+        }).when(chain).doFilter(req, res);
         filter.doFilter(req, res, chain);
         Mockito.verify(chain).doFilter(req, res);
+        return bound[0];
     }
 
     private void authenticateAs(UUID userId, String email, UUID tenantId, String role) {
@@ -184,8 +198,11 @@ class TenantRlsRegressionTest {
         SecurityContextHolder.getContext().setAuthentication(auth);
     }
 
-    private UUID seedTenant(String slug) {
+    private UUID seedTenant(String slugPrefix) {
         UUID id = UUID.randomUUID();
+        // Unique per call: soft-deleted tenants keep their name and slug, so a fixed value
+        // would collide on the second test of the class.
+        String slug = slugPrefix + "-" + id.toString().substring(0, 8);
         jdbc.update(
                 "INSERT INTO tenants (id, name, slug, contact_email, status, max_users, " +
                 "biometric_enabled, session_timeout_minutes, refresh_token_validity_days, " +

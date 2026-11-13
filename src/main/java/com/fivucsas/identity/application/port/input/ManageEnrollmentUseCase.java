@@ -9,6 +9,11 @@ import java.util.UUID;
 
 public interface ManageEnrollmentUseCase {
     List<EnrollmentResponse> getUserEnrollments(UUID userId);
+    /**
+     * Starts an enrollment for the user. The row is tagged with the user's own tenant;
+     * {@code tenantId} may be {@code null}, and when present it must equal that tenant
+     * or the call fails with {@link IllegalArgumentException}.
+     */
     EnrollmentResponse startEnrollment(UUID userId, UUID tenantId, AuthMethodType methodType);
     EnrollmentResponse completeEnrollment(UUID userId, AuthMethodType methodType, String enrollmentData);
 

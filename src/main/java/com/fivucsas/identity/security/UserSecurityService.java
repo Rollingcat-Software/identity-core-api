@@ -173,6 +173,6 @@ public class UserSecurityService {
             return null;
         }
         // Remove dashes and convert to lowercase for comparison
-        return value.replace("-", "").toLowerCase();
+        return value.replace("-", "").toLowerCase(java.util.Locale.ROOT);
     }
 }
