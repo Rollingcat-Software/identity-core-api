@@ -63,7 +63,26 @@
   - `POST /api/v1/devices` refuses a `tenantId` other than the user's own tenant (400), so a ROOT can no
     longer tag a tenant-Y user's device with tenant X.
 - The domain-layer `ResourceNotFoundException` is now mapped to 404; an unknown credential id had
-  answered 500.
+  answered 500. The mapping is global, not credential-only: `GuestLifecycleService` (unknown
+  invitation), `RevokeSessionService` (unknown session), `SwitchMembershipService` (unknown
+  membership), `IdentityLinkService` (unknown user, membership or identity), `ManageDeviceService` and
+  `WebAuthnCredentialService` all answer 404 where they used to answer 500.
+- `POST /api/v1/webauthn/register/verify` took the target user from the request body and stored the
+  credential with no owner or tenant check, so a tenant-A user could plant their own public key on a
+  tenant-B account with a challenge issued to themselves. It now goes through the same
+  `canActOnUserOwnedResource(user, "webauthn:register")` guard (403 otherwise), and
+  `POST /api/v1/webauthn/register/options/{userId}` binds the session to that user in Redis
+  (`webauthn:reg-user:{sessionId}`, same 5-minute TTL); verify refuses a session bound to anyone else
+  without consuming the challenge. A session from the self-service `/register-options` is not bound, so
+  it is accepted only by `/register`, as both clients already do.
+- Credential delete behaviour change: a caller who is neither the owner nor an admin holding
+  `webauthn:delete` in the owner's tenant now gets 404 where it used to get 204, a same-tenant member
+  included. Client check (web-app origin/main 6a1b3f1, client-apps origin/main 32085d75): the web-app
+  deletes and registers passkeys only for the signed-in user (`WebAuthnEnrollment` from the settings
+  and enrollment pages), and its admin `DevicesPage` deletes devices of the admin's own tenant (ROOT:
+  any), which the guard still allows. In the mobile client, `DevicesScreen` (not referenced by any
+  navigation on origin/main) removes devices from a per-user list, and passkey registration pairs
+  `/register/options/{userId}` with `/register/verify` for the same user.
 - An enrollment row tagged with a tenant other than its user's answers 409 instead of 500, and
   `recordBiometricScores` reads the row with the tenant filter off, so a ROOT switched to another
   tenant no longer re-starts an ENROLLED row and drops the scores.
