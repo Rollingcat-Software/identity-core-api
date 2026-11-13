@@ -12,6 +12,7 @@ import com.fivucsas.identity.dto.AssignRoleRequest;
 import com.fivucsas.identity.dto.CreateRoleRequest;
 import com.fivucsas.identity.dto.UpdateRoleRequest;
 import com.fivucsas.identity.security.RbacAuthorizationService;
+import com.fivucsas.identity.security.TenantScopeResolver;
 import com.fivucsas.identity.security.UserSecurityService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -41,6 +42,7 @@ public class RoleController {
     private final ManagePermissionUseCase managePermissionUseCase;
     private final UserSecurityService userSecurityService;
     private final RbacAuthorizationService rbacService;
+    private final TenantScopeResolver tenantScopeResolver;
 
     @GetMapping("/api/v1/roles")
     @Operation(summary = "Get all roles")
@@ -240,8 +242,12 @@ public class RoleController {
     public ResponseEntity<List<UserRoleResponse>> getRoleUsers(@PathVariable String roleId) {
         log.info("GET /api/v1/users/*/roles/all/{} - Get role users", roleId);
 
+        // Holders are limited to the caller's tenant scope (ROOT: unrestricted, or the
+        // tenant it switched to); a non-ROOT caller without a tenant gets the fail-closed
+        // empty scope, so a global role id never lists another tenant's users.
         GetRoleUsersQuery query = GetRoleUsersQuery.builder()
                 .roleId(roleId)
+                .tenantScope(tenantScopeResolver.currentScope())
                 .build();
 
         return ResponseEntity.ok(manageUserRoleUseCase.getRoleUsers(query));

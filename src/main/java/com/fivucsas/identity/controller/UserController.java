@@ -492,7 +492,7 @@ public class UserController {
 
     @PostMapping("/api/v1/guests/{guestUserId}/revoke")
     @Operation(summary = "Revoke guest access")
-    @PreAuthorize("@rbac.hasPermission('guest:revoke')")
+    @PreAuthorize("@rbac.hasPermission('guest:revoke') and @rbac.canAccessUser(#guestUserId)")
     public ResponseEntity<Void> revokeGuestAccess(@PathVariable UUID guestUserId) {
         User currentUser = rbacService.getCurrentUser()
                 .orElseThrow(() -> new UnauthorizedException());
@@ -536,7 +536,7 @@ public class UserController {
 
     @PostMapping("/api/v1/guests/{guestUserId}/extend")
     @Operation(summary = "Extend guest access duration")
-    @PreAuthorize("@rbac.hasPermission('guest:extend')")
+    @PreAuthorize("@rbac.hasPermission('guest:extend') and @rbac.canAccessUser(#guestUserId)")
     public ResponseEntity<Void> extendGuestAccess(
             @PathVariable UUID guestUserId,
             @Valid @RequestBody ExtendGuestAccessRequest request) {

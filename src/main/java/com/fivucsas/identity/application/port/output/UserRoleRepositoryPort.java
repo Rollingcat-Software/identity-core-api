@@ -22,6 +22,9 @@ public interface UserRoleRepositoryPort {
 
     List<UserRole> findByRoleIdWithUser(UUID roleId);
 
+    /** Holders of {@code roleId} whose own tenant is {@code tenantId}. */
+    List<UserRole> findByRoleIdWithUserInTenant(UUID roleId, UUID tenantId);
+
     boolean existsByIdUserIdAndIdRoleId(UUID userId, UUID roleId);
 
     void deleteByUserIdAndRoleId(UUID userId, UUID roleId);
