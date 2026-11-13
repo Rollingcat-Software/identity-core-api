@@ -21,6 +21,10 @@
 - Query-parameter selectors: `GET /api/v1/devices?userId=` and `POST /api/v1/devices?userId=` now
   require `@rbac.canAccessUser(#userId)`. The `?tenantId=` selectors of devices, auth sessions,
   guests and verification were already coerced to the caller's scope for non-ROOT callers.
+- Every other `@PreAuthorize` that names a user by id (biometric, OTP/TOTP, QR, WebAuthn,
+  user read/update/delete/change-password, user-role read/assign/revoke) now runs its admin branch
+  through `@rbac.canAccessUser`; the self branch (`isCurrentUser`) is unchanged.
+  `GET /api/v1/users/{id}/roles` had answered 200 to an admin of another tenant.
 - Tests: `UserEnrollmentTenantGuardSecurityTest`, `RbacPermissionEvaluatorTargetScopeTest`,
   `TenantContextFilterOrderTest` (unit) and `CrossTenantEnrollmentHttpIT` (Testcontainers, full
   HTTP stack with real JWTs, added to the CI executed-IT gate).
