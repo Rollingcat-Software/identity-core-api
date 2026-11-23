@@ -107,6 +107,15 @@ class AuthenticateUserServiceTest {
     private com.fivucsas.identity.application.service.mfa.AvailableMethodsResolver availableMethodsResolver =
             new com.fivucsas.identity.application.service.mfa.AvailableMethodsResolver();
 
+    // Real runner over a resource-less manager: login phases run their real
+    // transaction boundaries, and tests can see whether a transaction is open (#285).
+    private final com.fivucsas.identity.application.service.transaction.TrackingTransactionManager transactionManager =
+            new com.fivucsas.identity.application.service.transaction.TrackingTransactionManager();
+
+    @org.mockito.Spy
+    private com.fivucsas.identity.application.service.transaction.TransactionRunner transactionRunner =
+            new com.fivucsas.identity.application.service.transaction.TransactionRunner(transactionManager);
+
     @InjectMocks
     private AuthenticateUserService authenticateUserService;
 
@@ -1099,6 +1108,183 @@ class AuthenticateUserServiceTest {
             assertThat(response.getAccessToken()).isEqualTo("access-token");
             verify(passwordEncoder).matches("Password123!", VALID_BCRYPT_HASH);
             verify(mfaSessionRepository, never()).save(any());
+        }
+
+        // -- Connection use (#285): never two connections, never HTTP inside a transaction --
+
+        @Test
+        @DisplayName("execute_WhenPasswordIsWrong_ShouldRecordTheStrikeAfterTheLoginTransactionRolledBack")
+        void execute_WhenPasswordIsWrong_ShouldRecordTheStrikeAfterTheLoginTransactionRolledBack() {
+            when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(existingUser));
+            when(passwordEncoder.matches("Password123!", VALID_BCRYPT_HASH)).thenReturn(false);
+            List<Integer> openWhileRecording = new java.util.ArrayList<>();
+            when(loginAccountStateGuard.recordFailedAttempt(any(), any(), any())).thenAnswer(invocation -> {
+                openWhileRecording.add(transactionManager.openTransactions());
+                return false;
+            });
+
+            assertThatThrownBy(() -> authenticateUserService.execute(validCommand))
+                    .isInstanceOf(InvalidCredentialsException.class);
+
+            assertThat(openWhileRecording).containsExactly(0);
+            assertThat(transactionManager.events()).containsExactly("begin", "rollback");
+        }
+
+        @Test
+        @DisplayName("execute_WhenTenantHasALoginFlow_ShouldProbeEnrollmentsOnceOutsideAnyTransaction")
+        void execute_WhenTenantHasALoginFlow_ShouldProbeEnrollmentsOnceOutsideAnyTransaction() {
+            UUID tenantId = UUID.randomUUID();
+            User user = tenantUser(tenantId);
+            var password = method(com.fivucsas.identity.domain.model.auth.AuthMethodType.PASSWORD, true);
+            var emailOtp = method(com.fivucsas.identity.domain.model.auth.AuthMethodType.EMAIL_OTP, false);
+            var loginFlow = flow(tenantId, step(1, password), step(2, emailOtp));
+            when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
+            when(passwordEncoder.matches("Password123!", VALID_BCRYPT_HASH)).thenReturn(true);
+            when(authFlowRepository.findByTenantIdAndIsDefaultTrueAndIsActiveTrueAndOperationType(
+                    eq(tenantId), eq(com.fivucsas.identity.domain.model.auth.OperationType.APP_LOGIN)))
+                    .thenReturn(Optional.of(loginFlow));
+            List<Integer> openWhileProbing = new java.util.ArrayList<>();
+            when(enrollmentHealthService.validateEnrollments(user.getId())).thenAnswer(invocation -> {
+                openWhileProbing.add(transactionManager.openTransactions());
+                return java.util.Map.of();
+            });
+
+            AuthenticationResponse response = authenticateUserService.execute(validCommand);
+
+            assertThat(response.isMfaRequired()).isTrue();
+            assertThat(openWhileProbing).containsExactly(0);
+            assertThat(transactionManager.events()).containsExactly("begin", "commit", "begin", "commit");
+        }
+
+        @Test
+        @DisplayName("execute_WhenLoginSucceeds_ShouldWriteTheLoginAuditAndDeviceAfterTheirTransactionsEnded")
+        void execute_WhenLoginSucceeds_ShouldWriteTheLoginAuditAndDeviceAfterTheirTransactionsEnded() {
+            when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(existingUser));
+            when(passwordEncoder.matches("Password123!", VALID_BCRYPT_HASH)).thenReturn(true);
+            when(tokenGenerator.generateAccessToken("test@example.com", List.of("pwd"))).thenReturn("access-token");
+            when(refreshTokenService.createRefreshToken(eq(existingUser), any(), any())).thenReturn(refreshToken);
+            List<String> openDuringSideEffects = new java.util.ArrayList<>();
+            org.mockito.Mockito.doAnswer(invocation -> {
+                openDuringSideEffects.add("audit:" + transactionManager.openTransactions());
+                return null;
+            }).when(auditLogPort).logUserAuthenticated(any(), any(), any(), any());
+            org.mockito.Mockito.doAnswer(invocation -> {
+                openDuringSideEffects.add("device:" + transactionManager.openTransactions());
+                return null;
+            }).when(manageDeviceUseCase).recordLoginDevice(any(), any());
+
+            AuthenticationResponse response = authenticateUserService.execute(validCommand);
+
+            assertThat(response.getAccessToken()).isEqualTo("access-token");
+            assertThat(openDuringSideEffects).containsExactly("audit:0", "device:0");
+        }
+
+        @Test
+        @DisplayName("execute_WhenPasswordVerifiedButAnEnrollmentIsMissing_ShouldKeepTheFirstFactorCommitAndAuditAfterRollback")
+        void execute_WhenPasswordVerifiedButAnEnrollmentIsMissing_ShouldKeepTheFirstFactorCommitAndAuditAfterRollback() {
+            UUID tenantId = UUID.randomUUID();
+            User user = tenantUser(tenantId);
+            for (int i = 0; i < 2; i++) {
+                user.incrementFailedLoginAttempts();
+            }
+            var password = method(com.fivucsas.identity.domain.model.auth.AuthMethodType.PASSWORD, true);
+            var face = method(com.fivucsas.identity.domain.model.auth.AuthMethodType.FACE, true);
+            var loginFlow = flow(tenantId, step(1, password), step(2, face));
+            when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
+            when(passwordEncoder.matches("Password123!", VALID_BCRYPT_HASH)).thenReturn(true);
+            when(authFlowRepository.findByTenantIdAndIsDefaultTrueAndIsActiveTrueAndOperationType(
+                    eq(tenantId), eq(com.fivucsas.identity.domain.model.auth.OperationType.APP_LOGIN)))
+                    .thenReturn(Optional.of(loginFlow));
+            when(enrollmentHealthService.validateEnrollments(user.getId())).thenReturn(
+                    java.util.Map.of(com.fivucsas.identity.domain.model.auth.AuthMethodType.FACE, false));
+            List<String> openWhileSaving = new java.util.ArrayList<>();
+            when(userRepository.save(user)).thenAnswer(invocation -> {
+                openWhileSaving.add("failed=" + user.getFailedLoginAttempts()
+                        + ", lastLogin=" + (user.getLastLoginAt() != null)
+                        + ", open=" + transactionManager.openTransactions());
+                return user;
+            });
+            List<Integer> openWhileAuditing = new java.util.ArrayList<>();
+            org.mockito.Mockito.doAnswer(invocation -> {
+                openWhileAuditing.add(transactionManager.openTransactions());
+                return null;
+            }).when(auditLogPort).logAuthenticationFailed(
+                    "test@example.com", "192.168.1.1", "needs_enrollment:FACE");
+
+            assertThatThrownBy(() -> authenticateUserService.execute(validCommand))
+                    .isInstanceOf(com.fivucsas.identity.domain.exception.NeedsEnrollmentException.class);
+
+            // The password was verified, so the first-factor transaction committed its
+            // strike reset and last_login_at; the completion transaction rolled back.
+            assertThat(openWhileSaving).containsExactly("failed=0, lastLogin=true, open=1");
+            assertThat(transactionManager.events()).containsExactly("begin", "commit", "begin", "rollback");
+            assertThat(openWhileAuditing).containsExactly(0);
+            verify(mfaSessionRepository, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("execute_WhenIdentifierFirstLayer1VerifiesNoFactor_ShouldNotResetTheStrikeCounter")
+        void execute_WhenIdentifierFirstLayer1VerifiesNoFactor_ShouldNotResetTheStrikeCounter() {
+            UUID tenantId = UUID.randomUUID();
+            User user = tenantUser(tenantId);
+            for (int i = 0; i < 3; i++) {
+                user.incrementFailedLoginAttempts();
+            }
+            var emailOtp = method(com.fivucsas.identity.domain.model.auth.AuthMethodType.EMAIL_OTP, false);
+            var loginFlow = flow(tenantId, step(1, emailOtp));
+            when(configDrivenLoginPolicy.isEnabledFor(tenantId)).thenReturn(true); // engine ON
+            when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
+            when(authFlowRepository.findByTenantIdAndIsDefaultTrueAndIsActiveTrueAndOperationType(
+                    eq(tenantId), eq(com.fivucsas.identity.domain.model.auth.OperationType.APP_LOGIN)))
+                    .thenReturn(Optional.of(loginFlow));
+            // The probe fails, so no MFA session opens and the login reaches the
+            // single-factor mint with no verified factor, which must refuse it.
+            when(enrollmentHealthService.validateEnrollments(user.getId()))
+                    .thenThrow(new IllegalStateException("probe failed"));
+
+            assertThatThrownBy(() -> authenticateUserService.execute(validCommand))
+                    .isInstanceOf(InvalidCredentialsException.class);
+
+            assertThat(user.getFailedLoginAttempts()).isEqualTo(3);
+            assertThat(user.getLastLoginAt()).isNull();
+            verify(userRepository, never()).save(any());
+            verify(auditLogPort).logAuthenticationFailed(
+                    "test@example.com", "192.168.1.1", "identifier_first_no_factor_verified");
+        }
+
+        @Test
+        @DisplayName("execute_WhenIdentifierFirstLayer1OpensAnMfaSession_ShouldRecordTheLoginWithoutResettingTheStrikeCounter")
+        void execute_WhenIdentifierFirstLayer1OpensAnMfaSession_ShouldRecordTheLoginWithoutResettingTheStrikeCounter() {
+            UUID tenantId = UUID.randomUUID();
+            User user = tenantUser(tenantId);
+            for (int i = 0; i < 3; i++) {
+                user.incrementFailedLoginAttempts();
+            }
+            var emailOtp = method(com.fivucsas.identity.domain.model.auth.AuthMethodType.EMAIL_OTP, false);
+            var loginFlow = flow(tenantId, step(1, emailOtp));
+            when(configDrivenLoginPolicy.isEnabledFor(tenantId)).thenReturn(true); // engine ON
+            when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
+            when(authFlowRepository.findByTenantIdAndIsDefaultTrueAndIsActiveTrueAndOperationType(
+                    eq(tenantId), eq(com.fivucsas.identity.domain.model.auth.OperationType.APP_LOGIN)))
+                    .thenReturn(Optional.of(loginFlow));
+            when(enrollmentHealthService.validateEnrollments(user.getId())).thenReturn(java.util.Map.of());
+            when(userRepository.findById(user.getId())).thenReturn(Optional.of(user));
+            List<String> savedState = new java.util.ArrayList<>();
+            when(userRepository.save(user)).thenAnswer(invocation -> {
+                savedState.add("failed=" + user.getFailedLoginAttempts()
+                        + ", lastLogin=" + (user.getLastLoginAt() != null)
+                        + ", events=" + transactionManager.events());
+                return user;
+            });
+
+            AuthenticationResponse response = authenticateUserService.execute(validCommand);
+
+            assertThat(response.isMfaRequired()).isTrue();
+            // No factor is verified yet: the strike counter is left for the factor
+            // check at /auth/mfa/step to reset. last_login_at is recorded in the
+            // completion transaction, together with the MFA session it belongs to.
+            assertThat(savedState).containsExactly("failed=3, lastLogin=true, events=[begin, commit, begin]");
+            assertThat(response.getUser().getLastLoginAt()).isNotNull();
         }
     }
 }

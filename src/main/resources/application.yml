@@ -18,6 +18,15 @@ spring:
   application:
     name: identity-core-api
 
+  jpa:
+    # Spring Boot's own open-in-view interceptor is OFF. LoginOpenInViewConfig
+    # registers the same interceptor for every path EXCEPT POST /auth/login, so all
+    # other endpoints keep the request-bound EntityManager they were built on, while
+    # a login holds a pooled connection only inside its own short transactions
+    # (identity-core-api #285: open-in-view kept the first connection for the whole
+    # request and starved the pool at about 20 concurrent logins).
+    open-in-view: false
+
 # GDPR Art. 17 / KVKK right-to-erasure. Permanently purges users soft-deleted more
 # than 30 days ago. DISABLED by default — operator must validate via
 # `DELETE /api/v1/admin/purge/dry-run` before flipping to true per environment.
