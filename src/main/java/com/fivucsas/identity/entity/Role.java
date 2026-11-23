@@ -4,6 +4,7 @@ import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.Filter;
+import org.hibernate.annotations.SQLRestriction;
 import org.hibernate.annotations.UpdateTimestamp;
 
 import java.time.Instant;
@@ -28,6 +29,12 @@ import java.util.stream.Collectors;
 // A user only HOLDS a role via user_roles, so exposing global definitions is
 // not a cross-tenant data leak.
 @Filter(name = "tenantFilter", condition = "(tenant_id = :tenantId OR tenant_id IS NULL)")
+// #242 - read-side soft-delete guard, mirroring User / Tenant / UserEnrollment.
+// Role.softDelete() only stamps deleted_at; without this restriction every
+// entity query (findById, findAll, findByTenantId, join-to-Role paths and lazy
+// proxies loaded by id) keeps returning tombstoned roles. Explicit
+// DeletedAtIsNull repository methods stay as defence in depth.
+@SQLRestriction("deleted_at IS NULL")
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 @AllArgsConstructor(access = AccessLevel.PRIVATE)
