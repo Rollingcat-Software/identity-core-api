@@ -152,10 +152,23 @@ public class WebAuthnCredentialService {
         });
 
         if (!anyOfSameType) {
+            // #299 - a passkey can exist WITHOUT a FINGERPRINT / HARDWARE_KEY
+            // enrollment row. revokeEnrollment throws EntityNotFoundException in
+            // that state and, being @Transactional, marks THIS transaction
+            // rollback-only, so the credential delete failed with a 500
+            // (UnexpectedRollbackException) and the row stayed. Probe first: no
+            // row means there is nothing to revoke and the delete must commit.
+            if (!manageEnrollmentUseCase.hasEnrollment(userId, methodType)) {
+                log.info("No {} enrollment row to revoke for user {} after last credential deleted",
+                        methodType, userId);
+                return;
+            }
             try {
                 manageEnrollmentUseCase.revokeEnrollment(userId, methodType);
                 log.info("Auto-revoked {} enrollment for user {} after last credential deleted", methodType, userId);
             } catch (Exception e) {
+                // Kept as a safety net for a concurrent revoke/row change; the
+                // missing-row case above is the one that used to poison the commit.
                 log.warn("Failed to revoke {} enrollment for user {} after credential deletion: {}",
                         methodType, userId, e.getMessage());
             }

@@ -2,6 +2,25 @@
 
 ## [Unreleased]
 
+### 2026-11-23 - Deleting the last passkey without an enrollment row (#299)
+
+- `WebAuthnCredentialService` auto-revokes FINGERPRINT / HARDWARE_KEY when the last
+  credential of that class is deleted. If the user had no enrollment row,
+  `ManageEnrollmentService.revokeEnrollment` threw `EntityNotFoundException` from a
+  `@Transactional` method, which marked the credential-delete transaction
+  rollback-only: the commit threw `UnexpectedRollbackException`, the endpoint answered
+  500 and the credential stayed. A passkey can legitimately exist without an
+  enrollment row (registered before auto-bind, or its row cleaned up separately).
+- New read-only `ManageEnrollmentUseCase.hasEnrollment(userId, methodType)`; the
+  credential lifecycle probes it before revoking and skips the revoke when there is
+  nothing to revoke. The delete now commits (204) and the row is gone.
+- Tests: `WebAuthnCredentialDeleteTransactionTest` wires the real service and a real
+  `@Transactional` collaborator behind Spring's transaction interceptor (resource-less
+  manager) and reproduces the `UnexpectedRollbackException` against the old code; a
+  positive control proves the revoke still runs when the enrollment row exists.
+  `WebAuthnCredentialServiceTest` pins the behaviour for `deleteById` and
+  `deleteByCredentialId`; `ManageEnrollmentRevokeTest` covers the new probe.
+
 ### 2026-11-10 - Public device benchmark intake (Paper A)
 
 - New public, write-only `POST /api/v1/devbench/runs` stores one anonymous run of the

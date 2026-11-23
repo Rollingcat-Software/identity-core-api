@@ -38,6 +38,22 @@ public interface ManageEnrollmentUseCase {
     void revokeEnrollment(UUID userId, AuthMethodType methodType);
 
     /**
+     * Read-only probe: does an enrollment row exist for this user and method?
+     *
+     * <p>#299 - a WebAuthn credential delete auto-revokes the matching
+     * FINGERPRINT / HARDWARE_KEY enrollment when its last credential disappears.
+     * A user can hold a passkey without ever having an enrollment row (for
+     * example a passkey registered before the auto-bind path, or one whose row
+     * was cleaned up separately). Calling {@link #revokeEnrollment} in that
+     * state throws from a {@code @Transactional} method, which marks the
+     * caller's transaction rollback-only; the credential delete then fails with
+     * {@code UnexpectedRollbackException} (HTTP 500) and the credential is not
+     * removed. The credential lifecycle asks this probe first and skips the
+     * revoke when there is nothing to revoke.</p>
+     */
+    boolean hasEnrollment(UUID userId, AuthMethodType methodType);
+
+    /**
      * Idempotently ensure an ENROLLED row exists for a DEVICE-BOUND method
      * (WebAuthn FINGERPRINT / HARDWARE_KEY) that is created OUTSIDE the
      * start→complete flow — the WebAuthn register ceremony saves a credential

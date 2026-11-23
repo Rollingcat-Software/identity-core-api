@@ -426,6 +426,25 @@ class ManageEnrollmentRevokeTest {
         verify(userEnrollmentRepository).save(enrollment);
     }
 
+    // ── Enrollment existence probe (#299) ───────────────────────────────
+
+    @Test
+    void hasEnrollment_WhenRowExists_ShouldReturnTrue() {
+        when(userEnrollmentRepository.findByUserIdAndAuthMethodType(userId, AuthMethodType.FINGERPRINT))
+                .thenReturn(Optional.of(mock(UserEnrollment.class)));
+
+        assertThat(service.hasEnrollment(userId, AuthMethodType.FINGERPRINT)).isTrue();
+    }
+
+    @Test
+    void hasEnrollment_WhenRowMissing_ShouldReturnFalseWithoutThrowing() {
+        when(userEnrollmentRepository.findByUserIdAndAuthMethodType(userId, AuthMethodType.FINGERPRINT))
+                .thenReturn(Optional.empty());
+
+        assertThat(service.hasEnrollment(userId, AuthMethodType.FINGERPRINT)).isFalse();
+        verifyNoInteractions(biometricServicePort, nfcCardRepository, webAuthnCredentialRepository);
+    }
+
     // ── Enrollment not found ────────────────────────────────────────────
 
     @Test

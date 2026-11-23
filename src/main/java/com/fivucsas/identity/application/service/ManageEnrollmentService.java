@@ -309,6 +309,12 @@ public class ManageEnrollmentService implements ManageEnrollmentUseCase {
     }
 
     @Override
+    @Transactional(readOnly = true)
+    public boolean hasEnrollment(UUID userId, AuthMethodType methodType) {
+        return userEnrollmentRepository.findByUserIdAndAuthMethodType(userId, methodType).isPresent();
+    }
+
+    @Override
     @Transactional
     public void revokeEnrollment(UUID userId, AuthMethodType methodType) {
         UserEnrollment enrollment = userEnrollmentRepository
