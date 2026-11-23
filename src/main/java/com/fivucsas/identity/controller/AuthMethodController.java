@@ -36,15 +36,35 @@ public class AuthMethodController {
     }
 
     // --- /api/v1/tenants/{tenantId}/auth-methods endpoints (from TenantAuthMethodController) ---
+    //
+    // hasPermission(#tenantId, ...) does NOT scope by tenant: RbacPermissionEvaluator
+    // ignores the target id, and a TENANT_ADMIN holds every tenant-scoped permission
+    // implicitly. @rbac.canAccessTenant(#tenantId) is what keeps an admin of tenant B
+    // out of tenant A (ROOT stays cross-tenant).
+
+    /**
+     * Login-method catalog for one tenant's flow builder: the global catalog
+     * plus PUZZLE when the PUZZLE layer is enabled for this tenant (canary).
+     *
+     * <p>{@code hasPermission(#tenantId, ...)} checks the permission only (the
+     * RBAC evaluator ignores the target id), so tenant ownership is checked
+     * explicitly: without it any tenant's admin could probe whether another
+     * tenant is on the PUZZLE canary list.
+     */
+    @GetMapping("/api/v1/tenants/{tenantId}/auth-methods/catalog")
+    @PreAuthorize("hasPermission(#tenantId, 'Tenant', 'auth_method:read') and @rbac.canAccessTenant(#tenantId)")
+    public ResponseEntity<List<AuthMethodResponse>> getTenantCatalog(@PathVariable UUID tenantId) {
+        return ResponseEntity.ok(manageAuthMethodUseCase.listCatalogForTenant(tenantId));
+    }
 
     @GetMapping("/api/v1/tenants/{tenantId}/auth-methods")
-    @PreAuthorize("hasPermission(#tenantId, 'Tenant', 'auth_method:read')")
+    @PreAuthorize("hasPermission(#tenantId, 'Tenant', 'auth_method:read') and @rbac.canAccessTenant(#tenantId)")
     public ResponseEntity<List<TenantAuthMethodResponse>> getTenantMethods(@PathVariable UUID tenantId) {
         return ResponseEntity.ok(manageAuthMethodUseCase.listTenantMethods(tenantId));
     }
 
     @PutMapping("/api/v1/tenants/{tenantId}/auth-methods/{authMethodId}")
-    @PreAuthorize("hasPermission(#tenantId, 'Tenant', 'auth_method:configure')")
+    @PreAuthorize("hasPermission(#tenantId, 'Tenant', 'auth_method:configure') and @rbac.canAccessTenant(#tenantId)")
     public ResponseEntity<TenantAuthMethodResponse> configureMethod(
             @PathVariable UUID tenantId,
             @PathVariable UUID authMethodId,
