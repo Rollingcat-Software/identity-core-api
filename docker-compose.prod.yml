@@ -77,6 +77,12 @@ services:
       # → canary one tenant (set _TENANTS to its UUID) → global (_LOGIN=true).
       APP_AUTH_CONFIG_DRIVEN_LOGIN: ${APP_AUTH_CONFIG_DRIVEN_LOGIN:-false}
       APP_AUTH_CONFIG_DRIVEN_LOGIN_TENANTS: ${APP_AUTH_CONFIG_DRIVEN_LOGIN_TENANTS:-}
+      # #254 fail-CLOSED MFA decision. MUST be listed here: this service uses an
+      # explicit environment: block (NOT env_file:), so a var only in .env.prod is
+      # not passed to the container and the rollback below would be dead. Default
+      # true = 503 + no token when the MFA decision cannot be evaluated. Set false
+      # in .env.prod + `up -d` (no rebuild) to restore the legacy fail-open branch.
+      APP_AUTH_MFA_FAIL_CLOSED: ${APP_AUTH_MFA_FAIL_CLOSED:-true}
       # Client-side face embedding (SP-A go-live). MUST be listed here — explicit
       # environment: block, NOT env_file:, so a var only in .env.prod is NOT passed
       # into the container. THIS GAP made the flag dead: the server logged

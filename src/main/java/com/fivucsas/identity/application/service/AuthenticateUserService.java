@@ -203,7 +203,7 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
         boolean configDriven = user.getTenant() != null
                 && configDrivenLoginPolicy.isEnabledFor(user.getTenant().getId());
         Set<AuthMethodType> layer1Methods = configDriven
-                ? resolveLayer1Methods(user)
+                ? resolveLayer1Methods(user, command.getEmail(), command.getIpAddress())
                 : Set.of();
         boolean layer1IsPassword = layer1Methods.isEmpty()
                 || layer1Methods.contains(AuthMethodType.PASSWORD);
@@ -569,7 +569,7 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
      * password they already typed, and any other option is offered as a later
      * step or a CHOICE the MFA engine handles.
      */
-    private Set<AuthMethodType> resolveLayer1Methods(User user) {
+    private Set<AuthMethodType> resolveLayer1Methods(User user, String email, String ipAddress) {
         try {
             if (user.getTenant() == null) {
                 return Set.of();
@@ -597,6 +597,10 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
             if (mfaFailClosed) {
                 log.error("AUDIT: Login failed closed - cannot resolve Layer-1 methods for user {}; config-driven login is enabled",
                         user.getId(), e);
+                // This throw happens before execute()'s MFA-decision try block, so
+                // the audit row must be written here; otherwise the one fail-closed
+                // path with no token would also leave no forensic trace.
+                auditLogPort.logAuthenticationFailed(email, ipAddress, "mfa_decision_unavailable");
                 throw new MfaDecisionUnavailableException(e);
             }
             // Reversibility path: a misconfigured tenant falls back to legacy PASSWORD.

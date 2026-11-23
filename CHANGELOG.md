@@ -18,7 +18,10 @@
   defaulting a failed lookup to PASSWORD.
 - Reversible without a redeploy: `app.auth.mfa-fail-closed` (env
   `APP_AUTH_MFA_FAIL_CLOSED`, default `true`). Setting it to `false` restores the
-  legacy fail-open branch; the flag is documented in `application.yml`.
+  legacy fail-open branch. The flag is declared in `application.yml`,
+  `application-prod.yml` AND the explicit `environment:` block of
+  `docker-compose.prod.yml` (a var only in `.env.prod` would not reach the
+  container otherwise, which would make the rollback dead).
 - Regression tests: `AuthenticateUserServiceTest$MfaDecisionFailClosed` covers flow
   lookup failure, enrollment-probe failure, Layer-1 failure and the flag-off
   reversibility path. The fail-closed cases assert that neither token is minted.

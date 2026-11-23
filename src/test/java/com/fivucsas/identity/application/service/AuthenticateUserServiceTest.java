@@ -1229,6 +1229,10 @@ class AuthenticateUserServiceTest {
             verify(passwordEncoder, never()).matches(any(), any());
             verify(tokenGenerator, never()).generateAccessToken(any(), any());
             verify(refreshTokenService, never()).createRefreshToken(any(), any(), any());
+            // The Layer-1 throw precedes execute()'s MFA-decision catch, so this
+            // path must write its own audit row (it used to have no trail).
+            verify(auditLogPort).logAuthenticationFailed(
+                    "test@example.com", "192.168.1.1", "mfa_decision_unavailable");
         }
 
         @Test

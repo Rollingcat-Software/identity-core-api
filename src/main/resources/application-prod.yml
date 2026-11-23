@@ -109,6 +109,12 @@ app:
   auth:
     config-driven-login: ${APP_AUTH_CONFIG_DRIVEN_LOGIN:false}
     config-driven-login-tenants: ${APP_AUTH_CONFIG_DRIVEN_LOGIN_TENANTS:}
+    # #254 fail-CLOSED MFA decision (issue #254). Default true: a failure while
+    # reading the tenant APP_LOGIN flow / enrollment health answers 503 with NO
+    # token instead of minting a single-factor JWT. Operationally reversible
+    # without a redeploy: APP_AUTH_MFA_FAIL_CLOSED=false (wired in
+    # docker-compose.prod.yml's explicit environment block).
+    mfa-fail-closed: ${APP_AUTH_MFA_FAIL_CLOSED:true}
     # Client-side-embedding face path (sub-project A, Phase 5). Default OFF =
     # legacy image path (/verify, /enroll). KILL-SWITCH / CANARY — no redeploy:
     #   APP_AUTH_CLIENT_SIDE_EMBEDDING=true            → embedding path, ALL tenants
