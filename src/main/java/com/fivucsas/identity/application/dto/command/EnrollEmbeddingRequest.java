@@ -27,11 +27,10 @@ import java.util.List;
  *
  * @param embedding the 512-dim client-side Facenet512 embedding (required,
  *                  exactly {@value #EMBEDDING_DIM} elements)
- * @param tenantId  optional tenant identifier (pgvector tenant scoping on the bio
- *                  side). When null/blank the controller derives it from the
- *                  authenticated principal, mirroring the face-search path; an
- *                  explicit value mirrors the multipart enroll's {@code tenant_id}
- *                  request param.
+ * @param tenantId  optional and not trusted, kept for wire compatibility: the bio
+ *                  tenant is always the enrolled user's tenant
+ *                  ({@code BiometricEnrollmentTenantResolver}); a different value
+ *                  is logged and ignored.
  */
 public record EnrollEmbeddingRequest(
         @NotEmpty(message = "embedding is required")

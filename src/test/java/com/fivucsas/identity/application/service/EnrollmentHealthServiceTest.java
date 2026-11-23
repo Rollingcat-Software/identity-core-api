@@ -141,6 +141,56 @@ class EnrollmentHealthServiceTest {
         verify(userEnrollmentRepository).save(any(UserEnrollment.class));
     }
 
+    // -- FACE, tenant-less legacy template (issue #284) --------------------------
+
+    @Test
+    void validateEnrollments_WhenFaceTemplateStoredWithoutTenant_ShouldKeepFaceEnrolled() {
+        // An image enroll made before #284 stored the template with tenant_id NULL.
+        // bio's tenant-scoped probe cannot match a NULL row, but bio's 1:1 verify
+        // (find_by_user_id) is keyed on user_id only, so the template is usable.
+        givenUserWithEnrollment(AuthMethodType.FACE);
+        UUID tenantId = UUID.randomUUID();
+        when(userJpaRepository.findTenantIdById(userId)).thenReturn(Optional.of(tenantId));
+        when(biometricServicePort.faceEnrollmentExists(userId, tenantId.toString()))
+                .thenReturn(Boolean.FALSE);
+        when(biometricServicePort.faceEnrollmentExists(userId, null)).thenReturn(Boolean.TRUE);
+
+        Map<AuthMethodType, Boolean> health = service(true).validateEnrollments(userId);
+
+        assertThat(health.get(AuthMethodType.FACE)).isTrue();
+        verify(userEnrollmentRepository, never()).save(any(UserEnrollment.class));
+    }
+
+    @Test
+    void validateEnrollments_WhenNoFaceTemplateInAnyTenant_ShouldRevokeFace() {
+        givenUserWithEnrollment(AuthMethodType.FACE);
+        UUID tenantId = UUID.randomUUID();
+        when(userJpaRepository.findTenantIdById(userId)).thenReturn(Optional.of(tenantId));
+        when(biometricServicePort.faceEnrollmentExists(userId, tenantId.toString()))
+                .thenReturn(Boolean.FALSE);
+        when(biometricServicePort.faceEnrollmentExists(userId, null)).thenReturn(Boolean.FALSE);
+
+        Map<AuthMethodType, Boolean> health = service(true).validateEnrollments(userId);
+
+        assertThat(health.get(AuthMethodType.FACE)).isFalse();
+        verify(userEnrollmentRepository).save(any(UserEnrollment.class));
+    }
+
+    @Test
+    void validateEnrollments_WhenUnscopedFaceProbeUnknown_ShouldFailOpen() {
+        givenUserWithEnrollment(AuthMethodType.FACE);
+        UUID tenantId = UUID.randomUUID();
+        when(userJpaRepository.findTenantIdById(userId)).thenReturn(Optional.of(tenantId));
+        when(biometricServicePort.faceEnrollmentExists(userId, tenantId.toString()))
+                .thenReturn(Boolean.FALSE);
+        when(biometricServicePort.faceEnrollmentExists(userId, null)).thenReturn(null);
+
+        Map<AuthMethodType, Boolean> health = service(true).validateEnrollments(userId);
+
+        assertThat(health.get(AuthMethodType.FACE)).isTrue();
+        verify(userEnrollmentRepository, never()).save(any(UserEnrollment.class));
+    }
+
     // -- Kill-switch -----------------------------------------------------------
 
     @Test

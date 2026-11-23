@@ -28,25 +28,18 @@ public interface BiometricServicePort {
     Map<String, Object> checkHealth();
 
     /**
-     * Enrolls a user's face in the biometric system.
-     *
-     * @param userId the user ID
-     * @param faceImage the face image file
-     * @return Map containing enrollment response data
-     * @throws com.fivucsas.identity.domain.exception.BiometricEnrollmentException if enrollment fails
-     */
-    default Map<String, Object> enrollFace(UUID userId, MultipartFile faceImage) {
-        return enrollFace(userId, faceImage, null, null, null);
-    }
-
-    /**
      * Enrolls a user's face with tenant scoping and optional client-side
      * pre-filter embedding telemetry (D2 log-only).
      *
+     * <p>There is deliberately no overload without {@code tenantId} (issue #284):
+     * a forgotten tenant stored the template tenant-less, invisible to the login
+     * probe and to 1:N search. Callers pass the value from
+     * {@code BiometricEnrollmentTenantResolver}.</p>
+     *
      * @param userId the user ID
      * @param faceImage the face image file
-     * @param tenantId optional tenant identifier — required for pgvector tenant
-     *                 scoping on the bio side
+     * @param tenantId the enrolled user's tenant, for pgvector tenant scoping on
+     *                 the bio side; {@code null} only for a tenant-less user
      * @param clientEmbedding optional single 512-dim client embedding (JSON
      *                        array string). D2 architectural decision: log-only,
      *                        not used for auth.
@@ -239,13 +232,10 @@ public interface BiometricServicePort {
                                    String clientEmbedding,
                                    String clientEmbeddings);
 
-    default Map<String, Object> enrollFaceMulti(UUID userId, List<MultipartFile> images) {
-        return enrollFaceMulti(userId, images, null, null, null);
-    }
-
     /**
      * Multi-image face enrollment with tenant scoping and optional client
-     * embedding telemetry (D2 log-only).
+     * embedding telemetry (D2 log-only). No overload without {@code tenantId},
+     * for the reason given on {@link #enrollFace(UUID, MultipartFile, String, String, String)}.
      */
     default Map<String, Object> enrollFaceMulti(UUID userId,
                                                 List<MultipartFile> images,

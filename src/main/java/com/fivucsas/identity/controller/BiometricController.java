@@ -26,6 +26,7 @@ import com.fivucsas.identity.domain.model.auth.AuthMethodType;
 import com.fivucsas.identity.domain.model.auth.DevicePlatform;
 import com.fivucsas.identity.dto.BiometricVerificationResponse;
 import com.fivucsas.identity.entity.User;
+import com.fivucsas.identity.security.BiometricEnrollmentTenantResolver;
 import com.fivucsas.identity.security.RbacAuthorizationService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -64,6 +65,8 @@ public class BiometricController {
     private final StepUpAuthUseCase stepUpAuthUseCase;
     private final ManageEnrollmentUseCase manageEnrollmentUseCase;
     private final RbacAuthorizationService rbacService;
+    // Issue #284: the one place an enroll endpoint gets its bio tenant from.
+    private final BiometricEnrollmentTenantResolver enrollmentTenantResolver;
     // Phase 6 (sub-project A): gates the JSON client-side-embedding enroll
     // endpoint. The endpoint is fail-closed — it serves ONLY the client-embedding
     // path, so when the policy is OFF for the tenant the request is rejected
@@ -111,12 +114,15 @@ public class BiometricController {
             @RequestParam(value = "client_embeddings", required = false) String clientEmbeddings,
             @RequestParam(value = "optimize", required = false, defaultValue = "false") boolean optimize) {
 
-        log.info("Face enrollment request for user: {} (tenant: {}, optimize: {})", userId, tenantId, optimize);
+        // Issue #284: the template is stored under the enrolled user's tenant,
+        // the same partition the login enrollment probe asks about.
+        String enrollTenantId = enrollmentTenantResolver.resolve(userId, tenantId);
+        log.info("Face enrollment request for user: {} (tenant: {}, optimize: {})", userId, enrollTenantId, optimize);
 
         EnrollBiometricCommand command = EnrollBiometricCommand.builder()
             .userId(userId.toString())
             .faceImage(image)
-            .tenantId(tenantId)
+            .tenantId(enrollTenantId)
             .clientEmbedding(clientEmbedding)
             .clientEmbeddings(clientEmbeddings)
             .optimize(optimize)
@@ -173,15 +179,7 @@ public class BiometricController {
             @PathVariable UUID userId,
             @Valid @RequestBody EnrollEmbeddingRequest request) {
 
-        // Tenant resolution mirrors the face-search path: trust the authenticated
-        // principal's tenant, never an arbitrary client value. An explicit
-        // tenant_id in the body is honoured only as the documented bio scoping
-        // hint (same as the multipart enroll's tenant_id request param), but when
-        // absent we derive it server-side so the bio pgvector store is correctly
-        // tenant-scoped.
-        String tenantId = (request.tenantId() != null && !request.tenantId().isBlank())
-                ? request.tenantId()
-                : resolveCurrentTenantId();
+        String tenantId = enrollmentTenantResolver.resolve(userId, request.tenantId());
 
         // Fail-closed: this endpoint ONLY serves the client-embedding path (no
         // image to fall back to), so it is rejected unless the policy is ON for
@@ -199,8 +197,7 @@ public class BiometricController {
             .tenantId(tenantId)
             .embedding(request.embedding())
             .onBehalfOfOtherUser(isOperatorEnrollingAnotherUser(userId))
-            // Gap Ü2: the liveness mode is decided on the PRINCIPAL's tenant,
-            // never on the body hint above (client-controlled).
+            // Gap Ü2: the liveness mode is decided on the PRINCIPAL's tenant.
             .livenessTenantId(rbacService.getCurrentUserTenantId().map(UUID::toString).orElse(null))
             .build();
 
@@ -220,8 +217,9 @@ public class BiometricController {
             @RequestParam(value = "client_embeddings", required = false) String clientEmbeddings,
             @RequestParam(value = "optimize", required = false, defaultValue = "false") boolean optimize) {
 
+        String enrollTenantId = enrollmentTenantResolver.resolve(userId, tenantId);
         log.info("Multi-image face enrollment for user: {}, images: {}, tenant: {}, optimize: {}",
-                userId, files.size(), tenantId, optimize);
+                userId, files.size(), enrollTenantId, optimize);
         // Atomic, transactional multi-enroll: the bio enroll + score recording +
         // is_biometric_enrolled flag-flip now happen inside ONE @Transactional
         // service method (mirrors the single-image EnrollBiometricService.execute).
@@ -231,7 +229,7 @@ public class BiometricController {
         // false → 412 "not enrolled" on verify. The flag is now flipped ONLY on a
         // robustly-parsed Boolean.TRUE.equals(success). Response contract unchanged.
         Map<String, Object> result = enrollBiometricUseCase.enrollFaceMulti(
-                userId, files, tenantId, clientEmbedding, clientEmbeddings, optimize);
+                userId, files, enrollTenantId, clientEmbedding, clientEmbeddings, optimize);
         return ResponseEntity.ok(result);
     }
 
@@ -273,6 +271,9 @@ public class BiometricController {
             @PathVariable UUID userId,
             @RequestBody Map<String, String> request) {
 
+        // Issue #284: same cross-tenant guard as every other enroll endpoint. The
+        // bio voice store is user-scoped, so only the guard is needed, not the tenant.
+        enrollmentTenantResolver.assertMayEnroll(userId);
         log.info("Voice enrollment request for user: {}", userId);
 
         String voiceData = request.get("voiceData");
@@ -349,12 +350,7 @@ public class BiometricController {
             @PathVariable UUID userId,
             @Valid @RequestBody VoiceEnrollEmbeddingRequest request) {
 
-        // Tenant resolution mirrors the face enroll-embedding path: trust the
-        // authenticated principal's tenant, honour an explicit body tenant_id only
-        // as the bio scoping hint.
-        String tenantId = (request.tenantId() != null && !request.tenantId().isBlank())
-                ? request.tenantId()
-                : resolveCurrentTenantId();
+        String tenantId = enrollmentTenantResolver.resolve(userId, request.tenantId());
 
         // Fail-closed: rejected unless the voice policy is ON for the tenant.
         if (!clientSideVoiceEmbeddingPolicy.isEnabledForTenant(tenantId)) {

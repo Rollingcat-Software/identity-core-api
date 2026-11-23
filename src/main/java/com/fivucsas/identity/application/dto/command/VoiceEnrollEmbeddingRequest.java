@@ -23,8 +23,9 @@ import java.util.List;
  *
  * @param embedding the 256-dim client-side speaker embedding (required, exactly
  *                  {@value #EMBEDDING_DIM} elements)
- * @param tenantId  optional tenant identifier; when null/blank the controller
- *                  derives it from the authenticated principal
+ * @param tenantId  optional and not trusted, kept for wire compatibility: the bio
+ *                  tenant is always the enrolled user's tenant
+ *                  ({@code BiometricEnrollmentTenantResolver})
  * @param optimize  re-enroll &amp; optimize: when true and the user already has a
  *                  voiceprint, the bio side FUSES this sample into the existing
  *                  centroid (defaults to false via {@link #optimizeOrDefault()})

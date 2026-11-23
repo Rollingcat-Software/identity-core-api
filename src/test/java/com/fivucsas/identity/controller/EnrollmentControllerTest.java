@@ -65,6 +65,7 @@ class EnrollmentControllerTest {
     @MockBean private RbacAuthorizationService rbacService;
     @MockBean private EnrollmentHealthService enrollmentHealthService;
     @MockBean private TenantScopeResolver tenantScopeResolver;
+    @MockBean private com.fivucsas.identity.security.BiometricEnrollmentTenantResolver enrollmentTenantResolver;
 
     // Security and infrastructure beans
     @MockBean private TenantRepository tenantRepository;
