@@ -18,6 +18,10 @@
 - `ManageRoleService.deleteRole` now clears the role's `user_roles` rows in the same
   transaction. Otherwise a soft-deleted role would leave an assignment that
   `findById` can no longer load, which the admin could neither see nor revoke.
+- `ManageUserRoleService.revokeRoleFromUser` now verifies the ASSIGNMENT
+  (`existsByIdUserIdAndIdRoleId`) instead of the live role row, so a grant left by a
+  pre-fix delete can still be revoked through the API. Assigning a soft-deleted role
+  still answers 404 (the role is not loadable), which is the intended behaviour.
 - Known pre-existing limitation, unchanged: `roles` has
   `UNIQUE (tenant_id, name)` across deleted rows (V3 `unique_tenant_role_name`), and
   `createRole` only checks live rows. Re-creating a soft-deleted role's name therefore
@@ -27,6 +31,8 @@
   also pins the `@NotFound(IGNORE)` proxy guard, the `deleted_at` mapping and the
   `softDelete()` state transition. `ManageRoleServiceDeleteRoleTest` pins the
   assignment cleanup and the system-role refusal.
+  `ManageUserRoleServiceRevokeTest` pins the revoke of a grant whose role is no
+  longer loadable.
 
 ### 2026-11-10 - Public device benchmark intake (Paper A)
 

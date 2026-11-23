@@ -95,8 +95,11 @@ public class ManageUserRoleService implements ManageUserRoleUseCase {
             throw new UserNotFoundException(command.getUserId());
         }
 
-        // Verify role exists
-        if (roleRepository.findById(roleId).isEmpty()) {
+        // Verify the ASSIGNMENT exists, not the live role: #242 gives Role a
+// @SQLRestriction, so findById returns empty for a soft-deleted role even
+// though a grant created before the delete-cleanup may still point at it. The
+// revoke endpoint must stay able to repair those legacy rows.
+        if (!userRoleRepository.existsByIdUserIdAndIdRoleId(userId, roleId)) {
             throw new RoleNotFoundException(command.getRoleId());
         }
 
