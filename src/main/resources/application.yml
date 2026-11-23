@@ -90,6 +90,12 @@ app:
     # production before the global flip. Invalid UUIDs are skipped with a warn
     # (never widens the rollout / crashes startup).
     config-driven-login-tenants: ${APP_AUTH_CONFIG_DRIVEN_LOGIN_TENANTS:}
+    # #254 - fail-CLOSED MFA decision. When true (default), a failure while
+    # resolving the tenant's APP_LOGIN flow / enrollment health aborts the login
+    # with HTTP 503 and NO token; the legacy code logged the error and fell
+    # through to a single-factor JWT. Set false to restore the old fail-open
+    # branch without a redeploy (security regression; use only to unstick prod).
+    mfa-fail-closed: ${APP_AUTH_MFA_FAIL_CLOSED:true}
     # CLIENT-SIDE-EMBEDDING face path (sub-project A, Phase 5). When true, a FACE
     # step/enroll payload carrying a precomputed `embedding` (512 floats) is
     # matched via the biometric-processor's /verify-embedding and /enroll-embedding
