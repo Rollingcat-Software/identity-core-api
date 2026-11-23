@@ -10,6 +10,7 @@ import com.fivucsas.identity.application.port.output.PasswordEncoderPort;
 import com.fivucsas.identity.application.port.output.TokenGenerationPort;
 import com.fivucsas.identity.domain.exception.AccountLockedException;
 import com.fivucsas.identity.domain.exception.InvalidCredentialsException;
+import com.fivucsas.identity.domain.exception.MfaDecisionUnavailableException;
 import com.fivucsas.identity.domain.exception.NeedsEnrollmentException;
 import com.fivucsas.identity.domain.exception.TenantMismatchException;
 import com.fivucsas.identity.domain.exception.TenantSuspendedException;
@@ -27,6 +28,7 @@ import com.fivucsas.identity.service.RefreshTokenService;
 import com.fivucsas.identity.application.port.output.OAuth2ClientRepositoryPort;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -76,6 +78,19 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
     // larger base floor just gives the first factor more headroom. Reversible:
     // one-line constant, no migration.
     private static final Duration MFA_SESSION_TTL = Duration.ofMinutes(15);
+
+    /**
+     * #254 - fail-closed MFA decision. When true (default), a failure while
+     * resolving the tenant's APP_LOGIN flow or the user's enrollment health
+     * aborts the login (503, no token) instead of falling through to the
+     * single-factor JWT mint. Set {@code app.auth.mfa-fail-closed=false} to
+     * restore the legacy fail-open branch without a redeploy.
+     *
+     * <p>Field (not constructor) injection keeps the unit-test harness simple
+     * and pins the safe default when the value is not supplied.</p>
+     */
+    @Value("${app.auth.mfa-fail-closed:true}")
+    private boolean mfaFailClosed = true;
 
     @Override
     @Transactional
@@ -188,7 +203,7 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
         boolean configDriven = user.getTenant() != null
                 && configDrivenLoginPolicy.isEnabledFor(user.getTenant().getId());
         Set<AuthMethodType> layer1Methods = configDriven
-                ? resolveLayer1Methods(user)
+                ? resolveLayer1Methods(user, command.getEmail(), command.getIpAddress())
                 : Set.of();
         boolean layer1IsPassword = layer1Methods.isEmpty()
                 || layer1Methods.contains(AuthMethodType.PASSWORD);
@@ -288,9 +303,13 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
         // with no completed methods, and VerifyMfaStepService runs the Layer-1
         // method as the first step.
         try {
-            Optional<AuthFlow> defaultLoginFlow = authFlowRepository
-                .findByTenantIdAndIsDefaultTrueAndIsActiveTrueAndOperationType(
-                    user.getTenant().getId(), OperationType.APP_LOGIN);
+            // A tenantless user has no tenant policy to evaluate: this is a
+            // legitimate "no flow" answer, not an unavailable decision, so keep
+            // the legacy single-factor path instead of treating it as an error.
+            Optional<AuthFlow> defaultLoginFlow = tenantIdForPolicy == null
+                ? Optional.empty()
+                : authFlowRepository.findByTenantIdAndIsDefaultTrueAndIsActiveTrueAndOperationType(
+                    tenantIdForPolicy, OperationType.APP_LOGIN);
 
             if (defaultLoginFlow.isPresent()) {
                 AuthFlow flow = defaultLoginFlow.get();
@@ -385,7 +404,22 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
                     "needs_enrollment:" + e.getMethod());
             throw e;
         } catch (Exception e) {
-            log.warn("Failed to check tenant auth flow for user {}: {}", user.getId(), e.getMessage(), e);
+            // #254 - an authentication decision must never fail OPEN. Before this
+            // guard, ANY failure in the MFA-flow decision (flow lookup, enrollment
+            // probe, session save) was logged and execution fell through to the
+            // single-factor JWT mint, silently dropping the tenant's second factor.
+            // Fail closed: no token, structured 503, audit row; the client retries.
+            // Reversible without a redeploy via app.auth.mfa-fail-closed=false.
+            if (!mfaFailClosed) {
+                log.warn("Failed to check tenant auth flow for user {} (app.auth.mfa-fail-closed=false: legacy fail-open)",
+                        user.getId(), e);
+            } else {
+                log.error("AUDIT: Login failed closed - MFA decision unavailable, no token issued; userId={}, ip={}",
+                        user.getId(), command.getIpAddress(), e);
+                auditLogPort.logAuthenticationFailed(command.getEmail(), command.getIpAddress(),
+                        "mfa_decision_unavailable");
+                throw new MfaDecisionUnavailableException(e);
+            }
         }
 
         // SECURITY (2026-06-01) — fail-closed defense-in-depth against a zero-factor
@@ -535,7 +569,7 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
      * password they already typed, and any other option is offered as a later
      * step or a CHOICE the MFA engine handles.
      */
-    private Set<AuthMethodType> resolveLayer1Methods(User user) {
+    private Set<AuthMethodType> resolveLayer1Methods(User user, String email, String ipAddress) {
         try {
             if (user.getTenant() == null) {
                 return Set.of();
@@ -556,8 +590,20 @@ public class AuthenticateUserService implements AuthenticateUserUseCase {
                 .map(set -> (Set<AuthMethodType>) set)
                 .orElseGet(Set::of);
         } catch (Exception e) {
-            // Any lookup failure falls back to legacy PASSWORD login rather than
-            // locking everyone out of a misconfigured tenant.
+            // #254 - Layer-1 resolution is part of the MFA decision. Defaulting a
+            // failed lookup to PASSWORD (the old behaviour) can skip an
+            // identifier-first factor entirely, so fail closed while the engine is
+            // enabled. app.auth.mfa-fail-closed=false restores the fallback.
+            if (mfaFailClosed) {
+                log.error("AUDIT: Login failed closed - cannot resolve Layer-1 methods for user {}; config-driven login is enabled",
+                        user.getId(), e);
+                // This throw happens before execute()'s MFA-decision try block, so
+                // the audit row must be written here; otherwise the one fail-closed
+                // path with no token would also leave no forensic trace.
+                auditLogPort.logAuthenticationFailed(email, ipAddress, "mfa_decision_unavailable");
+                throw new MfaDecisionUnavailableException(e);
+            }
+            // Reversibility path: a misconfigured tenant falls back to legacy PASSWORD.
             log.warn("Failed to resolve Layer-1 methods for user {}: {} — defaulting to PASSWORD",
                     user.getId(), e.getMessage());
             return Set.of();

@@ -1101,4 +1101,162 @@ class AuthenticateUserServiceTest {
             verify(mfaSessionRepository, never()).save(any());
         }
     }
+
+    /**
+     * #254 - the MFA decision must fail CLOSED. Before the fix, any exception in
+     * the flow lookup / enrollment probe was caught and execution fell through to
+     * the single-factor token mint, so a tenant that requires MFA got a
+     * single-factor JWT whenever the decision could not be evaluated.
+     */
+    @Nested
+    @DisplayName("MFA decision fail-closed (#254)")
+    class MfaDecisionFailClosed {
+
+        private User tenantUser(UUID tenantId) {
+            Tenant tenant = Tenant.builder().id(tenantId).name("Acme").status(TenantStatus.ACTIVE).build();
+            return User.builder()
+                    .id(UUID.randomUUID())
+                    .email("test@example.com")
+                    .passwordHash(VALID_BCRYPT_HASH)
+                    .firstName("John").lastName("Doe")
+                    .status(UserStatus.ACTIVE)
+                    .tenant(tenant)
+                    .createdAt(Instant.now()).updatedAt(Instant.now())
+                    .build();
+        }
+
+        private void loginReachesMfaDecision(User user, UUID tenantId) {
+            when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
+            when(passwordEncoder.matches("Password123!", VALID_BCRYPT_HASH)).thenReturn(true);
+            when(configDrivenLoginPolicy.isEnabledFor(tenantId)).thenReturn(false);
+        }
+
+        @Test
+        @DisplayName("flow lookup failure ⇒ MfaDecisionUnavailableException, NO single-factor JWT")
+        void flowLookupFailureFailsClosed() {
+            UUID tenantId = UUID.randomUUID();
+            User user = tenantUser(tenantId);
+            loginReachesMfaDecision(user, tenantId);
+
+            when(authFlowRepository.findByTenantIdAndIsDefaultTrueAndIsActiveTrueAndOperationType(
+                    eq(tenantId), eq(com.fivucsas.identity.domain.model.auth.OperationType.APP_LOGIN)))
+                    .thenThrow(new IllegalStateException("auth-flow store unavailable"));
+            // Lenient: only the (buggy) fail-open branch reaches these. On the fixed
+            // code they stay unused; on the old code they let the mint succeed so the
+            // assertion fails on the exception type rather than on an accidental NPE.
+            lenient().when(tokenGenerator.generateAccessToken("test@example.com", List.of("pwd")))
+                    .thenReturn("fail-open-token");
+            lenient().when(refreshTokenService.createRefreshToken(eq(user), any(), any())).thenReturn(refreshToken);
+
+            assertThatThrownBy(() -> authenticateUserService.execute(validCommand))
+                    .isInstanceOf(com.fivucsas.identity.domain.exception.MfaDecisionUnavailableException.class)
+                    .hasMessageContaining("no token was issued");
+
+            // Fail CLOSED: neither token is minted, no MFA session is created.
+            verify(tokenGenerator, never()).generateAccessToken(any(), any());
+            verify(refreshTokenService, never()).createRefreshToken(any(), any(), any());
+            verify(mfaSessionRepository, never()).save(any());
+            verify(auditLogPort).logAuthenticationFailed(
+                    "test@example.com", "192.168.1.1", "mfa_decision_unavailable");
+        }
+
+        @Test
+        @DisplayName("enrollment probe failure inside the MFA decision ⇒ fail closed, no JWT")
+        void enrollmentProbeFailureFailsClosed() {
+            UUID tenantId = UUID.randomUUID();
+            User user = tenantUser(tenantId);
+            loginReachesMfaDecision(user, tenantId);
+
+            var emailOtp = com.fivucsas.identity.entity.AuthMethod.builder()
+                    .id(UUID.randomUUID())
+                    .type(com.fivucsas.identity.domain.model.auth.AuthMethodType.EMAIL_OTP)
+                    .name("EMAIL_OTP")
+                    .category(com.fivucsas.identity.domain.model.auth.AuthMethodCategory.BASIC)
+                    .platforms(List.of("WEB"))
+                    .requiresEnrollment(false)
+                    .build();
+            var loginFlow = com.fivucsas.identity.entity.AuthFlow.builder()
+                    .id(UUID.randomUUID())
+                    .tenant(user.getTenant())
+                    .name("Login")
+                    .operationType(com.fivucsas.identity.domain.model.auth.OperationType.APP_LOGIN)
+                    .isDefault(true)
+                    .isActive(true)
+                    .steps(new java.util.ArrayList<>(List.of(
+                            com.fivucsas.identity.entity.AuthFlowStep.builder()
+                                    .id(UUID.randomUUID())
+                                    .stepOrder(2)
+                                    .authMethod(emailOtp)
+                                    .isRequired(true)
+                                    .build())))
+                    .build();
+
+            when(authFlowRepository.findByTenantIdAndIsDefaultTrueAndIsActiveTrueAndOperationType(
+                    eq(tenantId), eq(com.fivucsas.identity.domain.model.auth.OperationType.APP_LOGIN)))
+                    .thenReturn(Optional.of(loginFlow));
+            when(enrollmentHealthService.validateEnrollments(user.getId()))
+                    .thenThrow(new IllegalStateException("enrollment store unavailable"));
+            lenient().when(tokenGenerator.generateAccessToken("test@example.com", List.of("pwd")))
+                    .thenReturn("fail-open-token");
+            lenient().when(refreshTokenService.createRefreshToken(eq(user), any(), any())).thenReturn(refreshToken);
+
+            assertThatThrownBy(() -> authenticateUserService.execute(validCommand))
+                    .isInstanceOf(com.fivucsas.identity.domain.exception.MfaDecisionUnavailableException.class);
+
+            verify(tokenGenerator, never()).generateAccessToken(any(), any());
+            verify(refreshTokenService, never()).createRefreshToken(any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("Layer-1 resolution failure with the config-driven engine ON ⇒ fail closed, no JWT")
+        void layer1ResolutionFailureFailsClosed() {
+            UUID tenantId = UUID.randomUUID();
+            User user = tenantUser(tenantId);
+            when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
+            when(configDrivenLoginPolicy.isEnabledFor(tenantId)).thenReturn(true);
+            when(authFlowRepository.findByTenantIdAndIsDefaultTrueAndIsActiveTrueAndOperationType(
+                    eq(tenantId), eq(com.fivucsas.identity.domain.model.auth.OperationType.APP_LOGIN)))
+                    .thenThrow(new IllegalStateException("auth-flow store unavailable"));
+            lenient().when(passwordEncoder.matches("Password123!", VALID_BCRYPT_HASH)).thenReturn(true);
+            lenient().when(tokenGenerator.generateAccessToken("test@example.com", List.of("pwd")))
+                    .thenReturn("fail-open-token");
+            lenient().when(refreshTokenService.createRefreshToken(eq(user), any(), any())).thenReturn(refreshToken);
+
+            assertThatThrownBy(() -> authenticateUserService.execute(validCommand))
+                    .isInstanceOf(com.fivucsas.identity.domain.exception.MfaDecisionUnavailableException.class);
+
+            // The failure happens BEFORE the password is checked: no factor is verified.
+            verify(passwordEncoder, never()).matches(any(), any());
+            verify(tokenGenerator, never()).generateAccessToken(any(), any());
+            verify(refreshTokenService, never()).createRefreshToken(any(), any(), any());
+            // The Layer-1 throw precedes execute()'s MFA-decision catch, so this
+            // path must write its own audit row (it used to have no trail).
+            verify(auditLogPort).logAuthenticationFailed(
+                    "test@example.com", "192.168.1.1", "mfa_decision_unavailable");
+        }
+
+        @Test
+        @DisplayName("REVERSIBILITY: app.auth.mfa-fail-closed=false restores the legacy fail-open mint")
+        void flagOffRestoresLegacyFailOpen() {
+            UUID tenantId = UUID.randomUUID();
+            User user = tenantUser(tenantId);
+            loginReachesMfaDecision(user, tenantId);
+
+            when(authFlowRepository.findByTenantIdAndIsDefaultTrueAndIsActiveTrueAndOperationType(
+                    eq(tenantId), eq(com.fivucsas.identity.domain.model.auth.OperationType.APP_LOGIN)))
+                    .thenThrow(new IllegalStateException("auth-flow store unavailable"));
+            when(tokenGenerator.generateAccessToken("test@example.com", List.of("pwd")))
+                    .thenReturn("legacy-access-token");
+            when(refreshTokenService.createRefreshToken(eq(user), any(), any())).thenReturn(refreshToken);
+
+            org.springframework.test.util.ReflectionTestUtils.setField(
+                    authenticateUserService, "mfaFailClosed", false);
+
+            AuthenticationResponse response = authenticateUserService.execute(validCommand);
+
+            // Documented kill-switch: the old behaviour is byte-identical when flipped.
+            assertThat(response.isMfaRequired()).isFalse();
+            assertThat(response.getAccessToken()).isEqualTo("legacy-access-token");
+        }
+    }
 }

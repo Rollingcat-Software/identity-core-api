@@ -2,6 +2,30 @@
 
 ## [Unreleased]
 
+### 2026-11-23 - MFA decision fails closed (#254)
+
+- `AuthenticateUserService.execute` wrapped the tenant APP_LOGIN flow lookup and
+  the enrollment-health probe in a broad `catch (Exception)` that logged and fell
+  through to the single-factor JWT mint. Any failure (repository error, lazy-load
+  failure, probe outage, MFA-session save failure) therefore downgraded an
+  MFA-required login to a single-factor session for as long as the dependency was
+  broken: an authentication decision that failed OPEN.
+- The decision now fails CLOSED: `MfaDecisionUnavailableException` aborts the
+  login before any token is minted, writes a `mfa_decision_unavailable` auth-failure
+  audit row, and `GlobalExceptionHandler` answers HTTP 503 with error code
+  `MFA_DECISION_UNAVAILABLE` (503, not 500: the client should retry). Layer-1
+  resolution under `app.auth.config-driven-login` follows the same rule instead of
+  defaulting a failed lookup to PASSWORD.
+- Reversible without a redeploy: `app.auth.mfa-fail-closed` (env
+  `APP_AUTH_MFA_FAIL_CLOSED`, default `true`). Setting it to `false` restores the
+  legacy fail-open branch. The flag is declared in `application.yml`,
+  `application-prod.yml` AND the explicit `environment:` block of
+  `docker-compose.prod.yml` (a var only in `.env.prod` would not reach the
+  container otherwise, which would make the rollback dead).
+- Regression tests: `AuthenticateUserServiceTest$MfaDecisionFailClosed` covers flow
+  lookup failure, enrollment-probe failure, Layer-1 failure and the flag-off
+  reversibility path. The fail-closed cases assert that neither token is minted.
+
 ### 2026-11-10 - Public device benchmark intake (Paper A)
 
 - New public, write-only `POST /api/v1/devbench/runs` stores one anonymous run of the

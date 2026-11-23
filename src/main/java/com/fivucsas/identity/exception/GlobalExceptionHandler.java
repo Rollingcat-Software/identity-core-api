@@ -1081,6 +1081,29 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(error);
     }
 
+    /**
+     * #254 - fail-closed MFA decision. The login could not determine whether a
+     * second factor is required (tenant APP_LOGIN flow / enrollment probe
+     * unavailable), so no token was issued. 503 (not 500) tells the client this
+     * is a transient dependency failure and a retry is the correct action;
+     * 401 would wrongly read as "wrong password" and 429 as "slow down".
+     */
+    @ExceptionHandler(MfaDecisionUnavailableException.class)
+    public ResponseEntity<ErrorResponse> handleMfaDecisionUnavailable(
+            MfaDecisionUnavailableException ex,
+            HttpServletRequest request) {
+        log.error("Login failed closed - MFA decision unavailable: path={}", request.getRequestURI(), ex);
+
+        ErrorResponse error = ErrorResponse.of(
+                HttpStatus.SERVICE_UNAVAILABLE.value(),
+                ex.getErrorCode(),
+                ex.getMessage(),
+                request.getRequestURI()
+        );
+
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(error);
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ErrorResponse> handleGenericException(
             Exception ex,
