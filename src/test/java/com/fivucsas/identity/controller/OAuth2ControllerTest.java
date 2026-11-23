@@ -310,6 +310,52 @@ class OAuth2ControllerTest {
     }
 
     @Test
+    @DisplayName("GET /api/v1/oauth2/clients/{id}/public - registered redirect_uri is reported allowed")
+    void getClientPublicMeta_WhenRedirectUriRegistered_ShouldReportAllowed() throws Exception {
+        OAuth2Client client = publicMetaClient();
+        when(client.isRedirectUriAllowed("fivucsas://callback")).thenReturn(true);
+
+        mockMvc.perform(get("/api/v1/oauth2/clients/fivucsas-mobile/public")
+                        .param("redirect_uri", "fivucsas://callback"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.client_id").value("fivucsas-mobile"))
+                .andExpect(jsonPath("$.redirect_uri_allowed").value(true));
+    }
+
+    @Test
+    @DisplayName("GET /api/v1/oauth2/clients/{id}/public - unregistered redirect_uri is reported not allowed")
+    void getClientPublicMeta_WhenRedirectUriNotRegistered_ShouldReportNotAllowed() throws Exception {
+        OAuth2Client client = publicMetaClient();
+        when(client.isRedirectUriAllowed("intent://evil#Intent;end")).thenReturn(false);
+
+        mockMvc.perform(get("/api/v1/oauth2/clients/fivucsas-mobile/public")
+                        .param("redirect_uri", "intent://evil#Intent;end"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.redirect_uri_allowed").value(false));
+    }
+
+    @Test
+    @DisplayName("GET /api/v1/oauth2/clients/{id}/public - without redirect_uri the flag is absent")
+    void getClientPublicMeta_WhenNoRedirectUri_ShouldOmitAllowedFlag() throws Exception {
+        publicMetaClient();
+
+        mockMvc.perform(get("/api/v1/oauth2/clients/fivucsas-mobile/public"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.redirect_uri_allowed").doesNotExist());
+    }
+
+    private OAuth2Client publicMetaClient() {
+        OAuth2Client client = mock(OAuth2Client.class);
+        when(client.isValid()).thenReturn(true);
+        when(client.getClientId()).thenReturn("fivucsas-mobile");
+        when(client.getClientName()).thenReturn("FIVUCSAS Mobile");
+        when(client.isCrossTenant()).thenReturn(true);
+        when(oAuth2ClientRepository.findByClientIdAndActiveTrue("fivucsas-mobile"))
+                .thenReturn(java.util.Optional.of(client));
+        return client;
+    }
+
+    @Test
     @DisplayName("POST /api/v1/oauth2/authorize/complete - missing fields return 400")
     void authorizeComplete_WhenMissingFields_ShouldReturn400() throws Exception {
         mockMvc.perform(post("/api/v1/oauth2/authorize/complete")

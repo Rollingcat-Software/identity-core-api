@@ -284,10 +284,18 @@ public class OAuth2Controller {
      *
      * Returns the publicly displayable metadata the hosted login page needs to render
      * branding ("You're signing in to ACME"). No auth required — rate-limited upstream.
+     *
+     * <p>With an optional {@code redirect_uri} the response also carries
+     * {@code redirect_uri_allowed}: whether that URI is registered for the client
+     * ({@link OAuth2Client#isRedirectUriAllowed}). The hosted page may send the user
+     * back to {@code redirect_uri} before any code is minted (Cancel, a structured
+     * OAuth error), and RFC 6749 section 4.1.2.1 forbids that for an unverified URI.
      */
     @GetMapping("/clients/{clientId}/public")
     @Operation(summary = "Public client metadata for hosted-login branding")
-    public ResponseEntity<?> getClientPublicMeta(@PathVariable("clientId") String clientId) {
+    public ResponseEntity<?> getClientPublicMeta(
+            @PathVariable("clientId") String clientId,
+            @RequestParam(value = "redirect_uri", required = false) String redirectUri) {
         OAuth2Client client = clientRepository.findByClientIdAndActiveTrue(clientId).orElse(null);
         if (client == null || !client.isValid()) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND)
@@ -305,6 +313,9 @@ public class OAuth2Controller {
                 ? "FIVUCSAS"
                 : (client.getTenant() != null ? client.getTenant().getName() : null);
         response.put("tenant_name", tenantName);
+        if (redirectUri != null) {
+            response.put("redirect_uri_allowed", client.isRedirectUriAllowed(redirectUri));
+        }
         return ResponseEntity.ok().header(HttpHeaders.CACHE_CONTROL, "public, max-age=60").body(response);
     }
 
