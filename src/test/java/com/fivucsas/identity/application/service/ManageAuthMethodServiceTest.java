@@ -215,6 +215,33 @@ class ManageAuthMethodServiceTest {
     }
 
     @Test
+    void listCatalogForTenant_includesPuzzle_forACanaryTenant_whileGlobalSwitchIsOff() {
+        // The flow builder of a canaried tenant must be able to offer PUZZLE;
+        // the global catalog (listAllMethods) still hides it.
+        when(puzzleLayerPolicy.isEnabledFor(tenantId)).thenReturn(true);
+        when(authMethodRepository.findAllByIsActiveTrue()).thenReturn(List.of(
+                method(AuthMethodType.PASSWORD),
+                method(AuthMethodType.PUZZLE)));
+
+        assertThat(service.listCatalogForTenant(tenantId)).extracting(AuthMethodResponse::type)
+                .containsExactlyInAnyOrder(AuthMethodType.PASSWORD, AuthMethodType.PUZZLE);
+        assertThat(service.listAllMethods()).extracting(AuthMethodResponse::type)
+                .containsExactly(AuthMethodType.PASSWORD);
+    }
+
+    @Test
+    void listCatalogForTenant_hidesPuzzle_forOtherTenants() {
+        // isEnabledFor(tenantId) is false by default
+        when(authMethodRepository.findAllByIsActiveTrue()).thenReturn(List.of(
+                method(AuthMethodType.PASSWORD),
+                method(AuthMethodType.PUZZLE),
+                method(AuthMethodType.LIVENESS_CHECK)));
+
+        assertThat(service.listCatalogForTenant(tenantId)).extracting(AuthMethodResponse::type)
+                .containsExactly(AuthMethodType.PASSWORD);
+    }
+
+    @Test
     void listTenantMethods_excludesPuzzle_whenPolicyOffForTenant() {
         // puzzleLayerPolicy.isEnabledFor(tenantId) returns false by default
         when(tenantAuthMethodRepository.findAllByTenantId(tenantId)).thenReturn(List.of(

@@ -50,9 +50,21 @@ public class ManageAuthMethodService implements ManageAuthMethodUseCase {
         // uses isEnabledFor(tenantId) so a canary tenant sees PUZZLE while the
         // master switch is still off. Do NOT "align" this to isEnabledFor here —
         // that would widen the global catalog to every non-canary tenant.
+        return loginCatalog(puzzleLayerPolicy.isGloballyEnabled());
+    }
+
+    @Override
+    public List<AuthMethodResponse> listCatalogForTenant(UUID tenantId) {
+        // Tenant-scoped twin of listAllMethods(): here the tenant IS known, so a
+        // canary tenant's flow builder can offer PUZZLE while the master switch
+        // stays off. Every other tenant gets exactly the global catalog.
+        return loginCatalog(puzzleLayerPolicy.isEnabledFor(tenantId));
+    }
+
+    private List<AuthMethodResponse> loginCatalog(boolean puzzleVisible) {
         return authMethodRepository.findAllByIsActiveTrue().stream()
                 .filter(m -> m.getType() != null && m.getType().isLoginMethod())
-                .filter(m -> m.getType() != AuthMethodType.PUZZLE || puzzleLayerPolicy.isGloballyEnabled())
+                .filter(m -> m.getType() != AuthMethodType.PUZZLE || puzzleVisible)
                 .map(AuthMethodResponse::from)
                 .toList();
     }
