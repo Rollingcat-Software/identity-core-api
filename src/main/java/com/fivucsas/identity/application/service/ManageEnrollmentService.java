@@ -315,6 +315,25 @@ public class ManageEnrollmentService implements ManageEnrollmentUseCase {
                 .findByUserIdAndAuthMethodType(userId, methodType)
                 .orElseThrow(() -> new EntityNotFoundException("Enrollment not found for user: " + userId + " method: " + methodType));
 
+        revokeLoadedEnrollment(enrollment, userId, methodType);
+    }
+
+    /**
+     * #299 - idempotent revoke used by the WebAuthn credential lifecycle. The
+     * existence check and the revoke are one operation on the loaded row (no
+     * check-then-throw race), and {@code REQUIRES_NEW} keeps any failure out of
+     * the caller's transaction: a missing row or a DB error can no longer mark
+     * the credential delete rollback-only (the old
+     * {@code UnexpectedRollbackException} -> HTTP 500).
+     */
+    @Override
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void revokeEnrollmentIfPresent(UUID userId, AuthMethodType methodType) {
+        userEnrollmentRepository.findByUserIdAndAuthMethodType(userId, methodType)
+                .ifPresent(enrollment -> revokeLoadedEnrollment(enrollment, userId, methodType));
+    }
+
+    private void revokeLoadedEnrollment(UserEnrollment enrollment, UUID userId, AuthMethodType methodType) {
         // Clean up backing data for methods that have external storage
         if (BIOMETRIC_TYPES.contains(methodType)) {
             deleteBiometricData(userId, methodType);

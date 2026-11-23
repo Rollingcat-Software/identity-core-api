@@ -153,7 +153,27 @@ class WebAuthnCredentialServiceTest {
             service.deleteById(id);
 
             verify(credentialRepository).deleteById(id);
-            verify(manageEnrollmentUseCase).revokeEnrollment(userId, AuthMethodType.FINGERPRINT);
+            verify(manageEnrollmentUseCase).revokeEnrollmentIfPresent(userId, AuthMethodType.FINGERPRINT);
+        }
+
+        @Test
+        @DisplayName("#299: last platform credential uses the idempotent revoke, never the throwing one")
+        void lastPlatformCredentialUsesIdempotentRevoke() {
+            UUID id = UUID.randomUUID();
+            WebAuthnCredential c = mock(WebAuthnCredential.class);
+            when(c.getUser()).thenReturn(user);
+            when(c.getTransports()).thenReturn("internal");
+            when(credentialRepository.findById(id)).thenReturn(Optional.of(c));
+            when(credentialRepository.findAllByUserId(userId)).thenReturn(List.of());
+
+            service.deleteById(id);
+
+            verify(credentialRepository).deleteById(id);
+            // The throwing @Transactional revoke would mark the delete transaction
+            // rollback-only when the enrollment row is absent; the idempotent
+            // variant no-ops in its own transaction instead.
+            verify(manageEnrollmentUseCase).revokeEnrollmentIfPresent(userId, AuthMethodType.FINGERPRINT);
+            verify(manageEnrollmentUseCase, never()).revokeEnrollment(any(), any());
         }
 
         @Test
@@ -174,6 +194,7 @@ class WebAuthnCredentialServiceTest {
 
             verify(credentialRepository).deleteById(id);
             verify(manageEnrollmentUseCase, never()).revokeEnrollment(any(), any());
+            verify(manageEnrollmentUseCase, never()).revokeEnrollmentIfPresent(any(), any());
         }
 
         @Test
@@ -205,7 +226,23 @@ class WebAuthnCredentialServiceTest {
             service.deleteByCredentialId("credId");
 
             verify(credentialRepository).deleteByCredentialId("credId");
-            verify(manageEnrollmentUseCase).revokeEnrollment(userId, AuthMethodType.FINGERPRINT);
+            verify(manageEnrollmentUseCase).revokeEnrollmentIfPresent(userId, AuthMethodType.FINGERPRINT);
+        }
+
+        @Test
+        @DisplayName("#299: last platform credential uses the idempotent revoke (parity with deleteById)")
+        void lastPlatformCredentialUsesIdempotentRevoke() {
+            WebAuthnCredential c = mock(WebAuthnCredential.class);
+            when(c.getUser()).thenReturn(user);
+            when(c.getTransports()).thenReturn("internal");
+            when(credentialRepository.findByCredentialId("credId")).thenReturn(Optional.of(c));
+            when(credentialRepository.findAllByUserId(userId)).thenReturn(List.of());
+
+            service.deleteByCredentialId("credId");
+
+            verify(credentialRepository).deleteByCredentialId("credId");
+            verify(manageEnrollmentUseCase).revokeEnrollmentIfPresent(userId, AuthMethodType.FINGERPRINT);
+            verify(manageEnrollmentUseCase, never()).revokeEnrollment(any(), any());
         }
 
         @Test
@@ -225,6 +262,7 @@ class WebAuthnCredentialServiceTest {
 
             verify(credentialRepository).deleteByCredentialId("credId");
             verify(manageEnrollmentUseCase, never()).revokeEnrollment(any(), any());
+            verify(manageEnrollmentUseCase, never()).revokeEnrollmentIfPresent(any(), any());
         }
 
         @Test

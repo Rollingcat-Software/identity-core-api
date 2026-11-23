@@ -152,10 +152,21 @@ public class WebAuthnCredentialService {
         });
 
         if (!anyOfSameType) {
+            // #299 - a passkey can exist WITHOUT a FINGERPRINT / HARDWARE_KEY
+            // enrollment row. Call the idempotent variant: it no-ops when the row
+            // is absent and runs in its own transaction, so neither a missing row
+            // nor a DB error can mark THIS credential-delete transaction
+            // rollback-only (the old revokeEnrollment call threw, the commit
+            // answered 500 with UnexpectedRollbackException, and the credential
+            // stayed). The existence check and the revoke are one operation, so a
+            // concurrent delete of the row cannot reopen the race.
             try {
-                manageEnrollmentUseCase.revokeEnrollment(userId, methodType);
-                log.info("Auto-revoked {} enrollment for user {} after last credential deleted", methodType, userId);
+                manageEnrollmentUseCase.revokeEnrollmentIfPresent(userId, methodType);
+                log.info("Auto-revoked {} enrollment for user {} after last credential deleted (no-op if absent)",
+                        methodType, userId);
             } catch (Exception e) {
+                // The revoke runs in REQUIRES_NEW, so a failure here is logged and
+                // does not roll back the credential delete.
                 log.warn("Failed to revoke {} enrollment for user {} after credential deletion: {}",
                         methodType, userId, e.getMessage());
             }
