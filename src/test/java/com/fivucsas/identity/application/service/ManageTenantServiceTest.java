@@ -15,13 +15,16 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -68,6 +71,40 @@ class ManageTenantServiceTest {
         return Tenant.reconstitute(UUID.randomUUID(), t.getName(), t.getSlug(),
                 t.getDescription(), t.getContactEmail(), t.getContactPhone(),
                 t.getStatus(), t.getConfiguration(), t.getCreatedAt(), t.getUpdatedAt());
+    }
+
+    private static Tenant tenantWithId(UUID id, String slug) {
+        java.time.Instant now = java.time.Instant.now();
+        return Tenant.reconstitute(id, "Tenant " + slug, slug, null, slug + "@example.test",
+                null, com.fivucsas.identity.domain.model.tenant.TenantStatus.ACTIVE,
+                com.fivucsas.identity.domain.model.tenant.TenantConfiguration.defaultConfiguration(),
+                now, now);
+    }
+
+    @Test
+    @DisplayName("#233 regression: the tenant LIST counts each tenant's own members with tenantFilter suppressed")
+    void getAllTenantsCountsEveryTenantsMembers() {
+        Tenant alpha = tenantWithId(UUID.randomUUID(), "alpha");
+        Tenant beta = tenantWithId(UUID.randomUUID(), "beta");
+
+        when(tenantRepository.findAll()).thenReturn(List.of(alpha, beta));
+        when(userRepository.countByTenantId(alpha.getId())).thenReturn(2L);
+        when(userRepository.countByTenantId(beta.getId())).thenReturn(7L);
+
+        var responses = service.getAllTenants();
+
+        // Before #203's fix the Hibernate tenantFilter injected the CALLER's
+        // tenant into this COUNT, so every other tenant read 0. The count must
+        // now run under TenantFilterBypass and stay pinned to the mapped tenant.
+        assertThat(responses).hasSize(2);
+        assertThat(responses.get(0).getId()).isEqualTo(alpha.getId().toString());
+        assertThat(responses.get(0).getCurrentUsers()).isEqualTo(2);
+        assertThat(responses.get(1).getId()).isEqualTo(beta.getId().toString());
+        assertThat(responses.get(1).getCurrentUsers()).isEqualTo(7);
+
+        verify(tenantFilterBypass, times(2)).runWithoutTenantFilter(any());
+        verify(userRepository).countByTenantId(alpha.getId());
+        verify(userRepository).countByTenantId(beta.getId());
     }
 
     private CreateTenantCommand createCommand() {

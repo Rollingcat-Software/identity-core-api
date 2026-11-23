@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### 2026-11-23 - Regression test for the tenant member count (#233)
+
+- The production fix for #233 landed in #203: `ManageTenantService.mapToResponse`
+  counts members through `TenantFilterBypass.runWithoutTenantFilter`, so a ROOT/admin
+  browsing the tenant list no longer reads every other tenant as 0 members (the
+  Hibernate `tenantFilter` used to inject the caller's tenant into the COUNT). The
+  issue stayed open without a regression test.
+- Added `ManageTenantServiceTest#getAllTenantsCountsEveryTenantsMembers`: two tenants
+  with different counts; asserts each response carries its own count and that the
+  COUNT for each tenant runs under the bypass. The test fails if the bypass is ever
+  removed from `mapToResponse`. No production change in this PR.
+
 ### 2026-11-10 - Public device benchmark intake (Paper A)
 
 - New public, write-only `POST /api/v1/devbench/runs` stores one anonymous run of the
