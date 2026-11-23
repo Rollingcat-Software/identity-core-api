@@ -5,6 +5,7 @@ import com.fivucsas.identity.application.port.output.BiometricServicePort;
 import com.fivucsas.identity.application.service.ClientSideEmbeddingPolicy;
 import com.fivucsas.identity.application.service.FaceEmbeddingLivenessPolicy;
 import com.fivucsas.identity.application.service.mfa.LivenessEmbeddingDigest;
+import com.fivucsas.identity.application.service.mfa.MfaFailureReasons;
 import com.fivucsas.identity.application.service.mfa.MfaStepResult;
 import com.fivucsas.identity.entity.MfaSession;
 import com.fivucsas.identity.entity.User;
@@ -138,6 +139,58 @@ class FaceVerifyMfaStepHandlerTest {
         MfaStepResult result = handler.verify(session, user, Map.of("embedding", EMBEDDING));
 
         assertThat(result.valid()).isFalse();
+    }
+
+    @Test
+    void verify_WhenEmbeddingPathServerRejects_ShouldReportFaceMismatchReason() {
+        when(bio.verifyEmbedding(any(), eq(USER_ID), any()))
+                .thenReturn(Map.of("verified", false));
+        FaceVerifyMfaStepHandler handler = handlerWithPolicy(true);
+
+        MfaStepResult result = handler.verify(session, user, Map.of("embedding", EMBEDDING));
+
+        assertThat(result.failureReason()).isEqualTo(MfaFailureReasons.FACE_MISMATCH);
+    }
+
+    @Test
+    void verify_WhenImagePathServerRejects_ShouldReportFaceMismatchReason() {
+        when(bio.verifyFace(eq(USER_ID), any())).thenReturn(Map.of("verified", false));
+        FaceVerifyMfaStepHandler handler = handlerWithPolicy(false);
+
+        MfaStepResult result = handler.verify(session, user, Map.of("image", IMAGE_B64));
+
+        assertThat(result.failureReason()).isEqualTo(MfaFailureReasons.FACE_MISMATCH);
+    }
+
+    @Test
+    void verify_WhenSpoofDetected_ShouldReportSpoofReason() {
+        when(bio.verifyEmbedding(any(), eq(USER_ID), any()))
+                .thenReturn(Map.of("error_code", "SPOOF_DETECTED"));
+        FaceVerifyMfaStepHandler handler = handlerWithPolicy(true);
+
+        MfaStepResult result = handler.verify(session, user, Map.of("embedding", EMBEDDING));
+
+        assertThat(result.failureReason()).isEqualTo(MfaFailureReasons.FACE_SPOOF_DETECTED);
+    }
+
+    @Test
+    void verify_WhenVerifierReturnsNoVerdict_ShouldReportNoVerdictReason() {
+        when(bio.verifyEmbedding(any(), eq(USER_ID), any()))
+                .thenReturn(Map.of("distance", 0.3));
+        FaceVerifyMfaStepHandler handler = handlerWithPolicy(true);
+
+        MfaStepResult result = handler.verify(session, user, Map.of("embedding", EMBEDDING));
+
+        assertThat(result.failureReason()).isEqualTo(MfaFailureReasons.FACE_VERIFIER_NO_VERDICT);
+    }
+
+    @Test
+    void verify_WhenNoImageAndNoEmbedding_ShouldReportMissingFaceImage() {
+        FaceVerifyMfaStepHandler handler = handlerWithPolicy(true);
+
+        MfaStepResult result = handler.verify(session, user, Map.of());
+
+        assertThat(result.failureReason()).isEqualTo(MfaFailureReasons.MISSING_FACE_IMAGE);
     }
 
     @Test
