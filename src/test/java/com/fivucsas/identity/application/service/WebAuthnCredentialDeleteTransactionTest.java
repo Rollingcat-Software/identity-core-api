@@ -17,6 +17,7 @@ import org.springframework.test.context.junit.jupiter.SpringJUnitConfig;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.EnableTransactionManagement;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.AbstractPlatformTransactionManager;
 import org.springframework.transaction.support.DefaultTransactionStatus;
@@ -48,9 +49,10 @@ import static org.mockito.Mockito.when;
  * transaction interceptor, using a resource-less
  * {@link AbstractPlatformTransactionManager}. That reproduces the
  * rollback-only propagation without a database: with the old code the service
- * calls {@code revokeEnrollment}, the collaborator throws, the outer commit
- * fails; with the fix the service asks {@link ManageEnrollmentUseCase#hasEnrollment}
- * first, finds no row, and the delete commits normally.</p>
+ * calls {@code revokeEnrollment} in the shared transaction, the collaborator
+ * throws, the outer commit fails; with the fix the service calls
+ * {@link ManageEnrollmentUseCase#revokeEnrollmentIfPresent}, which no-ops on a
+ * missing row and runs in {@code REQUIRES_NEW}, so the delete commits.</p>
  */
 @SpringJUnitConfig(WebAuthnCredentialDeleteTransactionTest.Config.class)
 @DisplayName("#299 - last-passkey delete must not roll back on a missing enrollment row")
@@ -143,6 +145,26 @@ class WebAuthnCredentialDeleteTransactionTest {
     }
 
     @Test
+    @DisplayName("a failure inside the auto-revoke is isolated in REQUIRES_NEW and cannot roll back the delete")
+    void revokeFailureDoesNotRollBackTheDelete() {
+        UUID credentialId = UUID.randomUUID();
+        UUID ownerId = UUID.randomUUID();
+        WebAuthnCredential credential = credential(ownerId);
+
+        when(credentialRepository.findById(credentialId)).thenReturn(Optional.of(credential));
+        when(credentialRepository.findAllByUserId(ownerId)).thenReturn(List.of());
+        enrollmentState.enrollmentRowExists = true;
+        enrollmentState.throwOnRevoke = true; // the old same-transaction call would poison the commit
+
+        assertThatCode(() -> service.deleteById(credentialId))
+                .as("a failing best-effort revoke must not roll back the credential delete")
+                .doesNotThrowAnyException();
+
+        verify(credentialRepository).deleteById(credentialId);
+        assertThat(enrollmentState.revokeCalls).isEqualTo(1);
+    }
+
+    @Test
     @DisplayName("last platform credential + existing FINGERPRINT row ⇒ revoke still runs (positive control)")
     void deletingLastCredentialWithEnrollmentRowRevokes() {
         UUID credentialId = UUID.randomUUID();
@@ -173,8 +195,16 @@ class WebAuthnCredentialDeleteTransactionTest {
         }
 
         @Override
-        public boolean hasEnrollment(UUID userId, AuthMethodType methodType) {
-            return state.enrollmentRowExists;
+        @Transactional(propagation = Propagation.REQUIRES_NEW)
+        public void revokeEnrollmentIfPresent(UUID userId, AuthMethodType methodType) {
+            if (!state.enrollmentRowExists) {
+                return;
+            }
+            state.revokeCalls++;
+            if (state.throwOnRevoke) {
+                throw new EntityNotFoundException(
+                        "Enrollment not found for user: " + userId + " method: " + methodType);
+            }
         }
 
         @Override
@@ -239,6 +269,22 @@ class WebAuthnCredentialDeleteTransactionTest {
         @Override
         protected boolean isExistingTransaction(Object transaction) {
             return ((TestTransaction) transaction).active;
+        }
+
+        /**
+         * REQUIRES_NEW suspends the caller's transaction. Detach it so the inner
+         * transaction starts with its own handle and cannot share rollback-only.
+         */
+        @Override
+        protected Object doSuspend(Object transaction) {
+            TestTransaction suspended = (TestTransaction) transaction;
+            current.remove();
+            return suspended;
+        }
+
+        @Override
+        protected void doResume(Object transaction, Object suspendedResources) {
+            current.set((TestTransaction) suspendedResources);
         }
 
         @Override

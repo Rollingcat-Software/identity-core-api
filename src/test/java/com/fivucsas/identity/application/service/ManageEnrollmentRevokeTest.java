@@ -23,6 +23,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
@@ -426,23 +427,33 @@ class ManageEnrollmentRevokeTest {
         verify(userEnrollmentRepository).save(enrollment);
     }
 
-    // ── Enrollment existence probe (#299) ───────────────────────────────
+    // ── Idempotent revoke for the credential lifecycle (#299) ───────────
 
     @Test
-    void hasEnrollment_WhenRowExists_ShouldReturnTrue() {
-        when(userEnrollmentRepository.findByUserIdAndAuthMethodType(userId, AuthMethodType.FINGERPRINT))
-                .thenReturn(Optional.of(mock(UserEnrollment.class)));
-
-        assertThat(service.hasEnrollment(userId, AuthMethodType.FINGERPRINT)).isTrue();
-    }
-
-    @Test
-    void hasEnrollment_WhenRowMissing_ShouldReturnFalseWithoutThrowing() {
+    void revokeEnrollmentIfPresent_WhenRowMissing_ShouldNoOpWithoutThrowing() {
         when(userEnrollmentRepository.findByUserIdAndAuthMethodType(userId, AuthMethodType.FINGERPRINT))
                 .thenReturn(Optional.empty());
 
-        assertThat(service.hasEnrollment(userId, AuthMethodType.FINGERPRINT)).isFalse();
+        // The old revokeEnrollment threw here; from a @Transactional proxy that
+        // marked the caller's credential-delete transaction rollback-only.
+        assertThatCode(() -> service.revokeEnrollmentIfPresent(userId, AuthMethodType.FINGERPRINT))
+                .doesNotThrowAnyException();
+
+        verify(userEnrollmentRepository, never()).save(any());
         verifyNoInteractions(biometricServicePort, nfcCardRepository, webAuthnCredentialRepository);
+    }
+
+    @Test
+    void revokeEnrollmentIfPresent_WhenRowExists_ShouldRevoke() {
+        UserEnrollment enrollment = mock(UserEnrollment.class);
+        when(userEnrollmentRepository.findByUserIdAndAuthMethodType(userId, AuthMethodType.FINGERPRINT))
+                .thenReturn(Optional.of(enrollment));
+        when(webAuthnCredentialRepository.findAllByUserId(userId)).thenReturn(List.of());
+
+        service.revokeEnrollmentIfPresent(userId, AuthMethodType.FINGERPRINT);
+
+        verify(enrollment).revoke();
+        verify(userEnrollmentRepository).save(enrollment);
     }
 
     // ── Enrollment not found ────────────────────────────────────────────

@@ -149,31 +149,30 @@ class WebAuthnCredentialServiceTest {
             when(c.getTransports()).thenReturn("internal");
             when(credentialRepository.findById(id)).thenReturn(Optional.of(c));
             when(credentialRepository.findAllByUserId(userId)).thenReturn(List.of());
-            when(manageEnrollmentUseCase.hasEnrollment(userId, AuthMethodType.FINGERPRINT)).thenReturn(true);
 
             service.deleteById(id);
 
             verify(credentialRepository).deleteById(id);
-            verify(manageEnrollmentUseCase).revokeEnrollment(userId, AuthMethodType.FINGERPRINT);
+            verify(manageEnrollmentUseCase).revokeEnrollmentIfPresent(userId, AuthMethodType.FINGERPRINT);
         }
 
         @Test
-        @DisplayName("#299: last platform credential WITHOUT a FINGERPRINT row ⇒ no revoke call, delete proceeds")
-        void lastPlatformCredentialWithoutEnrollmentRowSkipsRevoke() {
+        @DisplayName("#299: last platform credential uses the idempotent revoke, never the throwing one")
+        void lastPlatformCredentialUsesIdempotentRevoke() {
             UUID id = UUID.randomUUID();
             WebAuthnCredential c = mock(WebAuthnCredential.class);
             when(c.getUser()).thenReturn(user);
             when(c.getTransports()).thenReturn("internal");
             when(credentialRepository.findById(id)).thenReturn(Optional.of(c));
             when(credentialRepository.findAllByUserId(userId)).thenReturn(List.of());
-            when(manageEnrollmentUseCase.hasEnrollment(userId, AuthMethodType.FINGERPRINT)).thenReturn(false);
 
             service.deleteById(id);
 
             verify(credentialRepository).deleteById(id);
-            // The missing row must be detected BEFORE calling the @Transactional
-            // revoke, which would otherwise mark the delete transaction
-            // rollback-only and surface as a 500.
+            // The throwing @Transactional revoke would mark the delete transaction
+            // rollback-only when the enrollment row is absent; the idempotent
+            // variant no-ops in its own transaction instead.
+            verify(manageEnrollmentUseCase).revokeEnrollmentIfPresent(userId, AuthMethodType.FINGERPRINT);
             verify(manageEnrollmentUseCase, never()).revokeEnrollment(any(), any());
         }
 
@@ -195,6 +194,7 @@ class WebAuthnCredentialServiceTest {
 
             verify(credentialRepository).deleteById(id);
             verify(manageEnrollmentUseCase, never()).revokeEnrollment(any(), any());
+            verify(manageEnrollmentUseCase, never()).revokeEnrollmentIfPresent(any(), any());
         }
 
         @Test
@@ -222,27 +222,26 @@ class WebAuthnCredentialServiceTest {
             when(c.getTransports()).thenReturn("internal");
             when(credentialRepository.findByCredentialId("credId")).thenReturn(Optional.of(c));
             when(credentialRepository.findAllByUserId(userId)).thenReturn(List.of());
-            when(manageEnrollmentUseCase.hasEnrollment(userId, AuthMethodType.FINGERPRINT)).thenReturn(true);
 
             service.deleteByCredentialId("credId");
 
             verify(credentialRepository).deleteByCredentialId("credId");
-            verify(manageEnrollmentUseCase).revokeEnrollment(userId, AuthMethodType.FINGERPRINT);
+            verify(manageEnrollmentUseCase).revokeEnrollmentIfPresent(userId, AuthMethodType.FINGERPRINT);
         }
 
         @Test
-        @DisplayName("#299: last platform credential WITHOUT a FINGERPRINT row ⇒ no revoke call (parity with deleteById)")
-        void lastPlatformCredentialWithoutEnrollmentRowSkipsRevoke() {
+        @DisplayName("#299: last platform credential uses the idempotent revoke (parity with deleteById)")
+        void lastPlatformCredentialUsesIdempotentRevoke() {
             WebAuthnCredential c = mock(WebAuthnCredential.class);
             when(c.getUser()).thenReturn(user);
             when(c.getTransports()).thenReturn("internal");
             when(credentialRepository.findByCredentialId("credId")).thenReturn(Optional.of(c));
             when(credentialRepository.findAllByUserId(userId)).thenReturn(List.of());
-            when(manageEnrollmentUseCase.hasEnrollment(userId, AuthMethodType.FINGERPRINT)).thenReturn(false);
 
             service.deleteByCredentialId("credId");
 
             verify(credentialRepository).deleteByCredentialId("credId");
+            verify(manageEnrollmentUseCase).revokeEnrollmentIfPresent(userId, AuthMethodType.FINGERPRINT);
             verify(manageEnrollmentUseCase, never()).revokeEnrollment(any(), any());
         }
 
@@ -263,6 +262,7 @@ class WebAuthnCredentialServiceTest {
 
             verify(credentialRepository).deleteByCredentialId("credId");
             verify(manageEnrollmentUseCase, never()).revokeEnrollment(any(), any());
+            verify(manageEnrollmentUseCase, never()).revokeEnrollmentIfPresent(any(), any());
         }
 
         @Test
