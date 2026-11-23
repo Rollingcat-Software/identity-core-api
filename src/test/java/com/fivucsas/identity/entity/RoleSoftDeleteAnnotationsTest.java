@@ -1,5 +1,7 @@
 package com.fivucsas.identity.entity;
 
+import org.hibernate.annotations.NotFound;
+import org.hibernate.annotations.NotFoundAction;
 import org.hibernate.annotations.SQLRestriction;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -48,6 +50,21 @@ class RoleSoftDeleteAnnotationsTest {
         jakarta.persistence.Column col = deletedAt.getAnnotation(jakarta.persistence.Column.class);
         assertThat(col).as("deletedAt must be mapped").isNotNull();
         assertThat(col.name()).isEqualTo("deleted_at");
+    }
+
+    @Test
+    void userRole_roleProxy_toleratesASoftDeletedRole() throws Exception {
+        // With the restriction, initializing a lazy Role proxy to a soft-deleted
+        // row throws EntityNotFoundException. Login/refresh//auth/me call
+        // UserRole.isValid() -> role.isActive(), so a leftover grant would become
+        // a 500 without @NotFound(IGNORE); isValid() then sees null and skips it.
+        Field role = UserRole.class.getDeclaredField("role");
+        NotFound notFound = role.getAnnotation(NotFound.class);
+
+        assertThat(notFound)
+            .as("UserRole.role must be @NotFound(IGNORE) now that Role is filtered")
+            .isNotNull();
+        assertThat(notFound.action()).isEqualTo(NotFoundAction.IGNORE);
     }
 
     @Test
