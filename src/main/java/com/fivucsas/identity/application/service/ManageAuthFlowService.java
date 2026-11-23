@@ -6,6 +6,7 @@ import com.fivucsas.identity.application.dto.response.AuthFlowResponse;
 import com.fivucsas.identity.application.port.input.ManageAuthFlowUseCase;
 import com.fivucsas.identity.domain.model.auth.AuthMethodType;
 import com.fivucsas.identity.domain.model.auth.OperationType;
+import com.fivucsas.identity.domain.model.auth.PuzzleChallengeType;
 import com.fivucsas.identity.application.port.output.AuthFlowRepositoryPort;
 import com.fivucsas.identity.application.port.output.AuthFlowStepRepositoryPort;
 import com.fivucsas.identity.application.port.output.AuthMethodRepositoryPort;
@@ -21,7 +22,10 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
@@ -104,6 +108,7 @@ public class ManageAuthFlowService implements ManageAuthFlowUseCase {
             // login enforcement would later block that method and strand any
             // user the flow routes through it. 422 with the offending method(s).
             validateNoDisabledMethods(tenantId, command.steps());
+            validatePuzzleStepConfigs(command.steps());
             for (CreateAuthFlowCommand.FlowStepSpec stepSpec : command.steps()) {
                 AuthMethodType methodType = AuthMethodType.valueOf(stepSpec.authMethodType());
                 AuthMethod method = authMethodRepository.findByType(methodType)
@@ -178,6 +183,7 @@ public class ManageAuthFlowService implements ManageAuthFlowUseCase {
         boolean becomingActive = command.isActive() != null && command.isActive();
         if (becomingDefault || becomingActive) {
             validateExistingFlowHasNoDisabledMethods(tenantId, flow);
+            validateExistingPuzzleStepConfigs(flow);
         }
         if (becomingDefault) {
             dethroneExistingDefault(tenantId, flow.getOperationType(), flow.getId());
@@ -379,6 +385,71 @@ public class ManageAuthFlowService implements ManageAuthFlowUseCase {
 
         log.debug("First-step structural check passed (method={}, {} step(s))",
                 firstStep.authMethodType(), steps.size());
+    }
+
+    /**
+     * A PUZZLE layer must carry its settings in the one shape every reader
+     * accepts ({@link PuzzleStepConfig}: {@code {"puzzleConfig":{...}}} with a
+     * non-empty allow-list). Rejecting anything else here (HTTP 400) keeps a
+     * mis-shaped flow from being saved and then failing closed at every login.
+     */
+    private void validatePuzzleStepConfigs(List<CreateAuthFlowCommand.FlowStepSpec> steps) {
+        checkPuzzleLayers(steps.stream()
+                .filter(ManageAuthFlowService::isPuzzleLayer)
+                .map(s -> new PuzzleLayer(s.stepOrder(), s.config()))
+                .toList());
+    }
+
+    /**
+     * Same check for a flow already stored (it may predate the guard) at the
+     * moment it joins the live login surface (made default or activated).
+     */
+    private void validateExistingPuzzleStepConfigs(AuthFlow flow) {
+        checkPuzzleLayers(flow.getSteps().stream()
+                .filter(step -> step.getAvailableMethods().stream()
+                        .filter(java.util.Objects::nonNull)
+                        .anyMatch(m -> m.getType() == AuthMethodType.PUZZLE))
+                .map(step -> new PuzzleLayer(step.getStepOrder(), step.getConfig()))
+                .toList());
+    }
+
+    private record PuzzleLayer(int stepOrder, String config) {}
+
+    /**
+     * Rejects (HTTP 400) a PUZZLE layer whose config has another shape, no
+     * challenge, or a challenge type bio does not know: each of these makes
+     * every login through the layer fail closed.
+     */
+    private static void checkPuzzleLayers(List<PuzzleLayer> layers) {
+        List<String> badShape = new ArrayList<>();
+        List<String> unknownTypes = new ArrayList<>();
+        for (PuzzleLayer layer : layers) {
+            Optional<PuzzleStepConfig> cfg = PuzzleStepConfig.parse(layer.config())
+                    .filter(PuzzleStepConfig::hasChallenges);
+            if (cfg.isEmpty()) {
+                badShape.add("Layer " + layer.stepOrder());
+            } else if (!cfg.get().unknownChallengeTypes().isEmpty()) {
+                unknownTypes.add("Layer " + layer.stepOrder() + " " + cfg.get().unknownChallengeTypes());
+            }
+        }
+        if (!badShape.isEmpty()) {
+            throw new IllegalArgumentException(
+                    "PUZZLE layers need a config of the form "
+                    + "{\"puzzleConfig\":{\"allowedChallengeTypes\":[...],\"count\":N,...}} "
+                    + "with at least one challenge type: " + badShape);
+        }
+        if (!unknownTypes.isEmpty()) {
+            throw new IllegalArgumentException(
+                    "PUZZLE layers list unknown challenge types " + unknownTypes
+                    + "; allowed: " + Arrays.stream(PuzzleChallengeType.values())
+                            .map(PuzzleChallengeType::wireValue).toList());
+        }
+    }
+
+    private static boolean isPuzzleLayer(CreateAuthFlowCommand.FlowStepSpec s) {
+        String puzzle = AuthMethodType.PUZZLE.name();
+        return puzzle.equals(s.authMethodType())
+                || (s.alternativeMethodTypes() != null && s.alternativeMethodTypes().contains(puzzle));
     }
 
     private void validateNoRequiredUnsupportedMethods(List<CreateAuthFlowCommand.FlowStepSpec> steps) {

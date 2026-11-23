@@ -232,6 +232,12 @@ app:
     outbox:
       enabled: ${APP_BIOMETRIC_DELETION_OUTBOX_ENABLED:true}
       max-attempts: ${APP_BIOMETRIC_DELETION_OUTBOX_MAX_ATTEMPTS:10}
+  # Public device benchmark intake (V89, POST /api/v1/devbench/runs). enabled=false
+  # answers 503 to every submission without a rebuild; daily-cap bounds accepted rows
+  # per UTC day across all clients (the per-IP cap lives in RateLimitFilter).
+  devbench:
+    enabled: ${APP_DEVBENCH_ENABLED:true}
+    daily-cap: ${APP_DEVBENCH_DAILY_CAP:5000}
   # WebAuthn allowed RP origins (P1-2). Exact-match, case-sensitive (RFC 6454 §4).
   # Any origin not in this list is rejected. Override with WEBAUTHN_ALLOWED_ORIGINS
   # (comma-separated) per environment. Default profile retains prod hosts plus

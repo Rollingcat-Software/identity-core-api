@@ -69,6 +69,8 @@ services:
       # deleting a user removes their face/voice templates in biometric-processor.
       # false = pause draining only (rows stay queued). Independent of the purge flag.
       APP_BIOMETRIC_DELETION_OUTBOX_ENABLED: ${APP_BIOMETRIC_DELETION_OUTBOX_ENABLED:-true}
+      APP_DEVBENCH_ENABLED: ${APP_DEVBENCH_ENABLED:-true}
+      APP_DEVBENCH_DAILY_CAP: ${APP_DEVBENCH_DAILY_CAP:-5000}
       # Config-driven login engine kill-switch (task #16, ships DARK 2026-05-30).
       # Default OFF = byte-identical legacy password-first login. Reversible via
       # .env.prod + `up -d` recreate (no image rebuild). Roll out dark → staging

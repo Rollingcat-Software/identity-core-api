@@ -9,6 +9,13 @@ import java.util.UUID;
 
 public interface ManageAuthMethodUseCase {
     List<AuthMethodResponse> listAllMethods();
+
+    /**
+     * The login-method catalog as one tenant's flow builder must see it: the
+     * global catalog, plus PUZZLE when the PUZZLE layer is enabled for that
+     * tenant (global switch or per-tenant canary list).
+     */
+    List<AuthMethodResponse> listCatalogForTenant(UUID tenantId);
     AuthMethodResponse getMethodByType(AuthMethodType type);
     List<TenantAuthMethodResponse> listTenantMethods(UUID tenantId);
 
