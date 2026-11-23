@@ -12,6 +12,7 @@ import com.fivucsas.identity.entity.Tenant;
 import com.fivucsas.identity.application.port.output.PermissionRepositoryPort;
 import com.fivucsas.identity.application.port.output.RoleRepositoryPort;
 import com.fivucsas.identity.repository.JpaTenantRepository;
+import com.fivucsas.identity.repository.UserRoleRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -34,6 +35,10 @@ public class ManageRoleService implements ManageRoleUseCase {
     private final RoleRepositoryPort roleRepository;
     private final PermissionRepositoryPort permissionRepository;
     private final JpaTenantRepository tenantRepository;
+    // #242 - a soft-deleted role with @SQLRestriction cannot be loaded again, so
+    // any user_roles row left behind is an unrevokable dangling grant. Clear the
+    // assignments in the same transaction as the soft delete.
+    private final UserRoleRepository userRoleRepository;
 
     @Override
     @Transactional
@@ -168,7 +173,13 @@ public class ManageRoleService implements ManageRoleUseCase {
             throw new SystemRoleModificationException(role.getName());
         }
 
-        // Soft delete
+        // Soft delete. #242: clear the grants in the SAME transaction. With the new
+// @SQLRestriction on Role, a leftover user_roles row would point at a role that
+// findById can no longer load: the admin could neither see nor revoke the
+// grant, and the holder's lazy proxy would need @NotFound(IGNORE) to avoid a
+// 500 on login. Deleting the assignments matches the old effective behaviour
+// (softDelete already made the role inactive, so isValid() was false).
+        userRoleRepository.deleteAllByRoleId(uuid);
         role.softDelete();
         roleRepository.save(role);
         log.info("Role soft-deleted successfully: {}", roleId);

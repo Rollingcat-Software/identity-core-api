@@ -2,6 +2,38 @@
 
 ## [Unreleased]
 
+### 2026-11-23 - Role entity filters soft-deleted rows (#242)
+
+- `Role.softDelete()` stamps `deleted_at` and clears `is_active`, but the entity had no
+  read-side soft-delete guard, unlike `User`, `Tenant` and `UserEnrollment`. Tombstoned
+  roles therefore kept appearing in `findById` / `findAll` / `findByTenantId` results,
+  role lists and join-to-Role or lazy-proxy paths, and could surface as a 500 in new
+  code. Added `@SQLRestriction("deleted_at IS NULL")` to the entity. The explicit
+  `...AndDeletedAtIsNull` repository methods stay as defence in depth.
+- Lazy-proxy guard: `UserRole.role` (a LAZY `@ManyToOne` with no `@NotFound`) is read
+  by `UserRole.isValid()` on login, refresh, `/auth/me` and MFA completion. A proxy to
+  a soft-deleted role now resolves to null instead of throwing
+  `EntityNotFoundException`; `isValid()` already skips a null role. This protects the
+  grants that were left behind before this change.
+- `ManageRoleService.deleteRole` now clears the role's `user_roles` rows in the same
+  transaction. Otherwise a soft-deleted role would leave an assignment that
+  `findById` can no longer load, which the admin could neither see nor revoke.
+- `ManageUserRoleService.revokeRoleFromUser` now verifies the ASSIGNMENT
+  (`existsByIdUserIdAndIdRoleId`) instead of the live role row, so a grant left by a
+  pre-fix delete can still be revoked through the API. Assigning a soft-deleted role
+  still answers 404 (the role is not loadable), which is the intended behaviour.
+- Known pre-existing limitation, unchanged: `roles` has
+  `UNIQUE (tenant_id, name)` across deleted rows (V3 `unique_tenant_role_name`), and
+  `createRole` only checks live rows. Re-creating a soft-deleted role's name therefore
+  still hits a DB unique violation (23505). `@SQLRestriction` is read-side only and
+  does not affect this.
+- `RoleSoftDeleteAnnotationsTest` (unit, reflection) fails without the annotation and
+  also pins the `@NotFound(IGNORE)` proxy guard, the `deleted_at` mapping and the
+  `softDelete()` state transition. `ManageRoleServiceDeleteRoleTest` pins the
+  assignment cleanup and the system-role refusal.
+  `ManageUserRoleServiceRevokeTest` pins the revoke of a grant whose role is no
+  longer loadable.
+
 ### 2026-11-10 - Public device benchmark intake (Paper A)
 
 - New public, write-only `POST /api/v1/devbench/runs` stores one anonymous run of the

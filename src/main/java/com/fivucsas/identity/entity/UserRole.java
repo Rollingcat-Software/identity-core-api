@@ -2,6 +2,8 @@ package com.fivucsas.identity.entity;
 
 import jakarta.persistence.*;
 import lombok.*;
+import org.hibernate.annotations.NotFound;
+import org.hibernate.annotations.NotFoundAction;
 
 import java.time.Instant;
 import java.util.UUID;
@@ -30,7 +32,15 @@ public class UserRole {
     @JoinColumn(name = "user_id", insertable = false, updatable = false)
     private User user;
 
+    // #242 - Role now has @SQLRestriction("deleted_at IS NULL"). A lazy proxy to a
+// soft-deleted role would throw EntityNotFoundException during initialization
+// (login, refresh, /auth/me, MFA completion all call UserRole.isValid() ->
+// role.isActive()), turning a harmless dangling grant into a 500. IGNORE makes
+// the proxy resolve to null; isValid() already has a null guard and then skips
+// the assignment. Rows created before the delete-role cleanup below may still
+// be dangling, so this guard stays.
     @ManyToOne(fetch = FetchType.LAZY)
+    @NotFound(action = NotFoundAction.IGNORE)
     @MapsId("roleId")
     @JoinColumn(name = "role_id", insertable = false, updatable = false)
     private Role role;
