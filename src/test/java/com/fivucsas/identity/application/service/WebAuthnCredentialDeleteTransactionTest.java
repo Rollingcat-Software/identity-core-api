@@ -34,7 +34,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * #299 — regression test for the transaction mechanics of the auto-revoke.
+ * #299 - regression test for the transaction mechanics of the auto-revoke.
  *
  * <p>The production symptom was a 500 from
  * {@code DELETE /api/v1/webauthn/credentials/by-id/{id}}: the credential delete
@@ -53,7 +53,7 @@ import static org.mockito.Mockito.when;
  * first, finds no row, and the delete commits normally.</p>
  */
 @SpringJUnitConfig(WebAuthnCredentialDeleteTransactionTest.Config.class)
-@DisplayName("#299 — last-passkey delete must not roll back on a missing enrollment row")
+@DisplayName("#299 - last-passkey delete must not roll back on a missing enrollment row")
 class WebAuthnCredentialDeleteTransactionTest {
 
     @Configuration
