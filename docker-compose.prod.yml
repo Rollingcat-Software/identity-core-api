@@ -117,6 +117,16 @@ services:
       # _TENANTS=<uuid>; reversible via .env.prod + `up -d` recreate (no rebuild).
       APP_AUTH_PUZZLE_LAYER: ${APP_AUTH_PUZZLE_LAYER:-false}
       APP_AUTH_PUZZLE_LAYER_TENANTS: ${APP_AUTH_PUZZLE_LAYER_TENANTS:-}
+      # Authors-only trial for Paper B (V90, docs/AUTHOR_TRIAL_CONTRACT.md).
+      # MUST be listed here — the service uses an explicit environment: block, NOT
+      # env_file:, so a var only in .env.prod is silently dropped. Default OFF =
+      # every /api/v1/author-trial endpoint answers 404. The access code is shared
+      # only among the authors/coordinator. Flip + `up -d` recreate (no rebuild).
+      AUTHOR_TRIAL_ENABLED: ${AUTHOR_TRIAL_ENABLED:-false}
+      AUTHOR_TRIAL_ACCESS_CODE: ${AUTHOR_TRIAL_ACCESS_CODE:-}
+      AUTHOR_TRIAL_TENANT_IDS: ${AUTHOR_TRIAL_TENANT_IDS:-}
+      AUTHOR_TRIAL_API_VERSION: ${AUTHOR_TRIAL_API_VERSION:-unknown}
+      AUTHOR_TRIAL_BIO_VERSION: ${AUTHOR_TRIAL_BIO_VERSION:-unknown}
       # Attested puzzle binding (docs/ATTESTED_PUZZLE_BINDING.md), default OFF.
       # Set the release signing-cert SHA-256 BEFORE enabling (empty ⇒ all rejected).
       APP_AUTH_ATTESTED_BINDING: ${APP_AUTH_ATTESTED_BINDING:-false}

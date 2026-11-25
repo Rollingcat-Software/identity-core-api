@@ -148,6 +148,10 @@ public class PuzzleVerifyMfaStepHandler implements VerifyMfaStepHandler {
     private final AttestedBindingPolicy attestedBindingPolicy;
     private final AttestationChallengePort attestationChallenges;
     private final AttestedPuzzleBindingVerifier attestedVerifier;
+    // Authors-only trial recorder (V90): a no-op for every non-trial tenant/session,
+    // and observation-only — it can never change the verification result.
+    private final com.fivucsas.identity.application.service.authorTrial.AuthorTrialRecorder
+            authorTrialRecorder;
 
     /** Legacy wiring (tests): attested binding disabled. */
     public PuzzleVerifyMfaStepHandler(BiometricServicePort biometricService,
@@ -158,7 +162,7 @@ public class PuzzleVerifyMfaStepHandler implements VerifyMfaStepHandler {
                 new AttestedBindingPolicy(false, ""), null, null);
     }
 
-    @Autowired
+    /** Wiring without the trial recorder (tests). */
     public PuzzleVerifyMfaStepHandler(BiometricServicePort biometricService,
                                       AuthFlowRepositoryPort authFlowRepository,
                                       ClientSideEmbeddingPolicy clientSideEmbeddingPolicy,
@@ -166,6 +170,21 @@ public class PuzzleVerifyMfaStepHandler implements VerifyMfaStepHandler {
                                       AttestedBindingPolicy attestedBindingPolicy,
                                       AttestationChallengePort attestationChallenges,
                                       AttestedPuzzleBindingVerifier attestedVerifier) {
+        this(biometricService, authFlowRepository, clientSideEmbeddingPolicy, puzzleSessionGuard,
+                attestedBindingPolicy, attestationChallenges, attestedVerifier,
+                com.fivucsas.identity.application.service.authorTrial.AuthorTrialRecorder.NO_OP);
+    }
+
+    @Autowired
+    public PuzzleVerifyMfaStepHandler(BiometricServicePort biometricService,
+                                      AuthFlowRepositoryPort authFlowRepository,
+                                      ClientSideEmbeddingPolicy clientSideEmbeddingPolicy,
+                                      PuzzleSessionGuardPort puzzleSessionGuard,
+                                      AttestedBindingPolicy attestedBindingPolicy,
+                                      AttestationChallengePort attestationChallenges,
+                                      AttestedPuzzleBindingVerifier attestedVerifier,
+                                      com.fivucsas.identity.application.service.authorTrial.AuthorTrialRecorder
+                                              authorTrialRecorder) {
         this.biometricService = biometricService;
         this.authFlowRepository = authFlowRepository;
         this.clientSideEmbeddingPolicy = clientSideEmbeddingPolicy;
@@ -173,6 +192,7 @@ public class PuzzleVerifyMfaStepHandler implements VerifyMfaStepHandler {
         this.attestedBindingPolicy = attestedBindingPolicy;
         this.attestationChallenges = attestationChallenges;
         this.attestedVerifier = attestedVerifier;
+        this.authorTrialRecorder = authorTrialRecorder;
     }
 
     /** Pre-verdict attested-binding state (attested key + exact embedding to match). */
@@ -198,6 +218,8 @@ public class PuzzleVerifyMfaStepHandler implements VerifyMfaStepHandler {
         String sessionId = extractSessionId(data);
         if (sessionId == null || sessionId.isBlank()) {
             log.warn("AUDIT: PUZZLE step rejected — no puzzle_session_id in payload, userId={}", userId);
+            authorTrialRecorder.stepFailed(session.getId(), session.getTenantId(), null, null,
+                    "missing_puzzle_session_id");
             return MfaStepResult.fail();
         }
 
@@ -208,6 +230,7 @@ public class PuzzleVerifyMfaStepHandler implements VerifyMfaStepHandler {
         if (tenantId == null) {
             log.warn("AUDIT: PUZZLE step rejected — MFA session carries no tenant (cannot owner-bind verdict), userId={}",
                     userId);
+            authorTrialRecorder.stepFailed(session.getId(), null, null, null, "mfa_session_has_no_tenant");
             return MfaStepResult.fail();
         }
 
@@ -233,6 +256,11 @@ public class PuzzleVerifyMfaStepHandler implements VerifyMfaStepHandler {
                 // result ignored) so a rejected attempt cannot leave it live.
                 log.warn("AUDIT: PUZZLE step failed — binding frame {} (fail-closed, bio session consumed), userId={}",
                         malformed ? "malformed" : "missing", userId);
+                // The liveness verdict was never requested (this is a pre-bio client
+                // failure): leave liveness blank so the export excludes the row from
+                // the biometric rates instead of counting a PAD pass.
+                authorTrialRecorder.stepFailed(session.getId(), tenantId, null, "fail",
+                        malformed ? "binding_frame_malformed" : "binding_frame_missing");
                 consumeQuietly(sessionId, userId, tenantId);
                 return MfaStepResult.fail();
             }
@@ -244,6 +272,8 @@ public class PuzzleVerifyMfaStepHandler implements VerifyMfaStepHandler {
         if (bindingRequired && attestedBindingPolicy.isEnabledFor(tenantId)) {
             attested = prepareAttestation(session, sessionId, data, bindingFrame, legacyV1, userId);
             if (attested == null) {
+                // Pre-bio failure: no liveness verdict exists yet.
+                authorTrialRecorder.stepFailed(session.getId(), tenantId, null, "fail", "attestation_failed");
                 consumeQuietly(sessionId, userId, tenantId);
                 return MfaStepResult.fail();
             }
@@ -281,6 +311,8 @@ public class PuzzleVerifyMfaStepHandler implements VerifyMfaStepHandler {
 
         if (!isServerVerified(verdict, userId, "verdict")) {
             log.warn("AUDIT: PUZZLE step failed — bio verdict not verified, userId={}", userId);
+            authorTrialRecorder.stepFailed(session.getId(), tenantId, "fail", null,
+                    "liveness_verdict_failed");
             return MfaStepResult.fail();
         }
 
@@ -290,6 +322,7 @@ public class PuzzleVerifyMfaStepHandler implements VerifyMfaStepHandler {
         if (!bindingRequired) {
             // Binding off → PUZZLE proves LIVENESS only (canonical rule). Pass on
             // the liveness verdict alone.
+            authorTrialRecorder.stepPassed(session.getId(), tenantId, false, null, null, null);
             return MfaStepResult.ok();
         }
 
@@ -299,6 +332,8 @@ public class PuzzleVerifyMfaStepHandler implements VerifyMfaStepHandler {
         if (!legacyV1 && !Boolean.TRUE.equals(verdict.get("binding_checked"))) {
             log.warn("AUDIT: PUZZLE step failed — binding required but bio verdict lacks "
                     + "binding_checked=true (fail-closed), userId={}", userId);
+            authorTrialRecorder.stepFailed(session.getId(), tenantId, "pass", "fail",
+                    "binding_not_checked");
             return MfaStepResult.fail();
         }
 
@@ -306,6 +341,8 @@ public class PuzzleVerifyMfaStepHandler implements VerifyMfaStepHandler {
         // session's nonce, the embedding about to be matched, the trace digest
         // bio scored and the binding frame bio checked.
         if (attested != null && !verifyAttestedSignature(attested, sessionId, verdict, bindingFrame, userId)) {
+            authorTrialRecorder.stepFailed(session.getId(), tenantId, "pass", "fail",
+                    "attestation_signature_invalid");
             return MfaStepResult.fail();
         }
 
@@ -317,6 +354,7 @@ public class PuzzleVerifyMfaStepHandler implements VerifyMfaStepHandler {
             log.warn("AUDIT: PUZZLE step failed — identity-binding required but embedding "
                             + "absent/wrong-length (fail-closed), userId={}, len={}",
                     userId, embedding == null ? null : embedding.size());
+            authorTrialRecorder.stepFailed(session.getId(), tenantId, "pass", "fail", "embedding_missing");
             return MfaStepResult.fail();
         }
 
@@ -330,11 +368,18 @@ public class PuzzleVerifyMfaStepHandler implements VerifyMfaStepHandler {
                 Thread.currentThread().interrupt();
             }
             log.error("AUDIT: PUZZLE step error — bio embedding-match threw (binding), userId={}", userId, e);
+            authorTrialRecorder.stepFailed(session.getId(), tenantId, "pass", "fail",
+                    "identity_match_error");
             return MfaStepResult.fail();
         }
 
+        Double identityScore = metric(identityResult, "confidence");
+        Double identityDistance = metric(identityResult, "distance");
+        Double identityThreshold = metric(identityResult, "threshold");
         if (!isServerVerified(identityResult, userId, "embedding-match")) {
             log.warn("AUDIT: PUZZLE step failed — identity-binding embedding match not verified, userId={}", userId);
+            authorTrialRecorder.stepFailed(session.getId(), tenantId, "pass", "fail",
+                    "identity_match_failed");
             return MfaStepResult.fail();
         }
 
@@ -355,7 +400,27 @@ public class PuzzleVerifyMfaStepHandler implements VerifyMfaStepHandler {
             log.info("AUDIT: PUZZLE binding passed without attestation — no liveness pin for a later FACE "
                     + "embedding, userId={}", userId);
         }
+        authorTrialRecorder.stepPassed(session.getId(), tenantId, true,
+                identityScore, identityDistance, identityThreshold);
         return MfaStepResult.ok();
+    }
+
+    /** Reads a numeric metric from a bio response map (number or numeric string). */
+    private static Double metric(Map<String, Object> map, String key) {
+        Object value = map == null ? null : map.get(key);
+        if (value instanceof Number number) {
+            double d = number.doubleValue();
+            return Double.isFinite(d) ? d : null;
+        }
+        if (value instanceof String text) {
+            try {
+                double d = Double.parseDouble(text);
+                return Double.isFinite(d) ? d : null;
+            } catch (NumberFormatException e) {
+                return null;
+            }
+        }
+        return null;
     }
 
     /**

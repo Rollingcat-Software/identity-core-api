@@ -90,7 +90,12 @@ public class VerifyMfaStepService {
     private final com.fivucsas.identity.application.service.LoginAccountStateGuard loginAccountStateGuard;
     // #15 — best-effort login-device upsert on MFA completion (the input port).
     private final com.fivucsas.identity.application.port.input.ManageDeviceUseCase manageDeviceUseCase;
+    // Authors-only trial (V90): records the authoritative accept on MFA completion.
+    // Observation only; a no-op for every non-trial tenant.
+    private final com.fivucsas.identity.application.service.authorTrial.AuthorTrialRecorder
+            authorTrialRecorder;
 
+    /** Wiring without the trial recorder (tests). */
     public VerifyMfaStepService(
             List<VerifyMfaStepHandler> handlerBeans,
             MfaSessionRepository mfaSessionRepository,
@@ -104,6 +109,28 @@ public class VerifyMfaStepService {
             com.fivucsas.identity.application.service.TenantAuthMethodPolicy tenantAuthMethodPolicy,
             com.fivucsas.identity.application.service.LoginAccountStateGuard loginAccountStateGuard,
             com.fivucsas.identity.application.port.input.ManageDeviceUseCase manageDeviceUseCase) {
+        this(handlerBeans, mfaSessionRepository, userRepository, authFlowRepository,
+                enrollmentHealthService, tokenGenerator, refreshTokenService, auditLogPort,
+                availableMethodsResolver, tenantAuthMethodPolicy, loginAccountStateGuard,
+                manageDeviceUseCase,
+                com.fivucsas.identity.application.service.authorTrial.AuthorTrialRecorder.NO_OP);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public VerifyMfaStepService(
+            List<VerifyMfaStepHandler> handlerBeans,
+            MfaSessionRepository mfaSessionRepository,
+            UserRepository userRepository,
+            AuthFlowRepositoryPort authFlowRepository,
+            EnrollmentHealthService enrollmentHealthService,
+            TokenGenerationPort tokenGenerator,
+            RefreshTokenService refreshTokenService,
+            AuditLogPort auditLogPort,
+            AvailableMethodsResolver availableMethodsResolver,
+            com.fivucsas.identity.application.service.TenantAuthMethodPolicy tenantAuthMethodPolicy,
+            com.fivucsas.identity.application.service.LoginAccountStateGuard loginAccountStateGuard,
+            com.fivucsas.identity.application.port.input.ManageDeviceUseCase manageDeviceUseCase,
+            com.fivucsas.identity.application.service.authorTrial.AuthorTrialRecorder authorTrialRecorder) {
         Map<AuthMethodType, VerifyMfaStepHandler> map = new EnumMap<>(AuthMethodType.class);
         for (VerifyMfaStepHandler h : handlerBeans) {
             VerifyMfaStepHandler prior = map.put(h.supports(), h);
@@ -125,6 +152,7 @@ public class VerifyMfaStepService {
         this.tenantAuthMethodPolicy = tenantAuthMethodPolicy;
         this.loginAccountStateGuard = loginAccountStateGuard;
         this.manageDeviceUseCase = manageDeviceUseCase;
+        this.authorTrialRecorder = authorTrialRecorder;
     }
 
     /**
@@ -438,6 +466,9 @@ public class VerifyMfaStepService {
     private VerifyMfaStepResponse completeMfa(MfaSession session, User user, VerifyMfaStepRequest req) {
         session.complete();
         mfaSessionRepository.save(session);
+        // Authors-only trial (V90): the real login machinery is the ONLY source of
+        // an accept. Observation only — the recorder never blocks or fails a login.
+        authorTrialRecorder.accepted(session.getId(), session.getTenantId());
 
         // RFC 8176 amr: resolved through the shared AmrMapping so this N-step
         // completion and the single-step mint (AuthenticateUserService) emit an

@@ -238,6 +238,21 @@ app:
   devbench:
     enabled: ${APP_DEVBENCH_ENABLED:true}
     daily-cap: ${APP_DEVBENCH_DAILY_CAP:5000}
+  # Authors-only trial for Paper B (V90). The whole surface is hidden (404) unless
+  # enabled=true, a non-blank access-code is set and exactly one tenant is allowed.
+  # The access key is shared only among the authors/coordinator; it is not an
+  # account credential. api-version/bio-version are the deploy pins stamped into
+  # every attempt's deployment_commits column (bio's own health version is probed
+  # first; fallback-bio-version is used when that probe fails).
+  author-trial:
+    enabled: ${AUTHOR_TRIAL_ENABLED:false}
+    access-code: ${AUTHOR_TRIAL_ACCESS_CODE:}
+    tenant-ids: ${AUTHOR_TRIAL_TENANT_IDS:}
+    api-version: ${AUTHOR_TRIAL_API_VERSION:unknown}
+    fallback-bio-version: ${AUTHOR_TRIAL_BIO_VERSION:unknown}
+    export-limit: ${AUTHOR_TRIAL_EXPORT_LIMIT:50000}
+    device-max-bytes: ${AUTHOR_TRIAL_DEVICE_MAX_BYTES:4096}
+    env-max-bytes: ${AUTHOR_TRIAL_ENV_MAX_BYTES:2048}
   # WebAuthn allowed RP origins (P1-2). Exact-match, case-sensitive (RFC 6454 §4).
   # Any origin not in this list is rejected. Override with WEBAUTHN_ALLOWED_ORIGINS
   # (comma-separated) per environment. Default profile retains prod hosts plus
