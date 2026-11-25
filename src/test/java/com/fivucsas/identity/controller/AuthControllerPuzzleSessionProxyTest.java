@@ -138,6 +138,7 @@ class AuthControllerPuzzleSessionProxyTest {
     @MockBean private com.fivucsas.identity.application.service.mfa.AvailableMethodsResolver availableMethodsResolver;
     @MockBean private PuzzleLayerPolicy puzzleLayerPolicy;
     @MockBean private PuzzleSessionGuardPort puzzleSessionGuard;
+    @MockBean private com.fivucsas.identity.application.service.authorTrial.AuthorTrialRecorder authorTrialRecorder;
     @MockBean private com.fivucsas.identity.application.service.attestation.AttestationChallengeIssuer attestationChallengeIssuer;
 
     @BeforeEach

@@ -203,6 +203,9 @@ class AuthControllerTest {
     private com.fivucsas.identity.application.port.output.PuzzleSessionGuardPort puzzleSessionGuard;
 
     @MockBean
+    private com.fivucsas.identity.application.service.authorTrial.AuthorTrialRecorder authorTrialRecorder;
+
+    @MockBean
     private com.fivucsas.identity.application.service.attestation.AttestationChallengeIssuer attestationChallengeIssuer;
 
     // Test Data

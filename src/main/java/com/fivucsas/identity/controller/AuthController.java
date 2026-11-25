@@ -112,6 +112,8 @@ public class AuthController {
     private final com.fivucsas.identity.application.service.mfa.AvailableMethodsResolver availableMethodsResolver;
     private final com.fivucsas.identity.application.service.PuzzleLayerPolicy puzzleLayerPolicy;
     private final PuzzleSessionGuardPort puzzleSessionGuard;
+    private final com.fivucsas.identity.application.service.authorTrial.AuthorTrialRecorder
+            authorTrialRecorder;
     private final com.fivucsas.identity.application.service.attestation.AttestationChallengeIssuer
             attestationChallengeIssuer;
 
@@ -1217,6 +1219,25 @@ public class AuthController {
                     .body(Map.of("message", "Puzzle step is not configured"));
         }
 
+        // Authors-only trial (V90): a trial attempt forces exactly ONE specific
+        // challenge. The server-side round plan already chose the action, so the
+        // issued session is the real PUZZLE session with count=1/easy (bio v2 would
+        // raise a standard session to >= 2 challenges; one per attempt is what makes
+        // a round cover every configured challenge exactly once). Binding still comes
+        // from the tenant flow. One bio session per attempt, so the per-challenge
+        // failure cap cannot be reset by a second CREATE.
+        java.util.Optional<com.fivucsas.identity.application.service.authorTrial.AuthorTrialRecorder.TrialSession>
+                trialSession = authorTrialRecorder.trialSession(mfaSession.getId());
+        if (trialSession.isPresent()) {
+            var trial = trialSession.get();
+            if (trial.puzzleSessionId() != null && !trial.puzzleSessionId().isBlank()) {
+                return ResponseEntity.status(HttpStatus.CONFLICT)
+                        .body(Map.of("message", "TRIAL_SESSION_ALREADY_CREATED"));
+            }
+            policy = new PuzzleStepPolicy(List.of(trial.challenge()), 1, "easy",
+                    policy.alsoMatchFaceIdentity());
+        }
+
         // S2: bound the number of bio puzzle sessions per MFA session token, so the
         // bio per-session attempt cap cannot be reset by creating new sessions.
         // Counted BEFORE the bio call (failed creates count too). Fail CLOSED when
@@ -1256,6 +1277,11 @@ public class AuthController {
                 ? PuzzleSessionGuardPort.CONTRACT_V2
                 : PuzzleSessionGuardPort.CONTRACT_V1;
         puzzleSessionGuard.recordTraceContract(String.valueOf(sessionId), contract, PUZZLE_CONTRACT_RECORD_TTL);
+        if (trialSession.isPresent()) {
+            authorTrialRecorder.puzzleSessionCreated(trialSession.get().attemptId(),
+                    String.valueOf(sessionId), contract,
+                    issuedAction(bioResponse, trialSession.get().challenge()));
+        }
         log.info("AUDIT: PUZZLE session created — userId={}, tenantId={}, count={}, contract={}, create={}/{}",
                 userId, tenantId, policy.count(), contract, creates, MAX_PUZZLE_SESSIONS_PER_MFA_SESSION);
         // Attested puzzle binding (default OFF): issue a single-use hardware-attestation
@@ -1334,7 +1360,22 @@ public class AuthController {
             return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
                     .body(bioResponse != null ? bioResponse : Map.of("message", "Puzzle challenge submit failed"));
         }
+        authorTrialRecorder.challengeSubmitted(sessionId,
+                Boolean.TRUE.equals(bioResponse.get("verified")),
+                asString(bioResponse.get("reason_code")));
         return ResponseEntity.ok(bioResponse);
+    }
+
+    /** The action bio actually issued (first challenge), fallback when absent. */
+    private static String issuedAction(Map<String, Object> bioResponse, String fallback) {
+        Object challenges = bioResponse == null ? null : bioResponse.get("challenges");
+        if (challenges instanceof List<?> list && !list.isEmpty() && list.get(0) instanceof Map<?, ?> first) {
+            Object action = first.get("action");
+            if (action != null) {
+                return String.valueOf(action);
+            }
+        }
+        return fallback;
     }
 
     /**

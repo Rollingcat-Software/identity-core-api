@@ -104,6 +104,12 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/mfa/puzzle/session").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/mfa/puzzle/session/*/challenge").permitAll()
 
+                        // Authors-only trial (Paper B, V90). No dashboard login on the
+                        // page: the X-Author-Trial-Key shared key plus the feature flag
+                        // and single-tenant allow-list are the gate (AuthorTrialAccessGuard).
+                        // A disabled surface answers 404; a wrong key 401.
+                        .requestMatchers("/api/v1/author-trial/**").permitAll()
+
                         // OAuth 2.0 / OIDC public endpoints
                         .requestMatchers(
                                 "/api/v1/oauth2/authorize",
